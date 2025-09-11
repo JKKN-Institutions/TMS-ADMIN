@@ -1,0 +1,78 @@
+{
+  "name": "tms-admin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "dev:turbo": "next dev --port 3001 --turbopack",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "export": "next export",
+    "analyze": "ANALYZE=true npm run build",
+    "db:setup": "node scripts/setup-database.mjs",
+    "db:migrate": "node scripts/migrate-database.mjs",
+    "db:seed": "node scripts/seed-database.mjs",
+    "db:reset": "node scripts/reset-database.mjs",
+    "db:status": "node test-db-status.mjs",
+    "health-check": "curl -f http://localhost:3001/api/health || exit 1",
+    "docker:build": "docker build -t tms-admin .",
+    "docker:run": "docker run -p 3001:3001 tms-admin",
+    "docker:compose": "docker-compose up -d",
+    "deploy:vercel": "vercel --prod",
+    "deploy:netlify": "netlify deploy --prod",
+    "postbuild": "echo 'Build completed successfully'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.2",
+    "@types/leaflet": "^1.9.19",
+    "autoprefixer": "^10.4.21",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.0.0",
+    "critters": "^0.0.23",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.6.0",
+    "framer-motion": "^11.18.2",
+    "graceful-fs": "^4.2.11",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.460.0",
+    "next": "15.3.4",
+    "node-fetch": "^2.7.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hot-toast": "^2.5.2",
+    "react-leaflet": "^5.0.0",
+    "recharts": "^2.15.4"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/tms-admin.git"
+  },
+  "keywords": [
+    "transport",
+    "management",
+    "admin",
+    "nextjs",
+    "supabase",
+    "typescript"
+  ],
+  "author": "Your Organization",
+  "license": "MIT"
+}
