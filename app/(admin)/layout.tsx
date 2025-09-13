@@ -27,18 +27,37 @@ import {
 import { AdminUser, UserRole } from '@/types';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
+import { useAuth } from '@/lib/auth/auth-context';
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<AdminUser | null>(null);
+  const { user: parentUser, isAuthenticated: parentAuth, logout: parentLogout } = useAuth();
 
   useEffect(() => {
     validateAndSetUser();
-  }, []);
+  }, [parentUser, parentAuth]);
 
   const validateAndSetUser = () => {
+    // Check for parent app authentication first
+    if (parentAuth && parentUser) {
+      // Convert parent app user to admin user format
+      const adminUser: AdminUser = {
+        id: parentUser.id,
+        name: parentUser.full_name,
+        email: parentUser.email,
+        role: 'super_admin' as UserRole, // Parent app users with access are super admins
+        permissions: ['all'], // Super admin has all permissions
+        avatar: parentUser.avatar_url || undefined,
+        lastLogin: parentUser.last_login || new Date().toISOString()
+      };
+      setUser(adminUser);
+      return;
+    }
+
+    // Fallback to local admin authentication
     const storedUser = localStorage.getItem('adminUser');
     if (storedUser) {
       try {
@@ -199,9 +218,16 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   }, {} as Record<string, typeof navigation>);
 
   const handleLogout = () => {
-    localStorage.removeItem('adminUser');
-    toast.success('Logged out successfully');
-    router.push('/login');
+    // Check if user is authenticated via parent app
+    if (parentAuth && parentUser) {
+      // Logout from parent app
+      parentLogout(false); // false means don't redirect to parent app
+    } else {
+      // Local admin logout
+      localStorage.removeItem('adminUser');
+      toast.success('Logged out successfully');
+      router.push('/login');
+    }
   };
 
   const getInitials = (name: string) => {

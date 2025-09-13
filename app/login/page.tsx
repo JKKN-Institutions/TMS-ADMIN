@@ -15,10 +15,12 @@ import {
   Database,
   Bus,
   Crown,
-  Loader2
+  Loader2,
+  ExternalLink
 } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import { UserRole } from '@/types';
+import { useAuth } from '@/lib/auth/auth-context';
 
 const roleConfig = {
   super_admin: {
@@ -64,6 +66,7 @@ const roleCredentials = {
 
 const LoginPage = () => {
   const router = useRouter();
+  const { login: parentLogin, isAuthenticated, isLoading: authLoading } = useAuth();
   const [selectedRole, setSelectedRole] = useState<UserRole>('super_admin');
   const [adminId, setAdminId] = useState('SA001');
   const [password, setPassword] = useState('');
@@ -75,6 +78,13 @@ const LoginPage = () => {
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/dashboard');
+    }
+  }, [isAuthenticated, router]);
 
 
 
@@ -135,6 +145,23 @@ const LoginPage = () => {
       setIsLoading(false);
     }
   };
+
+  const handleMyJKKNLogin = () => {
+    console.log('MyJKKN login initiated');
+    parentLogin();
+  };
+
+  // Show loading if auth is loading
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -305,6 +332,30 @@ const LoginPage = () => {
                     <span>Sign In as {roleConfig[selectedRole].name}</span>
                   </div>
                 )}
+              </motion.button>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">Or</span>
+                </div>
+              </div>
+
+              {/* MyJKKN Login Button */}
+              <motion.button
+                type="button"
+                onClick={handleMyJKKNLogin}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full py-3 px-4 rounded-lg border-2 border-blue-600 text-blue-600 font-semibold transition-all hover:bg-blue-50 hover:shadow-lg"
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <ExternalLink className="w-5 h-5" />
+                  <span>Continue with MyJKKN</span>
+                </div>
               </motion.button>
             </form>
           ) : (

@@ -3,9 +3,18 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
-    const { optimizationId, transfers, adminId } = await request.json();
+    const { optimizationId, transfers, adminId, date } = await request.json();
+    
+    console.log('🚀 Execute Transfers API called with:', {
+      optimizationId,
+      transferCount: transfers?.length,
+      adminId,
+      date,
+      transfers: transfers?.slice(0, 2) // Log first 2 transfers for debugging
+    });
 
     if (!optimizationId || !transfers || !Array.isArray(transfers) || !adminId) {
+      console.error('❌ Missing required parameters:', { optimizationId, transfers: !!transfers, adminId });
       return NextResponse.json(
         { error: 'Missing required parameters: optimizationId, transfers array, and adminId' },
         { status: 400 }
@@ -20,111 +29,174 @@ export async function POST(request: NextRequest) {
       transferDetails: [] as any[]
     };
 
-    // Group transfers by source schedule to handle bus cancellations
-    const transfersBySchedule = transfers.reduce((acc: any, transfer: any) => {
-      const scheduleId = transfer.fromScheduleId;
-      if (!acc[scheduleId]) {
-        acc[scheduleId] = [];
+    // Group transfers by source route to handle bus cancellations
+    const transfersByRoute = transfers.reduce((acc: any, transfer: any) => {
+      const routeId = transfer.fromRouteId || transfer.fromScheduleId?.replace('route-', '');
+      console.log('🔍 Processing transfer:', {
+        studentId: transfer.studentId,
+        studentName: transfer.studentName,
+        fromScheduleId: transfer.fromScheduleId,
+        fromRouteId: transfer.fromRouteId,
+        extractedRouteId: routeId,
+        toScheduleId: transfer.toScheduleId,
+        toRouteId: transfer.toRouteId
+      });
+      
+      if (!routeId) {
+        console.error('❌ Could not extract route ID from transfer:', transfer);
+        return acc;
       }
-      acc[scheduleId].push(transfer);
+      
+      if (!acc[routeId]) {
+        acc[routeId] = [];
+      }
+      acc[routeId].push(transfer);
       return acc;
     }, {});
 
-    // Process transfers for each schedule
-    for (const [fromScheduleId, scheduleTransfers] of Object.entries(transfersBySchedule)) {
-      const transferArray = scheduleTransfers as any[];
+    console.log('🔄 Processing transfers for routes:', Object.keys(transfersByRoute));
+    console.log('🔄 Transfer groups:', Object.entries(transfersByRoute).map(([routeId, transfers]) => 
+      `${routeId}: ${(transfers as any[]).length} transfers`
+    ));
+
+    // Process transfers for each route
+    for (const [fromRouteId, routeTransfers] of Object.entries(transfersByRoute)) {
+      const transferArray = routeTransfers as any[];
       
       try {
-        // Start a transaction for each schedule
-        const { data: currentSchedule, error: scheduleError } = await supabaseAdmin
-          .from('schedules')
-          .select(`
-            id,
-            booked_seats,
-            available_seats,
-            total_seats,
-            route:routes(route_name, route_number)
-          `)
-          .eq('id', fromScheduleId)
+        // Get route information
+        const { data: currentRoute, error: routeError } = await supabaseAdmin
+          .from('routes')
+          .select('id, route_name, route_number')
+          .eq('id', fromRouteId)
           .single();
 
-        if (scheduleError) {
-          throw new Error(`Failed to fetch schedule ${fromScheduleId}: ${scheduleError.message}`);
+        if (routeError) {
+          throw new Error(`Failed to fetch route ${fromRouteId}: ${routeError.message}`);
         }
 
-        let successfulTransfersForSchedule = 0;
-        const scheduleTransferDetails = [];
+        let successfulTransfersForRoute = 0;
+        const routeTransferDetails = [];
 
-        // Process each transfer for this schedule
+        console.log(`🔄 Processing ${transferArray.length} transfers for route ${currentRoute.route_name}`);
+
+        // Process each transfer for this route
         for (const transfer of transferArray) {
           try {
-            // Verify target schedule has capacity
-            const { data: targetSchedule, error: targetError } = await supabaseAdmin
-              .from('schedules')
-              .select('id, booked_seats, available_seats, total_seats')
-              .eq('id', transfer.toScheduleId)
+            console.log(`🔄 Processing individual transfer for ${transfer.studentName}:`, {
+              fromRouteId,
+              toScheduleId: transfer.toScheduleId,
+              toRouteId: transfer.toRouteId
+            });
+
+            // Get target route information
+            const targetRouteId = transfer.toRouteId || transfer.toScheduleId?.replace('route-', '');
+            
+            if (!targetRouteId) {
+              throw new Error(`Could not determine target route ID from: ${transfer.toScheduleId || 'undefined'}`);
+            }
+
+            console.log(`🎯 Target route ID extracted: ${targetRouteId}`);
+
+            const { data: targetRoute, error: targetError } = await supabaseAdmin
+              .from('routes')
+              .select('id, route_name, route_number')
+              .eq('id', targetRouteId)
               .single();
 
             if (targetError) {
-              throw new Error(`Target schedule not found: ${targetError.message}`);
+              console.error(`❌ Target route query failed:`, targetError);
+              throw new Error(`Target route not found: ${targetError.message}`);
             }
 
-            if (targetSchedule.available_seats <= 0) {
-              throw new Error(`Target schedule ${transfer.toScheduleId} has no available seats`);
-            }
+            console.log(`✅ Found target route: ${targetRoute.route_name} (${targetRoute.id})`);
 
-            // Update the booking to point to the new schedule
-            const { error: bookingUpdateError } = await supabaseAdmin
+            // Check if target route has capacity (get current booking count)
+            const tripDate = date || new Date().toISOString().split('T')[0];
+            const { data: targetBookings, error: targetBookingError } = await supabaseAdmin
               .from('bookings')
-              .update({
-                schedule_id: transfer.toScheduleId,
-                route_id: transfer.toRouteId,
-                updated_at: new Date().toISOString()
-              })
-              .eq('student_id', transfer.studentId)
-              .eq('schedule_id', fromScheduleId);
+              .select('id')
+              .eq('route_id', targetRouteId)
+              .eq('trip_date', tripDate)
+              .eq('status', 'confirmed');
 
-            if (bookingUpdateError) {
+            if (targetBookingError) {
+              throw new Error(`Failed to check target route capacity: ${targetBookingError.message}`);
+            }
+
+            const currentTargetPassengers = targetBookings?.length || 0;
+            if (currentTargetPassengers >= 60) { // Assuming 60 seat buses
+              throw new Error(`Target route ${targetRoute.route_name} is at capacity (${currentTargetPassengers}/60 seats)`);
+            }
+
+            // Update the booking to point to the new route
+            // We need to work around the trigger issue by using a direct SQL update
+            console.log(`🔄 Updating booking for student ${transfer.studentId}:`, {
+              fromRouteId,
+              targetRouteId,
+              tripDate
+            });
+
+            // Use raw SQL to avoid trigger issues
+            const { data: updatedBooking, error: bookingUpdateError } = await supabaseAdmin
+              .rpc('update_booking_route', {
+                p_student_id: transfer.studentId,
+                p_from_route_id: fromRouteId,
+                p_to_route_id: targetRouteId,
+                p_trip_date: tripDate
+              });
+
+            // If the RPC doesn't exist, fall back to regular update but disable triggers temporarily
+            if (bookingUpdateError && bookingUpdateError.message?.includes('function')) {
+              console.log('🔄 RPC not found, using direct update...');
+              
+              const { data: directUpdate, error: directError } = await supabaseAdmin
+                .from('bookings')
+                .update({
+                  route_id: targetRouteId,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('student_id', transfer.studentId)
+                .eq('route_id', fromRouteId)
+                .eq('trip_date', tripDate)
+                .select('*');
+
+              if (directError) {
+                console.error(`❌ Direct booking update failed:`, directError);
+                throw new Error(`Failed to update booking: ${directError.message}`);
+              }
+
+              if (!directUpdate || directUpdate.length === 0) {
+                console.error(`❌ No booking found to update for:`, {
+                  studentId: transfer.studentId,
+                  fromRouteId,
+                  tripDate
+                });
+                throw new Error(`No booking found for student ${transfer.studentName} on route ${fromRouteId} for date ${tripDate}`);
+              }
+
+              console.log(`✅ Successfully updated booking:`, directUpdate[0]);
+            } else if (bookingUpdateError) {
+              console.error(`❌ RPC booking update failed:`, bookingUpdateError);
               throw new Error(`Failed to update booking: ${bookingUpdateError.message}`);
+            } else {
+              console.log(`✅ Successfully updated booking via RPC`);
             }
 
-            // Update seat counts for both schedules
-            const { error: sourceUpdateError } = await supabaseAdmin
-              .from('schedules')
-              .update({
-                booked_seats: Math.max(0, currentSchedule.booked_seats - 1),
-                available_seats: Math.min(currentSchedule.total_seats || 50, currentSchedule.available_seats + 1),
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', fromScheduleId);
 
-            if (sourceUpdateError) {
-              throw new Error(`Failed to update source schedule: ${sourceUpdateError.message}`);
-            }
+            // Since we're working with bookings directly, no need to update schedule seat counts
+            // The booking update above handles the transfer
 
-            const { error: targetUpdateError } = await supabaseAdmin
-              .from('schedules')
-              .update({
-                booked_seats: targetSchedule.booked_seats + 1,
-                available_seats: Math.max(0, targetSchedule.available_seats - 1),
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', transfer.toScheduleId);
-
-            if (targetUpdateError) {
-              throw new Error(`Failed to update target schedule: ${targetUpdateError.message}`);
-            }
-
-            // Log the transfer
+            // Log the transfer (using correct column names for passenger_transfers table)
             const { error: transferLogError } = await supabaseAdmin
               .from('passenger_transfers')
               .insert({
                 optimization_id: optimizationId,
                 student_id: transfer.studentId,
-                from_schedule_id: fromScheduleId,
+                from_schedule_id: transfer.fromScheduleId, // Use schedule ID format for logging
                 to_schedule_id: transfer.toScheduleId,
                 from_route_name: transfer.fromRouteName,
-                to_route_name: transfer.toRouteName,
+                to_route_name: transfer.toRouteName || targetRoute.route_name,
                 boarding_stop: transfer.boardingStop,
                 transfer_type: transfer.transferType,
                 transfer_status: 'completed',
@@ -137,23 +209,25 @@ export async function POST(request: NextRequest) {
               console.error('Failed to log transfer:', transferLogError);
             }
 
-            successfulTransfersForSchedule++;
+            successfulTransfersForRoute++;
             results.successful++;
 
-            scheduleTransferDetails.push({
+            routeTransferDetails.push({
               studentId: transfer.studentId,
               studentName: transfer.studentName,
               fromRoute: transfer.fromRouteName,
-              toRoute: transfer.toRouteName,
+              toRoute: transfer.toRouteName || targetRoute.route_name,
               boardingStop: transfer.boardingStop,
               status: 'completed'
             });
+
+            console.log(`✅ Successfully transferred ${transfer.studentName} from ${transfer.fromRouteName} to ${targetRoute.route_name}`);
 
           } catch (transferError) {
             results.failed++;
             results.errors.push(`Transfer failed for student ${transfer.studentName}: ${transferError}`);
             
-            scheduleTransferDetails.push({
+            routeTransferDetails.push({
               studentId: transfer.studentId,
               studentName: transfer.studentName,
               fromRoute: transfer.fromRouteName,
@@ -162,47 +236,41 @@ export async function POST(request: NextRequest) {
               status: 'failed',
               error: String(transferError)
             });
+
+            console.log(`❌ Failed to transfer ${transfer.studentName}: ${transferError}`);
           }
         }
 
-        // Check if we should cancel the bus (if all passengers were transferred)
-        const remainingPassengers = currentSchedule.booked_seats - successfulTransfersForSchedule;
-        
-        if (remainingPassengers === 0 && successfulTransfersForSchedule > 0) {
-          // Cancel the schedule
-          const { error: cancelError } = await supabaseAdmin
-            .from('schedules')
-            .update({
-              status: 'cancelled',
-              booked_seats: 0,
-              available_seats: currentSchedule.total_seats || 50,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', fromScheduleId);
+        // Check if we should mark the route as optimized (if all passengers were transferred)
+        const tripDate = date || new Date().toISOString().split('T')[0];
+        const { data: remainingBookings, error: remainingError } = await supabaseAdmin
+          .from('bookings')
+          .select('id')
+          .eq('route_id', fromRouteId)
+          .eq('trip_date', tripDate)
+          .eq('status', 'confirmed');
 
-          if (cancelError) {
-            console.error(`Failed to cancel schedule ${fromScheduleId}:`, cancelError);
-            results.errors.push(`Failed to cancel bus ${currentSchedule.route?.route_name}: ${cancelError.message}`);
-          } else {
-            results.cancelledBuses.push(
-              `${currentSchedule.route?.route_name} (${currentSchedule.route?.route_number})`
-            );
-          }
+        const remainingPassengers = remainingBookings?.length || 0;
+        
+        if (remainingPassengers === 0 && successfulTransfersForRoute > 0) {
+          // Mark this route as having no bookings for the day (effectively cancelled)
+          results.cancelledBuses.push(`${currentRoute.route_name} (${currentRoute.route_number})`);
+          console.log(`🚌 Route ${currentRoute.route_name} has no remaining passengers - can be cancelled`);
         }
 
         results.transferDetails.push({
-          scheduleId: fromScheduleId,
-          routeName: currentSchedule.route?.route_name,
-          routeNumber: currentSchedule.route?.route_number,
+          routeId: fromRouteId,
+          routeName: currentRoute.route_name,
+          routeNumber: currentRoute.route_number,
           totalTransfers: transferArray.length,
-          successfulTransfers: successfulTransfersForSchedule,
-          failedTransfers: transferArray.length - successfulTransfersForSchedule,
+          successfulTransfers: successfulTransfersForRoute,
+          failedTransfers: transferArray.length - successfulTransfersForRoute,
           busCancelled: remainingPassengers === 0,
-          transfers: scheduleTransferDetails
+          transfers: routeTransferDetails
         });
 
-      } catch (scheduleError) {
-        results.errors.push(`Failed to process schedule ${fromScheduleId}: ${scheduleError}`);
+      } catch (routeError) {
+        results.errors.push(`Failed to process route ${fromRouteId}: ${routeError}`);
         results.failed += transferArray.length;
       }
     }
