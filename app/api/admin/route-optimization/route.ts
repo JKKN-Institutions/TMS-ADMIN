@@ -161,6 +161,18 @@ export async function POST(request: NextRequest) {
     for (const route of allRoutesToAnalyze) {
       const passengers = route.bookings || [];
       
+      // Get schedule information for this route on the selected date
+      const { data: scheduleData, error: scheduleError } = await supabaseAdmin
+        .from('schedules')
+        .select('departure_time, arrival_time')
+        .eq('route_id', route.id)
+        .eq('schedule_date', date)
+        .limit(1)
+        .single();
+      
+      const departureTime = scheduleData?.departure_time || 'N/A';
+      const arrivalTime = scheduleData?.arrival_time || 'N/A';
+      
       // Handle routes with no passengers - mark as "no bookings"
       if (passengers.length === 0) {
         noBookingCount++;
@@ -170,8 +182,8 @@ export async function POST(request: NextRequest) {
             routeId: route.id,
             routeName: route.route_name || 'Unknown Route',
             routeNumber: route.route_number || 'N/A',
-            departureTime: 'N/A', // No specific time since we're looking at date-based bookings
-            arrivalTime: 'N/A',
+            departureTime: departureTime,
+            arrivalTime: arrivalTime,
             currentPassengers: 0,
             totalCapacity: 60, // Default bus capacity
             availableSeats: 60
@@ -195,8 +207,8 @@ export async function POST(request: NextRequest) {
             routeId: route.id,
             routeName: route.route_name || 'Unknown Route',
             routeNumber: route.route_number || 'N/A',
-            departureTime: 'N/A',
-            arrivalTime: 'N/A',
+            departureTime: departureTime,
+            arrivalTime: arrivalTime,
             currentPassengers: passengers.length,
             totalCapacity: 60,
             availableSeats: 60 - passengers.length
@@ -255,10 +267,21 @@ export async function POST(request: NextRequest) {
         
         // Only consider routes that have enough capacity for at least some passengers
         if (remainingCapacity > 0) {
+          // Get schedule information for this alternative route
+          const { data: altScheduleData } = await supabaseAdmin
+            .from('schedules')
+            .select('departure_time, arrival_time')
+            .eq('route_id', altRoute.id)
+            .eq('schedule_date', date)
+            .limit(1)
+            .single();
+          
           alternativeRoutes.push({
             ...altRoute,
             passengerCount: altPassengerCount,
-            availableCapacity: remainingCapacity
+            availableCapacity: remainingCapacity,
+            departureTime: altScheduleData?.departure_time || 'N/A',
+            arrivalTime: altScheduleData?.arrival_time || 'N/A'
           });
         }
       }
@@ -372,8 +395,8 @@ export async function POST(request: NextRequest) {
               scheduleId: `route-${bestAlternative.id}`,
               routeName: bestAlternative.route_name || 'Unknown Route',
               routeNumber: bestAlternative.route_number || 'N/A',
-              departureTime: 'N/A',
-              arrivalTime: 'N/A',
+              departureTime: bestAlternative.departureTime || 'N/A',
+              arrivalTime: bestAlternative.arrivalTime || 'N/A',
               availableSeats: bestAlternative.availableCapacity,
               currentPassengers: bestAlternative.passengerCount
             },
@@ -422,8 +445,8 @@ export async function POST(request: NextRequest) {
           routeId: route.id,
           routeName: route.route_name || 'Unknown Route',
           routeNumber: route.route_number || 'N/A',
-          departureTime: 'N/A',
-          arrivalTime: 'N/A',
+          departureTime: departureTime,
+          arrivalTime: arrivalTime,
           currentPassengers: passengers.length,
           totalCapacity: 60, // Default bus capacity
           availableSeats: 60 - passengers.length

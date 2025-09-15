@@ -182,7 +182,19 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       href: '/notifications', 
       icon: Bell, 
       roles: ['super_admin', 'transport_admin'],
-      group: 'services'
+      group: 'services',
+      subItems: [
+        {
+          name: 'All Notifications',
+          href: '/notifications',
+          icon: Bell
+        },
+        {
+          name: 'Push Notifications',
+          href: '/notifications/push',
+          icon: Bell
+        }
+      ]
     },
     
     // System
@@ -310,19 +322,39 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                 </div>
                 <div className="space-y-1">
                   {items.map((item) => (
-                    <a
-                      key={item.name}
-                      href={item.href}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        router.push(item.href);
-                        setSidebarOpen(false);
-                      }}
-                      className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
-                    >
-                      <item.icon className="icon" />
-                      <span>{item.name}</span>
-                    </a>
+                    <div key={item.name}>
+                      <a
+                        href={item.href}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          router.push(item.href);
+                          setSidebarOpen(false);
+                        }}
+                        className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
+                      >
+                        <item.icon className="icon" />
+                        <span>{item.name}</span>
+                      </a>
+                      {item.subItems && item.current && (
+                        <div className="ml-6 mt-1 space-y-1">
+                          {item.subItems.map((subItem) => (
+                            <a
+                              key={subItem.name}
+                              href={subItem.href}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                router.push(subItem.href);
+                                setSidebarOpen(false);
+                              }}
+                              className={`sidebar-nav-item text-sm ${pathname === subItem.href ? 'active' : ''}`}
+                            >
+                              <subItem.icon className="icon w-4 h-4" />
+                              <span>{subItem.name}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
