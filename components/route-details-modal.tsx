@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { DatabaseService } from '@/lib/database';
 import LiveTrackingMap from './live-tracking-map';
+import PossibleStopsManager from './possible-stops-manager';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface RouteDetailsModalProps {
   isOpen: boolean;
@@ -250,7 +252,15 @@ const RouteDetailsModal: React.FC<RouteDetailsModalProps> = ({
 
               {/* Content */}
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-160px)]">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Tabs defaultValue="overview" className="w-full">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="stops">Regular Stops</TabsTrigger>
+                    <TabsTrigger value="possible-stops">Possible Stops</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="overview" className="mt-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   
                   {/* Route Information */}
                   <div className="space-y-6">
@@ -648,7 +658,63 @@ const RouteDetailsModal: React.FC<RouteDetailsModalProps> = ({
                       </div>
                     </div>
                   </div>
-                </div>
+                    </div>
+                  </TabsContent>
+                  
+                  <TabsContent value="stops" className="mt-6">
+                    {displayRoute.route_stops && displayRoute.route_stops.length > 0 ? (
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Regular Stops ({displayRoute.route_stops.length})</h3>
+                        <div className="space-y-3">
+                          {displayRoute.route_stops
+                            .sort((a: any, b: any) => a.sequence_order - b.sequence_order)
+                            .map((stop: any, index: number) => (
+                              <div key={stop.id || index} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                                <div className="flex items-center space-x-3">
+                                  <div className="flex items-center justify-center w-8 h-8 bg-blue-100 text-blue-600 rounded-full text-sm font-medium">
+                                    {stop.sequence_order || index + 1}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <MapPin className="w-4 h-4 text-gray-500" />
+                                      <span className="font-medium text-gray-900">{stop.stop_name}</span>
+                                      {stop.is_major_stop && (
+                                        <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">Major</span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+                                      <div className="flex items-center space-x-1">
+                                        <Clock className="w-3 h-3" />
+                                        <span>{stop.stop_time}</span>
+                                      </div>
+                                      {stop.morning_arrival_time && (
+                                        <span className="text-xs">Morning: {stop.morning_arrival_time}</span>
+                                      )}
+                                      {stop.evening_arrival_time && (
+                                        <span className="text-xs">Evening: {stop.evening_arrival_time}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <MapPin className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No regular stops configured for this route</p>
+                      </div>
+                    )}
+                  </TabsContent>
+                  
+                  <TabsContent value="possible-stops" className="mt-6">
+                    <PossibleStopsManager 
+                      routeId={displayRoute.id} 
+                      routeName={displayRoute.route_name}
+                    />
+                  </TabsContent>
+                </Tabs>
               </div>
 
               {/* Footer */}
