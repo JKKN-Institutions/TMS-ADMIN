@@ -6,7 +6,7 @@ import {
   DollarSign, Calendar, CreditCard, FileText, Mail, Search, User
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import DatabaseService from '../../../lib/DatabaseService';
+import { DatabaseService } from '@/lib/database';
 
 interface QuotaType {
   id: string;
