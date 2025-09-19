@@ -243,30 +243,6 @@ const ViewStudentModal = ({ isOpen, onClose, student }: any) => {
                       <span className="text-sm text-gray-900">{student.degree.degree_name}</span>
                     </div>
                   )}
-                  {student?.quota && (
-                    <div className="flex justify-between">
-                      <span className="text-sm font-medium text-gray-500">Admission Quota</span>
-                      <span className={`text-sm font-semibold px-2 py-1 rounded-full ${
-                        student.quota === 'GOVERNMENT' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {student.quota === 'GOVERNMENT' ? '7.5% Government Quota' : 'Management Quota'}
-                      </span>
-                    </div>
-                  )}
-                  {student?.category && (
-                    <div className="flex justify-between">
-                      <span className="text-sm font-medium text-gray-500">Category</span>
-                      <span className="text-sm text-gray-900">{student.category}</span>
-                    </div>
-                  )}
-                  {student?.annual_income && (
-                    <div className="flex justify-between">
-                      <span className="text-sm font-medium text-gray-500">Annual Income</span>
-                      <span className="text-sm text-gray-900">₹{parseInt(student.annual_income).toLocaleString('en-IN')}</span>
-                    </div>
-                  )}
                   {student?.is_profile_complete !== undefined && (
                     <div className="flex justify-between">
                       <span className="text-sm font-medium text-gray-500">Profile Status</span>
@@ -298,12 +274,6 @@ const ViewStudentModal = ({ isOpen, onClose, student }: any) => {
                         <span className="text-sm text-gray-900">{student.father_mobile}</span>
                       </div>
                     )}
-                    {student?.father_occupation && (
-                      <div className="flex justify-between">
-                        <span className="text-sm font-medium text-gray-500">Father's Occupation</span>
-                        <span className="text-sm text-gray-900">{student.father_occupation}</span>
-                      </div>
-                    )}
                     {student?.mother_name && (
                       <div className="flex justify-between">
                         <span className="text-sm font-medium text-gray-500">Mother's Name</span>
@@ -314,12 +284,6 @@ const ViewStudentModal = ({ isOpen, onClose, student }: any) => {
                       <div className="flex justify-between">
                         <span className="text-sm font-medium text-gray-500">Mother's Mobile</span>
                         <span className="text-sm text-gray-900">{student.mother_mobile}</span>
-                      </div>
-                    )}
-                    {student?.mother_occupation && (
-                      <div className="flex justify-between">
-                        <span className="text-sm font-medium text-gray-500">Mother's Occupation</span>
-                        <span className="text-sm text-gray-900">{student.mother_occupation}</span>
                       </div>
                     )}
                     
@@ -1874,30 +1838,6 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
           <BookOpen className="w-4 h-4" />
           <span>{student.department?.department_name || 'N/A'}</span>
           </div>
-          {/* Quota Information - Always show for enrolled students */}
-          {student._enrollmentStatus === 'enrolled' && (
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-500">QUOTA</span>
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                student.quota === 'GOVERNMENT' 
-                  ? 'bg-green-100 text-green-800' 
-                  : student.quota === 'MANAGEMENT'
-                  ? 'bg-blue-100 text-blue-800'
-                  : 'bg-gray-100 text-gray-800'
-              }`}>
-                {student.quota === 'GOVERNMENT' ? '7.5% Govt' : 
-                 student.quota === 'MANAGEMENT' ? 'Management' : 
-                 student.quota || 'Unknown'}
-              </span>
-            </div>
-          )}
-          {/* Parent Contact Information */}
-          {student.father_mobile && (
-            <div className="flex items-center space-x-2 text-sm text-gray-600">
-              <Phone className="w-4 h-4" />
-              <span className="text-xs">Father: {student.father_mobile}</span>
-            </div>
-          )}
       </div>
 
       {/* Transport Information - Show for enrolled students */}
@@ -2114,16 +2054,9 @@ const StudentsPage = () => {
         }],
         // Additional details
         father_name: localStudent.father_name,
-        father_mobile: localStudent.father_mobile,
-        father_occupation: localStudent.father_occupation,
         mother_name: localStudent.mother_name,
-        mother_mobile: localStudent.mother_mobile,
-        mother_occupation: localStudent.mother_occupation,
         date_of_birth: localStudent.date_of_birth,
         gender: localStudent.gender,
-        quota: localStudent.quota,
-        category: localStudent.category,
-        annual_income: localStudent.annual_income,
         address: {
           street: localStudent.address_street,
           district: localStudent.address_district,
