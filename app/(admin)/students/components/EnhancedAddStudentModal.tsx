@@ -62,7 +62,8 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       { term: 1, amount: 0 },
       { term: 2, amount: 0 },
       { term: 3, amount: 0 }
-    ] as PaymentTerm[]
+    ] as PaymentTerm[],
+    skipPaymentConfiguration: false
   });
 
   const [errors, setErrors] = useState<any>({});
@@ -118,7 +119,8 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         { term: 1, amount: 0 },
         { term: 2, amount: 0 },
         { term: 3, amount: 0 }
-      ]
+      ],
+      skipPaymentConfiguration: false
     });
     setErrors({});
   };
@@ -342,16 +344,19 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       newErrors.quota = 'Please select a quota type';
     }
     
-    const totalAmount = quotaData.paymentTerms.reduce((sum, term) => sum + term.amount, 0);
-    if (selectedQuotaType && totalAmount !== selectedQuotaType.annual_fee_amount) {
-      newErrors.paymentTerms = `Total payment amount (₹${totalAmount}) must equal quota fee (₹${selectedQuotaType.annual_fee_amount})`;
-    }
-    
-    quotaData.paymentTerms.forEach((term, index) => {
-      if (term.amount <= 0) {
-        newErrors[`term_${index}`] = 'Amount must be greater than 0';
+    // Skip payment validation if payment configuration is skipped
+    if (!quotaData.skipPaymentConfiguration) {
+      const totalAmount = quotaData.paymentTerms.reduce((sum, term) => sum + term.amount, 0);
+      if (selectedQuotaType && totalAmount !== selectedQuotaType.annual_fee_amount) {
+        newErrors.paymentTerms = `Total payment amount (₹${totalAmount}) must equal quota fee (₹${selectedQuotaType.annual_fee_amount})`;
       }
-    });
+      
+      quotaData.paymentTerms.forEach((term, index) => {
+        if (term.amount <= 0) {
+          newErrors[`term_${index}`] = 'Amount must be greater than 0';
+        }
+      });
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -381,8 +386,8 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       // Save student to database
       const savedStudent = await DatabaseService.addStudent(studentData);
       
-      // Create payment plan if quota is selected
-      if (quotaData.selectedQuota && quotaData.paymentTerms.length > 0) {
+      // Create payment plan if quota is selected and payment configuration is not skipped
+      if (quotaData.selectedQuota && !quotaData.skipPaymentConfiguration && quotaData.paymentTerms.length > 0) {
         const termsConfig = quotaData.paymentTerms.map(term => ({
           term: term.term,
           amount: term.amount
@@ -400,7 +405,11 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         });
       }
 
-      toast.success(`Student enrolled successfully with ${quotaTypes.find(q => q.id === quotaData.selectedQuota)?.quota_name || 'transport service'}!`);
+      const quotaTypeName = quotaTypes.find(q => q.id === quotaData.selectedQuota)?.quota_name || 'transport service';
+      const paymentMessage = quotaData.skipPaymentConfiguration 
+        ? '(Payment terms to be configured later)' 
+        : '(Payment plan configured)';
+      toast.success(`Student enrolled successfully with ${quotaTypeName}! ${paymentMessage}`);
       onSave(savedStudent);
       onClose();
       
@@ -677,84 +686,116 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
                       <label className="block text-sm font-medium text-gray-700">
                         Payment Terms Configuration
                       </label>
-                      <button
-                        onClick={addPaymentTerm}
-                        className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Add Term</span>
-                      </button>
-                    </div>
-
-                    <div className="bg-blue-50 rounded-lg p-4 mb-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-blue-800">
-                          Total Annual Fee: ₹{selectedQuotaType.annual_fee_amount}
-                        </span>
-                        <span className={`text-sm font-medium ${
-                          totalPaymentAmount === selectedQuotaType.annual_fee_amount
-                            ? 'text-green-700'
-                            : 'text-red-700'
-                        }`}>
-                          Configured Total: ₹{totalPaymentAmount}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      {quotaData.paymentTerms.map((term, index) => (
-                        <div key={index} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg">
-                          <div className="flex items-center space-x-2">
-                            <Calendar className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm font-medium text-gray-700">Term {term.term}</span>
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-sm text-gray-500">₹</span>
-                              <input
-                                type="number"
-                                min="0"
-                                max={selectedQuotaType.annual_fee_amount}
-                                value={term.amount}
-                                onChange={(e) => updateTermAmount(index, parseFloat(e.target.value) || 0)}
-                                className={`input flex-1 ${errors[`term_${index}`] ? 'border-red-500' : ''}`}
-                                placeholder="Enter amount"
-                              />
-                            </div>
-                            {errors[`term_${index}`] && (
-                              <p className="text-red-500 text-xs mt-1">{errors[`term_${index}`]}</p>
-                            )}
-                          </div>
-                          {quotaData.paymentTerms.length > 1 && (
-                            <button
-                              onClick={() => removePaymentTerm(index)}
-                              className="p-1 text-red-600 hover:text-red-800"
-                            >
-                              <Minus className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    {errors.paymentTerms && (
-                      <p className="text-red-500 text-sm mt-2">{errors.paymentTerms}</p>
-                    )}
-
-                    {/* Payment Examples */}
-                    <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                      <h5 className="text-sm font-medium text-gray-700 mb-2">Payment Examples:</h5>
-                      <div className="text-xs text-gray-600 space-y-1">
-                        {selectedQuotaType.is_government_quota ? (
-                          <p>• Government Quota: Single payment of ₹500</p>
-                        ) : (
-                          <>
-                            <p>• Option 1: ₹1500, ₹1500, ₹2000</p>
-                            <p>• Option 2: ₹3000, ₹2000</p>
-                            <p>• Option 3: ₹2000, ₹1500, ₹1500</p>
-                          </>
+                      <div className="flex items-center space-x-4">
+                        <label className="flex items-center space-x-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={quotaData.skipPaymentConfiguration}
+                            onChange={(e) => setQuotaData({
+                              ...quotaData,
+                              skipPaymentConfiguration: e.target.checked
+                            })}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-gray-600">Skip payment configuration</span>
+                        </label>
+                        {!quotaData.skipPaymentConfiguration && (
+                          <button
+                            onClick={addPaymentTerm}
+                            className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Add Term</span>
+                          </button>
                         )}
                       </div>
                     </div>
+
+                    {quotaData.skipPaymentConfiguration ? (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <div className="flex items-center space-x-2">
+                          <Calendar className="w-5 h-5 text-yellow-600" />
+                          <div>
+                            <h4 className="text-sm font-medium text-yellow-800">Payment Configuration Skipped</h4>
+                            <p className="text-sm text-yellow-700 mt-1">
+                              Payment terms will be configured later. Annual fee: ₹{selectedQuotaType.annual_fee_amount}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-blue-800">
+                              Total Annual Fee: ₹{selectedQuotaType.annual_fee_amount}
+                            </span>
+                            <span className={`text-sm font-medium ${
+                              totalPaymentAmount === selectedQuotaType.annual_fee_amount
+                                ? 'text-green-700'
+                                : 'text-red-700'
+                            }`}>
+                              Configured Total: ₹{totalPaymentAmount}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {quotaData.paymentTerms.map((term, index) => (
+                            <div key={index} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg">
+                              <div className="flex items-center space-x-2">
+                                <Calendar className="w-4 h-4 text-gray-400" />
+                                <span className="text-sm font-medium text-gray-700">Term {term.term}</span>
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-sm text-gray-500">₹</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={selectedQuotaType.annual_fee_amount}
+                                    value={term.amount}
+                                    onChange={(e) => updateTermAmount(index, parseFloat(e.target.value) || 0)}
+                                    className={`input flex-1 ${errors[`term_${index}`] ? 'border-red-500' : ''}`}
+                                    placeholder="Enter amount"
+                                  />
+                                </div>
+                                {errors[`term_${index}`] && (
+                                  <p className="text-red-500 text-xs mt-1">{errors[`term_${index}`]}</p>
+                                )}
+                              </div>
+                              {quotaData.paymentTerms.length > 1 && (
+                                <button
+                                  onClick={() => removePaymentTerm(index)}
+                                  className="p-1 text-red-600 hover:text-red-800"
+                                >
+                                  <Minus className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {errors.paymentTerms && (
+                          <p className="text-red-500 text-sm mt-2">{errors.paymentTerms}</p>
+                        )}
+
+                        {/* Payment Examples */}
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                          <h5 className="text-sm font-medium text-gray-700 mb-2">Payment Examples:</h5>
+                          <div className="text-xs text-gray-600 space-y-1">
+                            {selectedQuotaType.is_government_quota ? (
+                              <p>• Government Quota: Single payment of ₹500</p>
+                            ) : (
+                              <>
+                                <p>• Option 1: ₹1500, ₹1500, ₹2000</p>
+                                <p>• Option 2: ₹3000, ₹2000</p>
+                                <p>• Option 3: ₹2000, ₹1500, ₹1500</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
