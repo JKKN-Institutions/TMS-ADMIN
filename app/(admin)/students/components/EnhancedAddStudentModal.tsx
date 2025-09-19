@@ -375,6 +375,12 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       // Prepare student data with quota and payment information
       const studentData = {
         ...fetchedStudent,
+        // Ensure required fields are properly mapped and have values
+        student_name: fetchedStudent.student_name || fetchedStudent.name || 'Unknown Student',
+        roll_number: fetchedStudent.roll_number || fetchedStudent.rollNumber || 'UNKNOWN',
+        email: fetchedStudent.email || fetchedStudent.student_email || `unknown-${Date.now()}@temp.edu`,
+        mobile: fetchedStudent.mobile || fetchedStudent.student_mobile || '0000000000',
+        // Transport and quota information
         allocated_route_id: transportData.allocatedRoute,
         boarding_point: transportData.boardingPoint,
         transport_status: transportData.transportStatus,
@@ -382,6 +388,22 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         quota_type_id: quotaData.selectedQuota,
         transport_fee_amount: quotaTypes.find(q => q.id === quotaData.selectedQuota)?.annual_fee_amount || 0
       };
+
+      console.log('🔍 Student data before saving:', studentData);
+      console.log('🔍 Email field check:', {
+        email: studentData.email,
+        student_email: fetchedStudent.student_email,
+        fetchedStudent_email: fetchedStudent.email
+      });
+
+      // Validate required fields before saving
+      const requiredFields = ['student_name', 'roll_number', 'email', 'mobile'];
+      const missingFields = requiredFields.filter(field => !studentData[field] || studentData[field] === '');
+      
+      if (missingFields.length > 0) {
+        toast.error(`Missing required fields: ${missingFields.join(', ')}`);
+        return;
+      }
 
       // Save student to database
       const savedStudent = await DatabaseService.addStudent(studentData);
