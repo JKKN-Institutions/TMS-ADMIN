@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, CheckCircle, ArrowLeft, Check, Save, Plus, Minus,
-  DollarSign, Calendar, CreditCard, FileText, Mail, Search, User
+  DollarSign, Calendar, CreditCard, FileText, Mail, Search, User, X
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { DatabaseService } from '@/lib/database';
@@ -418,15 +418,20 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 transition-opacity bg-gray-900 bg-opacity-75" onClick={onClose}></div>
-        
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        onClick={onClose}
+      >
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          className="inline-block w-full max-w-4xl my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-xl rounded-2xl"
+          exit={{ opacity: 0, scale: 0.95 }}
+          className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
         >
           {/* Progress indicator */}
           <div className="bg-gradient-to-r from-purple-600 to-blue-600 px-6 py-4">
@@ -437,15 +442,23 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
                 {step === 3 && 'Transport Assignment'}
                 {step === 4 && 'Quota & Payment Configuration'}
               </h2>
-              <div className="flex space-x-2">
-                {[1, 2, 3, 4].map((stepNum) => (
-                  <div
-                    key={stepNum}
-                    className={`w-3 h-3 rounded-full ${
-                      stepNum <= step ? 'bg-white' : 'bg-white/30'
-                    }`}
-                  />
-                ))}
+              <div className="flex items-center space-x-4">
+                <div className="flex space-x-2">
+                  {[1, 2, 3, 4].map((stepNum) => (
+                    <div
+                      key={stepNum}
+                      className={`w-3 h-3 rounded-full ${
+                        stepNum <= step ? 'bg-white' : 'bg-white/30'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={onClose}
+                  className="p-2 text-white hover:text-gray-200 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
             </div>
           </div>
@@ -880,7 +893,7 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
             </div>
           )}
         </motion.div>
-      </div>
-    </div>
+      </motion.div>
+    </AnimatePresence>
   );
 };
