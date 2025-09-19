@@ -39,6 +39,7 @@ import toast from 'react-hot-toast';
 import { DatabaseService } from '@/lib/database';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { createStudentStats, safeNumber } from '@/lib/stat-utils';
+import { EnhancedAddStudentModal } from './components/EnhancedAddStudentModal';
 
 // ViewStudentModal Component
 const ViewStudentModal = ({ isOpen, onClose, student }: any) => {
@@ -789,7 +790,9 @@ const EditStudentModal = ({ isOpen, onClose, onSave, student }: any) => {
   );
 };
 
-const AddStudentModal = ({ isOpen, onClose, onSave, selectedStudent }: any) => {
+// Old AddStudentModal removed - using EnhancedAddStudentModal instead
+
+const OldAddStudentModal = ({ isOpen, onClose, onSave, selectedStudent }: any) => {
   const [step, setStep] = useState(1); // 1: Email Fetch, 2: Confirmation, 3: Transport Details
   const [fetchedStudent, setFetchedStudent] = useState<any>(null);
   const [email, setEmail] = useState('');
@@ -1838,6 +1841,19 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
           <BookOpen className="w-4 h-4" />
           <span>{student.department?.department_name || 'N/A'}</span>
           </div>
+        {/* Quota Information */}
+        {student.quota && (
+          <div className="flex items-center space-x-2 text-sm">
+            <CreditCard className="w-4 h-4 text-green-600" />
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+              student.quota?.toLowerCase().includes('government') || student.quota?.toLowerCase().includes('7.5') 
+                ? 'bg-green-100 text-green-800' 
+                : 'bg-blue-100 text-blue-800'
+            }`}>
+              {student.quota}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Transport Information - Show for enrolled students */}
@@ -3069,7 +3085,7 @@ const StudentsPage = () => {
 
 
       <AnimatePresence>
-        <AddStudentModal
+        <EnhancedAddStudentModal
           isOpen={isAddModalOpen}
           selectedStudent={selectedAvailableStudent}
           onClose={() => {

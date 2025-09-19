@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, CheckCircle, ArrowLeft, Check, Save, Plus, Minus,
-  DollarSign, Calendar, CreditCard, FileText
+  DollarSign, Calendar, CreditCard, FileText, Mail, Search, User
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import DatabaseService from '../../../lib/DatabaseService';
@@ -158,6 +158,91 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
     } catch (error) {
       console.error('Error fetching quota types:', error);
       setQuotaTypes([]);
+    }
+  };
+
+  const fetchStudentByEmail = async () => {
+    setIsLoading(true);
+    setErrors({});
+    
+    try {
+      console.log('🔍 Fetching student details for email from external API via proxy:', email);
+      
+      const searchResponse = await fetch('/api/external-students', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email })
+      });
+      
+      console.log('📡 API Proxy Response Status:', searchResponse.status);
+      
+      if (!searchResponse.ok) {
+        const errorData = await searchResponse.json().catch(() => ({}));
+        console.error('❌ API Proxy error:', searchResponse.status, searchResponse.statusText, errorData);
+        
+        if (searchResponse.status === 404) {
+          setErrors({ email: 'Student not found with this email address in the external database' });
+          toast.error('Student not found. Please check the email address.');
+          return;
+        }
+        
+        throw new Error(`API Proxy error: ${searchResponse.status} ${searchResponse.statusText} - ${errorData.error || 'Unknown error'}`);
+      }
+      
+      const searchData = await searchResponse.json();
+      console.log('📊 API Proxy response:', searchData);
+      
+      if (!searchData.success || !searchData.data) {
+        throw new Error('Invalid response format from API proxy');
+      }
+      
+      const matchedStudent = searchData.data;
+      console.log('✅ Found matching student via proxy:', matchedStudent);
+      
+      // Map external API data to internal format
+      const finalStudentData = {
+        id: matchedStudent.id,
+        student_name: matchedStudent.first_name && matchedStudent.last_name 
+          ? `${matchedStudent.first_name} ${matchedStudent.last_name}`.trim()
+          : matchedStudent.student_name || matchedStudent.name || 'Unknown',
+        roll_number: matchedStudent.roll_number || matchedStudent.rollNumber || 'Not Available',
+        student_email: matchedStudent.student_email || matchedStudent.email || matchedStudent.college_email,
+        student_mobile: matchedStudent.student_mobile || matchedStudent.mobile || matchedStudent.phone || 'Not Available',
+        father_name: matchedStudent.father_name || 'Not Available',
+        mother_name: matchedStudent.mother_name || 'Not Available',
+        father_mobile: matchedStudent.father_mobile || 'Not Available',
+        mother_mobile: matchedStudent.mother_mobile || 'Not Available',
+        date_of_birth: matchedStudent.date_of_birth || matchedStudent.dateOfBirth,
+        gender: matchedStudent.gender,
+        department_name: matchedStudent.department_name || matchedStudent.department?.department_name || 'Not Available',
+        institution_name: matchedStudent.institution_name || matchedStudent.institution?.name || 'JKKN College',
+        program_name: matchedStudent.program_name || matchedStudent.program?.program_name,
+        degree_name: matchedStudent.degree_name || matchedStudent.degree?.degree_name,
+        quota: matchedStudent.quota || null, // Existing quota from student data
+        is_profile_complete: matchedStudent.is_profile_complete || false
+      };
+      
+      setFetchedStudent(finalStudentData);
+      
+      if (finalStudentData.is_profile_complete) {
+        toast.success('Student profile found and verified!');
+      } else {
+        toast('Student found, but profile may be incomplete. You can still proceed with enrollment.', {
+          icon: '⚠️',
+          duration: 4000
+        });
+      }
+      
+      setStep(2);
+    } catch (error) {
+      console.error('Error fetching student:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setErrors({ email: errorMessage });
+      toast.error(`Failed to fetch student: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -364,6 +449,141 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
               </div>
             </div>
           </div>
+
+          {/* Step 1: Email Input */}
+          {step === 1 && (
+            <div className="p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Mail className="w-8 h-8 text-blue-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">Find Student</h3>
+                <p className="text-gray-600">Enter the student's email address to fetch their details from the college database</p>
+              </div>
+
+              <div className="max-w-md mx-auto">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Student Email Address</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className={`input ${errors.email ? 'border-red-500' : ''}`}
+                      placeholder="Enter student email (e.g., student@example.com)"
+                      onKeyPress={(e) => e.key === 'Enter' && fetchStudentByEmail()}
+                    />
+                    {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                  </div>
+                </div>
+
+                <div className="flex justify-between space-x-3 mt-8">
+                  <button
+                    onClick={onClose}
+                    className="btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={fetchStudentByEmail}
+                    disabled={!email || isLoading}
+                    className={`btn-primary flex items-center space-x-2 ${
+                      (!email || isLoading) ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {isLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Searching...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4" />
+                        <span>Find Student</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Student Confirmation */}
+          {step === 2 && fetchedStudent && (
+            <div className="p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <User className="w-8 h-8 text-green-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">Confirm Student Details</h3>
+                <p className="text-gray-600">Please review the student information before proceeding</p>
+              </div>
+
+              <div className="space-y-6 max-h-96 overflow-y-auto">
+                {/* Basic Information */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Basic Information</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Name</label>
+                      <p className="text-gray-900 font-medium">{fetchedStudent.student_name}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Roll Number</label>
+                      <p className="text-gray-900 font-medium">{fetchedStudent.roll_number}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Email</label>
+                      <p className="text-gray-900">{fetchedStudent.student_email}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Phone</label>
+                      <p className="text-gray-900">{fetchedStudent.student_mobile}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Department</label>
+                      <p className="text-gray-900">{fetchedStudent.department_name}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Institution</label>
+                      <p className="text-gray-900">{fetchedStudent.institution_name}</p>
+                    </div>
+                    {fetchedStudent.quota && (
+                      <div>
+                        <label className="text-sm font-medium text-gray-500">Current Quota</label>
+                        <p className="text-gray-900 font-medium">{fetchedStudent.quota}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between space-x-3">
+                <button
+                  onClick={() => setStep(1)}
+                  className="btn-secondary flex items-center space-x-2"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back</span>
+                </button>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={onClose}
+                    className="btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setStep(3)}
+                    className="btn-primary flex items-center space-x-2"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Confirm & Continue</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Step 4: Quota & Payment Configuration */}
           {step === 4 && (
