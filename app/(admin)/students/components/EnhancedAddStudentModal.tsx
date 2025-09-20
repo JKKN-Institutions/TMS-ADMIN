@@ -71,20 +71,48 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
   // Handle pre-selected student (available student being enrolled)
   useEffect(() => {
     if (isOpen && selectedStudent) {
+      console.log('🔍 Pre-selected student data:', selectedStudent);
       setFetchedStudent({
         id: selectedStudent.external_id,
         student_name: selectedStudent.student_name,
         student_email: selectedStudent.student_email || selectedStudent.college_email,
         student_mobile: selectedStudent.student_mobile,
-        department_name: selectedStudent.department_name,
-        institution_name: selectedStudent.institution_name,
         roll_number: selectedStudent.roll_number,
+        
+        // Academic information - extract from nested objects (available students) or direct fields
+        department: selectedStudent.department, // Keep nested object for UI display
+        institution: selectedStudent.institution, // Keep nested object for UI display
+        program: selectedStudent.program, // Keep nested object for UI display
+        degree: selectedStudent.degree, // Keep nested object for UI display
+        
+        // Also store flat fields for database mapping
+        department_name: selectedStudent.department?.department_name || selectedStudent.department_name,
+        institution_name: selectedStudent.institution?.name || selectedStudent.institution_name,
+        program_name: selectedStudent.program?.program_name || selectedStudent.program_name,
+        degree_name: selectedStudent.degree?.degree_name || selectedStudent.degree_name,
+        
+        // Personal information
         father_name: selectedStudent.father_name,
         mother_name: selectedStudent.mother_name,
         father_mobile: selectedStudent.father_mobile,
         mother_mobile: selectedStudent.mother_mobile,
         date_of_birth: selectedStudent.date_of_birth,
         gender: selectedStudent.gender,
+        
+        // Address information
+        permanent_address_street: selectedStudent.address?.street || '',
+        permanent_address_district: selectedStudent.address?.district || '',
+        permanent_address_state: selectedStudent.address?.state || '',
+        permanent_address_pin_code: selectedStudent.address?.pinCode || '',
+        
+        // Academic details
+        admission_id: selectedStudent.admission_id,
+        application_id: selectedStudent.application_id,
+        semester_id: selectedStudent.semester_id,
+        section_id: selectedStudent.section_id,
+        academic_year_id: selectedStudent.academic_year_id,
+        entry_type: selectedStudent.entry_type,
+        
         quota: selectedStudent.quota, // Existing quota from student data
         is_profile_complete: selectedStudent.is_profile_complete
       });
