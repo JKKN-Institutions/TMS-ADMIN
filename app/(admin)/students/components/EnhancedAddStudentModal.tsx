@@ -2,8 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Users, CheckCircle, ArrowLeft, Check, Save, Plus, Minus,
-  DollarSign, Calendar, CreditCard, FileText, Mail, Search, User, X
+  Users, CheckCircle, ArrowLeft, Check, Save,
+  DollarSign, CreditCard, FileText, Mail, Search, User, X
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { DatabaseService } from '@/lib/database';
@@ -18,11 +18,6 @@ interface QuotaType {
   is_active: boolean;
 }
 
-interface PaymentTerm {
-  term: number;
-  amount: number;
-  due_date?: string;
-}
 
 interface EnhancedAddStudentModalProps {
   isOpen: boolean;
@@ -54,16 +49,21 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
     paymentStatus: 'current'
   });
 
-  // Quota and payment form
+  // Quota and payment status tracking
   const [quotaData, setQuotaData] = useState({
     selectedQuota: '',
     academicYear: new Date().getFullYear().toString(),
-    paymentTerms: [
-      { term: 1, amount: 0 },
-      { term: 2, amount: 0 },
-      { term: 3, amount: 0 }
-    ] as PaymentTerm[],
-    skipPaymentConfiguration: false
+    // For Government quota (₹500 total)
+    govtQuotaPaid: false,
+    // For Management quota (₹5000 total) - term-wise tracking
+    managementPayments: [
+      { term: 1, amountPaid: 0, isPaid: false },
+      { term: 2, amountPaid: 0, isPaid: false },
+      { term: 3, amountPaid: 0, isPaid: false }
+    ] as { term: number; amountPaid: number; isPaid: boolean }[],
+    // Single payment option for management quota
+    singlePaymentAmount: 0,
+    isSinglePayment: false
   });
 
   const [errors, setErrors] = useState<any>({});
@@ -115,12 +115,14 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
     setQuotaData({
       selectedQuota: '',
       academicYear: new Date().getFullYear().toString(),
-      paymentTerms: [
-        { term: 1, amount: 0 },
-        { term: 2, amount: 0 },
-        { term: 3, amount: 0 }
+      govtQuotaPaid: false,
+      managementPayments: [
+        { term: 1, amountPaid: 0, isPaid: false },
+        { term: 2, amountPaid: 0, isPaid: false },
+        { term: 3, amountPaid: 0, isPaid: false }
       ],
-      skipPaymentConfiguration: false
+      singlePaymentAmount: 0,
+      isSinglePayment: false
     });
     setErrors({});
   };
@@ -274,66 +276,10 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
   };
 
   const handleQuotaChange = (quotaId: string) => {
-    const selectedQuotaType = quotaTypes.find(q => q.id === quotaId);
-    if (selectedQuotaType) {
-      const baseAmount = selectedQuotaType.annual_fee_amount;
-      
-      // Auto-distribute amount across terms
-      let newTerms = [...quotaData.paymentTerms];
-      if (selectedQuotaType.is_government_quota && baseAmount === 500) {
-        // For government quota, typically one payment
-        newTerms = [{ term: 1, amount: baseAmount }];
-      } else {
-        // For regular quota, distribute across 3 terms
-        const baseTermAmount = Math.floor(baseAmount / 3);
-        const remainder = baseAmount % 3;
-        
-        newTerms = [
-          { term: 1, amount: baseTermAmount },
-          { term: 2, amount: baseTermAmount },
-          { term: 3, amount: baseTermAmount + remainder }
-        ];
-      }
-      
-      setQuotaData({
-        ...quotaData,
-        selectedQuota: quotaId,
-        paymentTerms: newTerms
-      });
-    }
-  };
-
-  const updateTermAmount = (termIndex: number, amount: number) => {
-    const newTerms = [...quotaData.paymentTerms];
-    newTerms[termIndex].amount = amount;
     setQuotaData({
       ...quotaData,
-      paymentTerms: newTerms
+      selectedQuota: quotaId
     });
-  };
-
-  const addPaymentTerm = () => {
-    setQuotaData({
-      ...quotaData,
-      paymentTerms: [
-        ...quotaData.paymentTerms,
-        { term: quotaData.paymentTerms.length + 1, amount: 0 }
-      ]
-    });
-  };
-
-  const removePaymentTerm = (termIndex: number) => {
-    if (quotaData.paymentTerms.length > 1) {
-      const newTerms = quotaData.paymentTerms.filter((_, index) => index !== termIndex);
-      // Renumber terms
-      newTerms.forEach((term, index) => {
-        term.term = index + 1;
-      });
-      setQuotaData({
-        ...quotaData,
-        paymentTerms: newTerms
-      });
-    }
   };
 
   const validateQuotaData = () => {
@@ -344,18 +290,30 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       newErrors.quota = 'Please select a quota type';
     }
     
-    // Skip payment validation if payment configuration is skipped
-    if (!quotaData.skipPaymentConfiguration) {
-      const totalAmount = quotaData.paymentTerms.reduce((sum, term) => sum + term.amount, 0);
-      if (selectedQuotaType && totalAmount !== selectedQuotaType.annual_fee_amount) {
-        newErrors.paymentTerms = `Total payment amount (₹${totalAmount}) must equal quota fee (₹${selectedQuotaType.annual_fee_amount})`;
-      }
+    // Validate payment status based on quota type
+    if (selectedQuotaType) {
+      const isGovtQuota = selectedQuotaType.quota_name?.toLowerCase().includes('government') || 
+                         selectedQuotaType.quota_name?.toLowerCase().includes('7.5');
       
-      quotaData.paymentTerms.forEach((term, index) => {
-        if (term.amount <= 0) {
-          newErrors[`term_${index}`] = 'Amount must be greater than 0';
+      if (!isGovtQuota) {
+        // For Management quota - validate payment amounts
+        if (quotaData.isSinglePayment) {
+          if (quotaData.singlePaymentAmount < 0 || quotaData.singlePaymentAmount > selectedQuotaType.annual_fee_amount) {
+            newErrors.singlePayment = `Single payment amount must be between ₹0 and ₹${selectedQuotaType.annual_fee_amount}`;
+          }
+        } else {
+          const totalPaid = quotaData.managementPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
+          if (totalPaid > selectedQuotaType.annual_fee_amount) {
+            newErrors.managementPayments = `Total paid amount (₹${totalPaid}) cannot exceed quota fee (₹${selectedQuotaType.annual_fee_amount})`;
+          }
+          
+          quotaData.managementPayments.forEach((payment, index) => {
+            if (payment.isPaid && payment.amountPaid <= 0) {
+              newErrors[`mgmt_term_${index}`] = 'Paid amount must be greater than 0';
+            }
+          });
         }
-      });
+      }
     }
     
     setErrors(newErrors);
@@ -408,29 +366,81 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       // Save student to database
       const savedStudent = await DatabaseService.addStudent(studentData);
       
-      // Create payment plan if quota is selected and payment configuration is not skipped
-      if (quotaData.selectedQuota && !quotaData.skipPaymentConfiguration && quotaData.paymentTerms.length > 0) {
-        const termsConfig = quotaData.paymentTerms.map(term => ({
-          term: term.term,
-          amount: term.amount
-        }));
+      // Calculate outstanding amount and create payment records
+      if (quotaData.selectedQuota) {
+        const selectedQuotaType = quotaTypes.find(q => q.id === quotaData.selectedQuota);
+        const isGovtQuota = selectedQuotaType?.quota_name?.toLowerCase().includes('government') || 
+                           selectedQuotaType?.quota_name?.toLowerCase().includes('7.5');
         
-        await fetch('/api/admin/payment-plans', {
-          method: 'POST',
+        let totalPaid = 0;
+        let outstandingAmount = selectedQuotaType?.annual_fee_amount || 0;
+        
+        if (isGovtQuota) {
+          // Government quota: ₹500 total
+          totalPaid = quotaData.govtQuotaPaid ? 500 : 0;
+          outstandingAmount = 500 - totalPaid;
+        } else {
+          // Management quota: ₹5000 total
+          if (quotaData.isSinglePayment) {
+            totalPaid = quotaData.singlePaymentAmount;
+          } else {
+            totalPaid = quotaData.managementPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
+          }
+          outstandingAmount = (selectedQuotaType?.annual_fee_amount || 5000) - totalPaid;
+        }
+        
+        // Update student with payment information
+        await fetch('/api/admin/students', {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            student_id: savedStudent.id,
-            quota_type_id: quotaData.selectedQuota,
-            academic_year: quotaData.academicYear,
-            terms_config: termsConfig
+            id: savedStudent.id,
+            outstanding_amount: outstandingAmount,
+            payment_status: outstandingAmount > 0 ? 'pending' : 'current'
           })
         });
+        
+        // Create payment records for what's already paid
+        if (totalPaid > 0) {
+          await fetch('/api/admin/payments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              student_id: savedStudent.id,
+              amount: totalPaid,
+              payment_type: 'transport_fee',
+              payment_method: 'cash', // Default, can be updated later
+              academic_year: quotaData.academicYear,
+              quota_type_id: quotaData.selectedQuota,
+              payment_details: isGovtQuota 
+                ? { govtQuotaPaid: quotaData.govtQuotaPaid }
+                : quotaData.isSinglePayment 
+                  ? { singlePayment: quotaData.singlePaymentAmount }
+                  : { termWisePayments: quotaData.managementPayments }
+            })
+          });
+        }
       }
 
       const quotaTypeName = quotaTypes.find(q => q.id === quotaData.selectedQuota)?.quota_name || 'transport service';
-      const paymentMessage = quotaData.skipPaymentConfiguration 
-        ? '(Payment terms to be configured later)' 
-        : '(Payment plan configured)';
+      const selectedQuotaType = quotaTypes.find(q => q.id === quotaData.selectedQuota);
+      const isGovtQuota = selectedQuotaType?.quota_name?.toLowerCase().includes('government') || 
+                         selectedQuotaType?.quota_name?.toLowerCase().includes('7.5');
+      
+      let totalPaid = 0;
+      if (isGovtQuota) {
+        totalPaid = quotaData.govtQuotaPaid ? 500 : 0;
+      } else {
+        totalPaid = quotaData.isSinglePayment 
+          ? quotaData.singlePaymentAmount 
+          : quotaData.managementPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
+      }
+      
+      const outstandingAmount = (selectedQuotaType?.annual_fee_amount || 0) - totalPaid;
+      const paymentMessage = outstandingAmount > 0 
+        ? `(Outstanding: ₹${outstandingAmount})` 
+        : '(Fully Paid)';
+      
       toast.success(`Student enrolled successfully with ${quotaTypeName}! ${paymentMessage}`);
       onSave(savedStudent);
       onClose();
@@ -471,7 +481,7 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
                 {step === 1 && 'Find Student'}
                 {step === 2 && 'Confirm Details'}
                 {step === 3 && 'Transport Assignment'}
-                {step === 4 && 'Quota & Payment Configuration'}
+                  {step === 4 && 'Quota & Payment Status'}
               </h2>
               <div className="flex items-center space-x-4">
                 <div className="flex space-x-2">
@@ -636,8 +646,8 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <DollarSign className="w-8 h-8 text-green-600" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Quota & Payment Configuration</h3>
-                <p className="text-gray-600">Configure student quota and flexible payment terms</p>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">Quota & Payment Status</h3>
+                <p className="text-gray-600">Select student quota and track payment status</p>
               </div>
 
               <div className="space-y-6">
@@ -701,123 +711,196 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
                   </select>
                 </div>
 
-                {/* Payment Terms Configuration */}
+                {/* Payment Status Tracking */}
                 {selectedQuotaType && (
                   <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Payment Terms Configuration
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-3">
+                        Payment Status for Academic Year {quotaData.academicYear}
                       </label>
-                      <div className="flex items-center space-x-4">
-                        <label className="flex items-center space-x-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={quotaData.skipPaymentConfiguration}
-                            onChange={(e) => setQuotaData({
-                              ...quotaData,
-                              skipPaymentConfiguration: e.target.checked
-                            })}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-gray-600">Skip payment configuration</span>
-                        </label>
-                        {!quotaData.skipPaymentConfiguration && (
-                          <button
-                            onClick={addPaymentTerm}
-                            className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800"
-                          >
-                            <Plus className="w-4 h-4" />
-                            <span>Add Term</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
 
-                    {quotaData.skipPaymentConfiguration ? (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                        <div className="flex items-center space-x-2">
-                          <Calendar className="w-5 h-5 text-yellow-600" />
-                          <div>
-                            <h4 className="text-sm font-medium text-yellow-800">Payment Configuration Skipped</h4>
-                            <p className="text-sm text-yellow-700 mt-1">
-                              Payment terms will be configured later. Annual fee: ₹{selectedQuotaType.annual_fee_amount}
-                            </p>
+                      {/* Government Quota Payment Status */}
+                      {(selectedQuotaType.quota_name?.toLowerCase().includes('government') || 
+                        selectedQuotaType.quota_name?.toLowerCase().includes('7.5')) ? (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-sm font-medium text-green-800">Government Quota - Annual Fee: ₹500</h4>
+                          </div>
+                          
+                          <label className="flex items-center space-x-3">
+                            <input
+                              type="checkbox"
+                              checked={quotaData.govtQuotaPaid}
+                              onChange={(e) => setQuotaData({
+                                ...quotaData,
+                                govtQuotaPaid: e.target.checked
+                              })}
+                              className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              ₹500 paid for academic year {quotaData.academicYear}
+                            </span>
+                          </label>
+                          
+                          <div className="mt-3 p-3 bg-white rounded border">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600">Outstanding Amount:</span>
+                              <span className={`text-sm font-bold ${quotaData.govtQuotaPaid ? 'text-green-600' : 'text-red-600'}`}>
+                                ₹{quotaData.govtQuotaPaid ? 0 : 500}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="bg-blue-50 rounded-lg p-4 mb-4">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-blue-800">
-                              Total Annual Fee: ₹{selectedQuotaType.annual_fee_amount}
-                            </span>
-                            <span className={`text-sm font-medium ${
-                              totalPaymentAmount === selectedQuotaType.annual_fee_amount
-                                ? 'text-green-700'
-                                : 'text-red-700'
-                            }`}>
-                              Configured Total: ₹{totalPaymentAmount}
-                            </span>
+                      ) : (
+                        /* Management Quota Payment Status */
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-sm font-medium text-blue-800">
+                              Management Quota - Annual Fee: ₹{selectedQuotaType.annual_fee_amount}
+                            </h4>
                           </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          {quotaData.paymentTerms.map((term, index) => (
-                            <div key={index} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg">
-                              <div className="flex items-center space-x-2">
-                                <Calendar className="w-4 h-4 text-gray-400" />
-                                <span className="text-sm font-medium text-gray-700">Term {term.term}</span>
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-sm text-gray-500">₹</span>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={selectedQuotaType.annual_fee_amount}
-                                    value={term.amount}
-                                    onChange={(e) => updateTermAmount(index, parseFloat(e.target.value) || 0)}
-                                    className={`input flex-1 ${errors[`term_${index}`] ? 'border-red-500' : ''}`}
-                                    placeholder="Enter amount"
-                                  />
-                                </div>
-                                {errors[`term_${index}`] && (
-                                  <p className="text-red-500 text-xs mt-1">{errors[`term_${index}`]}</p>
+                          
+                          {/* Payment Mode Selection */}
+                          <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Payment Mode</label>
+                            <div className="flex space-x-4">
+                              <label className="flex items-center space-x-2">
+                                <input
+                                  type="radio"
+                                  name="paymentMode"
+                                  checked={!quotaData.isSinglePayment}
+                                  onChange={() => setQuotaData({ ...quotaData, isSinglePayment: false })}
+                                  className="text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-gray-700">Term-wise Payment</span>
+                              </label>
+                              <label className="flex items-center space-x-2">
+                                <input
+                                  type="radio"
+                                  name="paymentMode"
+                                  checked={quotaData.isSinglePayment}
+                                  onChange={() => setQuotaData({ ...quotaData, isSinglePayment: true })}
+                                  className="text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-gray-700">Single Payment</span>
+                              </label>
+                            </div>
+                          </div>
+                          
+                          {quotaData.isSinglePayment ? (
+                            /* Single Payment Mode */
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Amount Paid (Single Payment)
+                                </label>
+                                <input
+                                  type="number"
+                                  value={quotaData.singlePaymentAmount}
+                                  onChange={(e) => setQuotaData({
+                                    ...quotaData,
+                                    singlePaymentAmount: parseInt(e.target.value) || 0
+                                  })}
+                                  className="input"
+                                  placeholder="Enter amount paid"
+                                  min="0"
+                                  max={selectedQuotaType.annual_fee_amount}
+                                />
+                                {errors.singlePayment && (
+                                  <p className="text-red-500 text-xs mt-1">{errors.singlePayment}</p>
                                 )}
                               </div>
-                              {quotaData.paymentTerms.length > 1 && (
-                                <button
-                                  onClick={() => removePaymentTerm(index)}
-                                  className="p-1 text-red-600 hover:text-red-800"
-                                >
-                                  <Minus className="w-4 h-4" />
-                                </button>
+                              
+                              <div className="p-3 bg-white rounded border">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm text-gray-600">Outstanding Amount:</span>
+                                  <span className={`text-sm font-bold ${
+                                    (selectedQuotaType.annual_fee_amount - quotaData.singlePaymentAmount) <= 0 
+                                      ? 'text-green-600' : 'text-red-600'
+                                  }`}>
+                                    ₹{Math.max(0, selectedQuotaType.annual_fee_amount - quotaData.singlePaymentAmount)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Term-wise Payment Mode */
+                            <div className="space-y-3">
+                              <div className="text-sm text-gray-600 mb-3">
+                                Mark the terms that have been paid and enter the amounts:
+                              </div>
+                              
+                              {quotaData.managementPayments.map((payment, index) => (
+                                <div key={index} className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg bg-white">
+                                  <input
+                                    type="checkbox"
+                                    checked={payment.isPaid}
+                                    onChange={(e) => {
+                                      const newPayments = [...quotaData.managementPayments];
+                                      newPayments[index].isPaid = e.target.checked;
+                                      if (!e.target.checked) {
+                                        newPayments[index].amountPaid = 0;
+                                      }
+                                      setQuotaData({ ...quotaData, managementPayments: newPayments });
+                                    }}
+                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div className="flex-shrink-0 w-16">
+                                    <span className="text-sm font-medium text-gray-700">Term {payment.term}</span>
+                                  </div>
+                                  <div className="flex-1">
+                                    <input
+                                      type="number"
+                                      value={payment.amountPaid}
+                                      onChange={(e) => {
+                                        const newPayments = [...quotaData.managementPayments];
+                                        newPayments[index].amountPaid = parseInt(e.target.value) || 0;
+                                        setQuotaData({ ...quotaData, managementPayments: newPayments });
+                                      }}
+                                      disabled={!payment.isPaid}
+                                      className={`input ${!payment.isPaid ? 'bg-gray-100' : ''}`}
+                                      placeholder="Amount paid"
+                                      min="0"
+                                      max={selectedQuotaType.annual_fee_amount}
+                                    />
+                                    {errors[`mgmt_term_${index}`] && (
+                                      <p className="text-red-500 text-xs mt-1">{errors[`mgmt_term_${index}`]}</p>
+                                    )}
+                                  </div>
+                                  <div className="flex-shrink-0 w-20 text-right">
+                                    <span className={`text-sm font-medium ${payment.isPaid ? 'text-green-600' : 'text-gray-400'}`}>
+                                      {payment.isPaid ? 'Paid' : 'Pending'}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                              
+                              <div className="p-3 bg-white rounded border">
+                                <div className="flex justify-between items-center mb-2">
+                                  <span className="text-sm text-gray-600">Total Paid:</span>
+                                  <span className="text-sm font-medium text-blue-600">
+                                    ₹{quotaData.managementPayments.reduce((sum, p) => sum + p.amountPaid, 0)}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm text-gray-600">Outstanding Amount:</span>
+                                  <span className={`text-sm font-bold ${
+                                    (selectedQuotaType.annual_fee_amount - quotaData.managementPayments.reduce((sum, p) => sum + p.amountPaid, 0)) <= 0 
+                                      ? 'text-green-600' : 'text-red-600'
+                                  }`}>
+                                    ₹{Math.max(0, selectedQuotaType.annual_fee_amount - quotaData.managementPayments.reduce((sum, p) => sum + p.amountPaid, 0))}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              {errors.managementPayments && (
+                                <p className="text-red-500 text-sm mt-2">{errors.managementPayments}</p>
                               )}
                             </div>
-                          ))}
+                          )}
                         </div>
-                        {errors.paymentTerms && (
-                          <p className="text-red-500 text-sm mt-2">{errors.paymentTerms}</p>
-                        )}
-
-                        {/* Payment Examples */}
-                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                          <h5 className="text-sm font-medium text-gray-700 mb-2">Payment Examples:</h5>
-                          <div className="text-xs text-gray-600 space-y-1">
-                            {selectedQuotaType.is_government_quota ? (
-                              <p>• Government Quota: Single payment of ₹500</p>
-                            ) : (
-                              <>
-                                <p>• Option 1: ₹1500, ₹1500, ₹2000</p>
-                                <p>• Option 2: ₹3000, ₹2000</p>
-                                <p>• Option 3: ₹2000, ₹1500, ₹1500</p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
