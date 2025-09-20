@@ -1922,7 +1922,7 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
           <span>{student.department?.department_name || 'N/A'}</span>
           </div>
         {/* Quota Information */}
-        {(student.quota_type || student.quota) && (
+        {(student.quota_type || student.quota || student._enrollmentStatus === 'enrolled') && (
           <div className="flex items-center space-x-2 text-sm">
             <CreditCard className="w-4 h-4 text-green-600" />
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -1932,7 +1932,7 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
                 ? 'bg-green-100 text-green-800' 
                 : 'bg-blue-100 text-blue-800'
             }`}>
-              {student.quota_type?.quota_name || student.quota || 'No Quota'}
+              {student.quota_type?.quota_name || student.quota || (student._enrollmentStatus === 'enrolled' ? 'No Quota Assigned' : 'Available')}
             </span>
           </div>
         )}
@@ -1949,18 +1949,16 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
             )}
             
             {/* Outstanding Amount */}
-            {student.outstanding_amount !== undefined && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">Outstanding:</span>
-                <span className={`font-medium ${
-                  parseFloat(student.outstanding_amount || 0) > 0 
-                    ? 'text-red-600' 
-                    : 'text-green-600'
-                }`}>
-                  ₹{parseFloat(student.outstanding_amount || 0).toLocaleString()}
-                </span>
-              </div>
-            )}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-600">Outstanding:</span>
+              <span className={`font-medium ${
+                parseFloat(student.outstanding_amount || student.student_transport_profiles?.[0]?.outstanding_amount || 0) > 0 
+                  ? 'text-red-600' 
+                  : 'text-green-600'
+              }`}>
+                ₹{parseFloat(student.outstanding_amount || student.student_transport_profiles?.[0]?.outstanding_amount || 0).toLocaleString()}
+              </span>
+            </div>
             
             {/* Payment Status */}
             <div className="flex items-center justify-between text-sm">
