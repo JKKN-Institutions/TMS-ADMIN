@@ -68,9 +68,9 @@ export async function POST(request: Request) {
       .insert([{
         student_id: paymentData.student_id,
         amount: paymentData.amount,
-        payment_type: paymentData.payment_type || 'transport_fee',
+        payment_type: paymentData.payment_type || 'semester_fee',
         payment_method: paymentData.payment_method || 'cash',
-        status: 'completed', // Using 'status' instead of 'payment_status'
+        status: 'completed', // Using payment_transaction_status enum
         description: paymentData.description || 'Transport fee payment',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()

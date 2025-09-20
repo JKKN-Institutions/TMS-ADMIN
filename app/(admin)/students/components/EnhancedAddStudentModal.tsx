@@ -483,7 +483,7 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
               body: JSON.stringify({
                 student_id: savedStudent.id,
                 amount: totalPaid,
-                payment_type: 'transport_fee',
+                payment_type: 'semester_fee',
                 payment_method: 'cash', // Default, can be updated later
                 academic_year: quotaData.academicYear,
                 quota_type_id: quotaData.selectedQuota,
