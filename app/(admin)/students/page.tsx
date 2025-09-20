@@ -2679,20 +2679,20 @@ const StudentsPage = () => {
   }, [searchTerm, statusFilter, paymentFilter, enrollmentFilter, departmentFilter, routeFilter, academicYearFilter, semesterFilter, genderFilter]);
 
   // Stats calculations
-  const totalStudents = students.length;
-  const enrolledCount = enrolledStudents.length;
-  const availableCount = availableStudents.length;
-  const activeTransport = enrolledStudents.filter(s => 
+  const totalStudents = (students || []).length;
+  const enrolledCount = (enrolledStudents || []).length;
+  const availableCount = (availableStudents || []).length;
+  const activeTransport = (enrolledStudents || []).filter(s => 
     s.student_transport_profiles && 
     s.student_transport_profiles.length > 0 && 
     s.student_transport_profiles[0].transport_status === 'active'
   ).length;
-  const overduePayments = enrolledStudents.filter(s => 
+  const overduePayments = (enrolledStudents || []).filter(s => 
     s.student_transport_profiles && 
     s.student_transport_profiles.length > 0 && 
     s.student_transport_profiles[0].payment_status === 'overdue'
   ).length;
-  const totalOutstanding = enrolledStudents.reduce((sum, s) => {
+  const totalOutstanding = (enrolledStudents || []).reduce((sum, s) => {
     if (s.student_transport_profiles && s.student_transport_profiles.length > 0) {
       return sum + (s.student_transport_profiles[0].outstanding_amount || 0);
     }

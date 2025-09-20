@@ -302,12 +302,12 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
             newErrors.singlePayment = `Single payment amount must be between ₹0 and ₹${selectedQuotaType.annual_fee_amount}`;
           }
         } else {
-          const totalPaid = quotaData.managementPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
+          const totalPaid = (quotaData.managementPayments || []).reduce((sum, payment) => sum + payment.amountPaid, 0);
           if (totalPaid > selectedQuotaType.annual_fee_amount) {
             newErrors.managementPayments = `Total paid amount (₹${totalPaid}) cannot exceed quota fee (₹${selectedQuotaType.annual_fee_amount})`;
           }
           
-          quotaData.managementPayments.forEach((payment, index) => {
+          (quotaData.managementPayments || []).forEach((payment, index) => {
             if (payment.isPaid && payment.amountPaid <= 0) {
               newErrors[`mgmt_term_${index}`] = 'Paid amount must be greater than 0';
             }
@@ -384,7 +384,7 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
           if (quotaData.isSinglePayment) {
             totalPaid = quotaData.singlePaymentAmount;
           } else {
-            totalPaid = quotaData.managementPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
+            totalPaid = (quotaData.managementPayments || []).reduce((sum, payment) => sum + payment.amountPaid, 0);
           }
           outstandingAmount = (selectedQuotaType?.annual_fee_amount || 5000) - totalPaid;
         }
@@ -433,7 +433,7 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       } else {
         totalPaid = quotaData.isSinglePayment 
           ? quotaData.singlePaymentAmount 
-          : quotaData.managementPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
+          : (quotaData.managementPayments || []).reduce((sum, payment) => sum + payment.amountPaid, 0);
       }
       
       const outstandingAmount = (selectedQuotaType?.annual_fee_amount || 0) - totalPaid;
@@ -453,8 +453,16 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
     }
   };
 
+  // Calculate total payment amount based on quota type
   const selectedQuotaType = quotaTypes.find(q => q.id === quotaData.selectedQuota);
-  const totalPaymentAmount = quotaData.paymentTerms.reduce((sum, term) => sum + term.amount, 0);
+  const isGovtQuota = selectedQuotaType?.quota_name?.toLowerCase().includes('government') || 
+                     selectedQuotaType?.quota_name?.toLowerCase().includes('7.5');
+  
+  const totalPaymentAmount = isGovtQuota 
+    ? (quotaData.govtQuotaPaid ? 500 : 0)
+    : quotaData.isSinglePayment 
+      ? quotaData.singlePaymentAmount
+      : (quotaData.managementPayments || []).reduce((sum, payment) => sum + payment.amountPaid, 0);
 
   if (!isOpen) return null;
 
@@ -879,16 +887,16 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
                                 <div className="flex justify-between items-center mb-2">
                                   <span className="text-sm text-gray-600">Total Paid:</span>
                                   <span className="text-sm font-medium text-blue-600">
-                                    ₹{quotaData.managementPayments.reduce((sum, p) => sum + p.amountPaid, 0)}
+                                    ₹{(quotaData.managementPayments || []).reduce((sum, p) => sum + p.amountPaid, 0)}
                                   </span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                   <span className="text-sm text-gray-600">Outstanding Amount:</span>
                                   <span className={`text-sm font-bold ${
-                                    (selectedQuotaType.annual_fee_amount - quotaData.managementPayments.reduce((sum, p) => sum + p.amountPaid, 0)) <= 0 
+                                    (selectedQuotaType.annual_fee_amount - (quotaData.managementPayments || []).reduce((sum, p) => sum + p.amountPaid, 0)) <= 0 
                                       ? 'text-green-600' : 'text-red-600'
                                   }`}>
-                                    ₹{Math.max(0, selectedQuotaType.annual_fee_amount - quotaData.managementPayments.reduce((sum, p) => sum + p.amountPaid, 0))}
+                                    ₹{Math.max(0, selectedQuotaType.annual_fee_amount - (quotaData.managementPayments || []).reduce((sum, p) => sum + p.amountPaid, 0))}
                                   </span>
                                 </div>
                               </div>
