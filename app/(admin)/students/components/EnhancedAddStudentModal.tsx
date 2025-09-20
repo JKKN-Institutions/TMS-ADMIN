@@ -116,7 +116,7 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         quota: selectedStudent.quota, // Existing quota from student data
         is_profile_complete: selectedStudent.is_profile_complete
       });
-      setStep(3); // Skip directly to transport assignment
+      setStep(2); // Go to confirmation step, then transport, then quota selection
     } else if (isOpen) {
       resetForm();
     }
@@ -408,11 +408,6 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
       };
 
       console.log('🔍 Student data before saving:', studentData);
-      console.log('🔍 Email field check:', {
-        email: studentData.email,
-        student_email: fetchedStudent.student_email,
-        fetchedStudent_email: fetchedStudent.email
-      });
 
       // Validate required fields before saving
       const requiredFields = ['student_name', 'roll_number', 'email', 'mobile'];
@@ -423,22 +418,22 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         return;
       }
 
-      // Save student to database
-      const savedStudent = await DatabaseService.addStudent(studentData);
+      // Calculate outstanding amount and payment status before saving
+      let calculatedOutstandingAmount = 0;
+      let calculatedPaymentStatus = 'current';
       
-      // Calculate outstanding amount and create payment records
       if (quotaData.selectedQuota) {
         const selectedQuotaType = quotaTypes.find(q => q.id === quotaData.selectedQuota);
         const isGovtQuota = selectedQuotaType?.quota_name?.toLowerCase().includes('government') || 
                            selectedQuotaType?.quota_name?.toLowerCase().includes('7.5');
         
         let totalPaid = 0;
-        let outstandingAmount = selectedQuotaType?.annual_fee_amount || 0;
+        let totalFee = selectedQuotaType?.annual_fee_amount || 0;
         
         if (isGovtQuota) {
           // Government quota: ₹500 total
           totalPaid = quotaData.govtQuotaPaid ? 500 : 0;
-          outstandingAmount = 500 - totalPaid;
+          calculatedOutstandingAmount = 500 - totalPaid;
         } else {
           // Management quota: ₹5000 total
           if (quotaData.isSinglePayment) {
@@ -446,39 +441,64 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
           } else {
             totalPaid = (quotaData.managementPayments || []).reduce((sum, payment) => sum + payment.amountPaid, 0);
           }
-          outstandingAmount = (selectedQuotaType?.annual_fee_amount || 5000) - totalPaid;
+          calculatedOutstandingAmount = totalFee - totalPaid;
         }
         
-        // Update student with payment information
-        await fetch('/api/admin/students', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: savedStudent.id,
-            outstanding_amount: outstandingAmount,
-            payment_status: outstandingAmount > 0 ? 'pending' : 'current'
-          })
-        });
+        calculatedPaymentStatus = calculatedOutstandingAmount > 0 ? 'overdue' : 'current';
         
-        // Create payment records for what's already paid
+      }
+      
+      // Include calculated amounts in the initial student data
+      const finalStudentData = {
+        ...studentData,
+        outstanding_amount: calculatedOutstandingAmount,
+        payment_status: calculatedPaymentStatus
+      };
+      
+      
+      // Save student to database with all information
+      const savedStudent = await DatabaseService.addStudent(finalStudentData);
+      
+      // Create payment records for what's already paid
+      if (quotaData.selectedQuota && calculatedOutstandingAmount < (quotaTypes.find(q => q.id === quotaData.selectedQuota)?.annual_fee_amount || 0)) {
+        const selectedQuotaType = quotaTypes.find(q => q.id === quotaData.selectedQuota);
+        const isGovtQuota = selectedQuotaType?.quota_name?.toLowerCase().includes('government') || 
+                           selectedQuotaType?.quota_name?.toLowerCase().includes('7.5');
+        
+        let totalPaid = 0;
+        if (isGovtQuota) {
+          totalPaid = quotaData.govtQuotaPaid ? 500 : 0;
+        } else {
+          if (quotaData.isSinglePayment) {
+            totalPaid = quotaData.singlePaymentAmount;
+          } else {
+            totalPaid = (quotaData.managementPayments || []).reduce((sum, payment) => sum + payment.amountPaid, 0);
+          }
+        }
+        
         if (totalPaid > 0) {
-          await fetch('/api/admin/payments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              student_id: savedStudent.id,
-              amount: totalPaid,
-              payment_type: 'transport_fee',
-              payment_method: 'cash', // Default, can be updated later
-              academic_year: quotaData.academicYear,
-              quota_type_id: quotaData.selectedQuota,
-              payment_details: isGovtQuota 
-                ? { govtQuotaPaid: quotaData.govtQuotaPaid }
-                : quotaData.isSinglePayment 
-                  ? { singlePayment: quotaData.singlePaymentAmount }
-                  : { termWisePayments: quotaData.managementPayments }
-            })
-          });
+          try {
+            await fetch('/api/admin/payments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                student_id: savedStudent.id,
+                amount: totalPaid,
+                payment_type: 'transport_fee',
+                payment_method: 'cash', // Default, can be updated later
+                academic_year: quotaData.academicYear,
+                quota_type_id: quotaData.selectedQuota,
+                payment_details: isGovtQuota 
+                  ? { govtQuotaPaid: quotaData.govtQuotaPaid }
+                  : quotaData.isSinglePayment 
+                    ? { singlePayment: quotaData.singlePaymentAmount }
+                    : { termWisePayments: quotaData.managementPayments }
+              })
+            });
+          } catch (error) {
+            console.error('❌ Error creating payment record:', error);
+            // Don't fail the enrollment if payment record creation fails
+          }
         }
       }
 
