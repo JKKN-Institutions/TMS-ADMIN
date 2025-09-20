@@ -255,6 +255,86 @@ const ViewStudentModal = ({ isOpen, onClose, student }: any) => {
                 </div>
               </div>
 
+              {/* Quota & Payment Information - Show for enrolled students */}
+              {student._enrollmentStatus === 'enrolled' && (
+                <div className="bg-green-50 rounded-lg p-4">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <CreditCard className="w-5 h-5 text-green-600" />
+                    <h3 className="text-lg font-semibold text-gray-900">Quota & Payment Information</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {/* Quota Information */}
+                    <div className="flex justify-between">
+                      <span className="text-sm font-medium text-gray-500">Quota Type</span>
+                      <span className={`text-sm px-2 py-1 rounded-full font-medium ${
+                        student.quota_type?.is_government_quota 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {student.quota_type?.quota_name || student.quota || 'Not Assigned'}
+                      </span>
+                    </div>
+                    
+                    {/* Annual Fee */}
+                    {student.transport_fee_amount && parseFloat(student.transport_fee_amount) > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium text-gray-500">Annual Transport Fee</span>
+                        <span className="text-sm text-gray-900 font-semibold">₹{parseFloat(student.transport_fee_amount).toLocaleString()}</span>
+                      </div>
+                    )}
+                    
+                    {/* Payment Status */}
+                    <div className="flex justify-between">
+                      <span className="text-sm font-medium text-gray-500">Payment Status</span>
+                      <span className={`text-sm px-2 py-1 rounded-full font-medium ${
+                        (student.payment_status || 'current') === 'current' ? 'bg-green-100 text-green-800' :
+                        (student.payment_status || 'current') === 'overdue' ? 'bg-red-100 text-red-800' :
+                        'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {((student.payment_status || 'current').charAt(0).toUpperCase() + (student.payment_status || 'current').slice(1))}
+                      </span>
+                    </div>
+                    
+                    {/* Outstanding Amount */}
+                    <div className="flex justify-between">
+                      <span className="text-sm font-medium text-gray-500">Outstanding Amount</span>
+                      <span className={`text-sm font-semibold ${
+                        parseFloat(student.outstanding_amount || 0) > 0 
+                          ? 'text-red-600' 
+                          : 'text-green-600'
+                      }`}>
+                        ₹{parseFloat(student.outstanding_amount || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    
+                    {/* Payment Summary */}
+                    {student.quota_type?.annual_fee_amount && (
+                      <div className="bg-white rounded-lg p-3 border">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-sm font-medium text-gray-700">Payment Summary</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Total Fee:</span>
+                            <span className="text-gray-900">₹{parseFloat(student.quota_type.annual_fee_amount).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Paid Amount:</span>
+                            <span className="text-green-600">₹{(parseFloat(student.quota_type.annual_fee_amount) - parseFloat(student.outstanding_amount || 0)).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-medium border-t pt-2">
+                            <span className="text-gray-700">Remaining:</span>
+                            <span className={parseFloat(student.outstanding_amount || 0) > 0 ? 'text-red-600' : 'text-green-600'}>
+                              ₹{parseFloat(student.outstanding_amount || 0).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Family Information */}
               {(student?.father_name || student?.mother_name || student?.emergency_contact_name) && (
                 <div className="bg-orange-50 rounded-lg p-4">
@@ -1842,16 +1922,53 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
           <span>{student.department?.department_name || 'N/A'}</span>
           </div>
         {/* Quota Information */}
-        {student.quota && (
+        {(student.quota_type || student.quota) && (
           <div className="flex items-center space-x-2 text-sm">
             <CreditCard className="w-4 h-4 text-green-600" />
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-              student.quota?.toLowerCase().includes('government') || student.quota?.toLowerCase().includes('7.5') 
+              (student.quota_type?.is_government_quota || 
+               student.quota?.toLowerCase().includes('government') || 
+               student.quota?.toLowerCase().includes('7.5')) 
                 ? 'bg-green-100 text-green-800' 
                 : 'bg-blue-100 text-blue-800'
             }`}>
-              {student.quota}
+              {student.quota_type?.quota_name || student.quota || 'No Quota'}
             </span>
+          </div>
+        )}
+        
+        {/* Payment Information for Enrolled Students */}
+        {student._enrollmentStatus === 'enrolled' && (
+          <div className="space-y-2">
+            {/* Fee Amount */}
+            {student.transport_fee_amount && parseFloat(student.transport_fee_amount) > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">Annual Fee:</span>
+                <span className="font-medium text-gray-900">₹{parseFloat(student.transport_fee_amount).toLocaleString()}</span>
+              </div>
+            )}
+            
+            {/* Outstanding Amount */}
+            {student.outstanding_amount !== undefined && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">Outstanding:</span>
+                <span className={`font-medium ${
+                  parseFloat(student.outstanding_amount || 0) > 0 
+                    ? 'text-red-600' 
+                    : 'text-green-600'
+                }`}>
+                  ₹{parseFloat(student.outstanding_amount || 0).toLocaleString()}
+                </span>
+              </div>
+            )}
+            
+            {/* Payment Status */}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-600">Payment:</span>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPaymentStatusColor(student.payment_status || 'current')}`}>
+                {(student.payment_status || 'current').charAt(0).toUpperCase() + (student.payment_status || 'current').slice(1)}
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -2061,6 +2178,14 @@ const StudentsPage = () => {
         degree: {
           degree_name: localStudent.degree_name || ''
         },
+        
+        // Quota and payment information
+        quota_type_id: localStudent.quota_type_id,
+        quota_type: localStudent.quota_type || null, // This will be populated if JOIN is used
+        transport_fee_amount: localStudent.transport_fee_amount || '0.00',
+        outstanding_amount: localStudent.outstanding_amount || '0.00',
+        payment_status: localStudent.payment_status || 'current',
+        
         student_transport_profiles: [{
           transport_status: localStudent.transport_status,
           payment_status: localStudent.payment_status,

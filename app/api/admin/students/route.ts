@@ -16,10 +16,20 @@ export async function GET() {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Fetch students from database
+    // Fetch students from database with quota information
     const { data: students, error } = await supabase
       .from('students')
-      .select('*')
+      .select(`
+        *,
+        quota_type:quota_types(
+          id,
+          quota_name,
+          quota_code,
+          description,
+          annual_fee_amount,
+          is_government_quota
+        )
+      `)
       .order('created_at', { ascending: false });
 
     if (error) {
