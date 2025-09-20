@@ -1922,17 +1922,17 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
           <span>{student.department?.department_name || 'N/A'}</span>
           </div>
         {/* Quota Information */}
-        {(student.quota_type || student.quota || student._enrollmentStatus === 'enrolled') && (
+        {student._enrollmentStatus === 'enrolled' && (
           <div className="flex items-center space-x-2 text-sm">
             <CreditCard className="w-4 h-4 text-green-600" />
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
               (student.quota_type?.is_government_quota || 
-               student.quota?.toLowerCase().includes('government') || 
-               student.quota?.toLowerCase().includes('7.5')) 
+               (student.quota && student.quota.toLowerCase().includes('government')) || 
+               (student.quota && student.quota.toLowerCase().includes('7.5'))) 
                 ? 'bg-green-100 text-green-800' 
                 : 'bg-blue-100 text-blue-800'
             }`}>
-              {student.quota_type?.quota_name || student.quota || (student._enrollmentStatus === 'enrolled' ? 'No Quota Assigned' : 'Available')}
+              {student.quota_type?.quota_name || student.quota || 'No Quota Assigned'}
             </span>
           </div>
         )}
@@ -1952,11 +1952,11 @@ const StudentCard = ({ student, onEdit, onDelete, onView, userRole }: any) => {
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Outstanding:</span>
               <span className={`font-medium ${
-                parseFloat(student.outstanding_amount || student.student_transport_profiles?.[0]?.outstanding_amount || 0) > 0 
+                parseFloat(student.outstanding_amount || 0) > 0 
                   ? 'text-red-600' 
                   : 'text-green-600'
               }`}>
-                ₹{parseFloat(student.outstanding_amount || student.student_transport_profiles?.[0]?.outstanding_amount || 0).toLocaleString()}
+                ₹{parseFloat(student.outstanding_amount || 0).toLocaleString()}
               </span>
             </div>
             
@@ -2157,6 +2157,7 @@ const StudentsPage = () => {
       const localStudents = Array.isArray(localDbStudents) ? localDbStudents : [];
       console.log(`Found ${localStudents.length} students in local database (enrolled in transport)`);
       
+      
       // Transform local students to match UI format
       const transformedEnrolledStudents = localStudents.map(localStudent => ({
         id: localStudent.id,
@@ -2179,7 +2180,7 @@ const StudentsPage = () => {
         
         // Quota and payment information
         quota_type_id: localStudent.quota_type_id,
-        quota_type: localStudent.quota_type || null, // This will be populated if JOIN is used
+        quota_type: localStudent.quota_type || null, // Nested quota object from JOIN
         transport_fee_amount: localStudent.transport_fee_amount || '0.00',
         outstanding_amount: localStudent.outstanding_amount || '0.00',
         payment_status: localStudent.payment_status || 'current',
@@ -2314,6 +2315,7 @@ const StudentsPage = () => {
       setEnrolledStudents(transformedEnrolledStudents);
       setAvailableStudents(transformedAvailableStudents);
       setStudents(allStudents);
+      
       
       console.log(`Loaded ${transformedEnrolledStudents.length} enrolled students and ${transformedAvailableStudents.length} available students`);
       
