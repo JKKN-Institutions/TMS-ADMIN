@@ -338,6 +338,38 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         roll_number: fetchedStudent.roll_number || fetchedStudent.rollNumber || 'UNKNOWN',
         email: fetchedStudent.email || fetchedStudent.student_email || `unknown-${Date.now()}@temp.edu`,
         mobile: fetchedStudent.mobile || fetchedStudent.student_mobile || '0000000000',
+        
+        // Academic information - extract from nested objects if available
+        department_name: fetchedStudent.department?.department_name || fetchedStudent.department_name || 'Unknown Department',
+        institution_name: fetchedStudent.institution?.name || fetchedStudent.institution_name || 'Unknown Institution',
+        program_name: fetchedStudent.program?.program_name || fetchedStudent.program_name || '',
+        degree_name: fetchedStudent.degree?.degree_name || fetchedStudent.degree_name || '',
+        
+        // Personal details
+        father_name: fetchedStudent.father_name || 'Unknown',
+        mother_name: fetchedStudent.mother_name || 'Unknown',
+        father_mobile: fetchedStudent.father_mobile || '',
+        mother_mobile: fetchedStudent.mother_mobile || '0000000000',
+        date_of_birth: fetchedStudent.date_of_birth || null,
+        gender: fetchedStudent.gender || 'Unknown',
+        
+        // Address information
+        address_street: fetchedStudent.permanent_address_street || '',
+        address_district: fetchedStudent.permanent_address_district || '',
+        address_state: fetchedStudent.permanent_address_state || '',
+        address_pin_code: fetchedStudent.permanent_address_pin_code || '',
+        
+        // Academic details
+        admission_id: fetchedStudent.admission_id || null,
+        application_id: fetchedStudent.application_id || null,
+        semester_id: fetchedStudent.semester_id || null,
+        section_id: fetchedStudent.section_id || null,
+        academic_year_id: fetchedStudent.academic_year_id || null,
+        entry_type: fetchedStudent.entry_type || '',
+        
+        // External reference
+        external_id: fetchedStudent.id || fetchedStudent.external_id,
+        
         // Transport and quota information
         allocated_route_id: transportData.allocatedRoute,
         boarding_point: transportData.boardingPoint,
