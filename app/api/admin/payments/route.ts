@@ -43,4 +43,59 @@ export async function GET() {
       { status: 500 }
     );
   }
+}
+
+export async function POST(request: Request) {
+  try {
+    const paymentData = await request.json();
+    
+    // Create Supabase admin client (server-side only)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 }
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Create payment record
+    const { data: payment, error } = await supabase
+      .from('payments')
+      .insert([{
+        student_id: paymentData.student_id,
+        amount: paymentData.amount,
+        payment_type: paymentData.payment_type || 'transport_fee',
+        payment_method: paymentData.payment_method || 'cash',
+        status: 'completed', // Using 'status' instead of 'payment_status'
+        description: paymentData.description || 'Transport fee payment',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Database error creating payment:', error);
+      return NextResponse.json(
+        { error: 'Failed to create payment record' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      data: payment
+    });
+
+  } catch (error) {
+    console.error('Payment creation error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
 } 

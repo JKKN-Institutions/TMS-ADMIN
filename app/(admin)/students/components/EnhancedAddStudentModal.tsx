@@ -349,16 +349,10 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
   };
 
   const handleSaveStudent = async () => {
-    console.log('🚀 handleSaveStudent called - Current step:', step);
-    console.log('🚀 Quota data:', quotaData);
-    
     if (step === 4) {
-      console.log('🔍 Step 4 - Validating quota data...');
       if (!validateQuotaData()) {
-        console.log('❌ Quota validation failed');
         return;
       }
-      console.log('✅ Quota validation passed');
     }
 
     try {
@@ -413,12 +407,6 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         transport_fee_amount: quotaTypes.find(q => q.id === quotaData.selectedQuota)?.annual_fee_amount || 0
       };
 
-      console.log('🔍 Student data before saving:', studentData);
-      console.log('🔍 Quota validation check:', {
-        hasSelectedQuota: !!quotaData.selectedQuota,
-        selectedQuotaId: quotaData.selectedQuota,
-        quotaTypesAvailable: quotaTypes.length
-      });
 
       // Validate required fields before saving
       const requiredFields = ['student_name', 'roll_number', 'email', 'mobile'];

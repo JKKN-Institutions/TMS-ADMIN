@@ -624,7 +624,12 @@ export class DatabaseService {
           transport_status: studentData.transport_status || 'active',
           payment_status: studentData.payment_status || 'current',
           total_fines: 0,
-          outstanding_amount: 0,
+          outstanding_amount: studentData.outstanding_amount || 0,
+          
+          // Quota and payment fields
+          quota_type_id: studentData.quota_type_id || null,
+          transport_fee_amount: studentData.transport_fee_amount || 0,
+          
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }])
