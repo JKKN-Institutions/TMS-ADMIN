@@ -575,6 +575,25 @@ export class DatabaseService {
         mother_mobile: studentData.mother_mobile
       });
       
+      // Check if student already exists by email
+      const { data: existingStudent, error: checkError } = await supabase
+        .from('students')
+        .select('id, student_name, email, roll_number, transport_enrolled, enrollment_status')
+        .eq('email', studentData.email)
+        .single();
+
+      if (existingStudent && !checkError) {
+        console.log('🔄 Student already exists, updating existing record:', {
+          id: existingStudent.id,
+          email: existingStudent.email,
+          currentName: existingStudent.student_name,
+          newName: studentData.student_name
+        });
+
+        // Update the existing student record with new enrollment data
+        return await this.updateExistingStudentForEnrollment(existingStudent.id, studentData);
+      }
+      
       // Determine emergency contact information
       // Priority: Father's info first, then Mother's info as fallback
       let emergencyContactName = null;
@@ -641,6 +660,23 @@ export class DatabaseService {
 
       if (error) {
         console.error('Error adding student:', error);
+        
+        // Handle duplicate email error specifically
+        if (error.code === '23505' && error.message.includes('students_email_key')) {
+          console.log('🔄 Duplicate email detected, attempting to update existing student...');
+          
+          // Try to find and update the existing student
+          const { data: duplicateStudent } = await supabase
+            .from('students')
+            .select('id')
+            .eq('email', studentData.email)
+            .single();
+          
+          if (duplicateStudent) {
+            return await this.updateExistingStudentForEnrollment(duplicateStudent.id, studentData);
+          }
+        }
+        
         throw new Error(`Failed to add student: ${error.message}`);
       }
 
@@ -656,6 +692,84 @@ export class DatabaseService {
       return data[0];
     } catch (error) {
       console.error('Exception adding student:', error);
+      throw error;
+    }
+  }
+
+  // Update existing student for enrollment (handles duplicate email case)
+  static async updateExistingStudentForEnrollment(studentId: string, studentData: any) {
+    try {
+      console.log('🔄 Updating existing student for enrollment:', studentId, studentData.email);
+      
+      // Determine emergency contact information
+      let emergencyContactName = null;
+      let emergencyContactPhone = null;
+      
+      if (studentData.father_name && studentData.father_mobile) {
+        emergencyContactName = studentData.father_name;
+        emergencyContactPhone = studentData.father_mobile;
+      } else if (studentData.mother_name && studentData.mother_mobile) {
+        emergencyContactName = studentData.mother_name;
+        emergencyContactPhone = studentData.mother_mobile;
+      }
+
+      const { data, error } = await supabase
+        .from('students')
+        .update({
+          // Update with proper external API data
+          external_id: studentData.external_id,
+          student_name: studentData.student_name,
+          roll_number: studentData.roll_number,
+          mobile: studentData.mobile,
+          department_name: studentData.department_name,
+          institution_name: studentData.institution_name,
+          program_name: studentData.program_name,
+          degree_name: studentData.degree_name,
+          father_name: studentData.father_name || null,
+          mother_name: studentData.mother_name || null,
+          father_mobile: studentData.father_mobile || null,
+          mother_mobile: studentData.mother_mobile || null,
+          date_of_birth: studentData.date_of_birth || null,
+          gender: studentData.gender || null,
+          address_street: studentData.address_street || null,
+          address_district: studentData.address_district || null,
+          address_state: studentData.address_state || null,
+          address_pin_code: studentData.address_pin_code || null,
+          is_profile_complete: studentData.is_profile_complete || false,
+          
+          // Emergency contact information
+          emergency_contact_name: emergencyContactName,
+          emergency_contact_phone: emergencyContactPhone,
+          
+          // Transport-related fields
+          allocated_route_id: studentData.allocated_route_id || null,
+          boarding_point: studentData.boarding_point || null,
+          transport_status: studentData.transport_status || 'active',
+          payment_status: studentData.payment_status || 'current',
+          outstanding_amount: studentData.outstanding_amount || 0,
+          
+          // Enrollment status fields - CRITICAL FOR LOGIN FLOW
+          transport_enrolled: true, // Set to true when manually enrolling from admin
+          enrollment_status: 'approved', // Set to approved for manual enrollment
+          
+          // Quota and payment fields
+          quota_type_id: studentData.quota_type_id || null,
+          transport_fee_amount: studentData.transport_fee_amount || 0,
+          
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', studentId)
+        .select();
+
+      if (error) {
+        console.error('Error updating existing student:', error);
+        throw new Error(`Failed to update existing student: ${error.message}`);
+      }
+
+      console.log('✅ Existing student updated successfully for enrollment:', data[0]);
+      return data[0];
+    } catch (error) {
+      console.error('Exception updating existing student:', error);
       throw error;
     }
   }
