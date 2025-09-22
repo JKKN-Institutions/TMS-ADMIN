@@ -106,13 +106,31 @@ export async function POST(request: NextRequest) {
 // Send basic test notification
 async function sendBasicTestNotification(adminUser: any, targetUserId?: string) {
   try {
+    console.log('🚀 === BASIC TEST NOTIFICATION DEBUG START ===');
+    console.log('📋 Input parameters:', { adminUser: adminUser?.name, targetUserId });
+    
     const testTitle = '🧪 Test Notification from Admin';
     const testMessage = `This is a test notification sent by ${adminUser.name} at ${new Date().toLocaleTimeString()}`;
 
+    console.log('📧 Notification content:', { testTitle, testMessage });
+
     // Get target subscriptions
+    console.log('🔍 Fetching subscriptions...');
     const subscriptions = await getTestSubscriptions(targetUserId);
     
+    console.log(`📊 Subscription query results:`, {
+      found: subscriptions.length,
+      targetUserId,
+      subscriptionData: subscriptions.map(sub => ({
+        userId: sub.user_id,
+        userType: sub.user_type,
+        isActive: sub.is_active,
+        endpointPreview: sub.endpoint.substring(0, 50) + '...'
+      }))
+    });
+    
     if (subscriptions.length === 0) {
+      console.log('❌ No active push subscriptions found!');
       return {
         success: false,
         message: 'No active push subscriptions found for testing',
@@ -190,11 +208,20 @@ async function sendBasicTestNotification(adminUser: any, targetUserId?: string) 
     let failedCount = 0;
     const results = [];
 
-    console.log(`📤 Sending test notifications to ${subscriptions.length} subscriptions...`);
+    console.log(`📤 === PUSH NOTIFICATION SENDING PHASE ===`);
+    console.log(`📊 Total subscriptions to process: ${subscriptions.length}`);
+    
+    // Check VAPID keys first
+    console.log('🔑 VAPID Key Check:');
+    console.log('   - NEXT_PUBLIC_VAPID_PUBLIC_KEY:', process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ? 'SET ✅' : 'NOT SET ❌');
+    console.log('   - VAPID_PRIVATE_KEY:', process.env.VAPID_PRIVATE_KEY ? 'SET ✅' : 'NOT SET ❌');
     
     for (const subscription of subscriptions) {
       try {
-        console.log(`📱 Processing subscription for user: ${subscription.user_id}`);
+        console.log(`\n📱 === PROCESSING SUBSCRIPTION ${sentCount + failedCount + 1}/${subscriptions.length} ===`);
+        console.log(`👤 User ID: ${subscription.user_id}`);
+        console.log(`🔗 Endpoint: ${subscription.endpoint.substring(0, 60)}...`);
+        console.log(`🔑 Keys: p256dh=${subscription.p256dh_key?.substring(0, 20)}..., auth=${subscription.auth_key?.substring(0, 20)}...`);
         
         // Check if this is a test subscription
         if (subscription.endpoint.startsWith('test_endpoint')) {
@@ -210,7 +237,7 @@ async function sendBasicTestNotification(adminUser: any, targetUserId?: string) 
 
         // Check if VAPID keys are configured for real push
         if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-          console.log(`⚠️ VAPID keys not configured - simulating push to user ${subscription.user_id}`);
+          console.log(`❌ VAPID keys not configured - simulating push to user ${subscription.user_id}`);
           sentCount++;
           results.push({
             userId: subscription.user_id,
@@ -228,14 +255,17 @@ async function sendBasicTestNotification(adminUser: any, targetUserId?: string) 
           }
         };
 
-        console.log(`🚀 Sending real push notification to user ${subscription.user_id}`);
+        console.log(`🚀 Attempting to send REAL push notification to user ${subscription.user_id}`);
+        console.log(`📦 Push payload:`, JSON.stringify(pushPayload, null, 2));
+        console.log(`🔗 Push subscription object:`, JSON.stringify(pushSubscription, null, 2));
+        
         await webpush.sendNotification(pushSubscription, JSON.stringify(pushPayload));
         sentCount++;
         results.push({
           userId: subscription.user_id,
           success: true
         });
-        console.log(`✅ Push notification sent successfully to user ${subscription.user_id}`);
+        console.log(`✅ REAL push notification sent successfully to user ${subscription.user_id}`);
 
       } catch (pushError) {
         console.error(`❌ Failed to send push notification to user ${subscription.user_id}:`, pushError);
@@ -260,7 +290,12 @@ async function sendBasicTestNotification(adminUser: any, targetUserId?: string) 
       }
     }
     
-    console.log(`📊 Test notification results: ${sentCount} sent, ${failedCount} failed`);
+    console.log(`📊 === FINAL TEST RESULTS ===`);
+    console.log(`✅ Sent: ${sentCount}`);
+    console.log(`❌ Failed: ${failedCount}`);
+    console.log(`📊 Total processed: ${sentCount + failedCount}`);
+    console.log(`📋 Subscriptions found: ${subscriptions.length}`);
+    console.log(`🎯 Results detail:`, results);
 
     // Update notification with test results (with fallback)
     try {
@@ -283,7 +318,7 @@ async function sendBasicTestNotification(adminUser: any, targetUserId?: string) 
       console.log('📋 Could not update notification record - table may not exist');
     }
 
-    return {
+    const finalResult = {
       success: true,
       notificationId: notification.id,
       subscriptionsFound: subscriptions.length,
@@ -291,6 +326,12 @@ async function sendBasicTestNotification(adminUser: any, targetUserId?: string) 
       failed: failedCount,
       results
     };
+    
+    console.log(`🏁 === RETURNING FINAL RESULT ===`);
+    console.log(`📤 Final result object:`, JSON.stringify(finalResult, null, 2));
+    console.log(`🚀 === BASIC TEST NOTIFICATION DEBUG END ===`);
+    
+    return finalResult;
 
   } catch (error) {
     return {
@@ -608,22 +649,34 @@ async function performSystemCheck(adminUser: any) {
 
 // Helper functions
 async function getTestSubscriptions(targetUserId?: string) {
-  console.log('🔍 Getting test subscriptions for:', targetUserId || 'all users');
+  console.log('🔍 === GET TEST SUBSCRIPTIONS DEBUG ===');
+  console.log('📋 Target user:', targetUserId || 'all users');
   
   try {
+    console.log('🗃️ Querying push_subscriptions table...');
+    
     let query = supabaseAdmin
       .from('push_subscriptions')
       .select('*')
       .eq('is_active', true);
 
+    console.log('📊 Base query: SELECT * FROM push_subscriptions WHERE is_active = true');
+
     if (targetUserId) {
       query = query.eq('user_id', targetUserId);
+      console.log(`🎯 Filtering by user_id: ${targetUserId}`);
     } else {
       // Limit to 5 subscriptions for testing
       query = query.limit(5);
+      console.log('📏 Limiting to 5 subscriptions for testing');
     }
 
+    console.log('⏳ Executing database query...');
     const { data: subscriptions, error } = await query;
+    
+    console.log('📋 Database query results:');
+    console.log('   - Error:', error ? error.message : 'None');
+    console.log('   - Subscriptions found:', subscriptions?.length || 0);
     
     if (error) {
       console.log('📋 Push subscriptions table not available, using fallback test subscriptions');
