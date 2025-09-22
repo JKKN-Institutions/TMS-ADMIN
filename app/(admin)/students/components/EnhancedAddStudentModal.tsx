@@ -477,23 +477,62 @@ export const EnhancedAddStudentModal: React.FC<EnhancedAddStudentModalProps> = (
         
         if (totalPaid > 0) {
           try {
-            await fetch('/api/admin/payments', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                student_id: savedStudent.id,
-                amount: totalPaid,
-                payment_type: 'semester_fee',
-                payment_method: 'cash', // Default, can be updated later
-                academic_year: quotaData.academicYear,
-                quota_type_id: quotaData.selectedQuota,
-                payment_details: isGovtQuota 
-                  ? { govtQuotaPaid: quotaData.govtQuotaPaid }
-                  : quotaData.isSinglePayment 
-                    ? { singlePayment: quotaData.singlePaymentAmount }
-                    : { termWisePayments: quotaData.managementPayments }
-              })
-            });
+            if (isGovtQuota) {
+              // For government quota, create a single payment record
+              await fetch('/api/admin/payments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  student_id: savedStudent.id,
+                  amount: totalPaid,
+                  payment_type: 'semester_fee',
+                  payment_method: 'cash',
+                  academic_year: quotaData.academicYear,
+                  quota_type_id: quotaData.selectedQuota,
+                  payment_details: { govtQuotaPaid: quotaData.govtQuotaPaid }
+                })
+              });
+            } else {
+              // For management quota, create proper term-wise records in semester_payments table
+              if (quotaData.isSinglePayment) {
+                // Single payment - store in payments table
+                await fetch('/api/admin/payments', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    student_id: savedStudent.id,
+                    amount: quotaData.singlePaymentAmount,
+                    payment_type: 'semester_fee',
+                    payment_method: 'cash',
+                    academic_year: quotaData.academicYear,
+                    quota_type_id: quotaData.selectedQuota,
+                    payment_details: { singlePayment: quotaData.singlePaymentAmount }
+                  })
+                });
+              } else {
+                // Term-wise payments - create individual records in semester_payments table
+                for (const termPayment of quotaData.managementPayments) {
+                  if (termPayment.isPaid && termPayment.amountPaid > 0) {
+                    await fetch('/api/semester-payments-v2', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        studentId: savedStudent.id,
+                        paymentType: 'term',
+                        termNumber: termPayment.term.toString(),
+                        routeId: finalStudentData.allocated_route_id,
+                        stopName: finalStudentData.boarding_point,
+                        paymentMethod: 'cash',
+                        amount: termPayment.amountPaid,
+                        // Mark as confirmed since it's already paid during enrollment
+                        paymentStatus: 'confirmed',
+                        isEnrollmentPayment: true
+                      })
+                    });
+                  }
+                }
+              }
+            }
           } catch (error) {
             console.error('❌ Error creating payment record:', error);
             // Don't fail the enrollment if payment record creation fails
