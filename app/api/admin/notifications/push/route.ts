@@ -14,8 +14,8 @@ if (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
 interface PushNotificationRequest {
   title: string;
   message: string;
-  type: 'info' | 'warning' | 'error' | 'success' | 'transport' | 'payment' | 'emergency';
-  category: 'transport' | 'payment' | 'system' | 'emergency' | 'general';
+  type: 'info' | 'warning' | 'error' | 'success';
+  category: 'transport' | 'payment' | 'system' | 'emergency';
   targetAudience: 'all' | 'students' | 'drivers' | 'admins' | 'specific_users';
   specificUsers?: string[];
   routes?: string[];
@@ -660,7 +660,7 @@ function getNotificationTemplates() {
         id: 'trip_reminder',
         title: '🚌 Trip Reminder',
         message: 'Your trip is scheduled for tomorrow at {time}. Please confirm your booking.',
-        type: 'transport',
+        type: 'info',
         category: 'transport',
         actionable: true,
         primaryAction: {

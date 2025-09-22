@@ -493,8 +493,8 @@ async function sendBookingReminderTest(adminUser: any, targetUserId?: string) {
         .insert({
           title: testTitle,
           message: testMessage,
-          type: 'transport',
-          category: 'booking',
+          type: 'info',
+          category: 'transport',
           target_audience: targetUserId ? 'specific_users' : 'all',
           specific_users: targetUserId ? [targetUserId] : [],
           enable_push_notification: true,
@@ -521,7 +521,7 @@ async function sendBookingReminderTest(adminUser: any, targetUserId?: string) {
           id: `test_booking_notification_${Date.now()}`,
           title: testTitle,
           message: testMessage,
-          type: 'transport',
+          type: 'info',
           category: 'booking',
           created_at: new Date().toISOString()
         };
