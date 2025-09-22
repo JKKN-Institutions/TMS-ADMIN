@@ -626,6 +626,10 @@ export class DatabaseService {
           total_fines: 0,
           outstanding_amount: studentData.outstanding_amount || 0,
           
+          // Enrollment status fields - CRITICAL FOR LOGIN FLOW
+          transport_enrolled: true, // Set to true when manually enrolling from admin
+          enrollment_status: 'approved', // Set to approved for manual enrollment
+          
           // Quota and payment fields
           quota_type_id: studentData.quota_type_id || null,
           transport_fee_amount: studentData.transport_fee_amount || 0,
