@@ -575,23 +575,38 @@ export class DatabaseService {
         mother_mobile: studentData.mother_mobile
       });
       
-      // Check if student already exists by email
-      const { data: existingStudent, error: checkError } = await supabase
-        .from('students')
-        .select('id, student_name, email, roll_number, transport_enrolled, enrollment_status')
-        .eq('email', studentData.email)
-        .single();
-
-      if (existingStudent && !checkError) {
-        console.log('🔄 Student already exists, updating existing record:', {
-          id: existingStudent.id,
-          email: existingStudent.email,
-          currentName: existingStudent.student_name,
-          newName: studentData.student_name
+      // Check if student already exists by email using server-side API
+      console.log('🔍 Checking for existing student with email via API:', studentData.email);
+      
+      try {
+        const checkResponse = await fetch('/api/admin/students/check-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email: studentData.email })
         });
 
-        // Update the existing student record with new enrollment data
-        return await this.updateExistingStudentForEnrollment(existingStudent.id, studentData);
+        if (checkResponse.ok) {
+          const checkData = await checkResponse.json();
+          
+          if (checkData.success && checkData.exists && checkData.student) {
+            console.log('🔄 Student already exists, updating existing record:', {
+              id: checkData.student.id,
+              email: checkData.student.email,
+              currentName: checkData.student.student_name,
+              newName: studentData.student_name
+            });
+
+            // Update the existing student record with new enrollment data
+            return await this.updateExistingStudentForEnrollment(checkData.student.id, studentData);
+          }
+        } else {
+          console.log('⚠️ Email check API failed, proceeding with insert:', checkResponse.status);
+        }
+      } catch (emailCheckError) {
+        console.log('⚠️ Email check failed, proceeding with insert:', emailCheckError);
+        // Continue with insert - the duplicate error handling below will catch any issues
       }
       
       // Determine emergency contact information
@@ -663,17 +678,27 @@ export class DatabaseService {
         
         // Handle duplicate email error specifically
         if (error.code === '23505' && error.message.includes('students_email_key')) {
-          console.log('🔄 Duplicate email detected, attempting to update existing student...');
+          console.log('🔄 Duplicate email detected, attempting to find and update existing student...');
           
-          // Try to find and update the existing student
-          const { data: duplicateStudent } = await supabase
-            .from('students')
-            .select('id')
-            .eq('email', studentData.email)
-            .single();
-          
-          if (duplicateStudent) {
-            return await this.updateExistingStudentForEnrollment(duplicateStudent.id, studentData);
+          // Try to find the existing student using the API endpoint
+          try {
+            const findResponse = await fetch('/api/admin/students/check-email', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ email: studentData.email })
+            });
+
+            if (findResponse.ok) {
+              const findData = await findResponse.json();
+              
+              if (findData.success && findData.exists && findData.student) {
+                return await this.updateExistingStudentForEnrollment(findData.student.id, studentData);
+              }
+            }
+          } catch (findError) {
+            console.error('❌ Failed to find existing student for update:', findError);
           }
         }
         
