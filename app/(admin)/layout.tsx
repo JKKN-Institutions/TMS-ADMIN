@@ -22,8 +22,7 @@ import {
   Search,
   Power,
   Navigation,
-  Zap,
-  Bug
+  Zap
 } from 'lucide-react';
 import { AdminUser, UserRole } from '@/types';
 import toast, { Toaster } from 'react-hot-toast';
@@ -196,13 +195,6 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           icon: Bell
         }
       ]
-    },
-    { 
-      name: 'Bug Reports', 
-      href: '/bug-reports', 
-      icon: Bug, 
-      roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'services'
     },
     
     // System
@@ -417,6 +409,10 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       
       <Toaster
         position="top-right"
+        containerStyle={{
+          top: '20px',
+          right: '20px',
+        }}
         toastOptions={{
           duration: 4000,
           style: {
@@ -425,6 +421,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             border: '1px solid #e5e7eb',
             borderRadius: '8px',
             fontSize: '14px',
+            maxWidth: '400px',
           },
           success: {
             style: {
