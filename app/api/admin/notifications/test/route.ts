@@ -473,12 +473,31 @@ async function sendInteractiveTestNotification(adminUser: any, targetUserId?: st
 // Send booking reminder test
 async function sendBookingReminderTest(adminUser: any, targetUserId?: string) {
   try {
+    console.log('🚌 === BOOKING REMINDER TEST DEBUG START ===');
+    console.log('📋 Input parameters:', { adminUser: adminUser?.name, targetUserId });
+    
     const testTitle = '🚌 Test Booking Reminder';
     const testMessage = 'This is a test booking reminder notification. This would normally be sent the day before a trip.';
 
+    console.log('📧 Notification content:', { testTitle, testMessage });
+
+    // Get target subscriptions
+    console.log('🔍 Fetching subscriptions for booking reminder...');
     const subscriptions = await getTestSubscriptions(targetUserId);
     
+    console.log(`📊 Booking reminder subscription results:`, {
+      found: subscriptions.length,
+      targetUserId,
+      subscriptionData: subscriptions.map(sub => ({
+        userId: sub.user_id,
+        userType: sub.user_type,
+        isActive: sub.is_active,
+        endpointPreview: sub.endpoint.substring(0, 50) + '...'
+      }))
+    });
+    
     if (subscriptions.length === 0) {
+      console.log('❌ No active push subscriptions found for booking reminder!');
       return {
         success: false,
         message: 'No active push subscriptions found for testing'
@@ -576,9 +595,47 @@ async function sendBookingReminderTest(adminUser: any, targetUserId?: string) {
 
     let sentCount = 0;
     let failedCount = 0;
+    const results = [];
+
+    console.log(`🚌 === BOOKING REMINDER PUSH SENDING PHASE ===`);
+    console.log(`📊 Total subscriptions to process: ${subscriptions.length}`);
+    
+    // Check VAPID keys first
+    console.log('🔑 VAPID Key Check for Booking Reminder:');
+    console.log('   - NEXT_PUBLIC_VAPID_PUBLIC_KEY:', process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ? 'SET ✅' : 'NOT SET ❌');
+    console.log('   - VAPID_PRIVATE_KEY:', process.env.VAPID_PRIVATE_KEY ? 'SET ✅' : 'NOT SET ❌');
 
     for (const subscription of subscriptions) {
       try {
+        console.log(`\n🚌 === PROCESSING BOOKING REMINDER SUBSCRIPTION ${sentCount + failedCount + 1}/${subscriptions.length} ===`);
+        console.log(`👤 User ID: ${subscription.user_id}`);
+        console.log(`🔗 Endpoint: ${subscription.endpoint.substring(0, 60)}...`);
+        console.log(`🔑 Keys: p256dh=${subscription.p256dh_key?.substring(0, 20)}..., auth=${subscription.auth_key?.substring(0, 20)}...`);
+        
+        // Check if this is a test subscription
+        if (subscription.endpoint.startsWith('test_endpoint')) {
+          console.log(`🧪 Test subscription detected - simulating booking reminder to user ${subscription.user_id}`);
+          sentCount++;
+          results.push({
+            userId: subscription.user_id,
+            success: true,
+            note: 'Test subscription - simulated booking reminder'
+          });
+          continue;
+        }
+
+        // Check if VAPID keys are configured for real push
+        if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+          console.log(`❌ VAPID keys not configured - simulating booking reminder to user ${subscription.user_id}`);
+          sentCount++;
+          results.push({
+            userId: subscription.user_id,
+            success: true,
+            note: 'VAPID keys not configured - simulated booking reminder'
+          });
+          continue;
+        }
+
         const pushSubscription = {
           endpoint: subscription.endpoint,
           keys: {
@@ -587,29 +644,63 @@ async function sendBookingReminderTest(adminUser: any, targetUserId?: string) {
           }
         };
 
+        console.log(`🚌 Attempting to send REAL booking reminder to user ${subscription.user_id}`);
+        console.log(`📦 Booking reminder payload:`, JSON.stringify(pushPayload, null, 2));
+        console.log(`🔗 Push subscription object:`, JSON.stringify(pushSubscription, null, 2));
+
         await webpush.sendNotification(pushSubscription, JSON.stringify(pushPayload));
         sentCount++;
+        results.push({
+          userId: subscription.user_id,
+          success: true
+        });
+        console.log(`✅ REAL booking reminder sent successfully to user ${subscription.user_id}`);
 
       } catch (pushError) {
+        console.error(`❌ Failed to send booking reminder to user ${subscription.user_id}:`, pushError);
         failedCount++;
+        results.push({
+          userId: subscription.user_id,
+          success: false,
+          error: pushError instanceof Error ? pushError.message : 'Unknown error'
+        });
         
         if (pushError instanceof Error && pushError.message.includes('410')) {
-          await supabaseAdmin
-            .from('push_subscriptions')
-            .update({ is_active: false })
-            .eq('id', subscription.id);
+          try {
+            await supabaseAdmin
+              .from('push_subscriptions')
+              .update({ is_active: false })
+              .eq('id', subscription.id);
+            console.log(`🗑️ Marked expired subscription as inactive for user ${subscription.user_id}`);
+          } catch (updateError) {
+            console.log('Could not update subscription status - table may not exist');
+          }
         }
       }
     }
+    
+    console.log(`🚌 === BOOKING REMINDER FINAL RESULTS ===`);
+    console.log(`✅ Sent: ${sentCount}`);
+    console.log(`❌ Failed: ${failedCount}`);
+    console.log(`📊 Total processed: ${sentCount + failedCount}`);
+    console.log(`📋 Subscriptions found: ${subscriptions.length}`);
+    console.log(`🎯 Results detail:`, results);
 
-    return {
+    const finalResult = {
       success: true,
       notificationId: notification.id,
       subscriptionsFound: subscriptions.length,
       sent: sentCount,
       failed: failedCount,
+      results,
       message: 'Booking reminder test notification sent with interactive buttons'
     };
+    
+    console.log(`🏁 === RETURNING BOOKING REMINDER RESULT ===`);
+    console.log(`📤 Final booking reminder result:`, JSON.stringify(finalResult, null, 2));
+    console.log(`🚌 === BOOKING REMINDER TEST DEBUG END ===`);
+
+    return finalResult;
 
   } catch (error) {
     return {

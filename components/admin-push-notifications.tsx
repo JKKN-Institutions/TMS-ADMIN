@@ -25,7 +25,8 @@ import {
   Copy,
   Activity,
   Terminal,
-  Bell
+  Bell,
+  Zap
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import BulkPushNotificationForm from './bulk-push-notification-form';
 import toast from 'react-hot-toast';
 
 interface NotificationTemplate {
@@ -379,10 +381,14 @@ const AdminPushNotifications: React.FC<AdminPushNotificationsProps> = ({
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="send" className="flex items-center space-x-2">
             <Send className="w-4 h-4" />
             <span>Send Notification</span>
+          </TabsTrigger>
+          <TabsTrigger value="bulk" className="flex items-center space-x-2">
+            <Zap className="w-4 h-4" />
+            <span>Bulk Send</span>
           </TabsTrigger>
           <TabsTrigger value="monitor" className="flex items-center space-x-2">
             <BarChart3 className="w-4 h-4" />
@@ -690,6 +696,14 @@ const AdminPushNotifications: React.FC<AdminPushNotificationsProps> = ({
               </Card>
             </div>
           </div>
+        </TabsContent>
+
+        {/* Bulk Send Tab */}
+        <TabsContent value="bulk" className="space-y-6">
+          <BulkPushNotificationForm 
+            adminId={adminId}
+            className="w-full"
+          />
         </TabsContent>
 
         {/* Monitor & Responses Tab */}
