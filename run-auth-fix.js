@@ -146,3 +146,4 @@ runAuthFixes().then(() => {
   console.error('❌ Auth fix failed:', err);
   process.exit(1);
 });
+

@@ -108,3 +108,4 @@ GRANT ALL ON bug_status_history TO authenticated, service_role;
 GRANT ALL ON bug_labels TO authenticated, service_role;
 GRANT ALL ON bug_report_labels TO authenticated, service_role;
 GRANT SELECT ON bug_report_stats TO authenticated, service_role;
+

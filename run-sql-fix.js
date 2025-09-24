@@ -111,3 +111,4 @@ runSQLStatements().then(() => {
   console.error('❌ Database fix failed:', err);
   process.exit(1);
 });
+

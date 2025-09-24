@@ -61,3 +61,4 @@ checkScreenshots().then(() => {
   console.error('❌ Check failed:', err);
   process.exit(1);
 });
+

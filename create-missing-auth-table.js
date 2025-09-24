@@ -77,3 +77,4 @@ createMissingAuthTable().then(() => {
   console.error('❌ Process failed:', err);
   process.exit(1);
 });
+

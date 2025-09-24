@@ -130,3 +130,4 @@ fixScreenshotStorage().then(() => {
   console.error('❌ Fix failed:', err);
   process.exit(1);
 });
+

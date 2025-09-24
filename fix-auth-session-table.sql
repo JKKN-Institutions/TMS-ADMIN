@@ -86,3 +86,4 @@ VALUES
     ('f2362481-2473-4d3b-9689-7f8387aa1255', 'transport_management_system_menrm674', 'sample_session_token_1', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '10 minutes'),
     ('f2362481-2473-4d3b-9689-7f8387aa1255', 'transport_management_system_menrm674', 'sample_session_token_2', NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 hour')
 ON CONFLICT DO NOTHING;
+

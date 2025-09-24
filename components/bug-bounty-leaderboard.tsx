@@ -671,3 +671,4 @@ const BugBountyLeaderboard: React.FC<BugBountyLeaderboardProps> = ({
 };
 
 export default BugBountyLeaderboard;
+

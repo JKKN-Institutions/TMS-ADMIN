@@ -266,3 +266,4 @@
 🚀 **The bug bounty system is now fully operational and ready to engage users in productive bug hunting through gamification!**
 
 **Users can now compete, earn points, unlock achievements, and climb the leaderboard while contributing valuable bug reports to improve the system.**
+

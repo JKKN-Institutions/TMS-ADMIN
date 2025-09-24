@@ -37,3 +37,4 @@ GRANT ALL ON storage.buckets TO authenticated, anon, service_role;
 UPDATE storage.buckets 
 SET public = true 
 WHERE id = 'bug-screenshots';
+
