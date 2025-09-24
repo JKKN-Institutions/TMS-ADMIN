@@ -22,7 +22,8 @@ import {
   Search,
   Power,
   Navigation,
-  Zap
+  Zap,
+  Bug
 } from 'lucide-react';
 import { AdminUser, UserRole } from '@/types';
 import toast, { Toaster } from 'react-hot-toast';
@@ -195,6 +196,13 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           icon: Bell
         }
       ]
+    },
+    { 
+      name: 'Bug Management', 
+      href: '/bug-management', 
+      icon: Bug, 
+      roles: ['super_admin', 'transport_admin'],
+      group: 'services'
     },
     
     // System
