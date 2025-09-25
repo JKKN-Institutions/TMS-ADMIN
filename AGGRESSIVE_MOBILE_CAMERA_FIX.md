@@ -124,3 +124,5 @@ Check browser console for logs starting with `🐛 Device detection results:` to
 - [ ] **All devices**: Screenshots appear in admin panel (after RLS fix)
 
 The mobile camera issue should now be **completely eliminated** with this aggressive blocking approach.
+
+
