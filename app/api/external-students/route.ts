@@ -18,7 +18,7 @@ async function fetchAllStudentsFromExternalAPI(): Promise<ExternalStudent[]> {
     apiParams.append('page', page.toString());
     apiParams.append('limit', limitPerPage.toString());
     
-    const response = await fetch(`https://my.jkkn.ac.in/api/api-management/students?${apiParams.toString()}`, {
+    const response = await fetch(`https://jkkn.ai/api/api-management/students?${apiParams.toString()}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     const apiParams = new URLSearchParams();
       apiParams.append('limit', requestedLimit);
     
-    const response = await fetch(`https://my.jkkn.ac.in/api/api-management/students?${apiParams.toString()}`, {
+    const response = await fetch(`https://jkkn.ai/api/api-management/students?${apiParams.toString()}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

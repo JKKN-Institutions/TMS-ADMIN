@@ -238,7 +238,7 @@ export function AuthProvider({
     // Redirect appropriately
     if (redirectToParent) {
       window.location.href =
-        process.env.NEXT_PUBLIC_PARENT_APP_URL || 'https://my.jkkn.ac.in';
+        process.env.NEXT_PUBLIC_PARENT_APP_URL || 'https://jkkn.ai';
     } else {
       window.location.href = '/login';
     }

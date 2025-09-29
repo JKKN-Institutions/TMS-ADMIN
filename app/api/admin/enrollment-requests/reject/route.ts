@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     let foundStudent = null;
     try {
       // First try students API
-      const studentResponse = await fetch('https://my.jkkn.ac.in/api/api-management/students', {
+      const studentResponse = await fetch('https://jkkn.ai/api/api-management/students', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
 
       // If not found in students, try staff API
       if (!foundStudent) {
-        const staffResponse = await fetch('https://my.jkkn.ac.in/api/api-management/staff', {
+        const staffResponse = await fetch('https://jkkn.ai/api/api-management/staff', {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
