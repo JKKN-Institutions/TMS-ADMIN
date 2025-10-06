@@ -238,7 +238,7 @@ export function AuthProvider({
     // Redirect appropriately
     if (redirectToParent) {
       window.location.href =
-        process.env.NEXT_PUBLIC_PARENT_APP_URL || 'https://jkkn.ai';
+        process.env.NEXT_PUBLIC_PARENT_APP_URL || 'https://www.jkkn.ai';
     } else {
       window.location.href = '/login';
     }

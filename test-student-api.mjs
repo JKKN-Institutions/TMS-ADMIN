@@ -6,7 +6,7 @@
  */
 
 const API_KEY = 'jk_21372a6d0f4ca05d02139a0fb714a2e5_mcejx5qz';
-const BASE_URL = 'https://jkkn.ai/api/api-management';
+const BASE_URL = 'https://www.jkkn.ai/api/api-management';
 
 async function testStudentAPI() {
   console.log('🔍 Testing Student API Connection...\n');
