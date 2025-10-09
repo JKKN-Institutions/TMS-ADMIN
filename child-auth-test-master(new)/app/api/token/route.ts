@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   console.log('\n🔄 ═══════════════════════════════════════════════════════');
-  console.log('📍 TMS-ADMIN: Token Exchange Request');
+  console.log('📍 CHILD APP: Token Exchange Request');
   console.log('🔄 ═══════════════════════════════════════════════════════');
 
   try {
@@ -77,40 +77,11 @@ export async function POST(req: NextRequest) {
     const data = await response.json();
     console.log('✅ Token exchange successful!');
     console.log('👤 User:', data.user?.email);
-    console.log('🎫 Role:', data.user?.role);
+    console.log('🎫 Token Type:', data.token_type);
     console.log('⏱️  Expires In:', data.expires_in + 's');
-
-    // Check if user has admin/staff privileges
-    const isValidAdmin = 
-      data.user?.is_super_admin === true || 
-      data.user?.role === 'super_admin' ||
-      data.user?.role === 'Super Administrator' ||
-      data.user?.role === 'admin' ||
-      data.user?.role === 'staff' ||
-      data.user?.role === 'transport_staff' ||
-      data.user?.role === 'faculty' ||
-      (data.user?.permissions && (
-        data.user.permissions['admin_access'] || 
-        data.user.permissions['transport_access'] ||
-        data.user.permissions['staff_access']
-      ));
-    
-    if (!isValidAdmin) {
-      console.log('❌ Access denied for user:', {
-        email: data.user?.email,
-        role: data.user?.role,
-        is_super_admin: data.user?.is_super_admin,
-        permissions: data.user?.permissions
-      });
-      return NextResponse.json(
-        { error: 'access_denied', error_description: 'Access denied. Only administrators and staff can access this application.' },
-        { status: 403 }
-      );
-    }
-
-    console.log('✅ Admin access granted for:', data.user?.email);
+    console.log('📋 Scope:', data.scope);
     console.log('\n✅ ═══════════════════════════════════════════════════════');
-    console.log('📍 TMS-ADMIN: Authentication Complete');
+    console.log('📍 CHILD APP: Authentication Complete');
     console.log('✅ ═══════════════════════════════════════════════════════\n');
 
     return NextResponse.json(data);

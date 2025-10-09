@@ -40,14 +40,16 @@ export interface ValidationResponse {
 class ParentAuthService {
   private api: AxiosInstance;
   private refreshPromise: Promise<boolean> | null = null;
+  private accessToken: string | null = null;
+  private refreshTokenValue: string | null = null;
 
   constructor() {
+    // Use new centralized auth server
     this.api = axios.create({
-      baseURL: process.env.NEXT_PUBLIC_PARENT_APP_URL,
+      baseURL: process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.jkkn.ai',
       timeout: 10000,
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.NEXT_PUBLIC_API_KEY || ''
+        'Content-Type': 'application/json'
       }
     });
 
@@ -77,6 +79,12 @@ class ParentAuthService {
         return Promise.reject(error);
       }
     );
+
+    // Initialize from storage
+    if (typeof window !== 'undefined') {
+      this.accessToken = this.getStoredAccessToken();
+      this.refreshTokenValue = this.getStoredRefreshToken();
+    }
   }
 
   /**
@@ -90,24 +98,23 @@ class ParentAuthService {
       sessionStorage.setItem('post_login_redirect', redirectUrl);
     }
 
-    // Use the child app authorization endpoint
+    // Use the new centralized auth server with client_id pattern
     const authUrl = new URL(
-      '/auth/child-app/consent',
-      process.env.NEXT_PUBLIC_PARENT_APP_URL!
+      '/authorize',
+      process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.jkkn.ai'
     );
     authUrl.searchParams.append('response_type', 'code');
     authUrl.searchParams.append('client_id', process.env.NEXT_PUBLIC_APP_ID!);
-    authUrl.searchParams.append('app_id', process.env.NEXT_PUBLIC_APP_ID!);
     authUrl.searchParams.append(
       'redirect_uri',
       process.env.NEXT_PUBLIC_REDIRECT_URI!
     );
-    authUrl.searchParams.append('scope', 'read write profile');
+    authUrl.searchParams.append('scope', 'openid profile email');
     authUrl.searchParams.append('state', state);
 
-    console.log('🔍 ParentAuthService Login URL:', authUrl.toString());
+    console.log('🔍 Admin Auth Server Login URL:', authUrl.toString());
     console.log('🔍 Environment Variables:', {
-      PARENT_APP_URL: process.env.NEXT_PUBLIC_PARENT_APP_URL,
+      AUTH_SERVER_URL: process.env.NEXT_PUBLIC_AUTH_SERVER_URL,
       APP_ID: process.env.NEXT_PUBLIC_APP_ID,
       REDIRECT_URI: process.env.NEXT_PUBLIC_REDIRECT_URI
     });
@@ -120,17 +127,19 @@ class ParentAuthService {
     refreshToken?: string
   ): Promise<ParentAppUser | null> {
     try {
-      console.log('HandleCallback called with:', {
+      console.log('🔄 Admin HandleCallback called with:', {
         hasToken: !!token,
         tokenStart: token ? token.substring(0, 20) + '...' : 'none',
         hasRefreshToken: !!refreshToken
       });
 
+      // Store tokens
+      this.setAccessToken(token);
       if (refreshToken) {
         this.setRefreshToken(refreshToken);
       }
 
-      // Validate the token with parent app
+      // Validate the token with auth server
       const validation = await this.validateToken(token);
       console.log('Validation result:', validation);
 
@@ -140,252 +149,135 @@ class ParentAuthService {
           email: validation.user.email,
           role: validation.user.role,
           is_super_admin: validation.user.is_super_admin,
-          permissions: validation.user.permissions,
-          full_user: validation.user
+          permissions: validation.user.permissions
         });
 
-        // Check if user has Super Administrator role
+        // Check if user has admin/staff role
         if (!this.isValidAdminRole(validation.user)) {
           console.error('❌ Role validation failed for user:', validation.user.email);
           console.error('❌ User role:', validation.user.role);
-          console.error('❌ Is super admin:', validation.user.is_super_admin);
-          throw new Error('Access denied. Only Super Administrators can access this application.');
+          this.clearSession();
+          throw new Error('Access denied. Only administrators and staff can access this application.');
         }
 
-        console.log('Setting auth data...');
-        this.setAccessToken(token);
-        this.setUser(validation.user);
+        console.log('✅ Admin role validated successfully');
 
+        // Store user and session
+        this.setUser(validation.user);
         if (validation.session) {
           this.setSession(validation.session);
         }
 
-        // Clear OAuth state
-        sessionStorage.removeItem('oauth_state');
-
-        console.log(
-          'Auth callback successful, returning user:',
-          validation.user.email
-        );
         return validation.user;
       }
 
-      throw new Error(validation.error || 'Token validation failed');
+      return null;
     } catch (error) {
-      console.error('Auth callback error:', error);
-      this.clearSession();
+      console.error('Callback handling error:', error);
       throw error;
     }
   }
 
   /**
-   * Check if user has valid admin role (Super Administrator)
+   * Validate admin role - more permissive for admin app
    */
   private isValidAdminRole(user: ParentAppUser): boolean {
-    console.log('🔍 Checking admin role for user:', {
-      email: user.email,
-      role: user.role,
-      is_super_admin: user.is_super_admin,
-      roleType: typeof user.role,
-      isSuperAdminType: typeof user.is_super_admin
-    });
-
-    // Primary check: exact role name from parent app
-    if (user.role === 'super_admin') {
-      console.log('✅ User has super_admin role');
+    // Check for super admin
+    if (user.is_super_admin === true) {
+      console.log('✅ User is super admin');
       return true;
     }
 
-    // Secondary check: is_super_admin flag (boolean)
-    if (user.is_super_admin === true || user.is_super_admin === 'true') {
-      console.log('✅ User has is_super_admin flag set to true');
-      return true;
-    }
-
-    // Fallback checks for other possible formats
+    // Check role string
     const validRoles = [
+      'super_admin',
       'Super Administrator',
-      'super_administrator', 
-      'super administrator',
-      'SuperAdministrator',
-      'SUPER_ADMINISTRATOR'
+      'admin',
+      'Administrator',
+      'staff',
+      'Staff',
+      'transport_staff',
+      'Transport Staff',
+      'faculty',
+      'Faculty',
+      'teacher',
+      'Teacher'
     ];
 
-    // Check role string (case-insensitive)
-    if (user.role && validRoles.some(validRole => 
-      user.role.toLowerCase().trim() === validRole.toLowerCase()
-    )) {
-      console.log('✅ User has valid admin role:', user.role);
+    const roleMatch = validRoles.some(validRole => 
+      user.role?.toLowerCase() === validRole.toLowerCase()
+    );
+
+    if (roleMatch) {
+      console.log('✅ User has valid admin/staff role:', user.role);
       return true;
     }
 
-    // Check permissions for admin-related permissions
+    // Check permissions
     if (user.permissions) {
-      const adminPermissions = ['admin', 'super_admin', 'all', '*'];
-      const hasAdminPermission = adminPermissions.some(perm => 
-        user.permissions[perm] === true || 
-        user.permissions[perm] === 'true' ||
-        Object.keys(user.permissions).some(key => 
-          key.toLowerCase().includes('admin') && user.permissions[key] === true
-        )
-      );
-      
+      const hasAdminPermission = 
+        user.permissions['admin_access'] || 
+        user.permissions['transport_access'] ||
+        user.permissions['staff_access'] ||
+        user.permissions['manage_transport'] ||
+        user.permissions['view_admin_dashboard'];
+
       if (hasAdminPermission) {
-        console.log('✅ User has admin permissions:', user.permissions);
+        console.log('✅ User has valid admin permissions');
         return true;
       }
     }
 
-    console.log('❌ User does not have valid admin role. Expected: super_admin, Got:', user.role);
+    console.log('❌ User does not have admin/staff access:', {
+      role: user.role,
+      is_super_admin: user.is_super_admin,
+      permissions: user.permissions
+    });
+
     return false;
   }
 
-  /**
-   * Validate access token
-   */
   async validateToken(token: string): Promise<ValidationResponse> {
     try {
-      const requestData = {
-        token,
-        child_app_id: process.env.NEXT_PUBLIC_APP_ID
-      };
-
-      console.log('Validating token with parent app:', {
-        url: '/api/auth/child-app/validate',
-        child_app_id: requestData.child_app_id,
+      // Call local API route which validates with auth server
+      const response = await fetch('/api/auth/validate', {
+        method: 'POST',
         headers: {
-          'x-api-key': process.env.NEXT_PUBLIC_API_KEY ? 'Set' : 'Not set'
-        }
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ token })
       });
 
-      const response = await this.api.post(
-        '/api/auth/child-app/validate',
-        requestData
-      );
-
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        console.error(
-          'Token validation error:',
-          error.response?.data || error.message
-        );
-        return {
-          valid: false,
-          error: error.response?.data?.error || 'Validation failed'
-        };
+      if (!response.ok) {
+        return { valid: false, error: 'Token validation failed' };
       }
 
-      console.error('Token validation error:', error);
+      const data = await response.json();
       return {
-        valid: false,
-        error: 'Validation failed'
+        valid: data.valid,
+        user: data.user,
+        session: data.session
       };
-    }
-  }
-
-  /**
-   * Refresh access token
-   */
-  async refreshToken(): Promise<boolean> {
-    if (this.refreshPromise) {
-      return this.refreshPromise;
-    }
-
-    this.refreshPromise = this._doRefreshToken();
-    const result = await this.refreshPromise;
-    this.refreshPromise = null;
-    return result;
-  }
-
-  private async _doRefreshToken(): Promise<boolean> {
-    try {
-      const refreshToken = this.getRefreshToken();
-      if (!refreshToken) {
-        throw new Error('No refresh token available');
-      }
-
-      const response = await this.api.post('/api/auth/child-app/token', {
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        app_id: process.env.NEXT_PUBLIC_APP_ID
-      });
-
-      const data: TokenResponse = response.data;
-
-      // Check role again on refresh
-      if (!this.isValidAdminRole(data.user)) {
-        throw new Error('Access denied. Only Super Administrators can access this application.');
-      }
-
-      this.setAccessToken(data.access_token);
-      this.setUser(data.user);
-
-      if (data.refresh_token) {
-        this.setRefreshToken(data.refresh_token);
-      }
-
-      return true;
     } catch (error) {
-      console.error('Token refresh error:', error);
-      this.clearSession();
-      return false;
+      console.error('Token validation error:', error);
+      return { valid: false, error: 'Validation request failed' };
     }
   }
 
-  /**
-   * Logout from parent app
-   */
-  logout(redirectToParent: boolean = false): void {
-    console.log('🔍 Logout initiated, redirectToParent:', redirectToParent);
-
-    // Clear local session first
-    this.clearSession();
-
-    if (redirectToParent) {
-      const logoutUrl = new URL(
-        '/api/auth/child-app/logout',
-        process.env.NEXT_PUBLIC_PARENT_APP_URL!
-      );
-
-      window.location.href =
-        logoutUrl.toString() +
-        `?app_id=${
-          process.env.NEXT_PUBLIC_APP_ID
-        }&redirect_uri=${encodeURIComponent(
-          window.location.origin
-        )}&seamless_reauth=true`;
-    }
-  }
-
-  /**
-   * Check if user is authenticated
-   */
-  isAuthenticated(): boolean {
-    const token = this.getAccessToken();
-    const user = this.getUser();
-    return !!(token && user && this.isValidAdminRole(user));
-  }
-
-  /**
-   * Validate current session
-   */
   async validateSession(): Promise<boolean> {
-    const token = this.getAccessToken();
-    if (!token) {
-      return false;
-    }
-
     try {
+      const token = this.getAccessToken();
+      if (!token) {
+        return false;
+      }
+
       const validation = await this.validateToken(token);
-
-      if (validation.valid && validation.user && this.isValidAdminRole(validation.user)) {
+      if (validation.valid && validation.user) {
         this.setUser(validation.user);
-
         if (validation.session) {
           this.setSession(validation.session);
         }
-
         return true;
       }
 
@@ -396,127 +288,191 @@ class ParentAuthService {
     }
   }
 
-  /**
-   * Check if user has specific permission
-   */
+  async refreshToken(): Promise<boolean> {
+    // Prevent concurrent refresh requests
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this._refreshToken();
+    const result = await this.refreshPromise;
+    this.refreshPromise = null;
+    return result;
+  }
+
+  private async _refreshToken(): Promise<boolean> {
+    try {
+      const refreshToken = this.getRefreshToken();
+      if (!refreshToken) {
+        return false;
+      }
+
+      const response = await this.api.post('/api/auth/refresh', {
+        refresh_token: refreshToken,
+        app_id: process.env.NEXT_PUBLIC_APP_ID,
+        api_key: process.env.API_KEY
+      });
+
+      const { access_token, refresh_token, user } = response.data;
+
+      this.setAccessToken(access_token);
+      if (refresh_token) {
+        this.setRefreshToken(refresh_token);
+      }
+      if (user) {
+        this.setUser(user);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      this.clearSession();
+      return false;
+    }
+  }
+
+  // Token management
+  getAccessToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return this.accessToken || this.getStoredAccessToken();
+  }
+
+  private getStoredAccessToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('tms_admin_access_token') || 
+           Cookies.get('tms_admin_access_token') || 
+           null;
+  }
+
+  setAccessToken(token: string): void {
+    if (typeof window === 'undefined') return;
+    this.accessToken = token;
+    localStorage.setItem('tms_admin_access_token', token);
+    Cookies.set('tms_admin_access_token', token, { 
+      expires: 7, 
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production'
+    });
+  }
+
+  getRefreshToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return this.refreshTokenValue || this.getStoredRefreshToken();
+  }
+
+  private getStoredRefreshToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('tms_admin_refresh_token') || 
+           Cookies.get('tms_admin_refresh_token') || 
+           null;
+  }
+
+  setRefreshToken(token: string): void {
+    if (typeof window === 'undefined') return;
+    this.refreshTokenValue = token;
+    localStorage.setItem('tms_admin_refresh_token', token);
+    Cookies.set('tms_admin_refresh_token', token, { 
+      expires: 30, 
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production'
+    });
+  }
+
+  // User management
+  getUser(): ParentAppUser | null {
+    if (typeof window === 'undefined') return null;
+    const userStr = localStorage.getItem('tms_admin_user');
+    if (!userStr) return null;
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }
+
+  setUser(user: ParentAppUser): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('tms_admin_user', JSON.stringify(user));
+  }
+
+  updateUser(user: ParentAppUser): void {
+    this.setUser(user);
+  }
+
+  // Session management
+  getSession(): AuthSession | null {
+    if (typeof window === 'undefined') return null;
+    const sessionStr = localStorage.getItem('tms_admin_session');
+    if (!sessionStr) return null;
+    try {
+      return JSON.parse(sessionStr);
+    } catch {
+      return null;
+    }
+  }
+
+  setSession(session: AuthSession): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('tms_admin_session', JSON.stringify(session));
+  }
+
+  clearSession(): void {
+    if (typeof window === 'undefined') return;
+    
+    // Clear memory
+    this.accessToken = null;
+    this.refreshTokenValue = null;
+
+    // Clear localStorage
+    localStorage.removeItem('tms_admin_access_token');
+    localStorage.removeItem('tms_admin_refresh_token');
+    localStorage.removeItem('tms_admin_user');
+    localStorage.removeItem('tms_admin_session');
+    
+    // Clear cookies
+    Cookies.remove('tms_admin_access_token');
+    Cookies.remove('tms_admin_refresh_token');
+  }
+
+  // Permission checks
   hasPermission(permission: string): boolean {
     const user = this.getUser();
     return user?.permissions?.[permission] === true;
   }
 
-  /**
-   * Check if user has specific role
-   */
   hasRole(role: string): boolean {
     const user = this.getUser();
-    return user?.role === role;
+    return user?.role?.toLowerCase() === role.toLowerCase();
   }
 
-  /**
-   * Check if user has any of the specified roles
-   */
   hasAnyRole(roles: string[]): boolean {
     const user = this.getUser();
-    return user ? roles.includes(user.role) : false;
+    if (!user?.role) return false;
+    return roles.some(role => user.role.toLowerCase() === role.toLowerCase());
   }
 
-  // Token management methods
-  getAccessToken(): string | null {
-    return Cookies.get('access_token') || null;
-  }
-
-  private setAccessToken(token: string): void {
-    const isProduction = window.location.protocol === 'https:';
-    Cookies.set('access_token', token, {
-      expires: 1, // 1 day
-      secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax',
-      path: '/'
-    });
-  }
-
-  private getRefreshToken(): string | null {
-    return Cookies.get('refresh_token') || null;
-  }
-
-  private setRefreshToken(token: string): void {
-    const isProduction = window.location.protocol === 'https:';
-    Cookies.set('refresh_token', token, {
-      expires: 30, // 30 days
-      secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax',
-      path: '/'
-    });
-  }
-
-  getUser(): ParentAppUser | null {
-    try {
-      const userData = localStorage.getItem('parent_user_data');
-      if (userData && userData !== 'undefined') {
-        return JSON.parse(userData) as ParentAppUser;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error getting user data:', error);
-      return null;
-    }
-  }
-
-  private setUser(user: ParentAppUser): void {
-    try {
-      localStorage.setItem('parent_user_data', JSON.stringify(user));
-      localStorage.setItem('parent_auth_timestamp', Date.now().toString());
-    } catch (error) {
-      console.error('Error saving user data:', error);
-    }
-  }
-
-  getSession(): AuthSession | null {
-    try {
-      const sessionData = localStorage.getItem('parent_session_data');
-      if (sessionData && sessionData !== 'undefined') {
-        return JSON.parse(sessionData) as AuthSession;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error getting session data:', error);
-      return null;
-    }
-  }
-
-  private setSession(session: AuthSession): void {
-    try {
-      localStorage.setItem('parent_session_data', JSON.stringify(session));
-    } catch (error) {
-      console.error('Error saving session data:', error);
-    }
-  }
-
-  clearSession(): void {
-    Cookies.remove('access_token');
-    Cookies.remove('refresh_token');
-    localStorage.removeItem('parent_user_data');
-    localStorage.removeItem('parent_session_data');
-    localStorage.removeItem('parent_auth_timestamp');
-    sessionStorage.clear();
-  }
-
-  getApiClient(): AxiosInstance {
-    return this.api;
-  }
-
+  // Utility
   private generateState(): string {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    const state = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    
+    // Create enhanced state with metadata
     const stateData = {
-      random:
-        Math.random().toString(36).substring(2, 15) +
-        Math.random().toString(36).substring(2, 15),
-      isChildAppAuth: true,
+      nonce: state,
       timestamp: Date.now(),
+      isChildAppAuth: true,
       appId: process.env.NEXT_PUBLIC_APP_ID
     };
-
-    return btoa(JSON.stringify(stateData)).replace(/=/g, '');
+    
+    // Base64 encode the state data for transmission
+    const encodedState = btoa(JSON.stringify(stateData));
+    console.log('Generated state:', encodedState);
+    
+    return encodedState;
   }
 }
 
-export default new ParentAuthService();
+// Export singleton instance
+const parentAuthService = new ParentAuthService();
+export default parentAuthService;

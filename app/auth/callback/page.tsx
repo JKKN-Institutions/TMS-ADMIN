@@ -20,22 +20,30 @@ function CallbackContent() {
     const handleCallback = async () => {
       setHandled(true);
       try {
+        console.log('\n🔄 ═══════════════════════════════════════════════════════');
+        console.log('📍 Admin OAuth Callback Handler Started');
+        console.log('🔄 ═══════════════════════════════════════════════════════');
+
         const code = searchParams?.get('code');
         const state = searchParams?.get('state');
 
-        console.log('[Admin App Callback] Received code:', code);
-        console.log('[Admin App Callback] Received state:', state);
+        console.log('📋 Received OAuth params:', {
+          code: code ? code.substring(0, 8) + '...' : 'missing',
+          state: state ? state.substring(0, 20) + '...' : 'missing'
+        });
         
         const error = searchParams?.get('error');
         const errorDescription = searchParams?.get('error_description');
 
         if (error) {
+          console.log('❌ OAuth error:', error, errorDescription);
           setError(errorDescription || error);
           setProcessing(false);
           return;
         }
 
         if (!code) {
+          console.log('❌ No authorization code found');
           setError('Authorization code not found');
           setProcessing(false);
           return;
@@ -45,12 +53,14 @@ function CallbackContent() {
         const savedState = sessionStorage.getItem('oauth_state');
 
         if (!savedState) {
+          console.log('❌ No saved state found in session');
           setError('No state found in session - please try logging in again');
           setProcessing(false);
           return;
         }
 
         if (!state) {
+          console.log('❌ No state parameter received');
           setError('No state parameter received from authorization server');
           setProcessing(false);
           return;
@@ -68,16 +78,24 @@ function CallbackContent() {
           // Validate against saved state
           if (state === savedState && stateData?.isChildAppAuth) {
             stateValid = true;
-            console.log('✅ Enhanced state validation passed:', stateData);
+            console.log('✅ Enhanced state validation passed:', {
+              isChildAppAuth: stateData.isChildAppAuth,
+              appId: stateData.appId
+            });
           }
         } catch (error) {
-          console.error('State decoding failed:', error);
+          console.error('⚠️ State decoding failed:', error);
+          // Fallback: simple string comparison
+          if (state === savedState) {
+            stateValid = true;
+            console.log('✅ Basic state validation passed (fallback)');
+          }
         }
 
         if (!stateValid) {
-          console.error('State mismatch:', {
-            received: state,
-            expected: savedState,
+          console.error('❌ State mismatch:', {
+            received: state.substring(0, 20) + '...',
+            expected: savedState.substring(0, 20) + '...',
             decodedData: stateData
           });
           setError('Invalid state parameter - possible CSRF attack detected');
@@ -87,33 +105,59 @@ function CallbackContent() {
 
         // Clear the saved state after successful validation
         sessionStorage.removeItem('oauth_state');
+        console.log('✅ State validated and cleared');
 
         // Exchange authorization code for tokens
+        console.log('\n🔄 Exchanging authorization code for tokens...');
         const response = await fetch('/api/auth/token', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            code,
-            state
-          })
+          body: JSON.stringify({ code })
         });
+
+        console.log('📥 Token exchange response:', response.status, response.statusText);
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.error || 'Token exchange failed');
+          console.error('❌ Token exchange failed:', errorData);
+          throw new Error(errorData.error_description || errorData.error || 'Token exchange failed');
         }
 
         const tokenData = await response.json();
+        console.log('✅ Token exchange successful');
+        console.log('👤 User:', tokenData.user?.email);
+        console.log('🎫 Role:', tokenData.user?.role);
+
+        // Store tokens in localStorage (with tms_admin_ prefix)
+        console.log('\n💾 Storing authentication tokens...');
+        localStorage.setItem('tms_admin_access_token', tokenData.access_token);
+        localStorage.setItem('tms_admin_refresh_token', tokenData.refresh_token || '');
+        localStorage.setItem('tms_admin_user', JSON.stringify(tokenData.user));
+        localStorage.setItem('tms_admin_token_expires', String(Date.now() + (tokenData.expires_in * 1000)));
+        
+        // Also store in cookies for SSR
+        document.cookie = `tms_admin_access_token=${tokenData.access_token}; path=/; max-age=${tokenData.expires_in}; SameSite=Lax`;
+        if (tokenData.refresh_token) {
+          document.cookie = `tms_admin_refresh_token=${tokenData.refresh_token}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
+        }
+        
+        console.log('✅ Tokens stored in localStorage and cookies');
+
+        // Small delay to ensure storage is complete
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         // Handle the authentication callback
+        console.log('\n🔄 Handling authentication callback in context...');
         const success = await handleAuthCallback(
           tokenData.access_token,
           tokenData.refresh_token
         );
 
         if (success) {
+          console.log('✅ Authentication callback handled successfully');
+          
           // Clean URL parameters
           const url = new URL(window.location.href);
           url.searchParams.delete('code');
@@ -122,18 +166,26 @@ function CallbackContent() {
 
           // Check for post-login redirect
           const redirectUrl = sessionStorage.getItem('post_login_redirect');
+          const targetPath = redirectUrl || '/dashboard';
+          
+          console.log('\n🔄 Redirecting to:', targetPath);
+          console.log('\n✅ ═══════════════════════════════════════════════════════');
+          console.log('📍 OAuth Flow Complete! Redirecting...', targetPath);
+          console.log('✅ ═══════════════════════════════════════════════════════\n');
+
           if (redirectUrl) {
             sessionStorage.removeItem('post_login_redirect');
-            router.push(redirectUrl);
-          } else {
-            router.push('/dashboard');
           }
+
+          // Use full page reload to ensure fresh state
+          window.location.href = targetPath;
         } else {
+          console.error('❌ Authentication callback failed');
           setError('Authentication failed');
           setProcessing(false);
         }
       } catch (err) {
-        console.error('Callback error:', err);
+        console.error('\n❌ Callback error:', err);
         setError(err instanceof Error ? err.message : 'Authentication failed');
         setProcessing(false);
       }
