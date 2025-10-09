@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   X,
@@ -46,6 +46,29 @@ const BroadcastModal: React.FC<BroadcastModalProps> = ({
   });
   
   const [isLoading, setIsLoading] = useState(false);
+  const [subscriptionStats, setSubscriptionStats] = useState<any>(null);
+  const [showSubscriptionWarning, setShowSubscriptionWarning] = useState(false);
+
+  // Fetch subscription statistics when modal opens
+  useEffect(() => {
+    if (isOpen && formData.targetAudience === 'students') {
+      fetchSubscriptionStats();
+    }
+  }, [isOpen, formData.targetAudience]);
+
+  const fetchSubscriptionStats = async () => {
+    try {
+      const response = await fetch(`/api/admin/notifications/estimate-users?audience=students&detailed=false`);
+      if (response.ok) {
+        const data = await response.json();
+        setSubscriptionStats(data);
+        // Show warning if less than 70% have push enabled
+        setShowSubscriptionWarning(data.subscriptionRate < 70);
+      }
+    } catch (error) {
+      console.error('Error fetching subscription stats:', error);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -374,6 +397,65 @@ const BroadcastModal: React.FC<BroadcastModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Push Subscription Warning */}
+            {formData.enablePushNotification && subscriptionStats && (
+              <div className="space-y-3">
+                {/* Subscription Statistics */}
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <h4 className="font-medium text-blue-900 text-sm mb-2">Push Subscription Status</h4>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-white p-2 rounded">
+                          <p className="text-gray-600">Total Students</p>
+                          <p className="text-lg font-bold text-blue-900">{subscriptionStats.count}</p>
+                        </div>
+                        <div className="bg-white p-2 rounded">
+                          <p className="text-gray-600">Active Push</p>
+                          <p className="text-lg font-bold text-green-600">{subscriptionStats.activeSubscriptions}</p>
+                        </div>
+                        <div className="bg-white p-2 rounded">
+                          <p className="text-gray-600">No Push</p>
+                          <p className="text-lg font-bold text-orange-600">{subscriptionStats.studentsWithoutSubscriptions}</p>
+                        </div>
+                        <div className="bg-white p-2 rounded">
+                          <p className="text-gray-600">Coverage</p>
+                          <p className="text-lg font-bold text-purple-600">{subscriptionStats.subscriptionRate}%</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Warning if low subscription rate */}
+                {showSubscriptionWarning && (
+                  <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                    <div className="flex items-start space-x-3">
+                      <AlertTriangle className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <h4 className="font-medium text-orange-900 text-sm mb-1">Low Push Notification Coverage</h4>
+                        <p className="text-xs text-orange-700 mb-2">
+                          Only {subscriptionStats.subscriptionRate}% of students have enabled push notifications. 
+                          {subscriptionStats.studentsWithoutSubscriptions} students will not receive this push notification.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Open a detailed view showing which students don't have push enabled
+                            window.open('/admin/notifications/push-subscribers', '_blank');
+                          }}
+                          className="text-xs font-medium text-orange-800 hover:text-orange-900 underline"
+                        >
+                          View students without push notifications →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Preview */}
             <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
