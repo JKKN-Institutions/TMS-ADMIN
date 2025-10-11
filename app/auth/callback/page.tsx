@@ -49,12 +49,12 @@ function CallbackContent() {
           return;
         }
 
-        // Validate state for CSRF protection
-        const savedState = sessionStorage.getItem('oauth_state');
+        // SIMPLE state validation (matching passenger app)
+        const savedState = localStorage.getItem('oauth_state');
 
         if (!savedState) {
-          console.log('❌ No saved state found in session');
-          setError('No state found in session - please try logging in again');
+          console.log('❌ No saved state found in localStorage');
+          setError('No state found - please try logging in again');
           setProcessing(false);
           return;
         }
@@ -66,37 +66,11 @@ function CallbackContent() {
           return;
         }
 
-        // Enhanced state validation with Base64 decoding
-        let stateValid = false;
-        let stateData = null;
-
-        try {
-          // Try to decode the received state
-          const paddedState = state + '='.repeat((4 - (state.length % 4)) % 4);
-          stateData = JSON.parse(atob(paddedState));
-
-          // Validate against saved state
-          if (state === savedState && stateData?.isChildAppAuth) {
-            stateValid = true;
-            console.log('✅ Enhanced state validation passed:', {
-              isChildAppAuth: stateData.isChildAppAuth,
-              appId: stateData.appId
-            });
-          }
-        } catch (error) {
-          console.error('⚠️ State decoding failed:', error);
-          // Fallback: simple string comparison
-          if (state === savedState) {
-            stateValid = true;
-            console.log('✅ Basic state validation passed (fallback)');
-          }
-        }
-
-        if (!stateValid) {
+        // Simple string comparison (like passenger app)
+        if (state !== savedState) {
           console.error('❌ State mismatch:', {
-            received: state.substring(0, 20) + '...',
-            expected: savedState.substring(0, 20) + '...',
-            decodedData: stateData
+            received: state,
+            expected: savedState
           });
           setError('Invalid state parameter - possible CSRF attack detected');
           setProcessing(false);
@@ -104,7 +78,7 @@ function CallbackContent() {
         }
 
         // Clear the saved state after successful validation
-        sessionStorage.removeItem('oauth_state');
+        localStorage.removeItem('oauth_state');
         console.log('✅ State validated and cleared');
 
         // Exchange authorization code for tokens

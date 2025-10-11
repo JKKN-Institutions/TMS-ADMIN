@@ -88,38 +88,44 @@ class ParentAuthService {
   }
 
   /**
-   * Initiate OAuth login flow
+   * Initiate OAuth login flow (MATCHING PASSENGER APP)
    */
   login(redirectUrl?: string): void {
-    const state = this.generateState();
-    sessionStorage.setItem('oauth_state', state);
+    console.log('\n🚀 ═══════════════════════════════════════════════════════');
+    console.log('📍 TMS-ADMIN: Initiating OAuth Flow');
+    console.log('🚀 ═══════════════════════════════════════════════════════');
+    
+    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.jkkn.ai';
+    const appId = process.env.NEXT_PUBLIC_APP_ID || 'tms_admin_portal_mfhsyxnn';
+    const redirectUri = process.env.NEXT_PUBLIC_REDIRECT_URI || 'http://localhost:3001/auth/callback';
+    const scope = 'read write profile';
+    // SIMPLE STATE - matching passenger app (no encoding!)
+    const state = Math.random().toString(36).substring(7);
+
+    console.log('📋 Configuration:');
+    console.log('  - Auth Server:', authServerUrl);
+    console.log('  - App ID:', appId);
+    console.log('  - Redirect URI:', redirectUri);
+    console.log('  - Scope:', scope);
+    console.log('  - State:', state);
+
+    // Save state for validation (in localStorage like passenger app)
+    localStorage.setItem('oauth_state', state);
+    console.log('💾 State saved to localStorage');
 
     if (redirectUrl) {
       sessionStorage.setItem('post_login_redirect', redirectUrl);
+      console.log('💾 Post-login redirect URL stored:', redirectUrl);
     }
 
-    // Use the new centralized auth server with client_id pattern
-    const authUrl = new URL(
-      '/api/auth/authorize',
-      process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.jkkn.ai'
-    );
-    authUrl.searchParams.append('response_type', 'code');
-    authUrl.searchParams.append('client_id', process.env.NEXT_PUBLIC_APP_ID!);
-    authUrl.searchParams.append(
-      'redirect_uri',
-      process.env.NEXT_PUBLIC_REDIRECT_URI!
-    );
-    authUrl.searchParams.append('scope', 'read write profile');
-    authUrl.searchParams.append('state', state);
+    // Build authorization URL (EXACTLY like passenger app)
+    const authUrl = `${authServerUrl}/api/auth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&state=${state}`;
 
-    console.log('🔍 Admin Auth Server Login URL:', authUrl.toString());
-    console.log('🔍 Environment Variables:', {
-      AUTH_SERVER_URL: process.env.NEXT_PUBLIC_AUTH_SERVER_URL,
-      APP_ID: process.env.NEXT_PUBLIC_APP_ID,
-      REDIRECT_URI: process.env.NEXT_PUBLIC_REDIRECT_URI
-    });
-
-    window.location.href = authUrl.toString();
+    console.log('\n🔗 Redirecting to auth server...');
+    console.log('📍 URL:', authUrl);
+    console.log('═══════════════════════════════════════════════════════\n');
+    
+    window.location.href = authUrl;
   }
 
   async handleCallback(
@@ -460,26 +466,7 @@ class ParentAuthService {
     return roles.some(role => user.role.toLowerCase() === role.toLowerCase());
   }
 
-  // Utility
-  private generateState(): string {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    const state = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-    
-    // Create enhanced state with metadata
-    const stateData = {
-      nonce: state,
-      timestamp: Date.now(),
-      isChildAppAuth: true,
-      appId: process.env.NEXT_PUBLIC_APP_ID
-    };
-    
-    // Base64 encode the state data for transmission
-    const encodedState = btoa(JSON.stringify(stateData));
-    console.log('Generated state:', encodedState);
-    
-    return encodedState;
-  }
+  // Utility - removed complex state generation, using simple random string like passenger app
 }
 
 // Export singleton instance
