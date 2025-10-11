@@ -58,7 +58,7 @@ The app will be available at: `http://localhost:3001`
 
 ### Step 2: Click "Continue with MyJKKN"
 1. Click the blue "Continue with MyJKKN" button
-2. You should be redirected to: `https://auth.jkkn.ai/authorize?...`
+2. You should be redirected to: `https://auth.jkkn.ai/api/auth/authorize?...`
 
 ### Step 3: Login at Auth Server
 1. Enter your admin/staff credentials

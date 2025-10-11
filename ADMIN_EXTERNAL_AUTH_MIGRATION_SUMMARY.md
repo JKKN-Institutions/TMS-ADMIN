@@ -162,7 +162,7 @@ Login Page → parentAuthService.login() → Redirects to auth server
 
 ### 2. **Auth Server Authorization**
 ```
-User logs in at: https://auth.jkkn.ai/authorize?
+User logs in at: https://auth.jkkn.ai/api/auth/authorize?
   response_type=code&
   client_id=tms_admin_portal_mfhsyxnn&
   redirect_uri=http://localhost:3001/auth/callback&
@@ -314,7 +314,7 @@ NEXT_PUBLIC_REDIRECT_URI=https://tms-admin.jkkn.ac.in/auth/callback
 | Aspect | Old System | New System |
 |--------|-----------|------------|
 | **Auth Server** | `https://www.jkkn.ai` | `https://auth.jkkn.ai` |
-| **Authorization Endpoint** | `/auth/child-app/consent` | `/authorize` |
+| **Authorization Endpoint** | `/auth/child-app/consent` | `/api/auth/authorize` |
 | **Token Endpoint** | `/api/auth/child-app/token` | `/api/auth/token` |
 | **API Key Location** | Header (`X-API-Key`) | Request body (`api_key`) |
 | **Access Control** | Super Admin only | Admin/Staff/Faculty |

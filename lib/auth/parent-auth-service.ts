@@ -100,7 +100,7 @@ class ParentAuthService {
 
     // Use the new centralized auth server with client_id pattern
     const authUrl = new URL(
-      '/authorize',
+      '/api/auth/authorize',
       process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.jkkn.ai'
     );
     authUrl.searchParams.append('response_type', 'code');
