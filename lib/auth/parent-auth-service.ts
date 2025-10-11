@@ -109,7 +109,7 @@ class ParentAuthService {
       'redirect_uri',
       process.env.NEXT_PUBLIC_REDIRECT_URI!
     );
-    authUrl.searchParams.append('scope', 'openid profile email');
+    authUrl.searchParams.append('scope', 'read write profile');
     authUrl.searchParams.append('state', state);
 
     console.log('🔍 Admin Auth Server Login URL:', authUrl.toString());
