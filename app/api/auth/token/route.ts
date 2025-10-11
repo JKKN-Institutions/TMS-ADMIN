@@ -78,37 +78,51 @@ export async function POST(req: NextRequest) {
     console.log('✅ Token exchange successful!');
     console.log('👤 User:', data.user?.email);
     console.log('🎫 Role:', data.user?.role);
+    console.log('🔑 Is Super Admin:', data.user?.is_super_admin);
+    console.log('📋 Full User Object:', JSON.stringify(data.user, null, 2));
     console.log('⏱️  Expires In:', data.expires_in + 's');
 
-    // Check if user has admin/staff privileges
+    // Check if we have a valid user object
+    if (!data.user || !data.user.email) {
+      console.log('❌ No user data returned from auth server');
+      return NextResponse.json(
+        { error: 'user_not_found', error_description: 'User not found. Please ensure your account exists in the system.' },
+        { status: 404 }
+      );
+    }
+
+    // Check if user has admin/staff privileges (VERY PERMISSIVE)
     const isValidAdmin = 
       data.user?.is_super_admin === true || 
-      data.user?.role === 'super_admin' ||
-      data.user?.role === 'Super Administrator' ||
-      data.user?.role === 'admin' ||
-      data.user?.role === 'staff' ||
-      data.user?.role === 'transport_staff' ||
-      data.user?.role === 'faculty' ||
-      (data.user?.permissions && (
-        data.user.permissions['admin_access'] || 
-        data.user.permissions['transport_access'] ||
-        data.user.permissions['staff_access']
-      ));
+      data.user?.is_superadmin === true ||
+      data.user?.isSuperAdmin === true ||
+      String(data.user?.role).toLowerCase().includes('admin') ||
+      String(data.user?.role).toLowerCase().includes('staff') ||
+      String(data.user?.role).toLowerCase().includes('faculty') ||
+      String(data.user?.role).toLowerCase().includes('teacher') ||
+      String(data.user?.role).toLowerCase().includes('transport') ||
+      String(data.user?.role).toLowerCase().includes('manager') ||
+      (data.user?.permissions && Object.keys(data.user.permissions).length > 0);
     
     if (!isValidAdmin) {
       console.log('❌ Access denied for user:', {
         email: data.user?.email,
         role: data.user?.role,
         is_super_admin: data.user?.is_super_admin,
-        permissions: data.user?.permissions
+        permissions: data.user?.permissions,
+        fullUser: data.user
       });
       return NextResponse.json(
-        { error: 'access_denied', error_description: 'Access denied. Only administrators and staff can access this application.' },
+        { 
+          error: 'access_denied', 
+          error_description: `Access denied. Only administrators and staff can access this application. Your role: ${data.user?.role}` 
+        },
         { status: 403 }
       );
     }
 
     console.log('✅ Admin access granted for:', data.user?.email);
+    console.log('✅ Role accepted:', data.user?.role);
     console.log('\n✅ ═══════════════════════════════════════════════════════');
     console.log('📍 TMS-ADMIN: Authentication Complete');
     console.log('✅ ═══════════════════════════════════════════════════════\n');

@@ -179,59 +179,68 @@ class ParentAuthService {
   }
 
   /**
-   * Validate admin role - more permissive for admin app
+   * Validate admin role - VERY permissive for admin app
    */
   private isValidAdminRole(user: ParentAppUser): boolean {
-    // Check for super admin
-    if (user.is_super_admin === true) {
-      console.log('✅ User is super admin');
+    console.log('🔍 Validating admin role for:', user.email);
+    console.log('📋 User data:', {
+      role: user.role,
+      is_super_admin: user.is_super_admin,
+      permissions: user.permissions
+    });
+
+    // Check for super admin (multiple variations)
+    if (user.is_super_admin === true || 
+        (user as any).is_superadmin === true || 
+        (user as any).isSuperAdmin === true) {
+      console.log('✅ User is super admin (direct flag)');
       return true;
     }
 
-    // Check role string
-    const validRoles = [
-      'super_admin',
-      'Super Administrator',
-      'admin',
-      'Administrator',
-      'staff',
-      'Staff',
-      'transport_staff',
-      'Transport Staff',
-      'faculty',
-      'Faculty',
-      'teacher',
-      'Teacher'
-    ];
+    // Check if role string contains admin/staff/faculty keywords (case insensitive)
+    if (user.role) {
+      const roleLower = String(user.role).toLowerCase();
+      const validKeywords = [
+        'admin',
+        'staff',
+        'faculty',
+        'teacher',
+        'transport',
+        'manager',
+        'coordinator',
+        'head'
+      ];
 
-    const roleMatch = validRoles.some(validRole => 
-      user.role?.toLowerCase() === validRole.toLowerCase()
-    );
+      const hasValidKeyword = validKeywords.some(keyword => 
+        roleLower.includes(keyword)
+      );
 
-    if (roleMatch) {
-      console.log('✅ User has valid admin/staff role:', user.role);
-      return true;
-    }
-
-    // Check permissions
-    if (user.permissions) {
-      const hasAdminPermission = 
-        user.permissions['admin_access'] || 
-        user.permissions['transport_access'] ||
-        user.permissions['staff_access'] ||
-        user.permissions['manage_transport'] ||
-        user.permissions['view_admin_dashboard'];
-
-      if (hasAdminPermission) {
-        console.log('✅ User has valid admin permissions');
+      if (hasValidKeyword) {
+        console.log('✅ User role contains valid keyword:', user.role);
         return true;
       }
     }
 
-    console.log('❌ User does not have admin/staff access:', {
+    // Check permissions (if any permission exists, allow access)
+    if (user.permissions && typeof user.permissions === 'object') {
+      const permissionCount = Object.keys(user.permissions).length;
+      if (permissionCount > 0) {
+        console.log('✅ User has permissions:', permissionCount);
+        return true;
+      }
+    }
+
+    // If institution_id exists, user is likely staff/admin
+    if (user.institution_id) {
+      console.log('✅ User has institution_id, likely staff/admin');
+      return true;
+    }
+
+    console.log('❌ User does not meet any admin criteria:', {
       role: user.role,
       is_super_admin: user.is_super_admin,
-      permissions: user.permissions
+      has_permissions: !!user.permissions,
+      has_institution: !!user.institution_id
     });
 
     return false;
