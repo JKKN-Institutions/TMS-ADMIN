@@ -45,32 +45,67 @@ export async function POST(req: NextRequest) {
 
     // Exchange code for tokens
     console.log('\n🔄 Sending token exchange request to auth server...');
-    console.log('📤 Request:', {
-      endpoint: `${authServerUrl}/api/auth/token`,
+    
+    const requestBody = {
       grant_type: 'authorization_code',
+      code,
       app_id: appId,
-      code: code.substring(0, 8) + '...',
+      api_key: apiKey,
       redirect_uri: redirectUri
+    };
+    
+    console.log('📤 Request Details:');
+    console.log('  - Endpoint:', `${authServerUrl}/api/auth/token`);
+    console.log('  - Method: POST');
+    console.log('  - Headers:', { 'Content-Type': 'application/json' });
+    console.log('  - Body:', {
+      grant_type: requestBody.grant_type,
+      code: code.substring(0, 10) + '...' + code.substring(code.length - 6),
+      app_id: requestBody.app_id,
+      api_key: '***' + apiKey.substring(apiKey.length - 8),
+      redirect_uri: requestBody.redirect_uri
     });
+    console.log('  - Full Authorization Code:', code);
 
     const response = await fetch(`${authServerUrl}/api/auth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        code,
-        app_id: appId,
-        api_key: apiKey,
-        redirect_uri: redirectUri
-      })
+      body: JSON.stringify(requestBody)
     });
 
-    console.log('📥 Response status:', response.status, response.statusText);
+    console.log('\n📥 Response Details:');
+    console.log('  - Status:', response.status, response.statusText);
+    console.log('  - Headers:', Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
-      const error = await response.json();
-      console.log('❌ Token exchange failed!');
-      console.error('💥 Error details:', error);
+      const errorText = await response.text();
+      console.log('  - Raw Response Body:', errorText);
+      
+      let error;
+      try {
+        error = JSON.parse(errorText);
+      } catch (e) {
+        error = { error: 'parse_error', error_description: errorText };
+      }
+      
+      console.log('\n❌ ═══════════════════════════════════════════════════════');
+      console.log('💥 TOKEN EXCHANGE FAILED');
+      console.log('❌ ═══════════════════════════════════════════════════════');
+      console.error('Error Object:', JSON.stringify(error, null, 2));
+      console.log('\n🔍 DIAGNOSIS:');
+      console.log('  The auth server returned an error. This typically means:');
+      console.log('  1. ❌ User not found: The email used to login is not registered in auth.jkkn.ai');
+      console.log('  2. ❌ Invalid code: The authorization code expired or was already used');
+      console.log('  3. ❌ Mismatched redirect_uri: The redirect URI doesn\'t match what was registered');
+      console.log('  4. ❌ Invalid credentials: The app_id or api_key is incorrect');
+      console.log('\n📋 Current Configuration:');
+      console.log('  - Auth Server:', authServerUrl);
+      console.log('  - App ID:', appId);
+      console.log('  - Redirect URI:', redirectUri);
+      console.log('  - Error:', error.error);
+      console.log('  - Description:', error.error_description);
+      console.log('═══════════════════════════════════════════════════════\n');
+      
       return NextResponse.json(error, { status: response.status });
     }
 
