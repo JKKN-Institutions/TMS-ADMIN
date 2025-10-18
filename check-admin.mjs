@@ -52,7 +52,7 @@ async function checkSetup() {
       .from('admin_login_mapping')
       .select('admin_id, admin_users(name, role)')
       .eq('admin_id', 'SA001')
-      .eq('password', 'superadmin1234')
+      .eq('password', 'superadmin123')
       .single();
 
     if (loginError) {
