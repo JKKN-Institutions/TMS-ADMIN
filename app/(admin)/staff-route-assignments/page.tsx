@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import {
   Users,
   Route as RouteIcon,
-  Search,
   Plus,
   X,
   UserCheck,
@@ -69,13 +68,9 @@ const StaffRouteAssignmentsPage = () => {
 
   // Form states
   const [staffEmail, setStaffEmail] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [staffSearchResults, setStaffSearchResults] = useState<Staff[]>([]);
-  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState('');
   const [assignmentNotes, setAssignmentNotes] = useState('');
   const [assigning, setAssigning] = useState(false);
-  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     const userData = localStorage.getItem('adminUser');
@@ -112,10 +107,10 @@ const StaffRouteAssignmentsPage = () => {
   const fetchRoutes = async () => {
     try {
       const response = await fetch('/api/admin/routes');
-      const data = await response.json();
+      const result = await response.json();
 
-      if (data.success) {
-        setRoutes(data.routes || []);
+      if (result.success) {
+        setRoutes(result.data || []);
       } else {
         toast.error('Failed to load routes');
       }
@@ -125,42 +120,16 @@ const StaffRouteAssignmentsPage = () => {
     }
   };
 
-  const handleSearchStaff = async (query: string) => {
-    setSearchQuery(query);
-
-    if (query.trim().length < 2) {
-      setStaffSearchResults([]);
+  const handleAssignRoute = async () => {
+    if (!staffEmail || !staffEmail.trim()) {
+      toast.error('Please enter staff email');
       return;
     }
 
-    setSearching(true);
-    try {
-      const response = await fetch(`/api/admin/staff/search?q=${encodeURIComponent(query)}`);
-      const data = await response.json();
-
-      if (data.success) {
-        setStaffSearchResults(data.staff || []);
-      } else {
-        setStaffSearchResults([]);
-      }
-    } catch (error) {
-      console.error('Error searching staff:', error);
-      setStaffSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const handleSelectStaff = (staff: Staff) => {
-    setSelectedStaff(staff);
-    setStaffEmail(staff.email);
-    setSearchQuery(staff.email);
-    setStaffSearchResults([]);
-  };
-
-  const handleAssignRoute = async () => {
-    if (!selectedStaff && !staffEmail) {
-      toast.error('Please select a staff member');
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(staffEmail)) {
+      toast.error('Please enter a valid email address');
       return;
     }
 
@@ -177,7 +146,7 @@ const StaffRouteAssignmentsPage = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          staffEmail: selectedStaff ? selectedStaff.email : staffEmail,
+          staffEmail: staffEmail.trim(),
           routeId: selectedRouteId,
           assignedBy: user?.id,
           notes: assignmentNotes.trim() || null,
@@ -228,11 +197,8 @@ const StaffRouteAssignmentsPage = () => {
 
   const resetForm = () => {
     setStaffEmail('');
-    setSearchQuery('');
-    setSelectedStaff(null);
     setSelectedRouteId('');
     setAssignmentNotes('');
-    setStaffSearchResults([]);
   };
 
   if (loading) {
@@ -427,68 +393,24 @@ const StaffRouteAssignmentsPage = () => {
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Staff Search */}
+              {/* Staff Email Input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Search Staff by Email or Name
+                  Staff Email Address
                 </label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => handleSearchStaff(e.target.value)}
-                    placeholder="Type email or name..."
+                    type="email"
+                    value={staffEmail}
+                    onChange={(e) => setStaffEmail(e.target.value)}
+                    placeholder="Enter staff email (e.g., staff@jkkn.ac.in)"
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
-                  {searching && (
-                    <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 animate-spin" />
-                  )}
                 </div>
-
-                {/* Search Results */}
-                {staffSearchResults.length > 0 && (
-                  <div className="mt-2 border border-gray-200 rounded-lg max-h-60 overflow-y-auto">
-                    {staffSearchResults.map((staff) => (
-                      <button
-                        key={staff.id}
-                        onClick={() => handleSelectStaff(staff)}
-                        className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-200 last:border-b-0 transition-colors"
-                      >
-                        <div className="font-medium text-gray-900">{staff.name}</div>
-                        <div className="text-sm text-gray-600">{staff.email}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          Role: <span className="font-medium">{staff.role}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Selected Staff */}
-                {selectedStaff && (
-                  <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium text-gray-900">{selectedStaff.name}</div>
-                        <div className="text-sm text-gray-600">{selectedStaff.email}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          Role: <span className="font-medium">{selectedStaff.role}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setSelectedStaff(null);
-                          setSearchQuery('');
-                          setStaffEmail('');
-                        }}
-                        className="p-1 hover:bg-blue-100 rounded"
-                      >
-                        <X className="w-5 h-5 text-gray-600" />
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <p className="mt-2 text-sm text-gray-500">
+                  Enter the email address of the staff member you want to assign to a route
+                </p>
               </div>
 
               {/* Route Selection */}
@@ -530,7 +452,7 @@ const StaffRouteAssignmentsPage = () => {
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={handleAssignRoute}
-                  disabled={assigning || (!selectedStaff && !staffEmail) || !selectedRouteId}
+                  disabled={assigning || !staffEmail || !selectedRouteId}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                 >
                   {assigning ? (
