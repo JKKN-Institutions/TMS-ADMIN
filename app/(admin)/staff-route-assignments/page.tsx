@@ -43,19 +43,13 @@ interface Route {
 
 interface StaffRouteAssignment {
   id: string;
-  staff_id: string;
+  staff_email: string;
   route_id: string;
   assigned_at: string;
   assigned_by: string;
   is_active: boolean;
   notes?: string;
-  admin_users: Staff;
   routes: Route;
-  assigned_by_user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
 }
 
 const StaffRouteAssignmentsPage = () => {
@@ -260,9 +254,9 @@ const StaffRouteAssignmentsPage = () => {
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600 text-sm">Staff Members</p>
+              <p className="text-gray-600 text-sm">Staff Emails</p>
               <p className="text-3xl font-bold text-gray-900 mt-1">
-                {new Set(assignments.map(a => a.staff_id)).size}
+                {new Set(assignments.map(a => a.staff_email)).size}
               </p>
             </div>
             <Users className="w-12 h-12 text-purple-600 opacity-20" />
@@ -299,15 +293,14 @@ const StaffRouteAssignmentsPage = () => {
                     <div className="flex items-center gap-4 mb-3">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                          <UserCheck className="w-5 h-5 text-blue-600" />
+                          <Mail className="w-5 h-5 text-blue-600" />
                         </div>
                         <div>
                           <h3 className="font-semibold text-gray-900">
-                            {assignment.admin_users.name}
+                            Staff Email
                           </h3>
                           <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <Mail className="w-4 h-4" />
-                            {assignment.admin_users.email}
+                            {assignment.staff_email}
                           </div>
                         </div>
                       </div>

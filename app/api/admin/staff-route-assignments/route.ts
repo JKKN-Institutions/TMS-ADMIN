@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
       .from('staff_route_assignments')
       .select(`
         id,
-        staff_id,
+        staff_email,
         route_id,
         assigned_at,
         assigned_by,
@@ -25,14 +25,6 @@ export async function GET(request: NextRequest) {
         notes,
         created_at,
         updated_at,
-        admin_users!staff_route_assignments_staff_id_fkey (
-          id,
-          name,
-          email,
-          role,
-          avatar,
-          is_active
-        ),
         routes (
           id,
           route_number,
@@ -44,11 +36,6 @@ export async function GET(request: NextRequest) {
           status,
           total_capacity,
           current_passengers
-        ),
-        assigned_by_user:admin_users!staff_route_assignments_assigned_by_fkey (
-          id,
-          name,
-          email
         )
       `)
       .eq('is_active', true)
@@ -56,20 +43,7 @@ export async function GET(request: NextRequest) {
 
     // If staff email is provided, filter by it
     if (staffEmail) {
-      const { data: staffUser, error: staffError } = await supabase
-        .from('admin_users')
-        .select('id')
-        .eq('email', staffEmail)
-        .single();
-
-      if (staffError || !staffUser) {
-        return NextResponse.json({
-          success: false,
-          error: 'Staff member not found with the provided email'
-        }, { status: 404 });
-      }
-
-      query = query.eq('staff_id', staffUser.id);
+      query = query.eq('staff_email', staffEmail.toLowerCase().trim());
     }
 
     // If route ID is provided, filter by it
@@ -116,24 +90,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find staff by email
-    const { data: staffUser, error: staffError } = await supabase
-      .from('admin_users')
-      .select('id, name, email, role, is_active')
-      .eq('email', staffEmail)
-      .single();
-
-    if (staffError || !staffUser) {
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(staffEmail)) {
       return NextResponse.json(
-        { success: false, error: 'Staff member not found with the provided email' },
-        { status: 404 }
-      );
-    }
-
-    // Check if staff is active
-    if (!staffUser.is_active) {
-      return NextResponse.json(
-        { success: false, error: 'Staff member is not active' },
+        { success: false, error: 'Invalid email format' },
         { status: 400 }
       );
     }
@@ -152,11 +113,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if assignment already exists
-    const { data: existingAssignment, error: existingError } = await supabase
+    // Check if assignment already exists for this email and route
+    const { data: existingAssignment } = await supabase
       .from('staff_route_assignments')
       .select('id, is_active')
-      .eq('staff_id', staffUser.id)
+      .eq('staff_email', staffEmail.toLowerCase().trim())
       .eq('route_id', routeId)
       .eq('is_active', true)
       .maybeSingle();
@@ -165,18 +126,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: 'This staff member is already assigned to this route',
+          error: 'This email is already assigned to this route',
           assignmentId: existingAssignment.id
         },
         { status: 409 }
       );
     }
 
-    // Create the assignment
+    // Create the assignment with email directly (no validation if staff exists)
     const { data: assignment, error: assignmentError } = await supabase
       .from('staff_route_assignments')
       .insert({
-        staff_id: staffUser.id,
+        staff_email: staffEmail.toLowerCase().trim(),
         route_id: routeId,
         assigned_by: assignedBy || null,
         notes: notes || null,
@@ -184,20 +145,13 @@ export async function POST(request: NextRequest) {
       })
       .select(`
         id,
-        staff_id,
+        staff_email,
         route_id,
         assigned_at,
         assigned_by,
         is_active,
         notes,
         created_at,
-        admin_users!staff_route_assignments_staff_id_fkey (
-          id,
-          name,
-          email,
-          role,
-          avatar
-        ),
         routes (
           id,
           route_number,
