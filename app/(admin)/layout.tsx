@@ -23,7 +23,8 @@ import {
   Power,
   Navigation,
   Zap,
-  Bug
+  Bug,
+  ClipboardCheck
 } from 'lucide-react';
 import { AdminUser, UserRole } from '@/types';
 import toast, { Toaster } from 'react-hot-toast';
@@ -141,14 +142,21 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       roles: ['super_admin', 'transport_admin'],
       group: 'transport'
     },
-    { 
-      name: 'Route Optimization', 
-      href: '/route-optimization', 
-      icon: Zap, 
+    {
+      name: 'Route Optimization',
+      href: '/route-optimization',
+      icon: Zap,
       roles: ['super_admin', 'transport_admin'],
       group: 'transport'
     },
-    
+    {
+      name: 'Staff Assignments',
+      href: '/staff-route-assignments',
+      icon: ClipboardCheck,
+      roles: ['super_admin', 'transport_admin'],
+      group: 'transport'
+    },
+
     // Services
     { 
       name: 'Enrollments', 
