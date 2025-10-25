@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(timeout:*)",
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(if exist .next rd /s /q .next)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nImplement staff login with OAuth and super_admin support\n\nAdded comprehensive staff authentication system mirroring driver login:\n\nFeatures:\n- Staff login page with OAuth and direct login options\n- Staff-specific dashboard and navigation layout\n- Staff authentication API with parent app fallback\n- Super admin role support for staff access\n- Staff route guard for protected routes\n- Staff OAuth callback handler\n\nAuthentication:\n- OAuth login via MYJKKN (primary method)\n- Direct email/password login (alternative)\n- Parent app integration with role validation\n- Local database fallback authentication\n- 24-hour session management with tokens\n\nRole Support:\n- staff, super_admin, superadmin roles\n- transport_staff, admin, faculty roles\n- Role string matching for admin/staff variants\n- Permission-based access control\n\nDashboard:\n- Purple/indigo themed staff portal\n- Statistics cards (students, routes, grievances, bookings)\n- Quick action links for staff functions\n- Mobile-responsive layout with sidebar navigation\n\nBug Fixes:\n- Fixed navigator SSR error in push-notifications.ts\n- Relaxed OAuth state validation for multiple login attempts\n- Added staff role detection in callback handler\n- Updated unified auth service for staff support\n\n🤖 Generated with Claude Code\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ls:*)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
