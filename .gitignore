@@ -42,3 +42,8 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+.mcp.json
+.claude/*
+.claude/memory/
+.claude_settings.json
