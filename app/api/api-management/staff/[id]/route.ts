@@ -5,10 +5,11 @@ const BASE_URL = process.env.STAFF_API_BASE_URL || 'https://www.jkkn.ai/api/api-
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const staffId = params.id;
+    const { id } = await params;
+    const staffId = id;
 
     if (!staffId) {
       return NextResponse.json(

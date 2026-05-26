@@ -9,10 +9,10 @@ const supabase = createClient(
 // GET - Fetch possible stops for a route
 export async function GET(
   request: NextRequest,
-  { params }: { params: { routeId: string } }
+  { params }: { params: Promise<{ routeId: string }> }
 ) {
   try {
-    const { routeId } = params;
+    const { routeId } = await params;
 
     const { data: possibleStops, error } = await supabase
       .from('route_possible_stops')
@@ -47,12 +47,12 @@ export async function GET(
 // POST - Add possible stops to a route
 export async function POST(
   request: NextRequest,
-  { params }: { params: { routeId: string } }
+  { params }: { params: Promise<{ routeId: string }> }
 ) {
   try {
     console.log('=== POST POSSIBLE STOPS CALLED ===');
-    console.log('Params received:', params);
-    const { routeId } = params;
+    const { routeId } = await params;
+    console.log('Params received:', { routeId });
     console.log('Route ID:', routeId);
     
     // Log the raw request for debugging
@@ -306,9 +306,10 @@ export async function POST(
 // DELETE - Remove a possible stop
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { routeId: string } }
+  { params }: { params: Promise<{ routeId: string }> }
 ) {
   try {
+    const { routeId } = await params;
     const { searchParams } = new URL(request.url);
     const stopId = searchParams.get('stopId');
 
@@ -323,7 +324,7 @@ export async function DELETE(
       .from('route_possible_stops')
       .delete()
       .eq('id', stopId)
-      .eq('route_id', params.routeId);
+      .eq('route_id', routeId);
 
     if (error) {
       console.error('Error deleting possible stop:', error);

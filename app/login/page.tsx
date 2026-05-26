@@ -3,70 +3,66 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { 
-  User, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  LogIn, 
-  Shield, 
-  DollarSign, 
-  ClipboardList, 
+import {
+  User,
+  Lock,
+  Eye,
+  EyeOff,
+  LogIn,
+  Shield,
+  DollarSign,
+  ClipboardList,
   Database,
   Bus,
   Crown,
   Loader2,
-  ExternalLink
 } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import { UserRole } from '@/types';
-import { useAuth } from '@/lib/auth/auth-context';
 
 const roleConfig = {
   super_admin: {
     name: 'Super Admin',
     icon: Crown,
     color: 'bg-purple-500 hover:bg-purple-600',
-    description: 'Full system access and control'
+    description: 'Full system access and control',
   },
   transport_manager: {
     name: 'Transport Manager',
     icon: Bus,
     color: 'bg-blue-500 hover:bg-blue-600',
-    description: 'Manage routes, drivers, and vehicles'
+    description: 'Manage routes, drivers, and vehicles',
   },
   finance_admin: {
     name: 'Finance Admin',
     icon: DollarSign,
     color: 'bg-green-500 hover:bg-green-600',
-    description: 'Handle payments and financial operations'
+    description: 'Handle payments and financial operations',
   },
   operations_admin: {
     name: 'Operations Admin',
     icon: ClipboardList,
     color: 'bg-orange-500 hover:bg-orange-600',
-    description: 'Manage bookings and grievances'
+    description: 'Manage bookings and grievances',
   },
   data_entry: {
     name: 'Data Entry',
     icon: Database,
     color: 'bg-gray-500 hover:bg-gray-600',
-    description: 'Manage student data and records'
-  }
+    description: 'Manage student data and records',
+  },
 };
 
-// Admin ID mapping for different roles
 const roleCredentials = {
   super_admin: { id: 'SA001', password: 'superadmin123' },
   transport_manager: { id: 'TM001', password: 'transport123' },
   finance_admin: { id: 'FA001', password: 'finance123' },
   operations_admin: { id: 'OA001', password: 'operations123' },
-  data_entry: { id: 'DE001', password: 'dataentry123' }
+  data_entry: { id: 'DE001', password: 'dataentry123' },
 };
 
 const LoginPage = () => {
   const router = useRouter();
-  const { login: parentLogin, isAuthenticated, isLoading: authLoading } = useAuth();
   const [selectedRole, setSelectedRole] = useState<UserRole>('super_admin');
   const [adminId, setAdminId] = useState('SA001');
   const [password, setPassword] = useState('');
@@ -74,21 +70,18 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
-  // Ensure component is mounted before rendering forms
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated) {
+    const storedUser = localStorage.getItem('adminUser');
+    if (storedUser) {
       router.push('/dashboard');
     }
-  }, [isAuthenticated, router]);
+  }, [router]);
 
-
-
-  React.useEffect(() => {
+  useEffect(() => {
     const credentials = roleCredentials[selectedRole];
     if (credentials) {
       setAdminId(credentials.id);
@@ -97,24 +90,21 @@ const LoginPage = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!adminId || !password) {
       toast.error('Please enter both Admin ID and password');
       return;
     }
 
     setIsLoading(true);
-    
+
     try {
-      // Call the login API route
       const response = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           adminId: adminId.toUpperCase(),
-          password: password
+          password,
         }),
       });
 
@@ -127,9 +117,7 @@ const LoginPage = () => {
       }
 
       if (data.success && data.user) {
-        // Store user in localStorage
         localStorage.setItem('adminUser', JSON.stringify(data.user));
-
         toast.success(`Welcome back, ${data.user.name}!`);
         setTimeout(() => {
           router.push('/dashboard');
@@ -137,7 +125,6 @@ const LoginPage = () => {
       } else {
         toast.error('Login failed. Please try again.');
       }
-
     } catch (error) {
       console.error('Login error:', error);
       toast.error('Login failed. Please try again.');
@@ -146,26 +133,9 @@ const LoginPage = () => {
     }
   };
 
-  const handleMyJKKNLogin = () => {
-    console.log('MyJKKN login initiated');
-    parentLogin();
-  };
-
-  // Show loading if auth is loading
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      
+      <Toaster position="top-right" />
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
         {/* Left Panel - Role Selection */}
         <motion.div
@@ -188,7 +158,7 @@ const LoginPage = () => {
               Object.entries(roleConfig).map(([role, config]) => {
                 const Icon = config.icon;
                 const isSelected = selectedRole === role;
-                
+
                 return (
                   <motion.button
                     key={role}
@@ -196,18 +166,24 @@ const LoginPage = () => {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
-                      isSelected 
-                        ? 'border-blue-500 bg-blue-50 shadow-lg' 
+                      isSelected
+                        ? 'border-blue-500 bg-blue-50 shadow-lg'
                         : 'border-gray-200 bg-white hover:border-gray-300'
                     }`}
                   >
                     <div className="flex items-center space-x-4">
-                      <div className={`p-3 rounded-lg text-white ${config.color}`}>
+                      <div
+                        className={`p-3 rounded-lg text-white ${config.color}`}
+                      >
                         <Icon className="w-6 h-6" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900">{config.name}</h3>
-                        <p className="text-sm text-gray-600">{config.description}</p>
+                        <h3 className="font-semibold text-gray-900">
+                          {config.name}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          {config.description}
+                        </p>
                       </div>
                       {isSelected && (
                         <div className="text-blue-500">
@@ -219,9 +195,11 @@ const LoginPage = () => {
                 );
               })
             ) : (
-              // Loading skeleton for role buttons
               Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className="w-full p-4 rounded-xl border-2 border-gray-200 bg-white animate-pulse">
+                <div
+                  key={index}
+                  className="w-full p-4 rounded-xl border-2 border-gray-200 bg-white animate-pulse"
+                >
                   <div className="flex items-center space-x-4">
                     <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
                     <div className="flex-1">
@@ -243,13 +221,19 @@ const LoginPage = () => {
           className="bg-white rounded-2xl shadow-xl p-8"
         >
           <div className="text-center mb-8">
-            <div className={`inline-flex p-4 rounded-full text-white mb-4 ${roleConfig[selectedRole].color}`}>
-              {React.createElement(roleConfig[selectedRole].icon, { className: "w-8 h-8" })}
+            <div
+              className={`inline-flex p-4 rounded-full text-white mb-4 ${roleConfig[selectedRole].color}`}
+            >
+              {React.createElement(roleConfig[selectedRole].icon, {
+                className: 'w-8 h-8',
+              })}
             </div>
             <h2 className="text-2xl font-bold text-gray-900">
               {roleConfig[selectedRole].name} Login
             </h2>
-            <p className="text-gray-600">{roleConfig[selectedRole].description}</p>
+            <p className="text-gray-600">
+              {roleConfig[selectedRole].description}
+            </p>
           </div>
 
           {isMounted ? (
@@ -282,7 +266,7 @@ const LoginPage = () => {
                     <Lock className="h-5 w-5 text-gray-400" />
                   </div>
                   <input
-                    type={showPassword ? "text" : "password"}
+                    type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="input input-with-left-icon input-with-right-icon"
@@ -305,7 +289,9 @@ const LoginPage = () => {
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                 <p className="text-sm text-blue-800">
-                  <strong>Demo Credentials:</strong> {roleCredentials[selectedRole].id} / {roleCredentials[selectedRole].password}
+                  <strong>Demo Credentials:</strong>{' '}
+                  {roleCredentials[selectedRole].id} /{' '}
+                  {roleCredentials[selectedRole].password}
                 </p>
               </div>
 
@@ -315,8 +301,8 @@ const LoginPage = () => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className={`w-full py-3 px-4 rounded-lg text-white font-semibold transition-all ${
-                  isLoading 
-                    ? 'bg-gray-400 cursor-not-allowed' 
+                  isLoading
+                    ? 'bg-gray-400 cursor-not-allowed'
                     : `${roleConfig[selectedRole].color} shadow-lg hover:shadow-xl`
                 }`}
               >
@@ -331,30 +317,6 @@ const LoginPage = () => {
                     <span>Sign In as {roleConfig[selectedRole].name}</span>
                   </div>
                 )}
-              </motion.button>
-
-              {/* Divider */}
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300" />
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">Or</span>
-                </div>
-              </div>
-
-              {/* MyJKKN Login Button */}
-              <motion.button
-                type="button"
-                onClick={handleMyJKKNLogin}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="w-full py-3 px-4 rounded-lg border-2 border-blue-600 text-blue-600 font-semibold transition-all hover:bg-blue-50 hover:shadow-lg"
-              >
-                <div className="flex items-center justify-center space-x-2">
-                  <ExternalLink className="w-5 h-5" />
-                  <span>Continue with MyJKKN</span>
-                </div>
               </motion.button>
             </form>
           ) : (

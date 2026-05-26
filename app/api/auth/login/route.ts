@@ -1,11 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+
+const DEMO_USERS: Record<string, { password: string; id: string; name: string; role: string; email: string }> = {
+  SA001: {
+    password: 'superadmin123',
+    id: 'demo-sa-001',
+    name: 'Super Admin',
+    role: 'super_admin',
+    email: 'superadmin@jkkn.ac.in',
+  },
+  TM001: {
+    password: 'transport123',
+    id: 'demo-tm-001',
+    name: 'Transport Manager',
+    role: 'transport_manager',
+    email: 'transport@jkkn.ac.in',
+  },
+  FA001: {
+    password: 'finance123',
+    id: 'demo-fa-001',
+    name: 'Finance Admin',
+    role: 'finance_admin',
+    email: 'finance@jkkn.ac.in',
+  },
+  OA001: {
+    password: 'operations123',
+    id: 'demo-oa-001',
+    name: 'Operations Admin',
+    role: 'operations_admin',
+    email: 'operations@jkkn.ac.in',
+  },
+  DE001: {
+    password: 'dataentry123',
+    id: 'demo-de-001',
+    name: 'Data Entry',
+    role: 'data_entry',
+    email: 'dataentry@jkkn.ac.in',
+  },
+};
 
 export async function POST(request: NextRequest) {
   try {
     const { adminId, password } = await request.json();
 
-    // Validate input
     if (!adminId || !password) {
       return NextResponse.json(
         { error: 'Missing admin ID or password' },
@@ -13,73 +49,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create Supabase admin client (server-side only)
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const user = DEMO_USERS[adminId.toUpperCase()];
 
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Server configuration error' },
-        { status: 500 }
-      );
-    }
-
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    });
-
-    // Query the admin_login_mapping table to authenticate
-    const { data: loginData, error: loginError } = await supabaseAdmin
-      .from('admin_login_mapping')
-      .select('admin_user_id, password')
-      .eq('admin_id', adminId.toUpperCase())
-      .single();
-
-    if (loginError || !loginData) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Invalid Admin ID' },
         { status: 401 }
       );
     }
 
-    // For demo purposes, we'll check against plain text password
-    // In production, you'd hash the input password and compare
-    if (loginData.password !== password) {
+    if (user.password !== password) {
       return NextResponse.json(
         { error: 'Invalid password' },
         { status: 401 }
       );
     }
 
-    // Get full admin user details
-    const { data: adminUser, error: userError } = await supabaseAdmin
-      .from('admin_users')
-      .select('*')
-      .eq('id', loginData.admin_user_id)
-      .single();
-
-    if (userError || !adminUser) {
-      return NextResponse.json(
-        { error: 'User details not found' },
-        { status: 404 }
-      );
-    }
-
-    // Return user data (without sensitive information)
     return NextResponse.json({
       success: true,
       user: {
-        id: adminUser.id,
-        name: adminUser.name,
-        role: adminUser.role,
-        email: adminUser.email,
-        adminId: adminId.toUpperCase()
-      }
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        email: user.email,
+        adminId: adminId.toUpperCase(),
+      },
     });
-
   } catch (error) {
     console.error('Login API error:', error);
     return NextResponse.json(

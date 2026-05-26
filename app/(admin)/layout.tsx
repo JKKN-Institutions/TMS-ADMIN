@@ -24,42 +24,19 @@ import {
   Navigation,
   Zap,
   Bug,
-  ClipboardCheck
+  ClipboardCheck,
 } from 'lucide-react';
 import { AdminUser, UserRole } from '@/types';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
-import { useAuth } from '@/lib/auth/auth-context';
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<AdminUser | null>(null);
-  const { user: parentUser, isAuthenticated: parentAuth, logout: parentLogout } = useAuth();
 
   useEffect(() => {
-    validateAndSetUser();
-  }, [parentUser, parentAuth]);
-
-  const validateAndSetUser = () => {
-    // Check for parent app authentication first
-    if (parentAuth && parentUser) {
-      // Convert parent app user to admin user format
-      const adminUser: AdminUser = {
-        id: parentUser.id,
-        name: parentUser.full_name,
-        email: parentUser.email,
-        role: 'super_admin' as UserRole, // Parent app users with access are super admins
-        permissions: ['all'], // Super admin has all permissions
-        avatar: parentUser.avatar_url || undefined,
-        lastLogin: parentUser.last_login || new Date().toISOString()
-      };
-      setUser(adminUser);
-      return;
-    }
-
-    // Fallback to local admin authentication
     const storedUser = localStorage.getItem('adminUser');
     if (storedUser) {
       try {
@@ -73,195 +50,180 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     } else {
       router.push('/login');
     }
-  };
+  }, [router]);
 
   const allNavigation = [
-    // Overview
-    { 
-      name: 'Dashboard', 
-      href: '/dashboard', 
-      icon: LayoutDashboard, 
+    {
+      name: 'Dashboard',
+      href: '/dashboard',
+      icon: LayoutDashboard,
       roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'overview'
+      group: 'overview',
     },
-    { 
-      name: 'Analytics', 
-      href: '/analytics', 
-      icon: BarChart3, 
+    {
+      name: 'Analytics',
+      href: '/analytics',
+      icon: BarChart3,
       roles: ['super_admin', 'transport_admin'],
-      group: 'overview'
+      group: 'overview',
     },
-    
-    // Transport
-    { 
-      name: 'Passengers', 
-      href: '/students', 
-      icon: Users, 
+    {
+      name: 'Passengers',
+      href: '/students',
+      icon: Users,
       roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'transport'
+      group: 'transport',
     },
-    { 
-      name: 'Drivers', 
-      href: '/drivers', 
-      icon: UserCheck, 
+    {
+      name: 'Drivers',
+      href: '/drivers',
+      icon: UserCheck,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
-    { 
-      name: 'Vehicles', 
-      href: '/vehicles', 
-      icon: Car, 
+    {
+      name: 'Vehicles',
+      href: '/vehicles',
+      icon: Car,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
-    { 
-      name: 'GPS Devices', 
-      href: '/gps-devices', 
-      icon: Navigation, 
+    {
+      name: 'GPS Devices',
+      href: '/gps-devices',
+      icon: Navigation,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
-    { 
-      name: 'Track All', 
-      href: '/track-all', 
-      icon: Bus, 
+    {
+      name: 'Track All',
+      href: '/track-all',
+      icon: Bus,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
-    { 
-      name: 'Routes', 
-      href: '/routes', 
-      icon: Route, 
+    {
+      name: 'Routes',
+      href: '/routes',
+      icon: Route,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
-    { 
-      name: 'Schedules', 
-      href: '/schedules', 
-      icon: Calendar, 
+    {
+      name: 'Schedules',
+      href: '/schedules',
+      icon: Calendar,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
     {
       name: 'Route Optimization',
       href: '/route-optimization',
       icon: Zap,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
     {
       name: 'Staff Assignments',
       href: '/staff-route-assignments',
       icon: ClipboardCheck,
       roles: ['super_admin', 'transport_admin'],
-      group: 'transport'
+      group: 'transport',
     },
-
-    // Services
-    { 
-      name: 'Enrollments', 
-      href: '/enrollment-requests', 
-      icon: FileText, 
+    {
+      name: 'Enrollments',
+      href: '/enrollment-requests',
+      icon: FileText,
       roles: ['super_admin', 'transport_admin'],
-      group: 'services'
+      group: 'services',
     },
-    { 
-      name: 'Grievances', 
-      href: '/grievances', 
-      icon: MessageCircle, 
+    {
+      name: 'Grievances',
+      href: '/grievances',
+      icon: MessageCircle,
       roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'services'
+      group: 'services',
     },
-    { 
-      name: 'My Grievances', 
-      href: '/my-grievances', 
-      icon: MessageCircle, 
+    {
+      name: 'My Grievances',
+      href: '/my-grievances',
+      icon: MessageCircle,
       roles: ['staff'],
-      group: 'services'
+      group: 'services',
     },
-    { 
-      name: 'Payments', 
-      href: '/payments', 
-      icon: CreditCard, 
+    {
+      name: 'Payments',
+      href: '/payments',
+      icon: CreditCard,
       roles: ['super_admin', 'transport_admin'],
-      group: 'services'
+      group: 'services',
     },
-    { 
-      name: 'Notifications', 
-      href: '/notifications', 
-      icon: Bell, 
+    {
+      name: 'Notifications',
+      href: '/notifications',
+      icon: Bell,
       roles: ['super_admin', 'transport_admin'],
       group: 'services',
       subItems: [
-        {
-          name: 'All Notifications',
-          href: '/notifications',
-          icon: Bell
-        },
+        { name: 'All Notifications', href: '/notifications', icon: Bell },
         {
           name: 'Push Notifications',
           href: '/notifications/push',
-          icon: Bell
-        }
-      ]
+          icon: Bell,
+        },
+      ],
     },
-    { 
-      name: 'Bug Management', 
-      href: '/bug-management', 
-      icon: Bug, 
+    {
+      name: 'Bug Management',
+      href: '/bug-management',
+      icon: Bug,
       roles: ['super_admin', 'transport_admin'],
-      group: 'services'
+      group: 'services',
     },
-    
-    // System
-    { 
-      name: 'Authorize', 
-      href: '/authorize', 
-      icon: Shield, 
+    {
+      name: 'Authorize',
+      href: '/authorize',
+      icon: Shield,
       roles: ['super_admin'],
-      group: 'system'
+      group: 'system',
     },
-    { 
-      name: 'Settings', 
-      href: '/settings', 
-      icon: Settings, 
+    {
+      name: 'Settings',
+      href: '/settings',
+      icon: Settings,
       roles: ['super_admin'],
-      group: 'system'
-    }
+      group: 'system',
+    },
   ];
 
   const navigation = allNavigation
-    .filter(item => user && item.roles.includes(user.role))
-    .map(item => ({
+    .filter((item) => user && item.roles.includes(user.role))
+    .map((item) => ({
       ...item,
-      current: pathname === item.href || pathname.startsWith(item.href + '/')
+      current: pathname === item.href || pathname.startsWith(item.href + '/'),
     }));
 
-  const groupedNavigation = navigation.reduce((acc, item) => {
-    if (!acc[item.group]) {
-      acc[item.group] = [];
-    }
-    acc[item.group].push(item);
-    return acc;
-  }, {} as Record<string, typeof navigation>);
+  const groupedNavigation = navigation.reduce(
+    (acc, item) => {
+      if (!acc[item.group]) {
+        acc[item.group] = [];
+      }
+      acc[item.group].push(item);
+      return acc;
+    },
+    {} as Record<string, typeof navigation>
+  );
 
   const handleLogout = () => {
-    // Check if user is authenticated via parent app
-    if (parentAuth && parentUser) {
-      // Logout from parent app
-      parentLogout(false); // false means don't redirect to parent app
-    } else {
-      // Local admin logout
-      localStorage.removeItem('adminUser');
-      toast.success('Logged out successfully');
-      router.push('/login');
-    }
+    localStorage.removeItem('adminUser');
+    toast.success('Logged out successfully');
+    router.push('/login');
   };
 
   const getInitials = (name: string) => {
     return name
       .split(' ')
-      .map(word => word.charAt(0))
+      .map((word) => word.charAt(0))
       .join('')
       .toUpperCase()
       .slice(0, 2);
@@ -283,17 +245,14 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-gray-100">
-        {/* Mobile sidebar overlay */}
         {sidebarOpen && (
-          <div 
+          <div
             className="fixed inset-0 z-40 lg:hidden bg-black bg-opacity-50"
             onClick={() => setSidebarOpen(false)}
           />
         )}
 
-        {/* Sidebar */}
         <div className={`sidebar-modern ${sidebarOpen ? 'open' : ''}`}>
-          {/* Sidebar Header */}
           <div className="sidebar-header">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -301,8 +260,12 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                   <Bus className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-bold text-gray-900">MYJKKN TMS</h1>
-                  <p className="text-xs text-gray-500 capitalize">{user.role.replace('_', ' ')}</p>
+                  <h1 className="text-lg font-bold text-gray-900">
+                    MYJKKN TMS
+                  </h1>
+                  <p className="text-xs text-gray-500 capitalize">
+                    {user.role.replace('_', ' ')}
+                  </p>
                 </div>
               </div>
               <button
@@ -314,7 +277,6 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </div>
 
-          {/* Search */}
           <div className="p-4 border-b border-gray-200">
             <div className="search-container">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -326,15 +288,17 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </div>
 
-          {/* Navigation */}
           <div className="sidebar-nav">
             {Object.entries(groupedNavigation).map(([group, items]) => (
               <div key={group} className="sidebar-section">
                 <div className="sidebar-section-title">
-                  {group === 'overview' ? 'OVERVIEW' : 
-                   group === 'transport' ? 'TRANSPORT' : 
-                   group === 'services' ? 'SERVICES' : 
-                   'SYSTEM'}
+                  {group === 'overview'
+                    ? 'OVERVIEW'
+                    : group === 'transport'
+                      ? 'TRANSPORT'
+                      : group === 'services'
+                        ? 'SERVICES'
+                        : 'SYSTEM'}
                 </div>
                 <div className="space-y-1">
                   {items.map((item) => (
@@ -377,7 +341,6 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             ))}
           </div>
 
-          {/* User Profile */}
           <div className="sidebar-user">
             <div className="user-info">
               <div className="user-avatar">
@@ -385,7 +348,9 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
               </div>
               <div className="user-details">
                 <div className="user-name">{user.name}</div>
-                <div className="user-role capitalize">{user.role.replace('_', ' ')}</div>
+                <div className="user-role capitalize">
+                  {user.role.replace('_', ' ')}
+                </div>
               </div>
             </div>
             <button
@@ -398,9 +363,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           </div>
         </div>
 
-        {/* Main Content */}
         <div className="main-content">
-          {/* Top Bar - Mobile Only */}
           <div className="top-bar lg:hidden">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -416,19 +379,13 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </div>
 
-          {/* Page Content */}
-          <div className="content-body fade-in">
-            {children}
-          </div>
+          <div className="content-body fade-in">{children}</div>
         </div>
       </div>
-      
+
       <Toaster
         position="top-right"
-        containerStyle={{
-          top: '20px',
-          right: '20px',
-        }}
+        containerStyle={{ top: '20px', right: '20px' }}
         toastOptions={{
           duration: 4000,
           style: {
@@ -459,4 +416,4 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-export default AdminLayout; 
+export default AdminLayout;

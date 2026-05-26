@@ -9,10 +9,10 @@ const supabase = createClient(
 // POST - Activate a GPS device
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // Update device status to active
     const { data: updatedDevice, error } = await supabase

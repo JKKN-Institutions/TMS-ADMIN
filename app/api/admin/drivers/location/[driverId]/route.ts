@@ -8,16 +8,15 @@ const supabase = createClient(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { driverId: string } }
+  { params }: { params: Promise<{ driverId: string }> }
 ) {
   try {
+    const { driverId } = await params;
     const { searchParams } = new URL(request.url);
     const routeId = searchParams.get('routeId');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 1000;
-
-    const { driverId } = params;
 
     if (!driverId) {
       return NextResponse.json(

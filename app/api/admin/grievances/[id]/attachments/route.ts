@@ -7,10 +7,10 @@ import { existsSync } from 'fs';
 // GET - Get all attachments for a grievance
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
     
     const { data, error } = await supabase
       .from('grievance_attachments')
@@ -34,10 +34,10 @@ export async function GET(
 // POST - Upload new attachment
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const formData = await request.formData();
     
     const file = formData.get('file') as File;
@@ -134,10 +134,10 @@ export async function POST(
 // DELETE - Delete attachment
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const { searchParams } = new URL(request.url);
     const attachmentId = searchParams.get('attachment_id');
     

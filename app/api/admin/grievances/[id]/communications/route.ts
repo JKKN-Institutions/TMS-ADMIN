@@ -4,10 +4,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 // GET - Get all communications for a grievance
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const grievanceId = params.id;
+    const { id } = await params;
+    const grievanceId = id;
     
     console.log('🔍 Fetching communications for grievance:', grievanceId);
     
@@ -74,10 +75,11 @@ export async function GET(
 // POST - Add new communication to a grievance
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const grievanceId = params.id;
+    const { id } = await params;
+    const grievanceId = id;
     const body = await request.json();
     
     if (!grievanceId) {
@@ -150,10 +152,11 @@ export async function POST(
 // PUT - Mark communication as read
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const grievanceId = params.id;
+    const { id } = await params;
+    const grievanceId = id;
     const body = await request.json();
     
     const { communication_id, read_by } = body;
