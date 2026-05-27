@@ -51,7 +51,7 @@ export function getDriverColumns(
       cell: ({ row }) => {
         const s = row.original.ops?.driverStatus;
         if (!s) return '—';
-        return <Badge value={s.replace('_', ' ')} tone={s === 'active' ? 'green' : s === 'on_leave' ? 'yellow' : 'gray'} />;
+        return <Badge value={s.replace(/_/g, ' ')} tone={s === 'active' ? 'green' : s === 'on_leave' ? 'yellow' : 'gray'} />;
       },
     },
     {
@@ -63,7 +63,15 @@ export function getDriverColumns(
     {
       accessorKey: 'employmentType',
       header: 'Employment',
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       cell: ({ row }) => <span className="capitalize">{row.original.employmentType.replace(/_/g, ' ') || '—'}</span>,
+    },
+    {
+      accessorKey: 'dateOfJoining',
+      header: ({ column }) => (
+        <button className="flex items-center gap-1" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>Joined <ArrowUpDown className="h-3 w-3" /></button>
+      ),
+      cell: ({ row }) => row.original.dateOfJoining ?? '—',
     },
     {
       id: 'actions',
