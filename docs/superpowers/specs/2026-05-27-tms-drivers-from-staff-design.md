@@ -18,8 +18,8 @@ Replace the existing Drivers Management module (card UI backed by a `drivers` ta
 - Remove the obsolete driver CRUD codebase.
 
 **Non-Goals (deferred / out of scope)**
-- No Add / Edit / Delete of drivers in TMS (managed in MyJKKN).
-- No driver-operational data (license number, rating, total trips, live GPS, route assignments) — those columns are not in `staff` and are deferred until TMS-domain tables exist.
+- No Add / Delete of the underlying **staff** record in TMS (created/removed in MyJKKN). TMS may create/edit the linked `tms_driver` row (see §13).
+- Staff identity fields (name, email, phone, designation) remain **read-only** in TMS.
 - No institution scoping — **all** driver-role staff are shown to every authorized user.
 - No server-side pagination (dataset is tiny; client-side is sufficient).
 
@@ -27,8 +27,8 @@ Replace the existing Drivers Management module (card UI backed by a `drivers` ta
 
 | # | Decision | Choice |
 |---|----------|--------|
-| 1 | CRUD scope | **Read-only view** (no Add/Edit/Delete in TMS) |
-| 2 | Operational data (license/GPS/assignments) | **Defer** — staff fields only |
+| 1 | CRUD scope | Staff basics **read-only**; TMS operational fields **editable** (see §13) |
+| 2 | Operational data (license/GPS/assignments) | **Stored in new `tms_driver` extension table** (see §13) |
 | 3 | Table features | **Standard** (search, sort, column filters, pagination, column visibility, row→details) |
 | 4 | Institution scoping | **Show all** drivers to everyone |
 
@@ -150,4 +150,55 @@ Before deleting each item, the implementation plan MUST grep for references; onl
 
 **New:** `components/ui/table.tsx`, `components/ui/dropdown-menu.tsx`, `components/ui/data-table.tsx`, `app/(admin)/drivers/columns.tsx`, `app/(admin)/drivers/driver-details-dialog.tsx`.
 **Modified:** `app/(admin)/drivers/page.tsx`, `app/api/admin/drivers/route.ts`, `types/index.ts`, `package.json` (+`@tanstack/react-table`), `lib/database.ts` (remove driver methods).
-**Removed:** the four driver modals; drivers POST/PUT; (pending impact check) the `location/[driverId]` and `[driverId]/route-assignments` sub-routes.
+**Removed:** the four driver modals; (pending impact check) the `location/[driverId]` and `[driverId]/route-assignments` sub-routes. **Note:** drivers `POST`/`PUT` are now *repurposed* (not removed) — see §13.
+
+---
+
+## 13. Revision v2 — `tms_driver` extension table (supersedes the "defer operational data" decision)
+
+The driver record = **staff basics (read-only)** + **TMS operational details (editable)**. MyJKKN owns `staff`; TMS owns a new 1:1 extension table `tms_driver` keyed by `staff_id`. The module joins both and lets users edit the TMS side.
+
+### 13.1 Schema (APPLIED 2026-05-27 via MCP → `supabase/migrations/20260527010000_create_tms_driver_table.sql`)
+
+`tms_driver`: `id`, `staff_id` (uuid, **unique**, FK→`staff.id` ON DELETE CASCADE), `license_number`, `license_expiry` (date), `experience_years` (int), `rating` (numeric), `total_trips` (int), `driver_status` (text check active|inactive|on_leave), `address`, `emergency_contact_name`, `emergency_contact_phone`, `aadhar_number`, `medical_certificate_expiry` (date), `location_sharing_enabled` (bool), `assigned_route_id` (uuid, no FK yet — routes table TBD), `notes`, `created_at`, `updated_at` (trigger), `created_by`, `updated_by`. **RLS enabled**: select = `tms.drivers.view`, insert/update/delete = `tms.drivers.manage` (super-admin bypass).
+
+### 13.2 Data flow (revised)
+
+- **GET `/api/admin/drivers`** — fetch `staff` (role_key='driver') + all `tms_driver` rows; **merge in JS** by `staff_id` (LEFT-join semantics: drivers with no `tms_driver` row still appear with `null` operational fields). Returns extended `DriverListItem`. (Service-role merge avoids PostgREST 1:1-embed ambiguity.)
+- **PUT `/api/admin/drivers`** — body `{ staffId, fields }`; **upsert** into `tms_driver` on `staff_id` (insert if missing, update otherwise); `tms.drivers.manage` enforced by proxy + RLS. Staff fields are never written.
+
+### 13.3 Extended `DriverListItem`
+
+Base staff fields (from §5) **plus** an optional `ops` object:
+```ts
+interface DriverOps {
+  licenseNumber: string | null;
+  licenseExpiry: string | null;
+  experienceYears: number;
+  rating: number;
+  totalTrips: number;
+  driverStatus: 'active' | 'inactive' | 'on_leave';
+  address: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  aadharNumber: string | null;
+  medicalCertificateExpiry: string | null;
+  locationSharingEnabled: boolean;
+  assignedRouteId: string | null;
+  notes: string | null;
+}
+// DriverListItem gains:  ops: DriverOps | null;   (null = no tms_driver row yet)
+```
+
+### 13.4 UI changes
+
+- **Columns** additionally surface: License No. (`ops?.licenseNumber`), Driver Status (`ops?.driverStatus` badge), Experience (`ops?.experienceYears`). Empty → "—".
+- **Details dialog** shows staff basics + all operational fields.
+- **Edit dialog** (new, `driver-edit-dialog.tsx`) — form over the `DriverOps` fields only; submits via a React Query mutation to `PUT /api/admin/drivers`; on success invalidates `['drivers']`. Staff identity fields shown read-only at top for context.
+- **Row actions:** View + **Edit** (Edit gated by `usePermissions().can('tms.drivers.manage')` / super-admin).
+
+### 13.5 Component/file additions (delta over §12)
+
+**New:** `app/(admin)/drivers/driver-edit-dialog.tsx`.
+**Modified (beyond §12):** API `GET` (join) + new `PUT` (upsert); `columns.tsx` (+ops columns, Edit action); `driver-details-dialog.tsx` (+ops fields); `page.tsx` (mutation + edit state); `types/index.ts` (`DriverOps`, extend `DriverListItem`).
+**DB:** `tms_driver` table (already applied) + repo migration file.
