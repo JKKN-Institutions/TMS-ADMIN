@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withAuth } from '@/lib/api/with-auth';
 
-export async function GET() {
+async function getRoutes() {
   try {
     // Create Supabase admin client (server-side only)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,7 +46,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function postRoute(request: Request) {
   try {
     const { action, routeId, routeData, stops } = await request.json();
 
@@ -173,7 +174,7 @@ async function addRoute(routeData: any, stops: any[]) {
   }
 }
 
-export async function PUT(request: NextRequest) {
+async function putRoute(request: NextRequest) {
   try {
     const { routeId, routeData } = await request.json();
 
@@ -245,4 +246,8 @@ export async function PUT(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}
+
+export const GET = withAuth(() => getRoutes());
+export const POST = withAuth((request) => postRoute(request));
+export const PUT = withAuth((request) => putRoute(request)); 

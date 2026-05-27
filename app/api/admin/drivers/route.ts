@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withAuth } from '@/lib/api/with-auth';
 
 // Helper function to get Supabase client
 function getSupabaseClient() {
@@ -29,7 +30,7 @@ function formatDate(dateValue: any) {
   return null;
 }
 
-export async function GET() {
+async function getDrivers() {
   try {
     const supabase = getSupabaseClient();
 
@@ -99,7 +100,7 @@ export async function GET() {
 }
 
 // POST - Add new driver
-export async function POST(request: NextRequest) {
+async function postDriver(request: NextRequest) {
   try {
     const driverData = await request.json();
     console.log('API: Adding new driver:', driverData);
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
 }
 
 // PUT - Update existing driver
-export async function PUT(request: NextRequest) {
+async function putDriver(request: NextRequest) {
   try {
     const { driverId, driverData } = await request.json();
     console.log('API: Updating driver:', driverId, driverData);
@@ -249,4 +250,8 @@ export async function PUT(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}
+
+export const GET = withAuth(() => getDrivers());
+export const POST = withAuth((request) => postDriver(request));
+export const PUT = withAuth((request) => putDriver(request)); 

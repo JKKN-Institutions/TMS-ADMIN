@@ -25,6 +25,7 @@ import {
 import toast from 'react-hot-toast';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { createDashboardStats, safeNumber } from '@/lib/stat-utils';
+import { useAuth } from '@/providers/auth-provider';
 
 interface DashboardStats {
   totalStudents: number;
@@ -38,29 +39,18 @@ interface DashboardStats {
   todayRevenue: number;
 }
 
-interface AdminUser {
-  id: string;
-  username: string;
-  role: string;
-  permissions: string[];
-}
-
 const DashboardPage = () => {
   const router = useRouter();
-  const [user, setUser] = useState<AdminUser | null>(null);
+  const { profile } = useAuth();
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    const userData = localStorage.getItem('adminUser');
-    if (userData) {
-      setUser(JSON.parse(userData));
-      fetchDashboardData();
-    } else {
-      router.push('/login');
-    }
-  }, [router]);
+    // Auth is enforced server-side by proxy.ts; just load data here.
+    fetchDashboardData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchDashboardData = async () => {
     try {
@@ -106,7 +96,7 @@ const DashboardPage = () => {
   };
 
   const getQuickActions = () => {
-    if (!user) return [];
+    if (!profile) return [];
 
     const actions = [
       {
@@ -183,7 +173,7 @@ const DashboardPage = () => {
       {/* Enhanced Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user?.username}!</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Welcome back, {profile?.full_name || profile?.email || 'Admin'}!</h1>
           <p className="text-gray-600 mt-1">Here's what's happening with your transport management system today.</p>
         </div>
         <div className="flex items-center space-x-3">

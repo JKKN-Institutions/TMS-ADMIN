@@ -1,3 +1,11 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVICE-ROLE client only — used by the existing /api/admin/* routes.
+// This client bypasses RLS and must never run in the browser.
+//
+// For user-scoped auth (session, RLS, permission checks) use:
+//   • lib/supabase/client.ts  → browser components
+//   • lib/supabase/server.ts  → server components / route handlers
+// ─────────────────────────────────────────────────────────────────────────────
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 // Type definitions would be generated from your Supabase schema

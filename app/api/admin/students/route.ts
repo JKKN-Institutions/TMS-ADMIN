@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withAuth } from '@/lib/api/with-auth';
 
-export async function GET() {
+async function getStudents() {
   try {
     // Create Supabase admin client (server-side only)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -55,7 +56,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function postStudents(request: Request) {
   try {
     const { action } = await request.json();
 
@@ -144,4 +145,7 @@ async function handleFixEmergencyContacts() {
       { status: 500 }
     );
   }
-} 
+}
+
+export const GET = withAuth(() => getStudents());
+export const POST = withAuth((request) => postStudents(request)); 

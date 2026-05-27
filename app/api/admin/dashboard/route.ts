@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withAuth } from '@/lib/api/with-auth';
 
-export async function GET() {
+async function getDashboard() {
   try {
     // Create Supabase admin client (server-side only)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -98,4 +99,6 @@ export async function GET() {
       { status: 500 }
     );
   }
-} 
+}
+
+export const GET = withAuth(() => getDashboard()); 

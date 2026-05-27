@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -26,178 +26,77 @@ import {
   Bug,
   ClipboardCheck,
 } from 'lucide-react';
-import { AdminUser, UserRole } from '@/types';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
+import { useAuth } from '@/providers/auth-provider';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  permission: string;
+  group: 'overview' | 'transport' | 'services' | 'system';
+  subItems?: { name: string; href: string; icon: React.ComponentType<{ className?: string }> }[];
+}
+
+const allNavigation: NavItem[] = [
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, permission: TMS_PERMISSIONS.DASHBOARD_VIEW, group: 'overview' },
+  { name: 'Analytics', href: '/analytics', icon: BarChart3, permission: TMS_PERMISSIONS.REPORTS_VIEW, group: 'overview' },
+  { name: 'Passengers', href: '/students', icon: Users, permission: TMS_PERMISSIONS.ENROLLMENT_VIEW, group: 'transport' },
+  { name: 'Drivers', href: '/drivers', icon: UserCheck, permission: TMS_PERMISSIONS.DRIVERS_VIEW, group: 'transport' },
+  { name: 'Vehicles', href: '/vehicles', icon: Car, permission: TMS_PERMISSIONS.VEHICLES_VIEW, group: 'transport' },
+  { name: 'GPS Devices', href: '/gps-devices', icon: Navigation, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
+  { name: 'Track All', href: '/track-all', icon: Bus, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
+  { name: 'Routes', href: '/routes', icon: Route, permission: TMS_PERMISSIONS.ROUTES_VIEW, group: 'transport' },
+  { name: 'Schedules', href: '/schedules', icon: Calendar, permission: TMS_PERMISSIONS.SCHEDULES_VIEW, group: 'transport' },
+  { name: 'Route Optimization', href: '/route-optimization', icon: Zap, permission: TMS_PERMISSIONS.ROUTES_EDIT, group: 'transport' },
+  { name: 'Staff Assignments', href: '/staff-route-assignments', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
+  { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
+  { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
+  { name: 'My Grievances', href: '/my-grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_SUBMIT, group: 'services' },
+  { name: 'Payments', href: '/payments', icon: CreditCard, permission: TMS_PERMISSIONS.BOOKINGS_VIEW_ALL, group: 'services' },
+  {
+    name: 'Notifications',
+    href: '/notifications',
+    icon: Bell,
+    permission: TMS_PERMISSIONS.SETTINGS_VIEW,
+    group: 'services',
+    subItems: [
+      { name: 'All Notifications', href: '/notifications', icon: Bell },
+      { name: 'Push Notifications', href: '/notifications/push', icon: Bell },
+    ],
+  },
+  { name: 'Bug Management', href: '/bug-management', icon: Bug, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'services' },
+  { name: 'Authorize', href: '/authorize', icon: Shield, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
+  { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
+];
+
+const GROUP_TITLES: Record<NavItem['group'], string> = {
+  overview: 'OVERVIEW',
+  transport: 'TRANSPORT',
+  services: 'SERVICES',
+  system: 'SYSTEM',
+};
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [user, setUser] = useState<AdminUser | null>(null);
+  const { profile, loading, signOut } = useAuth();
+  const { can, isSuperAdmin, isLoading: permsLoading } = usePermissions();
 
+  // The proxy protects these routes server-side. This is a client-side safety
+  // net for the brief window before the session is hydrated.
   useEffect(() => {
-    const storedUser = localStorage.getItem('adminUser');
-    if (storedUser) {
-      try {
-        const userData = JSON.parse(storedUser);
-        setUser(userData);
-      } catch (error) {
-        console.error('Invalid user data in localStorage:', error);
-        localStorage.removeItem('adminUser');
-        router.push('/login');
-      }
-    } else {
-      router.push('/login');
+    if (!loading && !profile) {
+      router.replace('/auth/login');
     }
-  }, [router]);
-
-  const allNavigation = [
-    {
-      name: 'Dashboard',
-      href: '/dashboard',
-      icon: LayoutDashboard,
-      roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'overview',
-    },
-    {
-      name: 'Analytics',
-      href: '/analytics',
-      icon: BarChart3,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'overview',
-    },
-    {
-      name: 'Passengers',
-      href: '/students',
-      icon: Users,
-      roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'transport',
-    },
-    {
-      name: 'Drivers',
-      href: '/drivers',
-      icon: UserCheck,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Vehicles',
-      href: '/vehicles',
-      icon: Car,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'GPS Devices',
-      href: '/gps-devices',
-      icon: Navigation,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Track All',
-      href: '/track-all',
-      icon: Bus,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Routes',
-      href: '/routes',
-      icon: Route,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Schedules',
-      href: '/schedules',
-      icon: Calendar,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Route Optimization',
-      href: '/route-optimization',
-      icon: Zap,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Staff Assignments',
-      href: '/staff-route-assignments',
-      icon: ClipboardCheck,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'transport',
-    },
-    {
-      name: 'Enrollments',
-      href: '/enrollment-requests',
-      icon: FileText,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'services',
-    },
-    {
-      name: 'Grievances',
-      href: '/grievances',
-      icon: MessageCircle,
-      roles: ['super_admin', 'transport_admin', 'staff'],
-      group: 'services',
-    },
-    {
-      name: 'My Grievances',
-      href: '/my-grievances',
-      icon: MessageCircle,
-      roles: ['staff'],
-      group: 'services',
-    },
-    {
-      name: 'Payments',
-      href: '/payments',
-      icon: CreditCard,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'services',
-    },
-    {
-      name: 'Notifications',
-      href: '/notifications',
-      icon: Bell,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'services',
-      subItems: [
-        { name: 'All Notifications', href: '/notifications', icon: Bell },
-        {
-          name: 'Push Notifications',
-          href: '/notifications/push',
-          icon: Bell,
-        },
-      ],
-    },
-    {
-      name: 'Bug Management',
-      href: '/bug-management',
-      icon: Bug,
-      roles: ['super_admin', 'transport_admin'],
-      group: 'services',
-    },
-    {
-      name: 'Authorize',
-      href: '/authorize',
-      icon: Shield,
-      roles: ['super_admin'],
-      group: 'system',
-    },
-    {
-      name: 'Settings',
-      href: '/settings',
-      icon: Settings,
-      roles: ['super_admin'],
-      group: 'system',
-    },
-  ];
+  }, [loading, profile, router]);
 
   const navigation = allNavigation
-    .filter((item) => user && item.roles.includes(user.role))
+    .filter((item) => isSuperAdmin || can(item.permission))
     .map((item) => ({
       ...item,
       current: pathname === item.href || pathname.startsWith(item.href + '/'),
@@ -205,31 +104,26 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
   const groupedNavigation = navigation.reduce(
     (acc, item) => {
-      if (!acc[item.group]) {
-        acc[item.group] = [];
-      }
-      acc[item.group].push(item);
+      (acc[item.group] ??= []).push(item);
       return acc;
     },
     {} as Record<string, typeof navigation>
   );
 
-  const handleLogout = () => {
-    localStorage.removeItem('adminUser');
-    toast.success('Logged out successfully');
-    router.push('/login');
+  const handleLogout = async () => {
+    toast.success('Signing out…');
+    await signOut();
   };
 
-  const getInitials = (name: string) => {
-    return name
+  const getInitials = (name: string) =>
+    name
       .split(' ')
       .map((word) => word.charAt(0))
       .join('')
       .toUpperCase()
       .slice(0, 2);
-  };
 
-  if (!user) {
+  if (loading || !profile) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -241,6 +135,9 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       </div>
     );
   }
+
+  const displayName = profile.full_name || profile.email || 'User';
+  const displayRole = (profile.role || '').replace(/_/g, ' ');
 
   return (
     <ErrorBoundary>
@@ -260,12 +157,8 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                   <Bus className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-bold text-gray-900">
-                    MYJKKN TMS
-                  </h1>
-                  <p className="text-xs text-gray-500 capitalize">
-                    {user.role.replace('_', ' ')}
-                  </p>
+                  <h1 className="text-lg font-bold text-gray-900">MYJKKN TMS</h1>
+                  <p className="text-xs text-gray-500 capitalize">{displayRole}</p>
                 </div>
               </div>
               <button
@@ -289,68 +182,75 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           </div>
 
           <div className="sidebar-nav">
-            {Object.entries(groupedNavigation).map(([group, items]) => (
-              <div key={group} className="sidebar-section">
-                <div className="sidebar-section-title">
-                  {group === 'overview'
-                    ? 'OVERVIEW'
-                    : group === 'transport'
-                      ? 'TRANSPORT'
-                      : group === 'services'
-                        ? 'SERVICES'
-                        : 'SYSTEM'}
-                </div>
-                <div className="space-y-1">
-                  {items.map((item) => (
-                    <div key={item.name}>
-                      <a
-                        href={item.href}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          router.push(item.href);
-                          setSidebarOpen(false);
-                        }}
-                        className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
-                      >
-                        <item.icon className="icon" />
-                        <span>{item.name}</span>
-                      </a>
-                      {item.subItems && item.current && (
-                        <div className="ml-6 mt-1 space-y-1">
-                          {item.subItems.map((subItem) => (
-                            <a
-                              key={subItem.name}
-                              href={subItem.href}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                router.push(subItem.href);
-                                setSidebarOpen(false);
-                              }}
-                              className={`sidebar-nav-item text-sm ${pathname === subItem.href ? 'active' : ''}`}
-                            >
-                              <subItem.icon className="icon w-4 h-4" />
-                              <span>{subItem.name}</span>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+            {permsLoading && !isSuperAdmin ? (
+              <div className="p-4 space-y-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />
+                ))}
               </div>
-            ))}
+            ) : (
+              Object.entries(groupedNavigation).map(([group, items]) => (
+                <div key={group} className="sidebar-section">
+                  <div className="sidebar-section-title">
+                    {GROUP_TITLES[group as NavItem['group']]}
+                  </div>
+                  <div className="space-y-1">
+                    {items.map((item) => (
+                      <div key={item.name}>
+                        <a
+                          href={item.href}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            router.push(item.href);
+                            setSidebarOpen(false);
+                          }}
+                          className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
+                        >
+                          <item.icon className="icon" />
+                          <span>{item.name}</span>
+                        </a>
+                        {item.subItems && item.current && (
+                          <div className="ml-6 mt-1 space-y-1">
+                            {item.subItems.map((subItem) => (
+                              <a
+                                key={subItem.name}
+                                href={subItem.href}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  router.push(subItem.href);
+                                  setSidebarOpen(false);
+                                }}
+                                className={`sidebar-nav-item text-sm ${pathname === subItem.href ? 'active' : ''}`}
+                              >
+                                <subItem.icon className="icon w-4 h-4" />
+                                <span>{subItem.name}</span>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           <div className="sidebar-user">
             <div className="user-info">
-              <div className="user-avatar">
-                {getInitials(user.name || 'Admin')}
-              </div>
+              {profile.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.avatar_url}
+                  alt={displayName}
+                  className="user-avatar object-cover"
+                />
+              ) : (
+                <div className="user-avatar">{getInitials(displayName)}</div>
+              )}
               <div className="user-details">
-                <div className="user-name">{user.name}</div>
-                <div className="user-role capitalize">
-                  {user.role.replace('_', ' ')}
-                </div>
+                <div className="user-name">{displayName}</div>
+                <div className="user-role capitalize">{displayRole}</div>
               </div>
             </div>
             <button
@@ -373,9 +273,16 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             </button>
             <div className="top-bar-title">MYJKKN TMS</div>
             <div className="top-bar-actions">
-              <div className="user-avatar">
-                {getInitials(user.name || 'Admin')}
-              </div>
+              {profile.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.avatar_url}
+                  alt={displayName}
+                  className="user-avatar object-cover"
+                />
+              ) : (
+                <div className="user-avatar">{getInitials(displayName)}</div>
+              )}
             </div>
           </div>
 
