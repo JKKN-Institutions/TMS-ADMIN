@@ -1,257 +1,114 @@
-import { NextResponse, NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { withAuth } from '@/lib/api/with-auth';
+import { NextResponse, type NextRequest } from 'next/server';
+import { withAuth, type AuthContext } from '@/lib/api/with-auth';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+import type { DriverListItem, DriverOps } from '@/types';
 
-// Helper function to get Supabase client
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error('Server configuration error');
-  }
-
-  return createClient(supabaseUrl, supabaseServiceKey);
+interface StaffRow {
+  id: string; first_name: string | null; last_name: string | null; designation: string | null;
+  phone: string | null; email: string | null; employment_type: string | null; status: string | null;
+  is_active: boolean | null; date_of_joining: string | null; profile_picture: string | null;
+  institution_id: string; profile_id: string | null;
+}
+interface OpsRow {
+  staff_id: string; license_number: string | null; license_expiry: string | null; experience_years: number;
+  rating: number; total_trips: number; driver_status: 'active' | 'inactive' | 'on_leave'; address: string | null;
+  emergency_contact_name: string | null; emergency_contact_phone: string | null; aadhar_number: string | null;
+  medical_certificate_expiry: string | null; location_sharing_enabled: boolean; assigned_route_id: string | null; notes: string | null;
 }
 
-// Helper function to format data for database
-function formatForDB(value: any) {
-  if (value === '' || value === undefined) return null;
-  return value;
+function mapOps(o: OpsRow): DriverOps {
+  return {
+    licenseNumber: o.license_number, licenseExpiry: o.license_expiry, experienceYears: o.experience_years,
+    rating: o.rating, totalTrips: o.total_trips, driverStatus: o.driver_status, address: o.address,
+    emergencyContactName: o.emergency_contact_name, emergencyContactPhone: o.emergency_contact_phone,
+    aadharNumber: o.aadhar_number, medicalCertificateExpiry: o.medical_certificate_expiry,
+    locationSharingEnabled: o.location_sharing_enabled, assignedRouteId: o.assigned_route_id, notes: o.notes,
+  };
 }
 
-// Helper function to format date properly
-function formatDate(dateValue: any) {
-  if (!dateValue || dateValue === '') return null;
-  // If it's already a valid date string, return as is
-  if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
-    return dateValue;
-  }
-  return null;
+function mapStaffToDriver(s: StaffRow, ops: OpsRow | null): DriverListItem {
+  const name = `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim();
+  return {
+    id: s.id, name: name || (s.email ?? 'Unknown'), firstName: s.first_name ?? '', lastName: s.last_name ?? '',
+    designation: s.designation ?? '', phone: s.phone ?? '', email: s.email ?? '', employmentType: s.employment_type ?? '',
+    status: s.status ?? '', isActive: s.is_active ?? false, dateOfJoining: s.date_of_joining,
+    avatarUrl: s.profile_picture, institutionId: s.institution_id, profileId: s.profile_id,
+    ops: ops ? mapOps(ops) : null,
+  };
 }
 
 async function getDrivers() {
   try {
-    const supabase = getSupabaseClient();
-
-    // Fetch drivers from database
-    const { data: rawDrivers, error } = await supabase
-      .from('drivers')
-      .select('*')
-      .order('created_at', { ascending: false });
-
+    const supabase = createServiceRoleClient();
+    const { data: staffRows, error } = await supabase
+      .from('staff')
+      .select('id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id')
+      .eq('role_key', 'driver')
+      .order('first_name', { ascending: true });
     if (error) {
-      console.error('Database error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch drivers' },
-        { status: 500 }
-      );
+      console.error('Drivers (staff) query error:', error);
+      return NextResponse.json({ error: 'Failed to fetch drivers' }, { status: 500 });
     }
-
-    // Transform data to match frontend expectations
-    const drivers = (rawDrivers || []).map(driver => ({
-      id: driver.id,
-      name: driver.name,
-      driver_name: driver.name || 'Unknown Driver', // Schema uses 'name' not 'driver_name'
-      phone: driver.phone,
-      phone_number: driver.phone || 'N/A', // Schema uses 'phone' not 'phone_number'
-      email: driver.email || 'N/A',
-      license_number: driver.license_number || 'N/A',
-      experience_years: driver.experience_years || 0,
-      rating: driver.rating || 4.0,
-      status: driver.status || 'active',
-      address: driver.address,
-      emergency_contact_name: driver.emergency_contact_name,
-      emergency_contact_phone: driver.emergency_contact_phone,
-      license_expiry: driver.license_expiry,
-      medical_certificate_expiry: driver.medical_certificate_expiry,
-      aadhar_number: driver.aadhar_number,
-      total_trips: driver.total_trips || 0,
-      assigned_route_id: driver.assigned_route_id,
-      created_at: driver.created_at,
-      updated_at: driver.updated_at,
-      // Location tracking fields
-      location_sharing_enabled: driver.location_sharing_enabled || false,
-      location_enabled: driver.location_enabled || false,
-      location_tracking_status: driver.location_tracking_status || 'inactive',
-      current_latitude: driver.current_latitude,
-      current_longitude: driver.current_longitude,
-      location_accuracy: driver.location_accuracy,
-      location_timestamp: driver.location_timestamp,
-      last_location_update: driver.last_location_update,
-      // Default relationship fields
-      routes: null,
-      vehicles: null
-    }));
-
-    return NextResponse.json({ 
-      success: true, 
-      data: drivers,
-      count: drivers.length
-    });
-
-  } catch (error) {
-    console.error('Drivers API Error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    const staff = (staffRows ?? []) as StaffRow[];
+    const ids = staff.map((s) => s.id);
+    const { data: opsRows } = ids.length
+      ? await supabase.from('tms_driver').select('*').in('staff_id', ids)
+      : { data: [] as OpsRow[] };
+    const opsByStaff = new Map<string, OpsRow>(((opsRows ?? []) as OpsRow[]).map((o) => [o.staff_id, o]));
+    const drivers = staff.map((s) => mapStaffToDriver(s, opsByStaff.get(s.id) ?? null));
+    return NextResponse.json({ success: true, data: drivers, count: drivers.length });
+  } catch (e) {
+    console.error('Drivers API error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST - Add new driver
-async function postDriver(request: NextRequest) {
+async function upsertDriverOps(request: NextRequest, auth: AuthContext) {
   try {
-    const driverData = await request.json();
-    console.log('API: Adding new driver:', driverData);
-
-    // Validate required fields
-    if (!driverData.name || !driverData.licenseNumber || !driverData.phone) {
-      return NextResponse.json(
-        { error: 'Name, license number, and phone are required' },
-        { status: 400 }
-      );
+    // Authorization: super-admin bypass, else require tms.drivers.manage.
+    if (!auth.isSuperAdmin) {
+      const { data: canManage } = await auth.supabase.rpc('user_has_permission', { permission_name: 'tms.drivers.manage' });
+      if (!canManage) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    const body = await request.json();
+    const staffId: string | undefined = body?.staffId;
+    const f = body?.fields ?? {};
+    if (!staffId) return NextResponse.json({ error: 'staffId is required' }, { status: 400 });
 
-    const supabase = getSupabaseClient();
-
-    // Check if license number already exists
-    const { data: existingDriver } = await supabase
-      .from('drivers')
-      .select('id')
-      .eq('license_number', driverData.licenseNumber)
-      .single();
-
-    if (existingDriver) {
-      return NextResponse.json(
-        { error: 'Driver with this license number already exists' },
-        { status: 409 }
-      );
-    }
-
-    // Prepare driver data with proper field mapping
-    const insertData = {
-      name: driverData.name,
-      license_number: driverData.licenseNumber,
-      aadhar_number: driverData.aadharNumber,
-      phone: driverData.phone,
-      email: formatForDB(driverData.email),
-      experience_years: driverData.experienceYears || 0,
-      rating: driverData.rating || 4.0,
-      total_trips: driverData.totalTrips || 0,
-      status: driverData.status || 'active',
-      address: formatForDB(driverData.address),
-      emergency_contact_name: formatForDB(driverData.emergencyContactName),
-      emergency_contact_phone: formatForDB(driverData.emergencyContactPhone),
-      license_expiry: formatDate(driverData.licenseExpiry),
-      medical_certificate_expiry: formatDate(driverData.medicalCertificateExpiry),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const supabase = createServiceRoleClient();
+    const payload = {
+      staff_id: staffId,
+      license_number: f.licenseNumber ?? null,
+      license_expiry: f.licenseExpiry || null,
+      experience_years: Number(f.experienceYears) || 0,
+      rating: Number(f.rating) || 0,
+      total_trips: Number(f.totalTrips) || 0,
+      driver_status: f.driverStatus ?? 'active',
+      address: f.address ?? null,
+      emergency_contact_name: f.emergencyContactName ?? null,
+      emergency_contact_phone: f.emergencyContactPhone ?? null,
+      aadhar_number: f.aadharNumber ?? null,
+      medical_certificate_expiry: f.medicalCertificateExpiry || null,
+      location_sharing_enabled: !!f.locationSharingEnabled,
+      assigned_route_id: f.assignedRouteId || null,
+      notes: f.notes ?? null,
+      updated_by: auth.userId,
     };
-
-    console.log('API: Formatted data for database insert:', insertData);
-
-    // Insert new driver
-    const { data: newDriver, error } = await supabase
-      .from('drivers')
-      .insert([insertData])
+    const { data, error } = await supabase
+      .from('tms_driver')
+      .upsert(payload, { onConflict: 'staff_id' })
       .select()
       .single();
-
     if (error) {
-      console.error('Database error adding driver:', error);
-      return NextResponse.json(
-        { error: 'Failed to add driver: ' + error.message },
-        { status: 500 }
-      );
+      console.error('tms_driver upsert error:', error);
+      return NextResponse.json({ error: 'Failed to save driver details' }, { status: 500 });
     }
-
-    console.log('API: Driver added successfully:', newDriver);
-
-    return NextResponse.json({
-      success: true,
-      data: newDriver,
-      message: 'Driver added successfully'
-    });
-
-  } catch (error) {
-    console.error('Error adding driver:', error);
-    return NextResponse.json(
-      { error: 'Failed to add driver' },
-      { status: 500 }
-    );
-  }
-}
-
-// PUT - Update existing driver
-async function putDriver(request: NextRequest) {
-  try {
-    const { driverId, driverData } = await request.json();
-    console.log('API: Updating driver:', driverId, driverData);
-
-    if (!driverId) {
-      return NextResponse.json(
-        { error: 'Driver ID is required' },
-        { status: 400 }
-      );
-    }
-
-    const supabase = getSupabaseClient();
-
-    // Prepare driver data with proper field mapping
-    const updateData = {
-      name: driverData.name,
-      license_number: driverData.licenseNumber,
-      aadhar_number: driverData.aadharNumber,
-      phone: driverData.phone,
-      email: formatForDB(driverData.email),
-      experience_years: driverData.experienceYears || 0,
-      rating: driverData.rating || 4.0,
-      total_trips: driverData.totalTrips || 0,
-      status: driverData.status || 'active',
-      address: formatForDB(driverData.address),
-      emergency_contact_name: formatForDB(driverData.emergencyContactName),
-      emergency_contact_phone: formatForDB(driverData.emergencyContactPhone),
-      license_expiry: formatDate(driverData.licenseExpiry),
-      medical_certificate_expiry: formatDate(driverData.medicalCertificateExpiry),
-      updated_at: new Date().toISOString()
-    };
-
-    console.log('API: Formatted data for database update:', updateData);
-
-    // Update driver
-    const { data: updatedDriver, error } = await supabase
-      .from('drivers')
-      .update(updateData)
-      .eq('id', driverId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Database error updating driver:', error);
-      return NextResponse.json(
-        { error: 'Failed to update driver: ' + error.message },
-        { status: 500 }
-      );
-    }
-
-    console.log('API: Driver updated successfully:', updatedDriver);
-
-    return NextResponse.json({
-      success: true,
-      data: updatedDriver,
-      message: 'Driver updated successfully'
-    });
-
-  } catch (error) {
-    console.error('Error updating driver:', error);
-    return NextResponse.json(
-      { error: 'Failed to update driver' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: true, data });
+  } catch (e) {
+    console.error('Driver upsert error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export const GET = withAuth(() => getDrivers());
-export const POST = withAuth((request) => postDriver(request));
-export const PUT = withAuth((request) => putDriver(request)); 
+export const PUT = withAuth((request, auth) => upsertDriverOps(request, auth));

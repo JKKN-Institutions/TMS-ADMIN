@@ -40,6 +40,41 @@ export interface TmsUser {
   phone_number: string | null;
 }
 
+export interface DriverOps {
+  licenseNumber: string | null;
+  licenseExpiry: string | null;
+  experienceYears: number;
+  rating: number;
+  totalTrips: number;
+  driverStatus: 'active' | 'inactive' | 'on_leave';
+  address: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  aadharNumber: string | null;
+  medicalCertificateExpiry: string | null;
+  locationSharingEnabled: boolean;
+  assignedRouteId: string | null;
+  notes: string | null;
+}
+
+export interface DriverListItem {
+  id: string;            // staff.id
+  name: string;
+  firstName: string;
+  lastName: string;
+  designation: string;
+  phone: string;
+  email: string;
+  employmentType: string;
+  status: string;        // staff lifecycle status
+  isActive: boolean;
+  dateOfJoining: string | null;
+  avatarUrl: string | null;
+  institutionId: string;
+  profileId: string | null;
+  ops: DriverOps | null; // null = no tms_driver row yet
+}
+
 export interface Permission {
   module: string;
   actions: ('create' | 'read' | 'update' | 'delete' | 'approve')[];
