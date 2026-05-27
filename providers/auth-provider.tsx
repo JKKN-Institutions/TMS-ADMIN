@@ -126,12 +126,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Initial session check (getUser validates the JWT).
     supabase.auth
       .getUser()
-      .then(({ data: { user } }: { data: { user: User | null } }) => {
+      .then(async ({ data: { user } }: { data: { user: User | null } }) => {
         if (!active) return;
         setUser(user);
-      if (user) fetchProfile(user.id);
-      setLoading(false);
-    });
+        // Await the profile fetch BEFORE clearing loading. Otherwise `loading`
+        // flips to false while `profile` is still null, and route guards that
+        // check `!profile` redirect an authenticated user to /auth/login.
+        if (user) await fetchProfile(user.id);
+        if (active) setLoading(false);
+      });
 
     const {
       data: { subscription },

@@ -84,16 +84,17 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { profile, loading, signOut } = useAuth();
+  const { user, profile, loading, signOut } = useAuth();
   const { can, isSuperAdmin, isLoading: permsLoading } = usePermissions();
 
-  // The proxy protects these routes server-side. This is a client-side safety
-  // net for the brief window before the session is hydrated.
+  // The proxy protects these routes server-side. This client net only redirects
+  // when there is genuinely NO authenticated user — never merely because the
+  // profile is still loading (that caused a login/dashboard bounce on sign-in).
   useEffect(() => {
-    if (!loading && !profile) {
+    if (!loading && !user) {
       router.replace('/auth/login');
     }
-  }, [loading, profile, router]);
+  }, [loading, user, router]);
 
   const navigation = allNavigation
     .filter((item) => isSuperAdmin || can(item.permission))
