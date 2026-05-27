@@ -11,12 +11,34 @@ export interface AdminUser {
   createdAt: Date;
 }
 
-export type UserRole = 
+// Aligned with MyJKKN roles. `(string & {})` keeps editor autocomplete for the
+// known roles while still permitting dynamic custom roles from custom_roles.
+export type UserRole =
   | 'super_admin'
-  | 'transport_manager' 
-  | 'finance_admin'
-  | 'operations_admin'
-  | 'data_entry';
+  | 'administrator'
+  | 'transport_manager'
+  | 'faculty'
+  | 'student'
+  | 'driver'
+  | 'staff'
+  | 'hod'
+  | 'principal'
+  | (string & {});
+
+// Shape of a TMS user sourced from the shared MyJKKN `profiles` table.
+// This is the auth source of truth (see providers/auth-provider.tsx Profile).
+export interface TmsUser {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  is_super_admin: boolean;
+  is_active: boolean;
+  institution_id: string | null;
+  department_id: string | null;
+  avatar_url: string | null;
+  phone_number: string | null;
+}
 
 export interface Permission {
   module: string;

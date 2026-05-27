@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withAuth } from '@/lib/api/with-auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function GET() {
+async function getVehicles() {
   try {
     // Fetch vehicles from database
     const { data: vehicles, error } = await supabase
@@ -38,7 +39,7 @@ export async function GET() {
 }
 
 // POST - Create new vehicle
-export async function POST(request: NextRequest) {
+async function postVehicle(request: NextRequest) {
   try {
     const vehicleData = await request.json();
 
@@ -112,4 +113,7 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}
+
+export const GET = withAuth(() => getVehicles());
+export const POST = withAuth((request) => postVehicle(request)); 
