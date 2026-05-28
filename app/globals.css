@@ -1,36 +1,183 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
+/* Enable class-based dark mode for Tailwind v4 utilities (dark:*).
+   Keep :where() so it matches the .dark element itself AND descendants
+   at zero specificity. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 142.1 76.2% 36.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222.2 84% 4.9%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96%;
-  --accent-foreground: 222.2 84% 4.9%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 142.1 76.2% 36.3%;
-  --chart-1: 12 76% 61%;
-  --chart-2: 173 58% 39%;
-  --chart-3: 197 37% 24%;
-  --chart-4: 43 74% 66%;
-  --chart-5: 27 87% 67%;
-  --radius: 0.5rem;
+  --background: oklch(1.0000 0 0);
+  --foreground: oklch(0.1371 0.0360 258.5258);
+  --card: oklch(1.0000 0 0);
+  --card-foreground: oklch(0.1371 0.0360 258.5258);
+  --popover: oklch(1.0000 0 0);
+  --popover-foreground: oklch(0.1371 0.0360 258.5258);
+  --primary: oklch(0.627 0.1939 149.21);
+  --primary-foreground: oklch(0.9838 0.0035 247.8583);
+  --secondary: oklch(0.9684 0.0068 247.8951);
+  --secondary-foreground: oklch(0.2079 0.0399 265.7275);
+  --muted: oklch(0.9684 0.0068 247.8951);
+  --muted-foreground: oklch(0.5547 0.0407 257.4404);
+  --accent: oklch(0.9684 0.0068 247.8951);
+  --accent-foreground: oklch(0.2079 0.0399 265.7275);
+  --destructive: oklch(0.6368 0.2078 25.3259);
+  --destructive-foreground: oklch(0.9838 0.0035 247.8583);
+  --border: oklch(0.9290 0.0126 255.5317);
+  --input: oklch(0.9290 0.0126 255.5317);
+  --ring: oklch(0.627 0.1939 149.21);
+  --chart-1: oklch(0.5460 0.2153 262.8719);
+  --chart-2: oklch(0.7211 0.1415 253.1015);
+  --chart-3: oklch(0.6325 0.1843 258.6360);
+  --chart-4: oklch(0.8117 0.0970 249.0979);
+  --chart-5: oklch(0.8829 0.0573 251.9139);
+  --sidebar: oklch(0.9838 0.0035 247.8583);
+  --sidebar-foreground: oklch(0.2079 0.0399 265.7275);
+  --sidebar-primary: oklch(0.627 0.1939 149.21);
+  --sidebar-primary-foreground: oklch(1.0000 0 0);
+  --sidebar-accent: oklch(0.9290 0.0126 255.5317);
+  --sidebar-accent-foreground: oklch(0.627 0.1939 149.21);
+  --sidebar-border: oklch(0.9290 0.0126 255.5317);
+  --sidebar-ring: oklch(0.627 0.1939 149.21);
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: JetBrains Mono, monospace;
+  --radius: 0.375rem;
+  --shadow-x: 0px;
+  --shadow-y: 4px;
+  --shadow-blur: 10px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.1;
+  --shadow-color: 0, 0%, 0%;
+  --shadow-2xs: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.05);
+  --shadow-xs: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.05);
+  --shadow-sm: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.10), 0px 1px 2px -1px hsl(0, 0%, 0% / 0.10);
+  --shadow: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.10), 0px 1px 2px -1px hsl(0, 0%, 0% / 0.10);
+  --shadow-md: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.10), 0px 2px 4px -1px hsl(0, 0%, 0% / 0.10);
+  --shadow-lg: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.10), 0px 4px 6px -1px hsl(0, 0%, 0% / 0.10);
+  --shadow-xl: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.10), 0px 8px 10px -1px hsl(0, 0%, 0% / 0.10);
+  --shadow-2xl: 0px 4px 10px 0px hsl(0, 0%, 0% / 0.25);
+  --tracking-normal: -0.015em;
+  --spacing: 0.25rem;
 }
 
-* {
-  border-color: hsl(var(--border));
+.dark {
+  --background: oklch(0.1371 0.0360 258.5258);
+  --foreground: oklch(0.9838 0.0035 247.8583);
+  --card: oklch(0.1371 0.0360 258.5258);
+  --card-foreground: oklch(0.9838 0.0035 247.8583);
+  --popover: oklch(0.1371 0.0360 258.5258);
+  --popover-foreground: oklch(0.9838 0.0035 247.8583);
+  --primary: oklch(0.723 0.219 149.579);
+  --primary-foreground: oklch(0.2079 0.0399 265.7275);
+  --secondary: oklch(0.2800 0.0369 259.9740);
+  --secondary-foreground: oklch(0.9838 0.0035 247.8583);
+  --muted: oklch(0.2800 0.0369 259.9740);
+  --muted-foreground: oklch(0.7107 0.0351 256.7877);
+  --accent: oklch(0.2800 0.0369 259.9740);
+  --accent-foreground: oklch(0.9838 0.0035 247.8583);
+  --destructive: oklch(0.3959 0.1331 25.7205);
+  --destructive-foreground: oklch(0.9838 0.0035 247.8583);
+  --border: oklch(0.2800 0.0369 259.9740);
+  --input: oklch(0.2800 0.0369 259.9740);
+  --ring: oklch(0.723 0.219 149.579);
+  --chart-1: oklch(0.4878 0.2170 264.3876);
+  --chart-2: oklch(0.5449 0.2154 262.7414);
+  --chart-3: oklch(0.6776 0.1481 238.1044);
+  --chart-4: oklch(0.3752 0.0394 256.8467);
+  --chart-5: oklch(0.4691 0.1926 264.5776);
+  --sidebar: oklch(0.1371 0.0360 258.5258);
+  --sidebar-foreground: oklch(0.9838 0.0035 247.8583);
+  --sidebar-primary: oklch(0.723 0.219 149.579);
+  --sidebar-primary-foreground: oklch(0.1371 0.0360 258.5258);
+  --sidebar-accent: oklch(0.2800 0.0369 259.9740);
+  --sidebar-accent-foreground: oklch(0.9838 0.0035 247.8583);
+  --sidebar-border: oklch(0.2800 0.0369 259.9740);
+  --sidebar-ring: oklch(0.723 0.219 149.579);
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: JetBrains Mono, monospace;
+  --radius: 0.375rem;
+  --shadow-x: 0px;
+  --shadow-y: 8px;
+  --shadow-blur: 15px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.5;
+  --shadow-color: 0, 0%, 0%;
+  --shadow-2xs: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.25);
+  --shadow-xs: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.25);
+  --shadow-sm: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.50), 0px 1px 2px -1px hsl(0, 0%, 0% / 0.50);
+  --shadow: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.50), 0px 1px 2px -1px hsl(0, 0%, 0% / 0.50);
+  --shadow-md: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.50), 0px 2px 4px -1px hsl(0, 0%, 0% / 0.50);
+  --shadow-lg: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.50), 0px 4px 6px -1px hsl(0, 0%, 0% / 0.50);
+  --shadow-xl: 0px 8px 15px 0px hsl(0, 0%, 0% / 0.50), 0px 8px 10px -1px hsl(0, 0%, 0% / 0.50);
+  --shadow-2xl: 0px 8px 15px 0px hsl(0, 0%, 0% / 1.25);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+
+  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+  --tracking-normal: var(--tracking-normal);
+  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
 }
 
 body {
@@ -40,6 +187,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   overflow-x: hidden;
+  letter-spacing: var(--tracking-normal);
 }
 
 html {
@@ -48,8 +196,8 @@ html {
 
 /* Clean Layout Components */
 .btn-primary {
-  background-color: rgb(22 163 74);
-  color: white;
+  background-color: var(--primary);
+  color: var(--primary-foreground);
   font-weight: 500;
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
@@ -61,7 +209,7 @@ html {
 }
 
 .btn-primary:hover {
-  background-color: rgb(21 128 61);
+  background-color: color-mix(in oklab, var(--primary) 88%, black);
 }
 
 .btn-secondary {
@@ -152,9 +300,9 @@ html {
 }
 
 .input:focus {
-  outline: 2px solid rgb(34 197 94);
+  outline: 2px solid var(--ring);
   outline-offset: -2px;
-  border-color: rgb(34 197 94);
+  border-color: var(--ring);
 }
 
 /* Helper classes for inputs with icons */
@@ -203,6 +351,7 @@ html {
   flex-direction: column;
   width: 240px;
   z-index: 30;
+  transition: width 0.2s ease;
 }
 
 .sidebar-header {
@@ -244,16 +393,17 @@ html {
 }
 
 .sidebar-nav-item:hover {
-  background-color: rgb(243 244 246);
+  background-color: rgb(220 252 231);
+  color: rgb(21 128 61);
 }
 
 .sidebar-nav-item.active {
-  background-color: rgb(22 163 74);
-  color: white;
+  background-color: var(--primary);
+  color: var(--primary-foreground);
 }
 
 .sidebar-nav-item.active:hover {
-  background-color: rgb(21 128 61);
+  background-color: color-mix(in oklab, var(--primary) 88%, black);
 }
 
 .sidebar-nav-item .icon {
@@ -268,8 +418,11 @@ html {
   background: #f8f9fb;
   min-height: 100vh;
   margin-left: 240px;
+  /* Clear the fixed 4rem header (border-box keeps total height at 100vh). */
+  padding-top: 4rem;
   display: flex;
   flex-direction: column;
+  transition: margin-left 0.2s ease;
 }
 
 .content-header {
@@ -407,9 +560,9 @@ html {
 }
 
 .search-input:focus {
-  outline: 2px solid rgb(34 197 94);
+  outline: 2px solid var(--ring);
   outline-offset: -2px;
-  border-color: rgb(34 197 94);
+  border-color: var(--ring);
 }
 
 /* Dashboard sections */
@@ -481,12 +634,12 @@ html {
 .user-avatar {
   width: 2.5rem;
   height: 2.5rem;
-  background-color: rgb(22 163 74);
+  background-color: var(--primary);
   border-radius: 9999px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--primary-foreground);
   font-weight: 500;
   font-size: 0.875rem;
   margin-right: 0.75rem;
@@ -638,3 +791,461 @@ html {
 .fade-in {
   animation: fadeIn 0.3s ease-out;
 }
+
+/* ===== Fixed application header =====
+   position: fixed (not sticky) so it never scrolls away regardless of any
+   overflow on ancestors. It is pinned to the top and offset from the left to
+   sit beside the fixed sidebar. z-index stays below the sidebar (z-30) so the
+   mobile slide-in drawer still covers the header when open. */
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  height: 4rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  background-color: white;
+  border-bottom: 1px solid rgb(229 231 235);
+}
+
+@media (min-width: 1024px) {
+  .app-header {
+    padding: 0 1.5rem;
+  }
+}
+
+/* Desktop: the sidebar is visible (240px), so start the header after it. */
+@media (min-width: 1025px) {
+  .app-header {
+    left: 240px;
+  }
+
+  /* Collapsed icon-rail is 72px wide. */
+  .main-content.sidebar-collapsed .app-header {
+    left: 72px;
+  }
+}
+
+/* ===== Collapsed (icon-only) sidebar — desktop only =====
+   Scoped to >=1025px so the mobile slide-in drawer always shows full labels
+   (the collapse toggle itself is desktop-only). */
+@media (min-width: 1025px) {
+  .sidebar-modern.collapsed {
+    width: 72px;
+  }
+
+  .sidebar-modern.collapsed .sidebar-header {
+    padding: 1.25rem 0.75rem;
+  }
+
+  .sidebar-modern.collapsed .sidebar-header > div {
+    justify-content: center;
+  }
+
+  .sidebar-modern.collapsed .sidebar-header h1,
+  .sidebar-modern.collapsed .sidebar-header p,
+  .sidebar-modern.collapsed .sidebar-search,
+  .sidebar-modern.collapsed .sidebar-section-title,
+  .sidebar-modern.collapsed .sidebar-nav-item span,
+  .sidebar-modern.collapsed .user-details,
+  .sidebar-modern.collapsed .sidebar-label {
+    display: none;
+  }
+
+  .sidebar-modern.collapsed .sidebar-nav-item {
+    justify-content: center;
+    padding: 0.625rem;
+  }
+
+  .sidebar-modern.collapsed .sidebar-nav-item .icon {
+    margin-right: 0;
+  }
+
+  .sidebar-modern.collapsed .user-info {
+    justify-content: center;
+  }
+
+  .sidebar-modern.collapsed .user-avatar {
+    margin-right: 0;
+  }
+
+  .sidebar-modern.collapsed .sidebar-user .btn-secondary {
+    justify-content: center;
+  }
+
+  /* Shift main content to match the collapsed rail */
+  .main-content.sidebar-collapsed {
+    margin-left: 72px;
+  }
+}
+
+/* ===== Dark mode — application shell ===== */
+.dark body {
+  background: #0f1115;
+  color: #e5e7eb;
+}
+
+.dark .main-content {
+  background: #0f1115;
+}
+
+.dark .sidebar-modern {
+  background-color: #161922;
+  border-right-color: #262a35;
+}
+
+.dark .sidebar-header {
+  border-bottom-color: #262a35;
+}
+
+.dark .sidebar-search {
+  border-bottom-color: #262a35;
+}
+
+.dark .sidebar-header h1 {
+  color: #f3f4f6;
+}
+
+.dark .sidebar-section-title {
+  color: #9ca3af;
+}
+
+.dark .sidebar-nav-item {
+  color: #cbd5e1;
+}
+
+.dark .sidebar-nav-item:hover {
+  background-color: rgba(34, 197, 94, 0.14);
+  color: rgb(134 239 172);
+}
+
+.dark .sidebar-user {
+  border-top-color: #262a35;
+}
+
+.dark .user-name {
+  color: #f3f4f6;
+}
+
+.dark .search-input {
+  background-color: #1f2430;
+  border-color: #2d333f;
+  color: #e5e7eb;
+}
+
+.dark .app-header {
+  background-color: #161922;
+  border-bottom-color: #262a35;
+}
+
+.dark .content-header {
+  background-color: #161922;
+  border-bottom-color: #262a35;
+}
+
+/* ===== Dark mode — module content (utility-class retrofit) =====
+   Module pages are built almost entirely with raw Tailwind neutrals
+   (bg-white, text-gray-*, border-gray-*) and carry no `dark:` variants — so
+   without this block the page content stays white when the chosen theme is
+   dark. These unlayered rules remap ONLY the neutral palette under `.dark`,
+   covering every module page, table, card, input and (portaled) dialog.
+   Colored utilities (blue/green/red/amber…) are left untouched so semantic
+   badges and buttons keep their meaning. Unlayered rules outrank Tailwind's
+   `@layer utilities`, so no `!important` is needed. Surface hexes match the
+   app shell (sidebar/header) for a cohesive dark UI:
+     base bg #0f1115 · surface #161922 · elevated #1f2430 · border #262a35 */
+
+/* Surfaces */
+.dark .bg-white { background-color: #161922; }
+.dark .bg-gray-50 { background-color: #1f2430; }
+.dark .bg-gray-100 { background-color: #1f2430; }
+.dark .bg-gray-200 { background-color: #262a35; }
+
+/* Text */
+.dark .text-gray-900,
+.dark .text-gray-800 { color: #f3f4f6; }
+.dark .text-gray-700,
+.dark .text-gray-600 { color: #d1d5db; }
+.dark .text-gray-500 { color: #9ca3af; }
+.dark .text-gray-400 { color: #6b7280; }
+
+/* Borders & dividers */
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 { border-color: #262a35; }
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #262a35; }
+
+/* Hover states */
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-100:hover { background-color: #1f2430; }
+.dark .hover\:bg-gray-200:hover { background-color: #262a35; }
+.dark .hover\:text-gray-900:hover { color: #f3f4f6; }
+
+/* Shared semantic component classes used by a few pages */
+.dark .card,
+.dark .card-hover,
+.dark .stat-card,
+.dark .dashboard-section,
+.dark .quick-action-card {
+  background-color: #161922;
+  border-color: #262a35;
+}
+
+.dark .stat-card,
+.dark .quick-action-card,
+.dark .dashboard-section {
+  box-shadow: none;
+}
+
+.dark .page-title,
+.dark .section-title,
+.dark .stat-value,
+.dark .text-heading-1,
+.dark .text-heading-2,
+.dark .text-heading-3 {
+  color: #f3f4f6;
+}
+
+.dark .page-subtitle,
+.dark .stat-title,
+.dark .text-body,
+.dark .quick-action-title,
+.dark .quick-action-desc {
+  color: #9ca3af;
+}
+
+.dark .input {
+  background-color: #161922;
+  border-color: #262a35;
+  color: #e5e7eb;
+}
+
+.dark .btn-secondary {
+  background-color: #161922;
+  border-color: #262a35;
+  color: #d1d5db;
+}
+
+.dark .btn-secondary:hover {
+  background-color: #1f2430;
+}
+
+/* ===== Tailwind v4 compatibility: *-opacity-* utilities =====
+   Tailwind v4 REMOVED the standalone opacity utilities (bg-opacity-*,
+   ring-opacity-*, …) in favour of the slash modifier (e.g. `bg-black/50`).
+   Legacy markup across the app still uses the old classes, which v4 silently
+   drops — so every modal/notification backdrop (`bg-black bg-opacity-50`)
+   renders as FULLY OPAQUE black, blacking out the page behind it. These
+   combined-selector rules re-activate the intended translucency app-wide
+   without editing 70+ components. They are unlayered and more specific
+   (0,2,0) than the single-class color utility (0,1,0), so they win without
+   `!important`. The deprecated class staying in the markup is harmless — it
+   only serves as the second half of these selectors. */
+.bg-black.bg-opacity-10 { background-color: rgb(0 0 0 / 0.10); }
+.bg-black.bg-opacity-20 { background-color: rgb(0 0 0 / 0.20); }
+.bg-black.bg-opacity-25 { background-color: rgb(0 0 0 / 0.25); }
+.bg-black.bg-opacity-30 { background-color: rgb(0 0 0 / 0.30); }
+.bg-black.bg-opacity-40 { background-color: rgb(0 0 0 / 0.40); }
+.bg-black.bg-opacity-50 { background-color: rgb(0 0 0 / 0.50); }
+.bg-black.bg-opacity-60 { background-color: rgb(0 0 0 / 0.60); }
+.bg-black.bg-opacity-70 { background-color: rgb(0 0 0 / 0.70); }
+.bg-black.bg-opacity-75 { background-color: rgb(0 0 0 / 0.75); }
+.bg-black.bg-opacity-80 { background-color: rgb(0 0 0 / 0.80); }
+
+.bg-white.bg-opacity-10 { background-color: rgb(255 255 255 / 0.10); }
+.bg-white.bg-opacity-20 { background-color: rgb(255 255 255 / 0.20); }
+.bg-white.bg-opacity-40 { background-color: rgb(255 255 255 / 0.40); }
+.bg-white.bg-opacity-50 { background-color: rgb(255 255 255 / 0.50); }
+.bg-white.bg-opacity-60 { background-color: rgb(255 255 255 / 0.60); }
+.bg-white.bg-opacity-80 { background-color: rgb(255 255 255 / 0.80); }
+.bg-white.bg-opacity-90 { background-color: rgb(255 255 255 / 0.90); }
+
+.bg-gray-600.bg-opacity-50 { background-color: rgb(75 85 99 / 0.50); }
+
+.ring-blue-500.ring-opacity-20 { --tw-ring-color: rgb(59 130 246 / 0.20); }
+
+/* ===== Dark mode — gradients, translucency & extended neutrals =====
+   The retrofit block earlier remaps only SOLID light neutrals (bg-white,
+   bg-gray-*). Module pages (analytics, dashboard, …) also lean heavily on
+   decorative LIGHT gradients (from-white, from-*-50, to-*-100), translucent
+   white surfaces (bg-white/80) and the slate/zinc/neutral/stone palettes —
+   none of which were covered, so they stayed bright in dark mode (a white
+   content area under an otherwise dark shell).
+
+   Tailwind v4 builds gradients from the --tw-gradient-from/via/to *color* vars
+   (referenced by --tw-gradient-stops). Overriding ONLY those color vars on the
+   light stop classes recolors gradients to dark surfaces while leaving the
+   direction, stop positions and SATURATED (-400…-900) accent stops untouched —
+   so the colorful KPI/stat cards keep their meaning. Surface hexes match the
+   shell: base #0f1115 · surface #161922 · elevated #1f2430 · border #262a35. */
+
+/* Light gradient START stops → dark surface */
+.dark :is(
+  .from-white,
+  .from-slate-50, .from-slate-100,
+  .from-gray-50, .from-gray-100,
+  .from-zinc-50, .from-zinc-100,
+  .from-neutral-50, .from-neutral-100,
+  .from-stone-50, .from-stone-100,
+  .from-red-50, .from-red-100,
+  .from-orange-50, .from-orange-100,
+  .from-amber-50, .from-amber-100,
+  .from-yellow-50, .from-yellow-100,
+  .from-lime-50, .from-lime-100,
+  .from-green-50, .from-green-100,
+  .from-emerald-50, .from-emerald-100,
+  .from-teal-50, .from-teal-100,
+  .from-cyan-50, .from-cyan-100,
+  .from-sky-50, .from-sky-100,
+  .from-blue-50, .from-blue-100,
+  .from-indigo-50, .from-indigo-100,
+  .from-violet-50, .from-violet-100,
+  .from-purple-50, .from-purple-100,
+  .from-fuchsia-50, .from-fuchsia-100,
+  .from-pink-50, .from-pink-100,
+  .from-rose-50, .from-rose-100
+) { --tw-gradient-from: #161922; }
+
+/* Light gradient MIDDLE stops → dark surface */
+.dark :is(
+  .via-white,
+  .via-slate-50, .via-slate-100,
+  .via-gray-50, .via-gray-100,
+  .via-zinc-50, .via-zinc-100,
+  .via-neutral-50, .via-neutral-100,
+  .via-stone-50, .via-stone-100,
+  .via-red-50, .via-red-100,
+  .via-orange-50, .via-orange-100,
+  .via-amber-50, .via-amber-100,
+  .via-yellow-50, .via-yellow-100,
+  .via-lime-50, .via-lime-100,
+  .via-green-50, .via-green-100,
+  .via-emerald-50, .via-emerald-100,
+  .via-teal-50, .via-teal-100,
+  .via-cyan-50, .via-cyan-100,
+  .via-sky-50, .via-sky-100,
+  .via-blue-50, .via-blue-100,
+  .via-indigo-50, .via-indigo-100,
+  .via-violet-50, .via-violet-100,
+  .via-purple-50, .via-purple-100,
+  .via-fuchsia-50, .via-fuchsia-100,
+  .via-pink-50, .via-pink-100,
+  .via-rose-50, .via-rose-100
+) { --tw-gradient-via: #1b2030; }
+
+/* Light gradient END stops → slightly elevated dark surface */
+.dark :is(
+  .to-white,
+  .to-slate-50, .to-slate-100,
+  .to-gray-50, .to-gray-100,
+  .to-zinc-50, .to-zinc-100,
+  .to-neutral-50, .to-neutral-100,
+  .to-stone-50, .to-stone-100,
+  .to-red-50, .to-red-100,
+  .to-orange-50, .to-orange-100,
+  .to-amber-50, .to-amber-100,
+  .to-yellow-50, .to-yellow-100,
+  .to-lime-50, .to-lime-100,
+  .to-green-50, .to-green-100,
+  .to-emerald-50, .to-emerald-100,
+  .to-teal-50, .to-teal-100,
+  .to-cyan-50, .to-cyan-100,
+  .to-sky-50, .to-sky-100,
+  .to-blue-50, .to-blue-100,
+  .to-indigo-50, .to-indigo-100,
+  .to-violet-50, .to-violet-100,
+  .to-purple-50, .to-purple-100,
+  .to-fuchsia-50, .to-fuchsia-100,
+  .to-pink-50, .to-pink-100,
+  .to-rose-50, .to-rose-100
+) { --tw-gradient-to: #1f2430; }
+
+/* Gradient-clipped TEXT (e.g. page headings) uses DARK stops (-700…-900) that
+   become invisible on a dark background. Recolor only when paired with
+   .bg-clip-text so ordinary dark gradients are unaffected. */
+.dark .bg-clip-text:is(
+  .from-gray-900, .from-gray-800, .from-gray-700,
+  .from-slate-900, .from-slate-800, .from-slate-700,
+  .from-zinc-900, .from-zinc-800,
+  .from-neutral-900, .from-neutral-800,
+  .from-blue-900, .from-blue-800, .from-blue-700,
+  .from-indigo-900, .from-indigo-800, .from-indigo-700,
+  .from-purple-900, .from-purple-800
+) { --tw-gradient-from: #f3f4f6; }
+
+.dark .bg-clip-text:is(
+  .via-blue-900, .via-blue-800, .via-blue-700,
+  .via-indigo-900, .via-indigo-800, .via-indigo-700,
+  .via-purple-900, .via-purple-800, .via-purple-700
+) { --tw-gradient-via: #93c5fd; }
+
+.dark .bg-clip-text:is(
+  .to-blue-900, .to-blue-800, .to-blue-700,
+  .to-indigo-900, .to-indigo-800, .to-indigo-700,
+  .to-purple-900, .to-purple-800, .to-purple-700
+) { --tw-gradient-to: #c7d2fe; }
+
+/* Translucent white surfaces (slash modifier) → translucent dark surface.
+   backdrop-blur is preserved by leaving the alpha < 1. */
+.dark :is(
+  .bg-white\/50, .bg-white\/60, .bg-white\/70,
+  .bg-white\/80, .bg-white\/90, .bg-white\/95
+) { background-color: rgb(22 25 34 / 0.92); }
+
+/* Translucent white surfaces (legacy bg-opacity-* pairing) → dark surface.
+   Mirrors the v4 compatibility block above, scoped to dark mode. */
+.dark .bg-white:is(
+  .bg-opacity-50, .bg-opacity-60, .bg-opacity-80, .bg-opacity-90
+) { background-color: rgb(22 25 34 / 0.92); }
+
+/* Translucent / hairline light borders → dark border */
+.dark :is(
+  .border-white\/10, .border-white\/20, .border-white\/30,
+  .border-white\/40, .border-white\/50,
+  .border-gray-100\/50, .border-gray-200\/50
+) { border-color: #262a35; }
+
+/* Extended neutral palettes (slate/zinc/neutral/stone) — mirror the gray remap */
+.dark :is(
+  .bg-slate-50, .bg-slate-100, .bg-zinc-50, .bg-zinc-100,
+  .bg-neutral-50, .bg-neutral-100, .bg-stone-50, .bg-stone-100
+) { background-color: #1f2430; }
+
+.dark :is(
+  .bg-slate-200, .bg-zinc-200, .bg-neutral-200, .bg-stone-200, .bg-gray-300
+) { background-color: #262a35; }
+
+.dark :is(
+  .text-slate-900, .text-slate-800, .text-zinc-900, .text-zinc-800,
+  .text-neutral-900, .text-neutral-800, .text-stone-900, .text-stone-800
+) { color: #f3f4f6; }
+
+.dark :is(
+  .text-slate-700, .text-slate-600, .text-zinc-700, .text-zinc-600,
+  .text-neutral-700, .text-neutral-600, .text-stone-700, .text-stone-600
+) { color: #d1d5db; }
+
+.dark :is(
+  .text-slate-500, .text-zinc-500, .text-neutral-500, .text-stone-500
+) { color: #9ca3af; }
+
+.dark :is(
+  .text-slate-400, .text-zinc-400, .text-neutral-400, .text-stone-400
+) { color: #6b7280; }
+
+.dark :is(
+  .border-slate-100, .border-slate-200, .border-slate-300,
+  .border-zinc-100, .border-zinc-200, .border-zinc-300,
+  .border-neutral-100, .border-neutral-200, .border-neutral-300,
+  .border-stone-100, .border-stone-200, .border-stone-300
+) { border-color: #262a35; }
+
+.dark :is(
+  .divide-slate-100, .divide-slate-200, .divide-zinc-100, .divide-zinc-200,
+  .divide-neutral-100, .divide-neutral-200
+) > :not([hidden]) ~ :not([hidden]) { border-color: #262a35; }

@@ -13,7 +13,6 @@ import {
   MessageCircle,
   BarChart3,
   Settings,
-  Menu,
   X,
   Bus,
   UserCheck,
@@ -28,6 +27,13 @@ import {
 } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
+import AdminHeader from '@/components/admin-header';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -80,12 +86,45 @@ const GROUP_TITLES: Record<NavItem['group'], string> = {
   system: 'SYSTEM',
 };
 
+// Flat list of every nav entry (incl. sub-items) used to resolve the active
+// module name shown in the header.
+const NAV_TITLE_LOOKUP: { name: string; href: string }[] = allNavigation.flatMap((item) => [
+  { name: item.name, href: item.href },
+  ...(item.subItems ?? []).map((s) => ({ name: s.name, href: s.href })),
+]);
+
+// Resolve the page title from the current path: prefer the longest matching
+// nav href, otherwise title-case the first path segment.
+const derivePageTitle = (path: string): string => {
+  const match = NAV_TITLE_LOOKUP.filter(
+    (i) => path === i.href || path.startsWith(i.href + '/')
+  ).sort((a, b) => b.href.length - a.href.length)[0];
+  if (match) return match.name;
+  const seg = path.split('/').filter(Boolean)[0];
+  if (!seg) return 'Dashboard';
+  return seg.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const { user, profile, loading, signOut } = useAuth();
   const { can, isSuperAdmin, isLoading: permsLoading } = usePermissions();
+
+  // Restore the desktop collapse preference across reloads.
+  useEffect(() => {
+    setCollapsed(localStorage.getItem('tms-sidebar-collapsed') === '1');
+  }, []);
+
+  const toggleCollapse = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('tms-sidebar-collapsed', next ? '1' : '0');
+      return next;
+    });
+  };
 
   // The proxy protects these routes server-side. This client net only redirects
   // when there is genuinely NO authenticated user — never merely because the
@@ -116,14 +155,6 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     await signOut();
   };
 
-  const getInitials = (name: string) =>
-    name
-      .split(' ')
-      .map((word) => word.charAt(0))
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-
   if (loading || !profile) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -137,11 +168,11 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  const displayName = profile.full_name || profile.email || 'User';
-  const displayRole = (profile.role || '').replace(/_/g, ' ');
+  const pageTitle = derivePageTitle(pathname);
 
   return (
     <ErrorBoundary>
+      <TooltipProvider delayDuration={0}>
       <div className="min-h-screen bg-gray-100">
         {sidebarOpen && (
           <div
@@ -150,7 +181,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           />
         )}
 
-        <div className={`sidebar-modern ${sidebarOpen ? 'open' : ''}`}>
+        <div className={`sidebar-modern ${sidebarOpen ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
           <div className="sidebar-header">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -159,7 +190,6 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                 </div>
                 <div>
                   <h1 className="text-lg font-bold text-gray-900">MYJKKN TMS</h1>
-                  <p className="text-xs text-gray-500 capitalize">{displayRole}</p>
                 </div>
               </div>
               <button
@@ -171,7 +201,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </div>
 
-          <div className="p-4 border-b border-gray-200">
+          <div className="p-4 border-b border-gray-200 sidebar-search">
             <div className="search-container">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -198,18 +228,27 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                   <div className="space-y-1">
                     {items.map((item) => (
                       <div key={item.name}>
-                        <a
-                          href={item.href}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            router.push(item.href);
-                            setSidebarOpen(false);
-                          }}
-                          className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
-                        >
-                          <item.icon className="icon" />
-                          <span>{item.name}</span>
-                        </a>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <a
+                              href={item.href}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                router.push(item.href);
+                                setSidebarOpen(false);
+                              }}
+                              className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
+                            >
+                              <item.icon className="icon" />
+                              <span>{item.name}</span>
+                            </a>
+                          </TooltipTrigger>
+                          {collapsed && (
+                            <TooltipContent side="right">
+                              {item.name}
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
                         {item.subItems && item.current && (
                           <div className="ml-6 mt-1 space-y-1">
                             {item.subItems.map((subItem) => (
@@ -238,54 +277,24 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           </div>
 
           <div className="sidebar-user">
-            <div className="user-info">
-              {profile.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.avatar_url}
-                  alt={displayName}
-                  className="user-avatar object-cover"
-                />
-              ) : (
-                <div className="user-avatar">{getInitials(displayName)}</div>
-              )}
-              <div className="user-details">
-                <div className="user-name">{displayName}</div>
-                <div className="user-role capitalize">{displayRole}</div>
-              </div>
-            </div>
             <button
               onClick={handleLogout}
               className="btn-secondary w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+              title="Sign Out"
             >
               <Power className="w-4 h-4 mr-2" />
-              Sign Out
+              <span className="sidebar-label">Sign Out</span>
             </button>
           </div>
         </div>
 
-        <div className="main-content">
-          <div className="top-bar lg:hidden">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-            >
-              <Menu className="w-6 h-6" />
-            </button>
-            <div className="top-bar-title">MYJKKN TMS</div>
-            <div className="top-bar-actions">
-              {profile.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.avatar_url}
-                  alt={displayName}
-                  className="user-avatar object-cover"
-                />
-              ) : (
-                <div className="user-avatar">{getInitials(displayName)}</div>
-              )}
-            </div>
-          </div>
+        <div className={`main-content ${collapsed ? 'sidebar-collapsed' : ''}`}>
+          <AdminHeader
+            title={pageTitle}
+            collapsed={collapsed}
+            onToggleCollapse={toggleCollapse}
+            onOpenSidebar={() => setSidebarOpen(true)}
+          />
 
           <div className="content-body fade-in">{children}</div>
         </div>
@@ -320,6 +329,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           },
         }}
       />
+      </TooltipProvider>
     </ErrorBoundary>
   );
 };
