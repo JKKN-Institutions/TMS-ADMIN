@@ -50,6 +50,3 @@ yarn-error.log*
 *.tsbuildinfo
 
 .mcp.json
-.claude/*
-.claude/memory/
-.claude_settings.json

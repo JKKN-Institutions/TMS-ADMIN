@@ -1,0 +1,17 @@
+# Backend Patterns Directory
+
+This directory will contain the 10 production cache patterns moved from references/:
+
+- pattern-00-connection.md - Deferring to request time with connection()
+- pattern-01-cached-data.md - Basic cached data fetching
+- pattern-02-server-actions.md - Server Actions for mutations
+- pattern-03-streaming.md - Streaming with Suspense
+- pattern-04-form-validation.md - Form validation with Zod
+- pattern-05-optimistic-updates.md - Optimistic UI updates
+- pattern-06-cache-keys.md - Cache key optimization
+- pattern-07-cache-profiles.md - Production cache profiles
+- pattern-08-cache-tags.md - Hierarchical cache tags
+- pattern-09-extract-pass.md - "Extract and pass" pattern
+- pattern-10-cache-nesting.md - Cache nesting rules
+
+These patterns will be extracted from the existing SKILL.md and references/ files in Phase 2.
