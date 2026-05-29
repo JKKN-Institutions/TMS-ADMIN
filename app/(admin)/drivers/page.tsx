@@ -1,14 +1,25 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, UserCheck } from 'lucide-react';
+import { ChevronDown, Download, FileJson, FileSpreadsheet, FileText, Plus, Trash2, Upload, UserCheck } from 'lucide-react';
 import type { DriverListItem } from '@/types';
 import { usePermissions } from '@/hooks/use-permissions';
 import { DataTable } from '@/components/ui/data-table';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getDriverColumns } from './columns';
-import { DriverDetailsDialog } from './driver-details-dialog';
-import { DriverEditDialog } from './driver-edit-dialog';
+import { DriverDeleteDialog } from './driver-delete-dialog';
+import { DriverBulkDeleteDialog } from './driver-bulk-delete-dialog';
+import { DriverImportDialog } from './driver-import-dialog';
+import { exportDrivers, downloadDriverTemplate } from './driver-export';
 
 async function fetchDrivers(): Promise<DriverListItem[]> {
   const res = await fetch('/api/admin/drivers');
@@ -17,15 +28,30 @@ async function fetchDrivers(): Promise<DriverListItem[]> {
   return json.data as DriverListItem[];
 }
 
+const outlineBtn =
+  'inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50';
+
 export default function DriversPage() {
+  const router = useRouter();
   const { can, isSuperAdmin } = usePermissions();
   const canManage = isSuperAdmin || can('tms.drivers.manage');
-  const [viewing, setViewing] = useState<DriverListItem | null>(null);
-  const [editing, setEditing] = useState<DriverListItem | null>(null);
+  const [deleting, setDeleting] = useState<DriverListItem | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [bulkState, setBulkState] = useState<{ rows: DriverListItem[]; reset: () => void } | null>(null);
 
   const { data: drivers = [], isLoading, isError } = useQuery({ queryKey: ['drivers'], queryFn: fetchDrivers });
 
-  const columns = useMemo(() => getDriverColumns(setViewing, setEditing, canManage), [canManage]);
+  // View/Edit are now in-module pages (no popups). Delete stays a confirm dialog.
+  const columns = useMemo(
+    () =>
+      getDriverColumns(
+        (d) => router.push(`/drivers/${d.id}`),
+        (d) => router.push(`/drivers/${d.id}/edit`),
+        setDeleting,
+        canManage
+      ),
+    [canManage, router]
+  );
 
   const total = drivers.length;
   const active = drivers.filter((d) => d.isActive).length;
@@ -40,42 +66,105 @@ export default function DriversPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Drivers</h1>
-        <p className="text-gray-600">Driver-role staff from MyJKKN, with TMS operational details</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Drivers</h1>
+          <p className="text-gray-600">Driver-role staff from MyJKKN, with TMS operational details</p>
+        </div>
+        {canManage && (
+          <Link
+            href="/drivers/new"
+            className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+          >
+            <Plus className="h-4 w-4" /> Create Driver
+          </Link>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((s) => (
-          <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4">
+          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4">
             <p className="text-sm text-gray-500">{s.label}</p>
             <p className="text-2xl font-bold text-gray-900">{s.value}</p>
           </div>
         ))}
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-blue-600 mr-2" /><span className="text-gray-600">Loading drivers...</span></div>
-      ) : isError ? (
-        <div className="text-center py-16"><UserCheck className="w-10 h-10 text-gray-400 mx-auto mb-3" /><p className="text-gray-600">Failed to load drivers. Please retry.</p></div>
+      {isError ? (
+        <div className="py-16 text-center">
+          <UserCheck className="mx-auto mb-3 h-10 w-10 text-gray-400" />
+          <p className="text-gray-600">Failed to load drivers. Please retry.</p>
+        </div>
       ) : (
         <DataTable
           columns={columns}
           data={drivers}
+          entityName="drivers"
+          isLoading={isLoading}
+          enableRowSelection={canManage}
+          getRowId={(d) => d.id}
           searchPlaceholder="Search name, email, phone..."
           filters={[
-            { columnId: 'driverStatus', title: 'Driver Status', options: [
-              { label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' }, { label: 'On Leave', value: 'on_leave' },
+            { columnId: 'activeStatus', title: 'Status', options: [
+              { label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' },
             ] },
             { columnId: 'employmentType', title: 'Employment', options: [
               { label: 'Full-time', value: 'full_time' }, { label: 'Part-time', value: 'part_time' },
             ] },
           ]}
+          toolbarActions={({ selectedRows, resetSelection }) => (
+            <>
+              {canManage && (
+                <button type="button" className={outlineBtn} onClick={() => setImportOpen(true)}>
+                  <Upload className="h-4 w-4" /> Import
+                </button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger className={outlineBtn}>
+                  <Download className="h-4 w-4" /> Export <ChevronDown className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => exportDrivers(selectedRows.length ? selectedRows : drivers, 'xlsx')}>
+                    <FileSpreadsheet className="text-gray-500" /> Export as Excel (.xlsx)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => exportDrivers(selectedRows.length ? selectedRows : drivers, 'csv')}>
+                    <FileText className="text-gray-500" /> Export as CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => exportDrivers(selectedRows.length ? selectedRows : drivers, 'json')}>
+                    <FileJson className="text-gray-500" /> Export as JSON
+                  </DropdownMenuItem>
+                  {canManage && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={downloadDriverTemplate}>
+                        <Download className="text-gray-500" /> Download import template
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {canManage && selectedRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBulkState({ rows: selectedRows, reset: resetSelection })}
+                  className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
+                </button>
+              )}
+            </>
+          )}
         />
       )}
 
-      <DriverDetailsDialog driver={viewing} open={!!viewing} onOpenChange={(o) => !o && setViewing(null)} />
-      <DriverEditDialog driver={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(null)} />
+      <DriverDeleteDialog driver={deleting} open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} />
+      <DriverImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      <DriverBulkDeleteDialog
+        drivers={bulkState?.rows ?? []}
+        open={!!bulkState}
+        onOpenChange={(o) => !o && setBulkState(null)}
+        onDeleted={() => bulkState?.reset()}
+      />
     </div>
   );
 }
