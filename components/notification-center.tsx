@@ -14,7 +14,7 @@ import {
   User,
   Bus
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { createClientSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 
 interface Notification {
@@ -31,6 +31,7 @@ interface Notification {
 }
 
 const NotificationCenter = () => {
+  const supabase = createClientSupabaseClient();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -38,63 +39,74 @@ const NotificationCenter = () => {
 
   useEffect(() => {
     fetchNotifications();
-    
-    // Set up real-time subscription
-    const subscription = supabase
-      .channel('notifications')
-      .on('postgres_changes', 
-        { 
-          event: 'INSERT', 
-          schema: 'public', 
-          table: 'notifications' 
-        }, 
-        (payload) => {
-          const newNotification = payload.new as Notification;
-          setNotifications(prev => [newNotification, ...prev]);
-          setUnreadCount(prev => prev + 1);
-          
-          // Show toast notification
-          showToastNotification(newNotification);
-        }
-      )
-      .subscribe();
+
+    // Set up real-time subscription. Guard against any client/realtime failure
+    // so the header bell degrades gracefully instead of crashing the layout.
+    let subscription: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      subscription = supabase
+        .channel('notifications')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+          },
+          (payload: { new: Notification }) => {
+            const newNotification = payload.new as Notification;
+            setNotifications(prev => [newNotification, ...prev]);
+            setUnreadCount(prev => prev + 1);
+            showToastNotification(newNotification);
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.error('Notification realtime subscription unavailable:', err);
+    }
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchNotifications = async () => {
     setLoading(true);
     try {
+      // NOTE: the live `notifications` table has no `is_active`/`target_audience`
+      // columns (despite some insert code referencing them), so we use the same
+      // minimal read that lib/database.ts uses to avoid Postgres 42703 errors.
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('is_active', true)
-        .in('target_audience', ['all', 'admins'])
         .order('created_at', { ascending: false })
         .limit(20);
 
       if (error) throw error;
 
-      const formattedNotifications = data?.map(notification => ({
+      const formattedNotifications: Notification[] = (data ?? []).map((notification: any) => ({
         ...notification,
         read: notification.read_by?.includes(getCurrentUserId()) || false
-      })) || [];
+      }));
 
       setNotifications(formattedNotifications);
-      setUnreadCount(formattedNotifications.filter(n => !n.read).length);
+      setUnreadCount(formattedNotifications.filter((n) => !n.read).length);
     } catch (error) {
+      // Degrade gracefully — the bell still renders with a zero count.
       console.error('Error fetching notifications:', error);
-      toast.error('Failed to fetch notifications');
     } finally {
       setLoading(false);
     }
   };
 
   const getCurrentUserId = () => {
-    const userData = localStorage.getItem('adminUser');
-    return userData ? JSON.parse(userData).id : null;
+    try {
+      const userData = localStorage.getItem('adminUser');
+      return userData ? JSON.parse(userData).id : null;
+    } catch {
+      return null;
+    }
   };
 
   const showToastNotification = (notification: Notification) => {
@@ -271,14 +283,14 @@ const NotificationCenter = () => {
                   {unreadCount > 0 && (
                     <button
                       onClick={markAllAsRead}
-                      className="text-sm text-blue-600 hover:text-blue-700"
+                      className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                     >
                       Mark all read
                     </button>
                   )}
                   <button
                     onClick={() => setIsOpen(false)}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -304,7 +316,7 @@ const NotificationCenter = () => {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors ${
-                          !notification.read ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
+                          !notification.read ? 'bg-blue-50 dark:bg-blue-950/30 border-l-4 border-l-blue-500' : ''
                         }`}
                         onClick={() => markAsRead(notification.id)}
                       >
@@ -350,7 +362,7 @@ const NotificationCenter = () => {
                       // Navigate to notifications page
                       window.location.href = '/notifications';
                     }}
-                    className="w-full text-center text-sm text-blue-600 hover:text-blue-700 font-medium"
+                    className="w-full text-center text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
                   >
                     View all notifications
                   </button>
