@@ -31,7 +31,7 @@ export async function GET(
 
     // Verify route exists
     const { data: route, error: routeError } = await supabase
-      .from('routes')
+      .from('tms_route')
       .select('id, route_number, route_name, status')
       .eq('id', routeId)
       .single();
@@ -45,7 +45,7 @@ export async function GET(
 
     // Fetch route stops
     const { data: stops, error: stopsError } = await supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .select('id, stop_name, stop_time, sequence_order, is_major_stop')
       .eq('route_id', routeId)
       .order('sequence_order');
@@ -117,7 +117,7 @@ export async function POST(
 
     // Verify route exists
     const { data: route, error: routeError } = await supabase
-      .from('routes')
+      .from('tms_route')
       .select('id')
       .eq('id', routeId)
       .single();
@@ -135,7 +135,7 @@ export async function POST(
     if (insertAfterSequence !== undefined && insertAfterSequence !== null) {
       // Get existing stops to update sequence numbers
       const { data: existingStops, error: fetchError } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .select('id, sequence_order')
         .eq('route_id', routeId)
         .gt('sequence_order', insertAfterSequence)
@@ -153,7 +153,7 @@ export async function POST(
       if (existingStops && existingStops.length > 0) {
         for (const stop of existingStops) {
           const { error: updateError } = await supabase
-            .from('route_stops')
+            .from('tms_route_stop')
             .update({ sequence_order: stop.sequence_order + 1 })
             .eq('id', stop.id);
             
@@ -171,7 +171,7 @@ export async function POST(
     } else {
       // Add to the end - get the highest sequence order
       const { data: lastStop } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .select('sequence_order')
         .eq('route_id', routeId)
         .order('sequence_order', { ascending: false })
@@ -182,7 +182,7 @@ export async function POST(
 
     // Insert the new stop
     const { data: newStop, error: insertError } = await supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .insert([{
         route_id: routeId,
         stop_name: stopData.stop_name.trim(),
@@ -258,7 +258,7 @@ export async function DELETE(
 
     // Verify route exists
     const { data: route, error: routeError } = await supabase
-      .from('routes')
+      .from('tms_route')
       .select('id')
       .eq('id', routeId)
       .single();
@@ -272,7 +272,7 @@ export async function DELETE(
 
     // Get the stop to be deleted to know its sequence order
     const { data: stopToDelete, error: fetchStopError } = await supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .select('id, sequence_order')
       .eq('id', stopId)
       .eq('route_id', routeId)
@@ -287,7 +287,7 @@ export async function DELETE(
 
     // Delete the stop
     const { error: deleteError } = await supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .delete()
       .eq('id', stopId)
       .eq('route_id', routeId);
@@ -302,7 +302,7 @@ export async function DELETE(
 
     // Update sequence numbers for stops that come after the deleted stop
     const { data: stopsToUpdate, error: fetchStopsError } = await supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .select('id, sequence_order')
       .eq('route_id', routeId)
       .gt('sequence_order', stopToDelete.sequence_order)
@@ -316,7 +316,7 @@ export async function DELETE(
       // Update sequence numbers
       for (const stop of stopsToUpdate) {
         const { error: updateError } = await supabase
-          .from('route_stops')
+          .from('tms_route_stop')
           .update({ sequence_order: stop.sequence_order - 1 })
           .eq('id', stop.id);
           

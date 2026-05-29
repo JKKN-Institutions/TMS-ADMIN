@@ -16,6 +16,11 @@ async function getVehicles() {
       .order('created_at', { ascending: false });
 
     if (error) {
+      // Vehicles module not yet migrated into this database (table absent → 42P01).
+      // Degrade to an empty list so dependents like the route assignment dropdown render cleanly.
+      if (error.code === '42P01') {
+        return NextResponse.json({ success: true, data: [], count: 0 });
+      }
       console.error('Database error:', error);
       return NextResponse.json(
         { error: 'Failed to fetch vehicles' },

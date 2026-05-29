@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     // Start with a simple query first
     let queryBuilder = supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .select(`
         id,
         stop_name,
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     if (routeIds.length > 0) {
       try {
         const { data: routes, error: routesError } = await supabase
-          .from('routes')
+          .from('tms_route')
           .select('id, route_name, route_code')
           .in('id', routeIds);
 

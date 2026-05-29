@@ -15,10 +15,10 @@ export async function GET(
     const { routeId } = await params;
 
     const { data: possibleStops, error } = await supabase
-      .from('route_possible_stops')
+      .from('tms_route_possible_stop')
       .select(`
         *,
-        source_route:routes!source_route_id(
+        source_route:tms_route!source_route_id(
           route_name,
           id
         )
@@ -150,7 +150,7 @@ export async function POST(
         // Check each stop individually to avoid complex OR queries
         for (const stop of stopsToInsert) {
           const { data: existing, error: err } = await supabase
-            .from('route_possible_stops')
+            .from('tms_route_possible_stop')
             .select('stop_name, source_route_id')
             .eq('route_id', routeId)
             .eq('stop_name', stop.stop_name)
@@ -217,7 +217,7 @@ export async function POST(
     let data, error;
     try {
       const result = await supabase
-        .from('route_possible_stops')
+        .from('tms_route_possible_stop')
         .insert(stopsToInsert)
         .select();
       data = result.data;
@@ -321,7 +321,7 @@ export async function DELETE(
     }
 
     const { error } = await supabase
-      .from('route_possible_stops')
+      .from('tms_route_possible_stop')
       .delete()
       .eq('id', stopId)
       .eq('route_id', routeId);

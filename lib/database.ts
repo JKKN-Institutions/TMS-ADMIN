@@ -64,7 +64,7 @@ export class DatabaseService {
       ] = await Promise.all([
         supabase.from('students').select('*', { count: 'exact', head: true }),
         supabase.from('drivers').select('*', { count: 'exact', head: true }),
-        supabase.from('routes').select('*', { count: 'exact', head: true }),
+        supabase.from('tms_route').select('*', { count: 'exact', head: true }),
         supabase.from('vehicles').select('*', { count: 'exact', head: true }),
         supabase.from('bookings').select('*', { count: 'exact', head: true }),
         supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
@@ -311,7 +311,7 @@ export class DatabaseService {
     try {
       // Calculate route efficiency (bookings vs capacity)
       const { data: routeStats } = await supabase
-        .from('routes')
+        .from('tms_route')
         .select(`
           id,
           route_name,
@@ -383,7 +383,7 @@ export class DatabaseService {
       
       // First, try simple query to check if routes exist
       const { data: simpleData, error: simpleError } = await supabase
-        .from('routes')
+        .from('tms_route')
         .select('*')
         .order('route_number')
 
@@ -402,10 +402,10 @@ export class DatabaseService {
       // Try enhanced query with relationships only if routes exist
       try {
         const { data: enhancedData, error: enhancedError } = await supabase
-          .from('routes')
+          .from('tms_route')
           .select(`
             *,
-            route_stops(
+            route_stops:tms_route_stop(
               id,
               stop_name,
               stop_time,
@@ -829,7 +829,7 @@ export class DatabaseService {
           let boardingStopId = null;
           if (transportData.boarding_point) {
             const { data: routeStop, error: stopError } = await supabase
-              .from('route_stops')
+              .from('tms_route_stop')
               .select('id')
               .eq('route_id', transportData.allocated_route_id)
               .eq('stop_name', transportData.boarding_point)
@@ -1537,7 +1537,7 @@ export class DatabaseService {
         .from('schedules')
         .select(`
           *,
-          route:routes(
+          route:tms_route(
             id,
             route_number,
             route_name,
@@ -1780,7 +1780,7 @@ export class DatabaseService {
         .from('schedules')
         .select(`
           *,
-          route:routes(
+          route:tms_route(
             id,
             route_number,
             route_name,
@@ -2032,7 +2032,7 @@ export class DatabaseService {
       
       // Start a transaction-like operation by adding route first
       const { data: routeResult, error: routeError } = await supabase
-        .from('routes')
+        .from('tms_route')
         .insert([{
           route_number: routeData.route_number,
           route_name: routeData.route_name,
@@ -2079,13 +2079,13 @@ export class DatabaseService {
         }));
 
         const { error: stopsError } = await supabase
-          .from('route_stops')
+          .from('tms_route_stop')
           .insert(stopsData);
 
         if (stopsError) {
           console.error('Error adding route stops:', stopsError);
           // Try to clean up the route if stops failed
-          await supabase.from('routes').delete().eq('id', newRoute.id);
+          await supabase.from('tms_route').delete().eq('id', newRoute.id);
           throw new Error(`Failed to add route stops: ${stopsError.message}`);
         }
 
@@ -2143,7 +2143,7 @@ export class DatabaseService {
       
       // Update route basic info
       const { data: routeResult, error: routeError } = await supabase
-        .from('routes')
+        .from('tms_route')
         .update({
           route_number: routeData.route_number,
           route_name: routeData.route_name,
@@ -2176,7 +2176,7 @@ export class DatabaseService {
       if (stops && stops.length > 0) {
         // Delete existing stops
         const { error: deleteError } = await supabase
-          .from('route_stops')
+          .from('tms_route_stop')
           .delete()
           .eq('route_id', routeId);
 
@@ -2198,7 +2198,7 @@ export class DatabaseService {
         }));
 
         const { error: stopsError } = await supabase
-          .from('route_stops')
+          .from('tms_route_stop')
           .insert(stopsData);
 
         if (stopsError) {
@@ -2211,7 +2211,7 @@ export class DatabaseService {
 
       // Handle driver assignment changes
       const previousRoute = await supabase
-        .from('routes')
+        .from('tms_route')
         .select('driver_id, vehicle_id')
         .eq('id', routeId)
         .single();
@@ -2288,7 +2288,7 @@ export class DatabaseService {
       console.log('Fetching stops for route:', routeId);
       
       const { data, error } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .select('*')
         .eq('route_id', routeId)
         .order('sequence_order');
@@ -2312,10 +2312,10 @@ export class DatabaseService {
       console.log(`Fetching route by ID: ${routeId}`);
       
       const { data, error } = await supabase
-        .from('routes')
+        .from('tms_route')
         .select(`
           *,
-          route_stops(
+          route_stops:tms_route_stop(
             id,
             stop_name,
             stop_time,
@@ -2374,7 +2374,7 @@ export class DatabaseService {
         
         for (const stop of stopsToUpdate) {
           const { error: updateError } = await supabase
-            .from('route_stops')
+            .from('tms_route_stop')
             .update({ sequence_order: stop.sequence_order + 1 })
             .eq('id', stop.id);
             
@@ -2393,7 +2393,7 @@ export class DatabaseService {
 
       // Insert the new stop
       const { data, error } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .insert([{
           route_id: routeId,
           stop_name: stopData.stop_name,
@@ -2422,7 +2422,7 @@ export class DatabaseService {
   static async removeStopFromRoute(stopId: string) {
     try {
       const { error } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .delete()
         .eq('id', stopId)
 
@@ -2445,7 +2445,7 @@ export class DatabaseService {
 
       // First, check if route exists
       const { data: existingRoute, error: fetchError } = await supabase
-        .from('routes')
+        .from('tms_route')
         .select('id, route_number, route_name')
         .eq('id', routeId)
         .single();
@@ -2485,7 +2485,7 @@ export class DatabaseService {
       // If no dependencies, proceed with deletion
       // Delete in order: route_stops first, then route
       const { error: stopsError } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .delete()
         .eq('route_id', routeId);
 
@@ -2496,7 +2496,7 @@ export class DatabaseService {
 
       // Delete the route itself
       const { error: routeError } = await supabase
-        .from('routes')
+        .from('tms_route')
         .delete()
         .eq('id', routeId);
 

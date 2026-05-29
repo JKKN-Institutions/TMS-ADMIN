@@ -19,7 +19,7 @@ async function getRoutes() {
 
     // Fetch routes from database
     const { data: routes, error } = await supabase
-      .from('routes')
+      .from('tms_route')
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -86,7 +86,7 @@ async function getRouteStops(routeId: string) {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: stops, error } = await supabase
-      .from('route_stops')
+      .from('tms_route_stop')
       .select('*')
       .eq('route_id', routeId)
               .order('sequence_order', { ascending: true });
@@ -129,7 +129,7 @@ async function addRoute(routeData: any, stops: any[]) {
 
     // Insert the route
     const { data: route, error: routeError } = await supabase
-      .from('routes')
+      .from('tms_route')
       .insert([routeData])
       .select()
       .single();
@@ -150,7 +150,7 @@ async function addRoute(routeData: any, stops: any[]) {
       }));
 
       const { error: stopsError } = await supabase
-        .from('route_stops')
+        .from('tms_route_stop')
         .insert(stopsWithRouteId);
 
       if (stopsError) {
@@ -200,7 +200,7 @@ async function putRoute(request: NextRequest) {
 
     // Update route
     const { data: updatedRoute, error } = await supabase
-      .from('routes')
+      .from('tms_route')
       .update({
         route_number: routeData.route_number,
         route_name: routeData.route_name,
