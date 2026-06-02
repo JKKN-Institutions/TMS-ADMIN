@@ -170,24 +170,24 @@ const DashboardPage = () => {
 
   return (
     <div className="space-y-8">
-      {/* Enhanced Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back, {profile?.full_name || profile?.email || 'Admin'}!</h1>
-          <p className="text-gray-600 mt-1">Here's what's happening with your transport management system today.</p>
+      {/* Enhanced Header — stacks on mobile so the title can't collide with the actions */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 break-words">Welcome back, {profile?.full_name || profile?.email || 'Admin'}!</h1>
+          <p className="text-gray-600 mt-1 text-sm sm:text-base">Here's what's happening with your transport management system today.</p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            className="inline-flex items-center whitespace-nowrap px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? 'Refreshing...' : 'Refresh Data'}
           </button>
-          <button 
-            onClick={() => router.push('/students')}
-            className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          <button
+            onClick={() => router.push('/passengers/learners')}
+            className="inline-flex items-center whitespace-nowrap px-4 py-2 border border-transparent rounded-lg shadow-sm bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Student
@@ -209,7 +209,7 @@ const DashboardPage = () => {
             variant="enhanced"
             loading={loading}
             onClick={() => {
-              const routes = ['/students', '/routes', '/drivers', '/vehicles'];
+              const routes = ['/passengers/learners', '/routes', '/drivers', '/vehicles'];
               router.push(routes[index] || '/dashboard');
             }}
             delay={index}
@@ -258,20 +258,20 @@ const DashboardPage = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Activity className="w-5 h-5 text-blue-600" />
+              <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-lg flex items-center justify-center">
+                <Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900">Transport Analytics</h3>
             </div>
           </div>
           <div className="p-6">
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+              <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950/40 rounded-lg">
                 <div className="flex items-center space-x-3">
-                  <DollarSign className="w-5 h-5 text-green-600" />
-                  <span className="text-sm font-medium text-green-900">Today's Revenue</span>
+                  <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400" />
+                  <span className="text-sm font-medium text-green-900 dark:text-green-200">Today's Revenue</span>
                 </div>
-                <span className="text-lg font-bold text-green-900">
+                <span className="text-lg font-bold text-green-900 dark:text-green-200">
                   ₹{safeNumber(dashboardStats?.todayRevenue).toLocaleString()}
                 </span>
               </div>
@@ -285,13 +285,13 @@ const DashboardPage = () => {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Pending Payments</span>
-                  <span className="text-sm font-semibold text-orange-600">
+                  <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">
                     {safeNumber(dashboardStats?.pendingPayments)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Open Grievances</span>
-                  <span className="text-sm font-semibold text-red-600">
+                  <span className="text-sm font-semibold text-red-600 dark:text-red-400">
                     {safeNumber(dashboardStats?.openGrievances)}
                   </span>
                 </div>
@@ -304,25 +304,25 @@ const DashboardPage = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-green-50 to-emerald-50">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
-                <Shield className="w-5 h-5 text-green-600" />
+              <div className="w-8 h-8 bg-green-100 dark:bg-green-900/40 rounded-lg flex items-center justify-center">
+                <Shield className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900">System Health</h3>
             </div>
           </div>
           <div className="p-6">
             <div className="space-y-4">
-              <div className="flex items-center space-x-3 p-3 bg-green-50 rounded-lg">
+              <div className="flex items-center space-x-3 p-3 bg-green-50 dark:bg-green-950/40 rounded-lg">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm font-medium text-green-900">All systems operational</span>
+                <span className="text-sm font-medium text-green-900 dark:text-green-200">All systems operational</span>
               </div>
-              <div className="flex items-center space-x-3 p-3 bg-blue-50 rounded-lg">
+              <div className="flex items-center space-x-3 p-3 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
                 <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span className="text-sm font-medium text-blue-900">Database performance: Excellent</span>
+                <span className="text-sm font-medium text-blue-900 dark:text-blue-200">Database performance: Excellent</span>
               </div>
-              <div className="flex items-center space-x-3 p-3 bg-yellow-50 rounded-lg">
+              <div className="flex items-center space-x-3 p-3 bg-yellow-50 dark:bg-yellow-950/40 rounded-lg">
                 <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                <span className="text-sm font-medium text-yellow-900">Scheduled maintenance due</span>
+                <span className="text-sm font-medium text-yellow-900 dark:text-yellow-200">Scheduled maintenance due</span>
               </div>
             </div>
           </div>
@@ -332,8 +332,8 @@ const DashboardPage = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-indigo-50">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Clock className="w-5 h-5 text-purple-600" />
+              <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/40 rounded-lg flex items-center justify-center">
+                <Clock className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
             </div>

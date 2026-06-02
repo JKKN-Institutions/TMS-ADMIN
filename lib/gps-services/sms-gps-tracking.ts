@@ -362,7 +362,7 @@ export class SMSGPSTrackingService {
 
       // Update associated vehicle
       await supabase
-        .from('vehicles')
+        .from('tms_vehicle')
         .update({
           current_latitude: location.latitude,
           current_longitude: location.longitude,

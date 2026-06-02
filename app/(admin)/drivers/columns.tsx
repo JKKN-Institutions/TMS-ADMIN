@@ -69,12 +69,12 @@ export function getDriverColumns(
               // eslint-disable-next-line @next/next/no-img-element
               <img src={d.avatarUrl} alt={d.name} className="h-8 w-8 rounded-full object-cover" />
             ) : (
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-xs font-semibold text-green-600 dark:bg-green-500/20 dark:text-green-300">
                 {d.name.slice(0, 2).toUpperCase()}
               </div>
             )}
             <div className="min-w-0">
-              <p className="truncate font-medium text-gray-900 group-hover:text-blue-600 group-hover:underline">{d.name}</p>
+              <p className="truncate font-medium text-gray-900 group-hover:text-green-600 group-hover:underline">{d.name}</p>
               {d.designation ? <p className="truncate text-xs text-gray-500">{d.designation}</p> : null}
             </div>
           </Link>
@@ -137,7 +137,7 @@ export function getDriverColumns(
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
                   aria-label={`Actions for ${d.name}`}
                 >
                   <MoreHorizontal className="h-4 w-4" />

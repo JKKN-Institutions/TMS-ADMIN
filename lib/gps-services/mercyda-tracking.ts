@@ -218,7 +218,7 @@ export class MercydaTrackingService {
 
     // Find vehicle with this GPS device
     const { data: vehicle, error: vehicleError } = await supabase
-      .from('vehicles')
+      .from('tms_vehicle')
       .select('id, registration_number, live_tracking_enabled')
       .eq('gps_device_id', gpsDeviceId)
       .single();
@@ -233,7 +233,7 @@ export class MercydaTrackingService {
 
     // Update vehicle GPS location
     const { error: updateError } = await supabase
-      .from('vehicles')
+      .from('tms_vehicle')
       .update({
         current_latitude: vehicleData.latitude,
         current_longitude: vehicleData.longitude,

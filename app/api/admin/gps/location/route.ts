@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     // Find vehicle with this GPS device
     const { data: vehicle, error: vehicleError } = await supabase
-      .from('vehicles')
+      .from('tms_vehicle')
       .select('id, registration_number, live_tracking_enabled')
       .eq('gps_device_id', device.id)
       .single();
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     // Update vehicle's current location
     const { error: updateError } = await supabase
-      .from('vehicles')
+      .from('tms_vehicle')
       .update({
         current_latitude: latitude,
         current_longitude: longitude,

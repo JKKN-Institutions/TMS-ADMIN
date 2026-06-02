@@ -58,7 +58,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
         <DriverPageHeader crumbs={crumbs('Not found')} title="Driver not found" />
         <p className="text-gray-600">
           This driver could not be loaded.{' '}
-          <Link href="/drivers" className="text-blue-600 hover:underline">Back to drivers</Link>
+          <Link href="/drivers" className="text-green-600 hover:underline">Back to drivers</Link>
         </p>
       </div>
     );
@@ -91,7 +91,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
             // eslint-disable-next-line @next/next/no-img-element
             <img src={driver.avatarUrl} alt={driver.name} className="h-16 w-16 rounded-full object-cover" />
           ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-lg font-semibold text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-lg font-semibold text-green-600 dark:bg-green-500/20 dark:text-green-300">
               {driver.name.slice(0, 2).toUpperCase()}
             </div>
           )}
@@ -121,7 +121,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
         title="Operational (TMS)"
         action={
           !ops && canManage ? (
-            <Link href={`/drivers/${driver.id}/edit`} className="text-sm font-medium text-blue-600 hover:underline">
+            <Link href={`/drivers/${driver.id}/edit`} className="text-sm font-medium text-green-600 hover:underline">
               Add details
             </Link>
           ) : undefined

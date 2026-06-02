@@ -768,17 +768,20 @@ html {
 
 /* Responsive design */
 @media (max-width: 1024px) {
+  /* Mobile uses the fixed bottom navigation (components/bottom-nav), not the
+     slide-in sidebar — hide the sidebar entirely below the lg breakpoint. */
   .sidebar-modern {
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-  }
-
-  .sidebar-modern.open {
-    transform: translateX(0);
+    display: none;
   }
 
   .main-content {
     margin-left: 0;
+  }
+
+  /* Clear the fixed bottom navbar (~4rem + safe area) so page content and any
+     sticky action bars aren't hidden behind it. */
+  .content-body {
+    padding-bottom: 6rem;
   }
 }
 

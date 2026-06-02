@@ -323,7 +323,7 @@ export class TCPGPSTrackingService {
 
         // Update vehicle location
         await supabase
-          .from('vehicles')
+          .from('tms_vehicle')
           .update({
             current_latitude: gpsData.latitude,
             current_longitude: gpsData.longitude,

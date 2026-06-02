@@ -87,12 +87,12 @@ export function DriverImportDialog({ open, onOpenChange }: { open: boolean; onOp
           <button
             type="button"
             onClick={downloadDriverTemplate}
-            className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
+            className="inline-flex items-center gap-2 text-sm font-medium text-green-600 hover:underline"
           >
             <Download className="h-4 w-4" /> Download Excel template
           </button>
 
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-500/5">
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-green-400 hover:bg-green-50/50 dark:hover:bg-green-500/5">
             <UploadCloud className="h-8 w-8 text-gray-400" />
             <span className="text-sm text-gray-600">
               {fileName ? <span className="font-medium text-gray-900">{fileName}</span> : 'Click to upload .xlsx or .csv'}
@@ -141,7 +141,7 @@ export function DriverImportDialog({ open, onOpenChange }: { open: boolean; onOp
               type="button"
               onClick={() => mutation.mutate()}
               disabled={mutation.isPending || rows.length === 0}
-              className="btn-primary inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
             >
               {mutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</> : `Import ${rows.length || ''}`}
             </button>

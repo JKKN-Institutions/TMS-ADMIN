@@ -30,7 +30,7 @@ export async function GET() {
       supabase.from('students').select('*').order('created_at', { ascending: false }),
       supabase.from('routes').select('*').order('created_at', { ascending: false }),
       supabase.from('drivers').select('*').order('created_at', { ascending: false }),
-      supabase.from('vehicles').select('*').order('created_at', { ascending: false }),
+      supabase.from('tms_vehicle').select('*').order('created_at', { ascending: false }),
       supabase.from('grievances').select('*').order('created_at', { ascending: false }),
       supabase.from('bookings').select('*').order('created_at', { ascending: false })
     ]);

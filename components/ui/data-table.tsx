@@ -104,18 +104,18 @@ export function DataTable<TData, TValue>({
             <span className="flex items-center gap-2 text-gray-600">
               <Database className="h-4 w-4 text-gray-400" />
               Showing <span className="font-medium text-gray-900">{pageRowCount}</span> of{' '}
-              <span className="font-bold text-blue-600">{filteredCount.toLocaleString()}</span> {entityName}
+              <span className="font-bold text-green-600">{filteredCount.toLocaleString()}</span> {entityName}
               {filteredCount !== totalRows ? <span className="text-gray-400">(of {totalRows.toLocaleString()})</span> : null}
             </span>
             <span className="text-gray-500">Page <span className="font-medium text-gray-700">{pageIndex + 1}</span> of {pageCount}</span>
             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{percentOfTotal}% of total</span>
             {selectedCount > 0 && (
-              <span className="font-medium text-blue-600">Selected: {selectedCount.toLocaleString()}</span>
+              <span className="font-medium text-green-600">Selected: {selectedCount.toLocaleString()}</span>
             )}
           </div>
           <div className="flex items-center gap-3 text-xs">
-            {isFiltered && <span className="rounded-md bg-blue-50 px-2 py-1 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">Filtered</span>}
-            {isLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-600" />}
+            {isFiltered && <span className="rounded-md bg-green-50 px-2 py-1 text-green-600 dark:bg-green-500/15 dark:text-green-300">Filtered</span>}
+            {isLoading && <Loader2 className="h-4 w-4 animate-spin text-green-600" />}
           </div>
         </div>
       </div>
@@ -191,7 +191,7 @@ export function DataTable<TData, TValue>({
       </div>
 
       {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <Table>
           <TableHeader className="bg-gray-50">
             {table.getHeaderGroups().map((hg) => (
@@ -215,7 +215,7 @@ export function DataTable<TData, TValue>({
               ))
             ) : table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} data-state={row.getIsSelected() ? 'selected' : undefined} className="data-[state=selected]:bg-blue-50 dark:data-[state=selected]:bg-blue-500/10">
+                <TableRow key={row.id} data-state={row.getIsSelected() ? 'selected' : undefined} className="data-[state=selected]:bg-green-50 dark:data-[state=selected]:bg-green-500/10">
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}

@@ -149,7 +149,7 @@ export class PerformanceOptimizer {
             supabase.from('students').select('id', { count: 'exact', head: true }),
             supabase.from('drivers').select('id', { count: 'exact', head: true }),
             supabase.from('routes').select('id', { count: 'exact', head: true }),
-            supabase.from('vehicles').select('id', { count: 'exact', head: true }),
+            supabase.from('tms_vehicle').select('id', { count: 'exact', head: true }),
             supabase.from('bookings').select('id', { count: 'exact', head: true }),
             supabase.from('payments').select('amount').eq('status', 'completed')
           ]);

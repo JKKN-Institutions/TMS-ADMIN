@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
       // If relationship query didn't work, fetch vehicle data separately
       if (!vehicle && route?.vehicle_id) {
         const { data: vehicleData, error: vehicleError } = await supabase
-          .from('vehicles')
+          .from('tms_vehicle')
           .select('*')
           .eq('id', route.vehicle_id)
           .single();

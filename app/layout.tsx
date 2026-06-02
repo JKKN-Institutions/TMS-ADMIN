@@ -22,7 +22,11 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="font-sans antialiased">
+      {/* suppressHydrationWarning: browser extensions (ColorZilla → cz-shortcut-listen,
+          Grammarly, etc.) mutate <body> attributes before React hydrates. Like the
+          <html> tag above, this suppresses only THIS element's own attribute mismatch
+          — it does NOT mask genuine hydration bugs in child components. */}
+      <body className="font-sans antialiased" suppressHydrationWarning>
         <ThemeProvider>
           <QueryProvider>
             <AuthProvider>{children}</AuthProvider>

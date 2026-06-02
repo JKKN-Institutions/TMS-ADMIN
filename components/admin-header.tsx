@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import {
-  Menu,
   PanelLeftClose,
   PanelLeft,
   Sun,
@@ -20,7 +19,6 @@ interface AdminHeaderProps {
   title: string;
   collapsed: boolean;
   onToggleCollapse: () => void;
-  onOpenSidebar: () => void;
 }
 
 const getInitials = (name: string) =>
@@ -167,21 +165,11 @@ function ProfileMenu() {
   );
 }
 
-export default function AdminHeader({ title, collapsed, onToggleCollapse, onOpenSidebar }: AdminHeaderProps) {
+export default function AdminHeader({ title, collapsed, onToggleCollapse }: AdminHeaderProps) {
   return (
     <header className="app-header">
       <div className="flex items-center gap-2 min-w-0">
-        {/* Mobile: open the slide-in sidebar */}
-        <button
-          type="button"
-          onClick={onOpenSidebar}
-          aria-label="Open menu"
-          className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 lg:hidden dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800"
-        >
-          <Menu className="w-6 h-6" />
-        </button>
-
-        {/* Desktop: collapse / expand the sidebar */}
+        {/* Desktop: collapse / expand the sidebar (mobile uses the bottom nav) */}
         <button
           type="button"
           onClick={onToggleCollapse}

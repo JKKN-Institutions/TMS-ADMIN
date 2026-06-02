@@ -47,7 +47,7 @@ export default function DriverEditPage({ params }: { params: Promise<{ driverId:
         <DriverPageHeader crumbs={crumbs('Not found')} title="Driver not found" />
         <p className="text-gray-600">
           This driver could not be loaded.{' '}
-          <Link href="/drivers" className="text-blue-600 hover:underline">Back to drivers</Link>
+          <Link href="/drivers" className="text-green-600 hover:underline">Back to drivers</Link>
         </p>
       </div>
     );

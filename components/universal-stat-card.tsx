@@ -31,84 +31,84 @@ interface UniversalStatCardProps {
 
 const colorVariants = {
   blue: {
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
-    icon: 'bg-blue-100 text-blue-600',
-    text: 'text-blue-600',
+    bg: 'bg-blue-50 dark:bg-blue-950/40',
+    border: 'border-blue-200 dark:border-blue-900/50',
+    icon: 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
+    text: 'text-blue-600 dark:text-blue-400',
     gradient: 'bg-gradient-to-br from-blue-500 to-blue-600',
-    hover: 'hover:border-blue-300 hover:shadow-blue-100'
+    hover: 'hover:border-blue-300 hover:shadow-blue-100 dark:hover:border-blue-800'
   },
   green: {
-    bg: 'bg-green-50',
-    border: 'border-green-200',
-    icon: 'bg-green-100 text-green-600',
-    text: 'text-green-600',
+    bg: 'bg-green-50 dark:bg-green-950/40',
+    border: 'border-green-200 dark:border-green-900/50',
+    icon: 'bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400',
+    text: 'text-green-600 dark:text-green-400',
     gradient: 'bg-gradient-to-br from-green-500 to-green-600',
-    hover: 'hover:border-green-300 hover:shadow-green-100'
+    hover: 'hover:border-green-300 hover:shadow-green-100 dark:hover:border-green-800'
   },
   red: {
-    bg: 'bg-red-50',
-    border: 'border-red-200',
-    icon: 'bg-red-100 text-red-600',
-    text: 'text-red-600',
+    bg: 'bg-red-50 dark:bg-red-950/40',
+    border: 'border-red-200 dark:border-red-900/50',
+    icon: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400',
+    text: 'text-red-600 dark:text-red-400',
     gradient: 'bg-gradient-to-br from-red-500 to-red-600',
-    hover: 'hover:border-red-300 hover:shadow-red-100'
+    hover: 'hover:border-red-300 hover:shadow-red-100 dark:hover:border-red-800'
   },
   yellow: {
-    bg: 'bg-yellow-50',
-    border: 'border-yellow-200',
-    icon: 'bg-yellow-100 text-yellow-600',
-    text: 'text-yellow-600',
+    bg: 'bg-yellow-50 dark:bg-yellow-950/40',
+    border: 'border-yellow-200 dark:border-yellow-900/50',
+    icon: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/40 dark:text-yellow-400',
+    text: 'text-yellow-600 dark:text-yellow-400',
     gradient: 'bg-gradient-to-br from-yellow-500 to-yellow-600',
-    hover: 'hover:border-yellow-300 hover:shadow-yellow-100'
+    hover: 'hover:border-yellow-300 hover:shadow-yellow-100 dark:hover:border-yellow-800'
   },
   purple: {
-    bg: 'bg-purple-50',
-    border: 'border-purple-200',
-    icon: 'bg-purple-100 text-purple-600',
-    text: 'text-purple-600',
+    bg: 'bg-purple-50 dark:bg-purple-950/40',
+    border: 'border-purple-200 dark:border-purple-900/50',
+    icon: 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400',
+    text: 'text-purple-600 dark:text-purple-400',
     gradient: 'bg-gradient-to-br from-purple-500 to-purple-600',
-    hover: 'hover:border-purple-300 hover:shadow-purple-100'
+    hover: 'hover:border-purple-300 hover:shadow-purple-100 dark:hover:border-purple-800'
   },
   indigo: {
-    bg: 'bg-indigo-50',
-    border: 'border-indigo-200',
-    icon: 'bg-indigo-100 text-indigo-600',
-    text: 'text-indigo-600',
+    bg: 'bg-indigo-50 dark:bg-indigo-950/40',
+    border: 'border-indigo-200 dark:border-indigo-900/50',
+    icon: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400',
+    text: 'text-indigo-600 dark:text-indigo-400',
     gradient: 'bg-gradient-to-br from-indigo-500 to-indigo-600',
-    hover: 'hover:border-indigo-300 hover:shadow-indigo-100'
+    hover: 'hover:border-indigo-300 hover:shadow-indigo-100 dark:hover:border-indigo-800'
   },
   pink: {
-    bg: 'bg-pink-50',
-    border: 'border-pink-200',
-    icon: 'bg-pink-100 text-pink-600',
-    text: 'text-pink-600',
+    bg: 'bg-pink-50 dark:bg-pink-950/40',
+    border: 'border-pink-200 dark:border-pink-900/50',
+    icon: 'bg-pink-100 text-pink-600 dark:bg-pink-900/40 dark:text-pink-400',
+    text: 'text-pink-600 dark:text-pink-400',
     gradient: 'bg-gradient-to-br from-pink-500 to-pink-600',
-    hover: 'hover:border-pink-300 hover:shadow-pink-100'
+    hover: 'hover:border-pink-300 hover:shadow-pink-100 dark:hover:border-pink-800'
   },
   cyan: {
-    bg: 'bg-cyan-50',
-    border: 'border-cyan-200',
-    icon: 'bg-cyan-100 text-cyan-600',
-    text: 'text-cyan-600',
+    bg: 'bg-cyan-50 dark:bg-cyan-950/40',
+    border: 'border-cyan-200 dark:border-cyan-900/50',
+    icon: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-900/40 dark:text-cyan-400',
+    text: 'text-cyan-600 dark:text-cyan-400',
     gradient: 'bg-gradient-to-br from-cyan-500 to-cyan-600',
-    hover: 'hover:border-cyan-300 hover:shadow-cyan-100'
+    hover: 'hover:border-cyan-300 hover:shadow-cyan-100 dark:hover:border-cyan-800'
   },
   orange: {
-    bg: 'bg-orange-50',
-    border: 'border-orange-200',
-    icon: 'bg-orange-100 text-orange-600',
-    text: 'text-orange-600',
+    bg: 'bg-orange-50 dark:bg-orange-950/40',
+    border: 'border-orange-200 dark:border-orange-900/50',
+    icon: 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400',
+    text: 'text-orange-600 dark:text-orange-400',
     gradient: 'bg-gradient-to-br from-orange-500 to-orange-600',
-    hover: 'hover:border-orange-300 hover:shadow-orange-100'
+    hover: 'hover:border-orange-300 hover:shadow-orange-100 dark:hover:border-orange-800'
   },
   teal: {
-    bg: 'bg-teal-50',
-    border: 'border-teal-200',
-    icon: 'bg-teal-100 text-teal-600',
-    text: 'text-teal-600',
+    bg: 'bg-teal-50 dark:bg-teal-950/40',
+    border: 'border-teal-200 dark:border-teal-900/50',
+    icon: 'bg-teal-100 text-teal-600 dark:bg-teal-900/40 dark:text-teal-400',
+    text: 'text-teal-600 dark:text-teal-400',
     gradient: 'bg-gradient-to-br from-teal-500 to-teal-600',
-    hover: 'hover:border-teal-300 hover:shadow-teal-100'
+    hover: 'hover:border-teal-300 hover:shadow-teal-100 dark:hover:border-teal-800'
   }
 };
 
@@ -173,9 +173,9 @@ const getTrendIcon = (direction: 'up' | 'down' | 'neutral') => {
 const getTrendColor = (direction: 'up' | 'down' | 'neutral') => {
   switch (direction) {
     case 'up':
-      return 'text-green-600 bg-green-50';
+      return 'text-green-600 bg-green-50 dark:text-green-400 dark:bg-green-950/40';
     case 'down':
-      return 'text-red-600 bg-red-50';
+      return 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-950/40';
     default:
       return 'text-gray-600 bg-gray-50';
   }

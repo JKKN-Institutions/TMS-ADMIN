@@ -29,9 +29,13 @@ async function getDashboard() {
       openGrievances
     ] = await Promise.all([
       supabase.from('students').select('*', { count: 'exact', head: true }),
-      supabase.from('drivers').select('*', { count: 'exact', head: true }),
-      supabase.from('routes').select('*', { count: 'exact', head: true }),
-      supabase.from('vehicles').select('*', { count: 'exact', head: true }),
+      // Drivers live in MyJKKN `staff` (role_key='driver') — same source as the
+      // /drivers page. The legacy `drivers` table is empty/absent (would count 0).
+      supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role_key', 'driver'),
+      // Routes were migrated to `tms_route` (same source as the /routes page).
+      // The legacy `routes` table is empty/absent (would count 0).
+      supabase.from('tms_route').select('*', { count: 'exact', head: true }),
+      supabase.from('tms_vehicle').select('*', { count: 'exact', head: true }),
       supabase.from('bookings').select('*', { count: 'exact', head: true }),
       supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
       supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'pending'),

@@ -2,32 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import {
-  LayoutDashboard,
-  Route,
-  Users,
-  Car,
-  Calendar,
-  CreditCard,
-  Bell,
-  MessageCircle,
-  BarChart3,
-  Settings,
-  X,
-  Bus,
-  UserCheck,
-  Shield,
-  FileText,
-  Search,
-  Power,
-  Navigation,
-  Zap,
-  Bug,
-  ClipboardCheck,
-} from 'lucide-react';
+import { X, Bus, Search, Power } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
 import AdminHeader from '@/components/admin-header';
+import BottomNav from '@/components/bottom-nav';
 import {
   Tooltip,
   TooltipTrigger,
@@ -36,74 +15,10 @@ import {
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
-import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { allNavigation, GROUP_TITLES, derivePageTitle, type NavItem } from '@/lib/navigation';
 
-interface NavItem {
-  name: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-  permission: string;
-  group: 'overview' | 'transport' | 'services' | 'system';
-  subItems?: { name: string; href: string; icon: React.ComponentType<{ className?: string }> }[];
-}
-
-const allNavigation: NavItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, permission: TMS_PERMISSIONS.DASHBOARD_VIEW, group: 'overview' },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3, permission: TMS_PERMISSIONS.REPORTS_VIEW, group: 'overview' },
-  { name: 'Passengers', href: '/students', icon: Users, permission: TMS_PERMISSIONS.ENROLLMENT_VIEW, group: 'transport' },
-  { name: 'Drivers', href: '/drivers', icon: UserCheck, permission: TMS_PERMISSIONS.DRIVERS_VIEW, group: 'transport' },
-  { name: 'Vehicles', href: '/vehicles', icon: Car, permission: TMS_PERMISSIONS.VEHICLES_VIEW, group: 'transport' },
-  { name: 'GPS Devices', href: '/gps-devices', icon: Navigation, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
-  { name: 'Track All', href: '/track-all', icon: Bus, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
-  { name: 'Routes', href: '/routes', icon: Route, permission: TMS_PERMISSIONS.ROUTES_VIEW, group: 'transport' },
-  { name: 'Schedules', href: '/schedules', icon: Calendar, permission: TMS_PERMISSIONS.SCHEDULES_VIEW, group: 'transport' },
-  { name: 'Route Optimization', href: '/route-optimization', icon: Zap, permission: TMS_PERMISSIONS.ROUTES_EDIT, group: 'transport' },
-  { name: 'Staff Assignments', href: '/staff-route-assignments', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
-  { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
-  { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
-  { name: 'My Grievances', href: '/my-grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_SUBMIT, group: 'services' },
-  { name: 'Payments', href: '/payments', icon: CreditCard, permission: TMS_PERMISSIONS.BOOKINGS_VIEW_ALL, group: 'services' },
-  {
-    name: 'Notifications',
-    href: '/notifications',
-    icon: Bell,
-    permission: TMS_PERMISSIONS.SETTINGS_VIEW,
-    group: 'services',
-    subItems: [
-      { name: 'All Notifications', href: '/notifications', icon: Bell },
-      { name: 'Push Notifications', href: '/notifications/push', icon: Bell },
-    ],
-  },
-  { name: 'Bug Management', href: '/bug-management', icon: Bug, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'services' },
-  { name: 'Authorize', href: '/authorize', icon: Shield, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
-  { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
-];
-
-const GROUP_TITLES: Record<NavItem['group'], string> = {
-  overview: 'OVERVIEW',
-  transport: 'TRANSPORT',
-  services: 'SERVICES',
-  system: 'SYSTEM',
-};
-
-// Flat list of every nav entry (incl. sub-items) used to resolve the active
-// module name shown in the header.
-const NAV_TITLE_LOOKUP: { name: string; href: string }[] = allNavigation.flatMap((item) => [
-  { name: item.name, href: item.href },
-  ...(item.subItems ?? []).map((s) => ({ name: s.name, href: s.href })),
-]);
-
-// Resolve the page title from the current path: prefer the longest matching
-// nav href, otherwise title-case the first path segment.
-const derivePageTitle = (path: string): string => {
-  const match = NAV_TITLE_LOOKUP.filter(
-    (i) => path === i.href || path.startsWith(i.href + '/')
-  ).sort((a, b) => b.href.length - a.href.length)[0];
-  if (match) return match.name;
-  const seg = path.split('/').filter(Boolean)[0];
-  if (!seg) return 'Dashboard';
-  return seg.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-};
+// Navigation config (allNavigation, GROUP_TITLES, derivePageTitle) now lives in
+// lib/navigation.ts and is shared with the mobile bottom nav (components/bottom-nav).
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
@@ -293,11 +208,13 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             title={pageTitle}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
-            onOpenSidebar={() => setSidebarOpen(true)}
           />
 
           <div className="content-body fade-in">{children}</div>
         </div>
+
+        {/* Mobile-only bottom navigation (replaces the sidebar on < lg). */}
+        <BottomNav />
       </div>
 
       <Toaster
