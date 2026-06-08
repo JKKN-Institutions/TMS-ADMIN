@@ -8,8 +8,9 @@ import { loadPassengerRefs } from '@/lib/passengers/refs';
  * GET bus-required learners for the Passenger module's Learners page.
  *
  * Reads the MyJKKN-owned `learners_profiles` master (TMS only reads it) filtered
- * to `bus_required = true`. `.eq('bus_required', true)` is null-safe — the column
- * is a nullable boolean and NULL rows are excluded, matching "IS TRUE". Route/stop
+ * to `bus_required = true` AND `lifecycle_status = 'active'` (currently-enrolled
+ * learners only). `.eq('bus_required', true)` is null-safe — the column is a
+ * nullable boolean and NULL rows are excluded, matching "IS TRUE". Route/stop
  * and institution/department names are resolved via a batch ref lookup.
  *
  * Permission: tms.enrollment.view (the existing Passengers permission). The proxy
@@ -33,6 +34,10 @@ async function getLearners(_request: NextRequest, auth: AuthContext) {
       .from('learners_profiles')
       .select(LEARNER_SELECT)
       .eq('bus_required', true)
+      // Only currently-active learners. `lifecycle_status` is a NOT-distinct enum;
+      // `.eq` excludes every other state (enquiry_submitted, reserved, account, …).
+      // This is a hard business filter, not a UI facet — prospects never reach the page.
+      .eq('lifecycle_status', 'active')
       .order('first_name', { ascending: true });
 
     if (error) {
