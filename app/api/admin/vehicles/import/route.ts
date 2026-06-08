@@ -49,6 +49,21 @@ function toDate(v: unknown): string | null {
   return s ? s.split('T')[0] : null;
 }
 
+function intOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : null;
+}
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = parseFloat(String(v));
+  return Number.isFinite(n) ? n : null;
+}
+function enumOrNull(v: unknown, allowed: string[]): string | null {
+  const x = str(v).toLowerCase();
+  return x && allowed.includes(x) ? x : null;
+}
+
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
   const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: permission });
@@ -99,18 +114,53 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
           registration_number: reg,
           model,
           capacity,
+          vehicle_type: enumOrNull(pick(r, 'vehicle_type', 'vehicleType'), ['bus','van','car','truck','ambulance','other']),
+          manufacturer: str(pick(r, 'manufacturer')) || null,
+          model_year: intOrNull(pick(r, 'model_year', 'modelYear')),
+          color: str(pick(r, 'color')) || null,
+          gross_vehicle_weight: numOrNull(pick(r, 'gross_vehicle_weight', 'grossVehicleWeight')),
           fuel_type: FUEL_TYPES.includes(fuel) ? fuel : 'diesel',
           status: STATUSES.includes(status) ? status : 'active',
           mileage: mileage != null && mileage !== '' ? parseFloat(String(mileage)) || 0 : 0,
-          last_maintenance: toDate(pick(r, 'last_maintenance', 'lastMaintenance')),
-          next_maintenance: toDate(pick(r, 'next_maintenance', 'nextMaintenance')),
-          insurance_expiry: toDate(pick(r, 'insurance_expiry', 'insuranceExpiry')),
-          fitness_expiry: toDate(pick(r, 'fitness_expiry', 'fitnessExpiry')),
+          ownership_type: enumOrNull(pick(r, 'ownership_type', 'ownershipType'), ['owned','leased','rented']),
           purchase_date: toDate(pick(r, 'purchase_date', 'purchaseDate')),
-          chassis_number: str(pick(r, 'chassis_number', 'chassisNumber')) || null,
-          engine_number: str(pick(r, 'engine_number', 'engineNumber')) || null,
+          purchase_cost: numOrNull(pick(r, 'purchase_cost', 'purchaseCost')),
+          vendor_name: str(pick(r, 'vendor_name', 'vendorName')) || null,
+          warranty_expiry: toDate(pick(r, 'warranty_expiry', 'warrantyExpiry')),
+          rc_expiry_date: toDate(pick(r, 'rc_expiry_date', 'rcExpiryDate')),
+          permit_number: str(pick(r, 'permit_number', 'permitNumber')) || null,
+          permit_expiry_date: toDate(pick(r, 'permit_expiry_date', 'permitExpiryDate')),
+          pollution_certificate_number: str(pick(r, 'pollution_certificate_number', 'pollutionCertificateNumber')) || null,
+          pollution_expiry_date: toDate(pick(r, 'pollution_expiry_date', 'pollutionExpiryDate')),
+          road_tax_expiry_date: toDate(pick(r, 'road_tax_expiry_date', 'roadTaxExpiryDate')),
+          fitness_expiry: toDate(pick(r, 'fitness_expiry', 'fitnessExpiry')),
+          insurance_provider: str(pick(r, 'insurance_provider', 'insuranceProvider')) || null,
+          insurance_policy_number: str(pick(r, 'insurance_policy_number', 'insurancePolicyNumber')) || null,
+          insurance_expiry: toDate(pick(r, 'insurance_expiry', 'insuranceExpiry')),
+          insurance_amount: numOrNull(pick(r, 'insurance_amount', 'insuranceAmount')),
+          assignment_date: toDate(pick(r, 'assignment_date', 'assignmentDate')),
           gps_device_id: str(pick(r, 'gps_device_id', 'gpsDeviceId')) || null,
           live_tracking_enabled: toBool(pick(r, 'live_tracking_enabled', 'liveTrackingEnabled')),
+          gps_provider: str(pick(r, 'gps_provider', 'gpsProvider')) || null,
+          sim_number: str(pick(r, 'sim_number', 'simNumber')) || null,
+          last_maintenance: toDate(pick(r, 'last_maintenance', 'lastMaintenance')),
+          next_maintenance: toDate(pick(r, 'next_maintenance', 'nextMaintenance')),
+          current_odometer: numOrNull(pick(r, 'current_odometer', 'currentOdometer')),
+          maintenance_interval_km: numOrNull(pick(r, 'maintenance_interval_km', 'maintenanceIntervalKm')),
+          maintenance_interval_days: intOrNull(pick(r, 'maintenance_interval_days', 'maintenanceIntervalDays')),
+          last_service_odometer: numOrNull(pick(r, 'last_service_odometer', 'lastServiceOdometer')),
+          next_service_odometer: numOrNull(pick(r, 'next_service_odometer', 'nextServiceOdometer')),
+          service_vendor: str(pick(r, 'service_vendor', 'serviceVendor')) || null,
+          monthly_emi: numOrNull(pick(r, 'monthly_emi', 'monthlyEmi')),
+          fuel_card_number: str(pick(r, 'fuel_card_number', 'fuelCardNumber')) || null,
+          operating_cost_per_km: numOrNull(pick(r, 'operating_cost_per_km', 'operatingCostPerKm')),
+          emergency_contact_name: str(pick(r, 'emergency_contact_name', 'emergencyContactName')) || null,
+          emergency_contact_phone: str(pick(r, 'emergency_contact_phone', 'emergencyContactPhone')) || null,
+          first_aid_available: toBool(pick(r, 'first_aid_available', 'firstAidAvailable')),
+          fire_extinguisher_expiry: toDate(pick(r, 'fire_extinguisher_expiry', 'fireExtinguisherExpiry')),
+          chassis_number: str(pick(r, 'chassis_number', 'chassisNumber')) || null,
+          engine_number: str(pick(r, 'engine_number', 'engineNumber')) || null,
+          remarks: str(pick(r, 'remarks')) || null,
           updated_by: auth.userId,
         },
       });
