@@ -8,8 +8,13 @@ import { loadPassengerRefs } from '@/lib/passengers/refs';
  * GET bus-required staff for the Passenger module's Staff page.
  *
  * Reads the MyJKKN-owned `staff` directory filtered to `bus_required = true`
- * (a NOT NULL boolean). Currently zero staff are flagged, so this returns an
- * empty list until staff start opting in — the page renders an empty state.
+ * (a NOT NULL boolean) AND `is_active = true`. `.eq('is_active', true)` is the
+ * staff analog of the Learners page's "active pipeline" filter — `is_active` is
+ * nullable, so this excludes both inactive (false) and unknown (NULL) staff,
+ * matching "IS TRUE". (The `status` column here is draft/published — a record
+ * publication state, not the person's active status — so it is intentionally
+ * left out of this filter.) Currently zero staff are flagged bus_required, so
+ * this returns an empty list until staff start opting in.
  *
  * Permission: tms.enrollment.view (shared with the Learners page).
  */
@@ -30,6 +35,7 @@ async function getStaffPassengers(_request: NextRequest, auth: AuthContext) {
       .from('staff')
       .select(STAFF_SELECT)
       .eq('bus_required', true)
+      .eq('is_active', true)
       .order('first_name', { ascending: true });
 
     if (error) {

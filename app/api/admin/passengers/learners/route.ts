@@ -1,16 +1,24 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-import { LEARNER_SELECT, mapLearner, type LearnerRow } from '@/lib/passengers/types';
+import {
+  LEARNER_SELECT,
+  ACTIVE_LIFECYCLE_STATUSES,
+  mapLearner,
+  type LearnerRow,
+} from '@/lib/passengers/types';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 
 /**
  * GET bus-required learners for the Passenger module's Learners page.
  *
  * Reads the MyJKKN-owned `learners_profiles` master (TMS only reads it) filtered
- * to `bus_required = true`. `.eq('bus_required', true)` is null-safe — the column
- * is a nullable boolean and NULL rows are excluded, matching "IS TRUE". Route/stop
- * and institution/department names are resolved via a batch ref lookup.
+ * to `bus_required = true` AND an active lifecycle. `.eq('bus_required', true)`
+ * is null-safe — the column is a nullable boolean and NULL rows are excluded,
+ * matching "IS TRUE". The lifecycle filter is an explicit ALLOW-LIST
+ * (ACTIVE_LIFECYCLE_STATUSES) so ONLY active-pipeline learners appear and nothing
+ * else can creep in. Route/stop and institution/department names are resolved via
+ * a batch ref lookup.
  *
  * Permission: tms.enrollment.view (the existing Passengers permission). The proxy
  * already gates the route on authentication; this adds the granular check that
@@ -33,6 +41,7 @@ async function getLearners(_request: NextRequest, auth: AuthContext) {
       .from('learners_profiles')
       .select(LEARNER_SELECT)
       .eq('bus_required', true)
+      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
       .order('first_name', { ascending: true });
 
     if (error) {

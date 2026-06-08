@@ -28,6 +28,22 @@ export const STAFF_SELECT =
   'designation, status, is_active, institution_id, department_id, ' +
   'bus_required, transport_route_id, transport_stop_id';
 
+// ── Lifecycle filtering for the Learners page. ───────────────────────────────
+// learners_profiles.lifecycle_status is a 14-value enum. The Learners page shows
+// only ENROLLED/active learners for transport, via an explicit ALLOW-LIST
+// (PostgREST `in` filter) — so ONLY these states ever appear and nothing else can
+// creep in. Admission-pipeline prospects ('reserved', 'enquiry_submitted') are
+// intentionally EXCLUDED — they are not yet active learners. 'account' is the
+// enrolled state that currently carries bus-required learners; 'active'/'admitted'
+// are included for forward-compatibility. To also show reserved/prospective
+// learners later, add those values back here (single edit, picked up by the
+// learners API route).
+export const ACTIVE_LIFECYCLE_STATUSES = [
+  'active',
+  'admitted',
+  'account',
+] as const;
+
 // ── Raw DB row shapes (what PostgREST returns for the SELECTs above). ─────────
 export interface LearnerRow {
   id: string;
