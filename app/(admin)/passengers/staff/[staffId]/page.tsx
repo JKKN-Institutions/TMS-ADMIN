@@ -7,9 +7,28 @@ import type { StaffPassenger } from '@/lib/passengers/types';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
 
 async function fetchStaff(id: string): Promise<StaffPassenger> {
-  const res = await fetch(`/api/admin/passengers/staff/${id}`);
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load staff');
+  // Mirror the list page: bypass any stale cache/SW entry and always send the
+  // session cookie, and never let a non-JSON/dev-compile response throw blankly.
+  let res: Response;
+  try {
+    res = await fetch(`/api/admin/passengers/staff/${id}`, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    });
+  } catch (e) {
+    throw new Error(`Could not reach the staff API: ${(e as Error).message}`);
+  }
+
+  let json: { success?: boolean; error?: string; data?: StaffPassenger };
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(`Staff API returned a non-JSON response (HTTP ${res.status}).`);
+  }
+
+  if (!res.ok || !json.success) {
+    throw new Error(`${json.error || 'Failed to load staff'} (HTTP ${res.status})`);
+  }
   return json.data as StaffPassenger;
 }
 
