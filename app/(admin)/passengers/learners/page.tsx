@@ -9,9 +9,37 @@ import { DataTable } from '@/components/ui/data-table';
 import { getLearnerColumns } from './columns';
 
 async function fetchLearners(): Promise<LearnerPassenger[]> {
-  const res = await fetch('/api/admin/passengers/learners');
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch learners');
+  // `cache: 'no-store'` keeps a brand-new dynamic route from being served a
+  // stale/cached response (incl. a service-worker entry from before the route
+  // existed). `credentials` is explicit so the session cookie always rides along.
+  let res: Response;
+  try {
+    res = await fetch('/api/admin/passengers/learners', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    });
+  } catch (e) {
+    // Network-level failure (server down, SW/network interception) — fetch rejects.
+    throw new Error(`Could not reach the learners API: ${(e as Error).message}`);
+  }
+
+  // If the route threw before returning JSON (e.g. a dev compile error page),
+  // res.json() throws — surface the status instead of a blank generic error.
+  let json: { success?: boolean; error?: string; data?: LearnerPassenger[] };
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(
+      `Learners API returned a non-JSON response (HTTP ${res.status}). ` +
+        `The dev server may still be compiling — retry in a moment.`
+    );
+  }
+
+  if (!res.ok || !json.success) {
+    // Carry the server's own message + status so the exact boundary is visible
+    // (e.g. "Unauthorized (401)", "Forbidden (403)", "Failed to fetch learners (500)").
+    throw new Error(`${json.error || 'Failed to fetch learners'} (HTTP ${res.status})`);
+  }
   return json.data as LearnerPassenger[];
 }
 
@@ -24,7 +52,7 @@ function options(values: (string | null)[]): { label: string; value: string }[] 
 
 export default function LearnersPage() {
   const router = useRouter();
-  const { data: learners = [], isLoading, isError } = useQuery({
+  const { data: learners = [], isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['passenger-learners'],
     queryFn: fetchLearners,
   });
@@ -83,7 +111,18 @@ export default function LearnersPage() {
       {isError ? (
         <div className="py-16 text-center">
           <GraduationCap className="mx-auto mb-3 h-10 w-10 text-gray-400" />
-          <p className="text-gray-600">Failed to load learners. Please retry.</p>
+          <p className="font-medium text-gray-700">Failed to load learners.</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-gray-500">
+            {(error as Error)?.message ?? 'Please retry.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="mt-4 inline-flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
+          >
+            {isFetching ? 'Retrying…' : 'Retry'}
+          </button>
         </div>
       ) : (
         <DataTable
