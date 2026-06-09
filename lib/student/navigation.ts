@@ -21,7 +21,7 @@ export const studentNavigation: StudentNavItem[] = [
   { name: 'Boarding Pass', href: '/student/pass', icon: QrCode },
   { name: 'My Attendance', href: '/student/attendance', icon: ClipboardCheck },
   { name: 'Payments', href: '/student/payments', icon: CreditCard, comingSoon: true },
-  { name: 'Grievances', href: '/student/grievances', icon: MessageCircle, comingSoon: true },
+  { name: 'Grievances', href: '/student/grievances', icon: MessageCircle },
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
   { name: 'Live Track', href: '/student/live-track', icon: MapPin, comingSoon: true },
   { name: 'Profile', href: '/student/profile', icon: User },
