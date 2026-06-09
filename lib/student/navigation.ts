@@ -18,8 +18,8 @@ export interface StudentNavItem {
 export const studentNavigation: StudentNavItem[] = [
   { name: 'Home', href: '/student/dashboard', icon: LayoutDashboard },
   { name: 'My Route', href: '/student/routes', icon: Route },
-  { name: 'Boarding Pass', href: '/student/pass', icon: QrCode, comingSoon: true },
-  { name: 'My Attendance', href: '/student/attendance', icon: ClipboardCheck, comingSoon: true },
+  { name: 'Boarding Pass', href: '/student/pass', icon: QrCode },
+  { name: 'My Attendance', href: '/student/attendance', icon: ClipboardCheck },
   { name: 'Payments', href: '/student/payments', icon: CreditCard, comingSoon: true },
   { name: 'Grievances', href: '/student/grievances', icon: MessageCircle, comingSoon: true },
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
