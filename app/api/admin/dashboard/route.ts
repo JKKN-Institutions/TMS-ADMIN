@@ -28,10 +28,15 @@ async function getDashboard() {
       pendingPayments,
       openGrievances
     ] = await Promise.all([
-      // "Students" on the TMS dashboard = transport (bus-required) learners — the
-      // same population as the Passengers > Learners module. The legacy `students`
-      // table is dropped (would always count 0).
-      supabase.from('learners_profiles').select('*', { count: 'exact', head: true }).eq('bus_required', true),
+      // "Students" on the TMS dashboard = transport learners, counted EXACTLY like
+      // the Passengers > Learners page: bus_required = true AND lifecycle_status =
+      // 'active' (current learners only — excludes enquiry/reserved/account prospects).
+      // The legacy `students` table is dropped (would always count 0).
+      supabase
+        .from('learners_profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('bus_required', true)
+        .eq('lifecycle_status', 'active'),
       // Drivers live in MyJKKN `staff` (role_key='driver') — same source as the
       // /drivers page. The legacy `drivers` table is empty/absent (would count 0).
       supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role_key', 'driver'),
