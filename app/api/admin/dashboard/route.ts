@@ -28,7 +28,10 @@ async function getDashboard() {
       pendingPayments,
       openGrievances
     ] = await Promise.all([
-      supabase.from('students').select('*', { count: 'exact', head: true }),
+      // "Students" on the TMS dashboard = transport (bus-required) learners — the
+      // same population as the Passengers > Learners module. The legacy `students`
+      // table is dropped (would always count 0).
+      supabase.from('learners_profiles').select('*', { count: 'exact', head: true }).eq('bus_required', true),
       // Drivers live in MyJKKN `staff` (role_key='driver') — same source as the
       // /drivers page. The legacy `drivers` table is empty/absent (would count 0).
       supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role_key', 'driver'),
@@ -39,7 +42,8 @@ async function getDashboard() {
       supabase.from('bookings').select('*', { count: 'exact', head: true }),
       supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
       supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('grievances').select('*', { count: 'exact', head: true }).eq('status', 'open')
+      // Transport grievances live in tms_grievance now (legacy `grievances` dropped).
+      supabase.from('tms_grievance').select('*', { count: 'exact', head: true }).in('status', ['open', 'in_progress'])
     ]);
 
     // Calculate today's revenue

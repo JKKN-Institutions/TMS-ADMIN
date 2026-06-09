@@ -187,7 +187,7 @@ const DashboardPage = () => {
           </button>
           <button
             onClick={() => router.push('/passengers/learners')}
-            className="inline-flex items-center whitespace-nowrap px-4 py-2 border border-transparent rounded-lg shadow-sm bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="inline-flex items-center whitespace-nowrap px-4 py-2 border border-transparent rounded-lg shadow-sm bg-green-600 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Student
