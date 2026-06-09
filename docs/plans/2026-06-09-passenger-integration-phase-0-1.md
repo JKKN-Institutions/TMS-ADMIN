@@ -61,13 +61,9 @@ WHERE lp.profile_id IS NULL
   AND p.role = 'student'
   AND lower(p.email) IN (lower(lp.college_email), lower(lp.student_email));
 
--- Backfill drivers by email.
-UPDATE public.tms_driver d
-SET profile_id = p.id
-FROM public.profiles p
-WHERE d.profile_id IS NULL
-  AND p.role = 'driver'
-  AND lower(p.email) = lower(d.email);
+-- Driver backfill is DEFERRED to Phase 2 (driver shell): tms_driver has NO email
+-- column — it links via staff_id → staff → profiles. The column is added now
+-- (additive, safe); the backfill join through `staff` is done when we build /driver.
 ```
 
 **Step 2: Apply it**
@@ -385,6 +381,25 @@ import { LEARNER_SELECT, type LearnerRow } from '@/lib/passengers/types';
 export async function getLearnerRowForUser(auth: AuthContext): Promise<LearnerRow | null> {
   const svc = createServiceRoleClient();
 
+  // Canonical link: profiles.learner_id → learners_profiles.id (verified 1:1 FK,
+  // the authoritative person↔identity key — email is unreliable for the transport
+  // cohort, which barely carries it).
+  const { data: prof } = await auth.supabase
+    .from('profiles')
+    .select('learner_id, email')
+    .eq('id', auth.userId)
+    .single();
+
+  if (prof?.learner_id) {
+    const byLearnerId = await svc
+      .from('learners_profiles')
+      .select(LEARNER_SELECT)
+      .eq('id', prof.learner_id)
+      .maybeSingle();
+    if (byLearnerId.data) return byLearnerId.data as unknown as LearnerRow;
+  }
+
+  // Fallback 1: the reverse profile_id FK we backfilled.
   const byFk = await svc
     .from('learners_profiles')
     .select(LEARNER_SELECT)
@@ -392,14 +407,8 @@ export async function getLearnerRowForUser(auth: AuthContext): Promise<LearnerRo
     .maybeSingle();
   if (byFk.data) return byFk.data as unknown as LearnerRow;
 
-  // Fallback: match the auth email against the learner's institutional emails.
-  const { data: prof } = await auth.supabase
-    .from('profiles')
-    .select('email')
-    .eq('id', auth.userId)
-    .single();
+  // Fallback 2 (last resort): institutional email match.
   if (!prof?.email) return null;
-
   const email = prof.email.toLowerCase();
   const byEmail = await svc
     .from('learners_profiles')
