@@ -64,6 +64,10 @@ export default function StudentPassPage() {
           <p className="text-[11px] text-muted-foreground text-center">
             Show this to boarding staff to mark your attendance.
           </p>
+          <details className="text-center w-full">
+            <summary className="text-[11px] text-muted-foreground cursor-pointer">Pass code (manual entry)</summary>
+            <p className="text-[10px] font-mono break-all select-all mt-1 text-muted-foreground px-2">{p.token}</p>
+          </details>
         </CardContent>
       </Card>
     </div>
