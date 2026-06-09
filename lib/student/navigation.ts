@@ -27,3 +27,14 @@ export const studentNavigation: StudentNavItem[] = [
   { name: 'Profile', href: '/student/profile', icon: User },
   { name: 'Settings', href: '/student/settings', icon: Settings },
 ];
+
+// Resolve the header title from the current path (mirrors the admin derivePageTitle).
+export function deriveStudentPageTitle(path: string): string {
+  const match = studentNavigation
+    .filter((i) => path === i.href || path.startsWith(i.href + '/'))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  if (match) return match.name;
+  const seg = path.split('/').filter(Boolean)[1];
+  if (!seg) return 'Home';
+  return seg.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
