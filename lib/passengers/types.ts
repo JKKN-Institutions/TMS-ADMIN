@@ -21,6 +21,7 @@
 export const LEARNER_SELECT =
   'id, first_name, last_name, student_email, college_email, student_mobile, ' +
   'roll_number, register_number, lifecycle_status, institution_id, department_id, ' +
+  'program_id, semester_id, ' +
   'bus_required, transport_route_id, transport_stop_id, transport_fee';
 
 export const STAFF_SELECT =
@@ -41,6 +42,8 @@ export interface LearnerRow {
   lifecycle_status: string;
   institution_id: string | null;
   department_id: string | null;
+  program_id: string | null;
+  semester_id: string | null;
   bus_required: boolean | null;
   transport_route_id: string | null;
   transport_stop_id: string | null;
@@ -71,6 +74,8 @@ export interface RefMaps {
   departments: Map<string, string>; // id → department name
   routes: Map<string, { routeNumber: string; routeName: string }>;
   stops: Map<string, string>; // id → stop name
+  programs: Map<string, string>; // id → program name
+  semesters: Map<string, string>; // id → semester name
 }
 
 export const EMPTY_REFS: RefMaps = {
@@ -78,6 +83,8 @@ export const EMPTY_REFS: RefMaps = {
   departments: new Map(),
   routes: new Map(),
   stops: new Map(),
+  programs: new Map(),
+  semesters: new Map(),
 };
 
 // ── Clean DTOs the API returns and the UI consumes. ──────────────────────────
@@ -91,6 +98,8 @@ export interface LearnerPassenger {
   lifecycleStatus: string;
   institutionName: string | null;
   departmentName: string | null;
+  programName: string | null;
+  semesterName: string | null;
   routeLabel: string | null;
   stopLabel: string | null;
   transportFee: number | null;
@@ -136,6 +145,8 @@ export function mapLearner(row: LearnerRow, refs: RefMaps): LearnerPassenger {
     lifecycleStatus: row.lifecycle_status,
     institutionName: row.institution_id ? refs.institutions.get(row.institution_id) ?? null : null,
     departmentName: row.department_id ? refs.departments.get(row.department_id) ?? null : null,
+    programName: row.program_id ? refs.programs.get(row.program_id) ?? null : null,
+    semesterName: row.semester_id ? refs.semesters.get(row.semester_id) ?? null : null,
     routeLabel: routeLabel(refs, row.transport_route_id),
     stopLabel: row.transport_stop_id ? refs.stops.get(row.transport_stop_id) ?? null : null,
     transportFee: row.transport_fee,

@@ -150,6 +150,10 @@ export default function VehicleForm({
   const [gpsDevices, setGpsDevices] = useState<GpsDevice[]>([]);
   const [drivers, setDrivers] = useState<DriverItem[]>([]);
   const [saving, setSaving] = useState(false);
+  // Documents are held here until submit, then uploaded to storage (deferred).
+  const [pendingDocs, setPendingDocs] = useState<{
+    rc: File | null; insurance: File | null; fitness: File | null; permit: File | null;
+  }>({ rc: null, insurance: null, fitness: null, permit: null });
 
   const set = <K extends keyof VehicleFormState>(k: K, v: VehicleFormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -202,7 +206,28 @@ export default function VehicleForm({
 
     setSaving(true);
     try {
-      const payload = toPayload(form);
+      // Deferred document upload: push any newly selected files to storage now,
+      // then save the vehicle with the returned paths. Abort the save if any
+      // upload fails (so we never persist a vehicle referencing a missing blob).
+      type DocKey = 'rcDocumentUrl' | 'insuranceDocumentUrl' | 'fitnessCertificateUrl' | 'permitDocumentUrl';
+      const pendingList: Array<{ key: DocKey; file: File | null; label: string }> = [
+        { key: 'rcDocumentUrl', file: pendingDocs.rc, label: 'RC Document' },
+        { key: 'insuranceDocumentUrl', file: pendingDocs.insurance, label: 'Insurance Document' },
+        { key: 'fitnessCertificateUrl', file: pendingDocs.fitness, label: 'Fitness Certificate' },
+        { key: 'permitDocumentUrl', file: pendingDocs.permit, label: 'Permit Document' },
+      ];
+      const docPaths: Partial<Record<DocKey, string>> = {};
+      for (const { key, file, label } of pendingList) {
+        if (!file) continue;
+        const fd = new FormData();
+        fd.append('file', file);
+        const up = await fetch('/api/admin/vehicles/documents', { method: 'POST', body: fd });
+        const upJson = await up.json();
+        if (!up.ok || !upJson.success) throw new Error(upJson.error || `Failed to upload ${label}`);
+        docPaths[key] = upJson.path as string;
+      }
+
+      const payload = toPayload({ ...form, ...docPaths });
       const res =
         mode === 'create'
           ? await fetch('/api/admin/vehicles', {
@@ -386,10 +411,18 @@ export default function VehicleForm({
 
       <SectionCard title="Documents">
         <div className={grid}>
-          <DocumentUploadField label="RC Document" value={form.rcDocumentUrl} onChange={(p) => set('rcDocumentUrl', p)} />
-          <DocumentUploadField label="Insurance Document" value={form.insuranceDocumentUrl} onChange={(p) => set('insuranceDocumentUrl', p)} />
-          <DocumentUploadField label="Fitness Certificate" value={form.fitnessCertificateUrl} onChange={(p) => set('fitnessCertificateUrl', p)} />
-          <DocumentUploadField label="Permit Document" value={form.permitDocumentUrl} onChange={(p) => set('permitDocumentUrl', p)} />
+          <DocumentUploadField label="RC Document" value={form.rcDocumentUrl} pendingFile={pendingDocs.rc}
+            onSelect={(f) => setPendingDocs((p) => ({ ...p, rc: f }))}
+            onClear={() => { setPendingDocs((p) => ({ ...p, rc: null })); set('rcDocumentUrl', ''); }} />
+          <DocumentUploadField label="Insurance Document" value={form.insuranceDocumentUrl} pendingFile={pendingDocs.insurance}
+            onSelect={(f) => setPendingDocs((p) => ({ ...p, insurance: f }))}
+            onClear={() => { setPendingDocs((p) => ({ ...p, insurance: null })); set('insuranceDocumentUrl', ''); }} />
+          <DocumentUploadField label="Fitness Certificate" value={form.fitnessCertificateUrl} pendingFile={pendingDocs.fitness}
+            onSelect={(f) => setPendingDocs((p) => ({ ...p, fitness: f }))}
+            onClear={() => { setPendingDocs((p) => ({ ...p, fitness: null })); set('fitnessCertificateUrl', ''); }} />
+          <DocumentUploadField label="Permit Document" value={form.permitDocumentUrl} pendingFile={pendingDocs.permit}
+            onSelect={(f) => setPendingDocs((p) => ({ ...p, permit: f }))}
+            onClear={() => { setPendingDocs((p) => ({ ...p, permit: null })); set('permitDocumentUrl', ''); }} />
         </div>
       </SectionCard>
 
