@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { resolveArea, AREA_PERMISSION, resolveHomeForRole } from '@/lib/auth/areas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Next.js 16 "proxy" (formerly middleware). The file is named proxy.ts, so the
@@ -97,22 +98,26 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  // 5. TMS permission gate (super admins bypass).
+  // 5. Area-based access gate (super admins bypass all areas). Each area (admin /
+  //    student / driver / boarding) requires its own permission; a user lacking it
+  //    is sent to their OWN area's home rather than a dead-end 403.
   if (!profile.is_super_admin) {
-    const { data: hasTmsAccess } = await supabase.rpc('user_has_permission', {
-      permission_name: 'tms.dashboard.view',
+    const area = resolveArea(pathname);
+    const { data: hasAccess } = await supabase.rpc('user_has_permission', {
+      permission_name: AREA_PERMISSION[area],
     });
 
-    if (!hasTmsAccess) {
+    if (!hasAccess) {
       if (isApi) {
-        return NextResponse.json(
-          { error: 'No TMS access' },
-          { status: 403 }
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      const home = resolveHomeForRole(profile.role, profile.is_super_admin);
+      if (pathname === home) {
+        return NextResponse.redirect(
+          new URL('/unauthorized?reason=no_tms_access', request.url)
         );
       }
-      return NextResponse.redirect(
-        new URL('/unauthorized?reason=no_tms_access', request.url)
-      );
+      return NextResponse.redirect(new URL(home, request.url));
     }
   }
 
