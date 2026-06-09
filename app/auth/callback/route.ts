@@ -99,7 +99,13 @@ export async function GET(request: NextRequest) {
   // the existing response's Location header so the session cookies set on it are
   // preserved (creating a fresh redirect would drop them).
   if (!searchParams.get('redirect')) {
-    const home = resolveHomeForRole(profile.role, profile.is_super_admin);
+    let home = resolveHomeForRole(profile.role, profile.is_super_admin);
+    if (home === '/dashboard' && !profile.is_super_admin) {
+      const { data: canScan } = await supabase.rpc('user_has_permission', {
+        permission_name: 'tms.attendance.scan',
+      });
+      if (canScan) home = '/boarding/scan';
+    }
     response.headers.set('location', new URL(home, request.url).toString());
   }
 

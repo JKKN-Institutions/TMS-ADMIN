@@ -111,7 +111,15 @@ export async function proxy(request: NextRequest) {
       if (isApi) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
-      const home = resolveHomeForRole(profile.role, profile.is_super_admin);
+      let home = resolveHomeForRole(profile.role, profile.is_super_admin);
+      if (home === '/dashboard' && !profile.is_super_admin) {
+        // Boarding scanners are permission-identified (transport_boarding role via
+        // user_roles), not role-identified — route them to /boarding.
+        const { data: canScan } = await supabase.rpc('user_has_permission', {
+          permission_name: 'tms.attendance.scan',
+        });
+        if (canScan) home = '/boarding/scan';
+      }
       if (pathname === home) {
         return NextResponse.redirect(
           new URL('/unauthorized?reason=no_tms_access', request.url)

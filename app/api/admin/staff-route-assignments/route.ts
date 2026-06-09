@@ -12,6 +12,48 @@ async function requireAssign(auth: AuthContext): Promise<boolean> {
   return !!data;
 }
 
+type Svc = ReturnType<typeof createServiceRoleClient>;
+
+// Boarding scanners are designated by route assignment: assigning a staff grants
+// them the dedicated `transport_boarding` role (via user_roles), so the proxy
+// /boarding gate + client can() pass. Best-effort — never fails the assignment.
+async function grantBoardingRole(supabase: Svc, staffEmail: string, assignedBy: string) {
+  try {
+    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', staffEmail).maybeSingle();
+    const profileId = (prof as { id: string } | null)?.id;
+    if (!profileId) return;
+    const { data: role } = await supabase.from('custom_roles').select('id').eq('role_key', 'transport_boarding').maybeSingle();
+    const roleId = (role as { id: string } | null)?.id;
+    if (!roleId) return;
+    const { data: existing } = await supabase.from('user_roles').select('id').eq('user_id', profileId).eq('role_id', roleId).maybeSingle();
+    if (existing) return;
+    await supabase.from('user_roles').insert({ user_id: profileId, role_id: roleId, is_primary: false, assigned_by: assignedBy });
+  } catch (e) {
+    console.error('grantBoardingRole (non-fatal):', e);
+  }
+}
+
+// Revoke the boarding role only if the staff has NO remaining active assignments.
+async function maybeRevokeBoardingRole(supabase: Svc, assignmentId: string) {
+  try {
+    const { data: a } = await supabase.from('tms_staff_route_assignment').select('staff_email').eq('id', assignmentId).maybeSingle();
+    const email = (a as { staff_email: string } | null)?.staff_email;
+    if (!email) return;
+    const { data: remaining } = await supabase
+      .from('tms_staff_route_assignment').select('id').eq('staff_email', email).eq('is_active', true).limit(1).maybeSingle();
+    if (remaining) return;
+    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', email).maybeSingle();
+    const profileId = (prof as { id: string } | null)?.id;
+    if (!profileId) return;
+    const { data: role } = await supabase.from('custom_roles').select('id').eq('role_key', 'transport_boarding').maybeSingle();
+    const roleId = (role as { id: string } | null)?.id;
+    if (!roleId) return;
+    await supabase.from('user_roles').delete().eq('user_id', profileId).eq('role_id', roleId);
+  } catch (e) {
+    console.error('maybeRevokeBoardingRole (non-fatal):', e);
+  }
+}
+
 // Columns of tms_route we surface alongside each assignment (joined in JS).
 const ROUTE_COLS =
   'id, route_number, route_name, start_location, end_location, departure_time, arrival_time, status, total_capacity, current_passengers';
@@ -114,6 +156,8 @@ async function postAssignment(request: NextRequest, auth: AuthContext) {
       console.error('Assignment create error:', error);
       return NextResponse.json({ success: false, error: 'Failed to create assignment' }, { status: 500 });
     }
+    // Grant the boarding-scanner role so this staff can enter /boarding (best-effort).
+    await grantBoardingRole(supabase, staffEmail, auth.userId);
     return NextResponse.json({ success: true, message: 'Route assigned successfully', assignment }, { status: 201 });
   } catch (e) {
     console.error('Assignment create error:', e);
@@ -141,6 +185,7 @@ async function deleteAssignment(request: NextRequest, auth: AuthContext) {
       console.error('Assignment remove error:', error);
       return NextResponse.json({ success: false, error: 'Failed to remove assignment' }, { status: 500 });
     }
+    await maybeRevokeBoardingRole(supabase, assignmentId);
     return NextResponse.json({ success: true, message: 'Assignment removed successfully' });
   } catch (e) {
     console.error('Assignment remove error:', e);
