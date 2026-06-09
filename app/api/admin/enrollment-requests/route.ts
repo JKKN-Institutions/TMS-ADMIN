@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { LEARNER_SELECT, mapLearner, type LearnerRow } from '@/lib/passengers/types';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
+import { notifyLearner } from '@/lib/notifications/notify';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 /**
@@ -139,6 +140,13 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
         return NextResponse.json({ error: 'Failed to clear allocation' }, { status: 500 });
       }
       if (!upd.data) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
+      await notifyLearner(svc, {
+        learnerId: body.learnerId,
+        actorId: auth.userId,
+        title: 'Transport allocation removed',
+        body: 'Your transport route allocation has been removed. Contact the transport office if this is unexpected.',
+        url: '/student/routes',
+      });
       return NextResponse.json({ success: true });
     }
 
@@ -168,6 +176,13 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Failed to update allocation' }, { status: 500 });
     }
     if (!upd.data) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
+    await notifyLearner(svc, {
+      learnerId: body.learnerId,
+      actorId: auth.userId,
+      title: 'Transport allocated',
+      body: 'You have been allocated to a transport route. View it under My Route, and your boarding pass is ready.',
+      url: '/student/routes',
+    });
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error('admin enrollment PATCH error:', e);

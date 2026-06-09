@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
+import { notifyLearner } from '@/lib/notifications/notify';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 /**
@@ -121,6 +122,18 @@ async function handlePost(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({ error: 'Failed to add comment' }, { status: 500 });
   }
   await svc.from('tms_grievance').update({ updated_at: new Date().toISOString() }).eq('id', grievanceId);
+
+  const { data: g } = await svc.from('tms_grievance').select('learner_id, subject').eq('id', grievanceId).maybeSingle();
+  const gl = g as { learner_id: string; subject: string } | null;
+  if (gl) {
+    await notifyLearner(svc, {
+      learnerId: gl.learner_id,
+      actorId: auth.userId,
+      title: 'New reply on your grievance',
+      body: `An admin replied to "${gl.subject}".`,
+      url: '/student/grievances',
+    });
+  }
   return NextResponse.json({ success: true });
 }
 
@@ -154,6 +167,18 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({ error: 'Failed to update grievance' }, { status: 500 });
   }
   if (!upd.data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  const { data: g } = await svc.from('tms_grievance').select('learner_id, subject').eq('id', grievanceId).maybeSingle();
+  const gl = g as { learner_id: string; subject: string } | null;
+  if (gl) {
+    await notifyLearner(svc, {
+      learnerId: gl.learner_id,
+      actorId: auth.userId,
+      title: 'Grievance updated',
+      body: `Your grievance "${gl.subject}"${status ? ` is now ${status.replace('_', ' ')}` : ' was updated'}.`,
+      url: '/student/grievances',
+    });
+  }
   return NextResponse.json({ success: true });
 }
 
