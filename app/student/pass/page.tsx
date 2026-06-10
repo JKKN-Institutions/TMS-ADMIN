@@ -36,7 +36,7 @@ export default function StudentPassPage() {
   const p = data.data;
   if (!p.hasPass) {
     return (
-      <Card className="max-w-sm">
+      <Card className="mx-auto w-full max-w-sm">
         <CardHeader>
           <CardTitle>No boarding pass yet</CardTitle>
         </CardHeader>
@@ -48,8 +48,8 @@ export default function StudentPassPage() {
   }
 
   return (
-    <div className="max-w-sm space-y-4">
-      <h1 className="text-xl font-semibold">Boarding Pass</h1>
+    <div className="mx-auto w-full max-w-sm space-y-4">
+      <h1 className="text-center text-xl font-semibold">Boarding Pass</h1>
       <Card>
         <CardContent className="flex flex-col items-center gap-3 py-6">
           <div className="bg-white p-3 rounded-lg">

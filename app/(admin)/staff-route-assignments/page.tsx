@@ -7,12 +7,14 @@ import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { getAssignmentColumns, type AssignmentRow } from './columns';
+import { AssignmentDeleteDialog } from './assignment-delete-dialog';
 
 const StaffRouteAssignmentsPage = () => {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<AssignmentRow | null>(null);
 
   useEffect(() => {
     const userData = localStorage.getItem('adminUser');
@@ -39,28 +41,12 @@ const StaffRouteAssignmentsPage = () => {
     }
   };
 
-  const handleRemoveAssignment = async (assignment: AssignmentRow) => {
-    if (!confirm(`Remove the assignment of ${assignment.staff_email} from this route?`)) return;
-    try {
-      const response = await fetch(
-        `/api/admin/staff-route-assignments?assignmentId=${assignment.id}`,
-        { method: 'DELETE' }
-      );
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || 'Failed to remove assignment');
-      toast.success('Assignment removed');
-      await fetchAssignments();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to remove assignment');
-    }
-  };
-
   const userRole = user?.role;
   const canManage = ['super_admin', 'transport_manager'].includes(userRole);
 
+  // Remove opens the styled confirm dialog; the dialog performs the DELETE.
   const columns = useMemo(
-    () => getAssignmentColumns(handleRemoveAssignment, canManage),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => getAssignmentColumns(setDeleting, canManage),
     [canManage]
   );
 
@@ -125,6 +111,13 @@ const StaffRouteAssignmentsPage = () => {
         isLoading={loading}
         searchPlaceholder="Search staff email, route…"
         getRowId={(a) => a.id}
+      />
+
+      <AssignmentDeleteDialog
+        assignment={deleting}
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        onDeleted={fetchAssignments}
       />
     </div>
   );

@@ -88,13 +88,20 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
 
     let driverName: string | null = null;
     if (route.driver_id) {
-      const drv = await svc.from('tms_driver').select('staff_id').eq('id', route.driver_id).maybeSingle();
-      const staffId = (drv.data as { staff_id: string | null } | null)?.staff_id;
-      if (staffId) {
-        const st = await svc.from('staff').select('first_name, last_name').eq('id', staffId).maybeSingle();
-        const sr = st.data as { first_name: string | null; last_name: string | null } | null;
-        if (sr) driverName = `${sr.first_name ?? ''} ${sr.last_name ?? ''}`.trim() || null;
+      // tms_route.driver_id is a loose ref and the admin route forms store the
+      // driver's STAFF id (picker options come from /api/admin/drivers, whose ids
+      // are staff ids). Resolve via staff directly, falling back to legacy rows
+      // that stored tms_driver.id instead.
+      let st = await svc.from('staff').select('first_name, last_name').eq('id', route.driver_id).maybeSingle();
+      if (!st.data) {
+        const drv = await svc.from('tms_driver').select('staff_id').eq('id', route.driver_id).maybeSingle();
+        const staffId = (drv.data as { staff_id: string | null } | null)?.staff_id;
+        if (staffId) {
+          st = await svc.from('staff').select('first_name, last_name').eq('id', staffId).maybeSingle();
+        }
       }
+      const sr = st.data as { first_name: string | null; last_name: string | null } | null;
+      if (sr) driverName = `${sr.first_name ?? ''} ${sr.last_name ?? ''}`.trim() || null;
     }
 
     return NextResponse.json({
