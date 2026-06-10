@@ -3,12 +3,13 @@
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  X, Bus, Power, PanelLeft, PanelLeftClose, Menu, Sun, Moon, Monitor, LogOut, Check, Bell,
+  Bus, Power, PanelLeft, PanelLeftClose, Sun, Moon, Monitor, LogOut, Check, Bell,
 } from 'lucide-react';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import { studentNavigation, deriveStudentPageTitle } from '@/lib/student/navigation';
+import StudentBottomNav from '@/components/student-bottom-nav';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -111,7 +112,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const { isStudent, isSuperAdmin } = usePermissions();
   const router = useRouter();
   const pathname = usePathname();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -150,15 +150,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const pageTitle = deriveStudentPageTitle(pathname);
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 lg:hidden bg-black bg-opacity-50"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <div className={`sidebar-modern ${sidebarOpen ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
+    <div className="min-h-screen bg-gray-100 overflow-x-hidden">
+      <div className={`sidebar-modern ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -169,12 +162,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                 <h1 className="text-lg font-bold text-gray-900">JKKN Transport</h1>
               </div>
             </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 lg:hidden"
-            >
-              <X className="w-5 h-5" />
-            </button>
           </div>
         </div>
 
@@ -201,7 +188,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                     onClick={(e) => {
                       e.preventDefault();
                       router.push(item.href);
-                      setSidebarOpen(false);
                     }}
                     className={`sidebar-nav-item ${active ? 'active' : ''}`}
                   >
@@ -229,14 +215,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       <div className={`main-content ${collapsed ? 'sidebar-collapsed' : ''}`}>
         <header className="app-header">
           <div className="flex items-center gap-2 min-w-0">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open menu"
-              className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 lg:hidden dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
             <button
               type="button"
               onClick={toggleCollapse}
@@ -269,6 +247,9 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
         <div className="content-body fade-in">{children}</div>
       </div>
+
+      {/* Mobile-only bottom navigation (replaces the slide-in drawer on < lg). */}
+      <StudentBottomNav />
     </div>
   );
 }

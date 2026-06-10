@@ -48,7 +48,7 @@ export default function StudentNotificationsPage() {
                       <p className="text-sm text-muted-foreground break-words">{n.body}</p>
                     )}
                   </div>
-                  <time className="text-xs text-muted-foreground whitespace-nowrap">
+                  <time className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
                     {new Date(n.createdAt).toLocaleDateString()}
                   </time>
                 </div>

@@ -276,13 +276,13 @@ export default function PossibleStopsManager({ routeId, routeName }: PossibleSto
     <>
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="flex items-center gap-2">
               <RouteIcon className="h-5 w-5" />
               Possible Stops
               <Badge variant="secondary">{possibleStops.length}</Badge>
             </CardTitle>
-            <Button onClick={() => setShowSearchModal(true)} className="flex items-center gap-2">
+            <Button onClick={() => setShowSearchModal(true)} className="flex items-center gap-2 self-start sm:self-auto">
               <Plus className="h-4 w-4" />
               Add Possible Stops
             </Button>
@@ -311,9 +311,9 @@ export default function PossibleStopsManager({ routeId, routeName }: PossibleSto
                 .map((stop) => (
                   <div
                     key={stop.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                    className="flex items-start justify-between gap-2 p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                   >
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       {editingStop === stop.id ? (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div>
@@ -344,19 +344,19 @@ export default function PossibleStopsManager({ routeId, routeName }: PossibleSto
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                          <div className="flex min-w-0 items-center gap-2">
                             <Badge variant="outline" className="text-xs">
                               #{stop.sequence_order}
                             </Badge>
-                            <MapPin className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium">{stop.stop_name}</span>
+                            <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate font-medium">{stop.stop_name}</span>
                             {stop.is_major_stop && (
                               <Badge variant="secondary" className="text-xs">Major</Badge>
                             )}
                           </div>
-                          
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                             <div className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
                               <span>{stop.stop_time}</span>

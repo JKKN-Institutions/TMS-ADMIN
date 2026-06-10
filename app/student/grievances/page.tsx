@@ -200,7 +200,7 @@ export default function StudentGrievancesPage() {
                   {grievanceCategoryLabel(g.category)} · {new Date(g.createdAt).toLocaleDateString()}
                 </p>
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[g.status] ?? ''}`}>
+              <span className={`shrink-0 whitespace-nowrap text-xs px-2 py-0.5 rounded ${STATUS_STYLES[g.status] ?? ''}`}>
                 {g.status.replace('_', ' ')}
               </span>
             </button>
@@ -219,9 +219,9 @@ export default function StudentGrievancesPage() {
             ) : (
               detail.data && (
                 <>
-                  <p className="text-muted-foreground">{detail.data.grievance.description}</p>
+                  <p className="whitespace-pre-wrap break-words text-muted-foreground">{detail.data.grievance.description}</p>
                   {detail.data.grievance.resolution && (
-                    <p className="text-green-700 dark:text-green-300">
+                    <p className="whitespace-pre-wrap break-words text-green-700 dark:text-green-300">
                       Resolution: {detail.data.grievance.resolution}
                     </p>
                   )}
@@ -230,10 +230,10 @@ export default function StudentGrievancesPage() {
                       <p className="text-xs text-muted-foreground">No messages yet.</p>
                     )}
                     {detail.data.comments.map((c) => (
-                      <div key={c.id} className={c.author_role === 'admin' ? 'pl-6' : ''}>
+                      <div key={c.id} className={`min-w-0 ${c.author_role === 'admin' ? 'pl-6' : ''}`}>
                         <span className="text-[10px] uppercase text-muted-foreground">{c.author_role}</span>
                         <p
-                          className={`rounded-md px-2 py-1 ${
+                          className={`whitespace-pre-wrap break-words rounded-md px-2 py-1 ${
                             c.author_role === 'admin' ? 'bg-primary/10' : 'bg-muted'
                           }`}
                         >
@@ -244,11 +244,12 @@ export default function StudentGrievancesPage() {
                   </div>
                   <div className="flex gap-2">
                     <Input
+                      className="flex-1 min-w-0"
                       value={comment}
                       onChange={(e) => setComment(e.target.value)}
                       placeholder="Add a message…"
                     />
-                    <Button onClick={() => addComment.mutate()} disabled={!comment || addComment.isPending}>
+                    <Button className="shrink-0" onClick={() => addComment.mutate()} disabled={!comment || addComment.isPending}>
                       Send
                     </Button>
                   </div>

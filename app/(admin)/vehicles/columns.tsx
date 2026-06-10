@@ -17,7 +17,7 @@ import {
 export interface VehicleRow {
   id: string;
   registration_number: string;
-  model: string;
+  model?: string | null;
   capacity?: number;
   fuel_type?: string;
   status?: string;

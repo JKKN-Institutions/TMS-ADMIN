@@ -150,7 +150,7 @@ export function DataTable<TData, TValue>({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           {toolbarActions?.({ selectedRows: table.getFilteredSelectedRowModel().rows.map((r) => r.original), resetSelection })}
           <DropdownMenu>
             <DropdownMenuTrigger className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">

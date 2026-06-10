@@ -111,7 +111,7 @@ export default function VehicleViewPage({ params }: { params: Promise<{ vehicleI
         crumbs={crumbs(vehicle.registration_number)}
         backHref="/vehicles"
         title={vehicle.registration_number}
-        subtitle={vehicle.model}
+        subtitle={vehicle.model ?? undefined}
         actions={
           <>
             <StatusBadge status={vehicle.status} />

@@ -6,7 +6,6 @@ import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2 }
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import { DatabaseService } from '@/lib/database';
-import AddRouteModal from '@/components/add-route-modal';
 import { RouteImportDialog } from './route-import-dialog';
 import { getRouteColumns, type RouteRow } from './columns';
 
@@ -18,7 +17,6 @@ const RoutesPage = () => {
   const [user, setUser] = useState<any>(null);
   const [routes, setRoutes] = useState<RouteRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
 
   useEffect(() => {
@@ -198,8 +196,9 @@ const RoutesPage = () => {
             <button onClick={() => setIsImportOpen(true)} className={outlineBtn}>
               <Upload className="h-4 w-4" /> Import Routes
             </button>
+            {/* Add Route is an in-module page (no popup), matching the drivers module. */}
             <button
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={() => router.push('/routes/new')}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
             >
               <Plus className="h-4 w-4" /> Add Route
@@ -252,7 +251,6 @@ const RoutesPage = () => {
         }
       />
 
-      <AddRouteModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onSuccess={fetchRoutes} />
       <RouteImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={fetchRoutes} />
     </div>
   );

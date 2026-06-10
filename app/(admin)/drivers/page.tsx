@@ -66,7 +66,7 @@ export default function DriversPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Drivers</h1>
           <p className="text-gray-600">Driver-role staff from MyJKKN, with TMS operational details</p>
@@ -74,7 +74,7 @@ export default function DriversPage() {
         {canManage && (
           <Link
             href="/drivers/new"
-            className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+            className="inline-flex h-[38px] shrink-0 items-center gap-2 self-start rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
           >
             <Plus className="h-4 w-4" /> Create Driver
           </Link>

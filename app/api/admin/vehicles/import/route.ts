@@ -93,10 +93,6 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
         return;
       }
       const model = str(pick(r, 'model'));
-      if (!model) {
-        results.push({ row: i + 1, registration_number: reg, status: 'error', message: 'model is required' });
-        return;
-      }
       const capacity = parseInt(String(pick(r, 'capacity') ?? '')) || 0;
       if (capacity <= 0) {
         results.push({ row: i + 1, registration_number: reg, status: 'error', message: 'capacity must be greater than 0' });
@@ -112,7 +108,7 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
         reg,
         payload: {
           registration_number: reg,
-          model,
+          model: model || null,
           capacity,
           vehicle_type: enumOrNull(pick(r, 'vehicle_type', 'vehicleType'), ['bus','van','car','truck','ambulance','other']),
           manufacturer: str(pick(r, 'manufacturer')) || null,

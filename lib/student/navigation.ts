@@ -6,6 +6,8 @@ import type { ComponentType } from 'react';
 
 export interface StudentNavItem {
   name: string;
+  /** Compact label for tight surfaces (e.g. the mobile bottom bar). Falls back to `name`. */
+  shortName?: string;
   href: string;
   icon: ComponentType<{ className?: string }>;
   /** Pages not built yet render disabled. Drop the flag as each phase lands. */
@@ -18,8 +20,8 @@ export interface StudentNavItem {
 export const studentNavigation: StudentNavItem[] = [
   { name: 'Home', href: '/student/dashboard', icon: LayoutDashboard },
   { name: 'My Route', href: '/student/routes', icon: Route },
-  { name: 'Boarding Pass', href: '/student/pass', icon: QrCode },
-  { name: 'My Attendance', href: '/student/attendance', icon: ClipboardCheck },
+  { name: 'Boarding Pass', shortName: 'Pass', href: '/student/pass', icon: QrCode },
+  { name: 'My Attendance', shortName: 'Attendance', href: '/student/attendance', icon: ClipboardCheck },
   { name: 'Payments', href: '/student/payments', icon: CreditCard, comingSoon: true },
   { name: 'Grievances', href: '/student/grievances', icon: MessageCircle },
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
