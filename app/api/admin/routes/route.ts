@@ -17,10 +17,12 @@ async function getRoutes() {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Fetch routes from database
+    // Fetch routes with their stops embedded (single query — the list page only
+    // needs route_stops.length, so we select just the stop ids). This replaces
+    // the old per-route getRouteStops calls the client used to fan out.
     const { data: routes, error } = await supabase
       .from('tms_route')
-      .select('*')
+      .select('*, route_stops:tms_route_stop(id)')
       .order('created_at', { ascending: false });
 
     if (error) {
