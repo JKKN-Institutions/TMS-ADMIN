@@ -5,30 +5,8 @@ import { Activity, CalendarClock, ListChecks } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import UniversalStatCard from '@/components/universal-stat-card';
-import { getActivityColumns, type ActivityRow } from './columns';
+import { ACTION_OPTIONS, MODULE_OPTIONS, getActivityColumns, type ActivityRow } from './columns';
 import { ActivityDetailsDialog } from './activity-details-dialog';
-
-const MODULE_OPTIONS = [
-  { label: 'Drivers', value: 'drivers' },
-  { label: 'Vehicles', value: 'vehicles' },
-  { label: 'Routes', value: 'routes' },
-  { label: 'GPS Devices', value: 'gps-devices' },
-  { label: 'Passengers', value: 'passengers' },
-  { label: 'Staff Assignments', value: 'staff-route-assignments' },
-  { label: 'Boarding', value: 'boarding' },
-];
-
-const ACTION_OPTIONS = [
-  { label: 'Create', value: 'create' },
-  { label: 'Update', value: 'update' },
-  { label: 'Delete', value: 'delete' },
-  { label: 'Import', value: 'import' },
-  { label: 'Assign', value: 'assign' },
-  { label: 'Unassign', value: 'unassign' },
-  { label: 'Upload', value: 'upload' },
-  { label: 'Scan', value: 'scan' },
-  { label: 'Mark', value: 'mark' },
-];
 
 const ActivityLogPage = () => {
   const [entries, setEntries] = useState<ActivityRow[]>([]);

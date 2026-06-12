@@ -58,9 +58,17 @@ const MODULE_LABEL: Record<string, string> = {
   'settings': 'Settings',
 };
 
+// Filter dropdown options for the DataTable — derived from the maps above so
+// the page can't drift out of sync with what the badges/labels support.
+export const MODULE_OPTIONS = Object.entries(MODULE_LABEL).map(([value, label]) => ({ label, value }));
+export const ACTION_OPTIONS = (Object.keys(ACTION_BADGE) as string[]).map((a) => ({
+  label: a.charAt(0).toUpperCase() + a.slice(1),
+  value: a,
+}));
+
 const fmtTime = (d: string) =>
   new Date(d).toLocaleString(undefined, {
-    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
 export function getActivityColumns(
@@ -98,7 +106,7 @@ export function getActivityColumns(
       accessorKey: 'module',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Module" />,
       size: 140,
-      filterFn: (row, id, value: string[]) => value.includes(row.getValue(id)),
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       cell: ({ row }) => (
         <span className="inline-flex rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-500/15 dark:text-gray-300">
           {MODULE_LABEL[row.original.module] ?? row.original.module}
@@ -109,7 +117,7 @@ export function getActivityColumns(
       accessorKey: 'action',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Action" />,
       size: 110,
-      filterFn: (row, id, value: string[]) => value.includes(row.getValue(id)),
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       cell: ({ row }) => (
         <span
           className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium capitalize ${
@@ -159,7 +167,7 @@ export function getActivityColumns(
             <DropdownMenuTrigger asChild>
               <button
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
-                aria-label="Activity entry actions"
+                aria-label={`Actions for ${row.original.entity_label ?? row.original.action} entry`}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>

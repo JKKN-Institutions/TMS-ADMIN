@@ -13,7 +13,7 @@ import type { ActivityRow } from './columns';
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</dt>
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</dt>
       <dd className="mt-0.5 text-sm text-gray-900 dark:text-gray-100">{value ?? '—'}</dd>
     </div>
   );
@@ -60,7 +60,7 @@ export function ActivityDetailsDialog({
 
         {entry.changes && (
           <div>
-            <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Changes</h4>
+            <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Changes</h4>
             <pre className="max-h-64 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-800 dark:bg-gray-900 dark:text-gray-200">
               {JSON.stringify(entry.changes, null, 2)}
             </pre>
@@ -69,7 +69,7 @@ export function ActivityDetailsDialog({
 
         {entry.metadata && (
           <div>
-            <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Metadata</h4>
+            <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Metadata</h4>
             <pre className="max-h-40 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-800 dark:bg-gray-900 dark:text-gray-200">
               {JSON.stringify(entry.metadata, null, 2)}
             </pre>
