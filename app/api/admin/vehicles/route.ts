@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 import { buildVehiclePayload } from '@/lib/vehicles/fields';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -58,6 +59,14 @@ async function postVehicle(request: NextRequest, auth: AuthContext) {
       console.error('Vehicle create error:', error);
       return NextResponse.json({ error: 'Failed to create vehicle' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'vehicles',
+      action: 'create',
+      entityType: 'tms_vehicle',
+      entityId: data?.id,
+      entityLabel: data?.registration_number ?? (payload.registration_number as string | undefined),
+      description: `Created vehicle ${data?.registration_number ?? payload.registration_number}`,
+    });
     return NextResponse.json({ success: true, data, message: 'Vehicle created successfully' });
   } catch (e) {
     console.error('Vehicle create error:', e);
@@ -90,6 +99,14 @@ async function putVehicle(request: NextRequest, auth: AuthContext) {
       console.error('Vehicle update error:', error);
       return NextResponse.json({ error: 'Failed to update vehicle' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'vehicles',
+      action: 'update',
+      entityType: 'tms_vehicle',
+      entityId: data?.id ?? id,
+      entityLabel: data?.registration_number,
+      description: `Updated vehicle ${data?.registration_number ?? id}`,
+    });
     return NextResponse.json({ success: true, data, message: 'Vehicle updated successfully' });
   } catch (e) {
     console.error('Vehicle update error:', e);
@@ -111,6 +128,13 @@ async function deleteVehicle(request: NextRequest, auth: AuthContext) {
       console.error('Vehicle delete error:', error);
       return NextResponse.json({ error: 'Failed to delete vehicle' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'vehicles',
+      action: 'delete',
+      entityType: 'tms_vehicle',
+      entityId: id,
+      description: `Deleted vehicle ${id}`,
+    });
     return NextResponse.json({ success: true, message: 'Vehicle deleted successfully' });
   } catch (e) {
     console.error('Vehicle delete error:', e);

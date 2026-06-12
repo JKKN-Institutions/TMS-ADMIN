@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 
 // Bulk-upload endpoint for the Vehicles module. Mirrors the Drivers import
 // (app/api/admin/drivers/import) but a vehicle is a STANDALONE entity whose
@@ -199,6 +200,13 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
 
     results.sort((a, b) => a.row - b.row);
     const failed = results.filter((r) => r.status === 'error').length;
+    await logActivity(auth, request, {
+      module: 'vehicles',
+      action: 'import',
+      entityType: 'tms_vehicle',
+      description: `Imported vehicles: ${created} created, ${updated} updated, ${failed} failed`,
+      metadata: { created, updated, failed },
+    });
     return NextResponse.json({ success: true, created, updated, failed, results });
   } catch (e) {
     console.error('Vehicle import error:', e);
