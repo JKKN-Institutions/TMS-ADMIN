@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { logActivityFromHeaders } from '@/lib/activity/log';
 
 /**
  * Per-device GPS endpoints backing the in-module View / Edit / Delete flow.
@@ -74,6 +75,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Failed to update GPS device' }, { status: 500 });
     }
     if (!data) return NextResponse.json({ error: 'GPS device not found' }, { status: 404 });
+    await logActivityFromHeaders(request, {
+      module: 'gps-devices',
+      action: 'update',
+      entityType: 'gps_devices',
+      entityId: data?.id ?? id,
+      entityLabel: data?.device_name,
+      description: `Updated GPS device ${data?.device_name ?? id}`,
+    });
     return NextResponse.json({ success: true, data, message: 'GPS device updated successfully' });
   } catch (e) {
     console.error('GPS device update API error:', e);
@@ -91,6 +100,13 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
       console.error('GPS device delete error:', error);
       return NextResponse.json({ error: 'Failed to delete GPS device' }, { status: 500 });
     }
+    await logActivityFromHeaders(_request, {
+      module: 'gps-devices',
+      action: 'delete',
+      entityType: 'gps_devices',
+      entityId: id,
+      description: `Deleted GPS device ${id}`,
+    });
     return NextResponse.json({ success: true, message: 'GPS device deleted successfully' });
   } catch (e) {
     console.error('GPS device delete API error:', e);
