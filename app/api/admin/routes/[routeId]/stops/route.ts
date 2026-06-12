@@ -207,7 +207,7 @@ export async function POST(
 
     await logActivityFromHeaders(request, {
       module: 'routes',
-      action: 'update',
+      action: 'create',
       entityType: 'tms_route_stop',
       entityId: newStop?.id,
       entityLabel: stopData.stop_name,
@@ -340,7 +340,7 @@ export async function DELETE(
 
     await logActivityFromHeaders(request, {
       module: 'routes',
-      action: 'update',
+      action: 'delete',
       entityType: 'tms_route_stop',
       entityId: stopId,
       description: `Deleted stop ${stopId} from route ${routeId}`,
