@@ -35,9 +35,47 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const PROFILE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const PROFILE_CACHE_KEY = 'tms-profile-cache:v1';
 
 const PROFILE_COLUMNS =
   'id, email, full_name, role, is_super_admin, is_active, institution_id, department_id, avatar_url, phone_number';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Persistent profile cache. The in-memory ref dies on every reload, which made
+// EVERY page load pay getUser() + profiles select (2 sequential round trips)
+// before the admin shell could render — the "Loading MYJKKN TMS…" splash.
+// localStorage survives reloads, so warm loads render instantly and revalidate
+// in the background. Display-only: proxy.ts + the API routes do the real
+// authorization on every request, so a ≤TTL-stale role here can't grant access.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CachedProfile {
+  data: Profile;
+  timestamp: number;
+}
+
+function readProfileCache(userId: string): CachedProfile | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedProfile;
+    if (!parsed?.data?.id || parsed.data.id !== userId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeProfileCache(cached: CachedProfile | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (cached) localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(cached));
+    else localStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch {
+    /* storage full / blocked — cache is an optimisation only */
+  }
+}
 
 /**
  * TRANSITIONAL COMPATIBILITY SHIM.
@@ -74,18 +112,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const profileCacheRef = useRef<{ data: Profile; timestamp: number } | null>(
-    null
-  );
+  const profileCacheRef = useRef<CachedProfile | null>(null);
   // createClientSupabaseClient() is a singleton, so this is stable across renders.
   const supabase = createClientSupabaseClient();
 
   const fetchProfile = useCallback(
-    async (userId: string) => {
-      const cached = profileCacheRef.current;
-      if (cached && Date.now() - cached.timestamp < PROFILE_CACHE_TTL) {
-        setProfile(cached.data);
-        return;
+    async (userId: string, opts?: { force?: boolean }) => {
+      if (!opts?.force) {
+        const cached = profileCacheRef.current;
+        if (
+          cached &&
+          cached.data.id === userId &&
+          Date.now() - cached.timestamp < PROFILE_CACHE_TTL
+        ) {
+          setProfile(cached.data);
+          return;
+        }
       }
 
       const { data, error } = await supabase
@@ -96,9 +138,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!error && data) {
         const typed = data as unknown as Profile;
+        const entry = { data: typed, timestamp: Date.now() };
         setProfile(typed);
-        profileCacheRef.current = { data: typed, timestamp: Date.now() };
+        profileCacheRef.current = entry;
+        writeProfileCache(entry);
         syncLegacyAdminUser(typed);
+        return;
+      }
+
+      // Fetch failed (network blip, transient RLS/API error). Fall back to ANY
+      // cached copy — even stale — instead of leaving profile null, which would
+      // pin the layout on the splash screen forever.
+      console.error('Profile fetch failed:', error?.message);
+      const fallback = profileCacheRef.current ?? readProfileCache(userId);
+      if (fallback) {
+        setProfile(fallback.data);
+        profileCacheRef.current = fallback;
+        syncLegacyAdminUser(fallback.data);
       }
     },
     [supabase]
@@ -109,6 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setProfile(null);
     profileCacheRef.current = null;
+    writeProfileCache(null);
     syncLegacyAdminUser(null);
     if (typeof window !== 'undefined') {
       window.location.href = '/auth/login';
@@ -116,25 +173,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   const refreshProfile = useCallback(async () => {
-    profileCacheRef.current = null; // invalidate cache
-    if (user) await fetchProfile(user.id);
+    if (user) await fetchProfile(user.id, { force: true });
   }, [user, fetchProfile]);
 
   useEffect(() => {
     let active = true;
 
-    // Initial session check (getUser validates the JWT).
-    supabase.auth
-      .getUser()
-      .then(async ({ data: { user } }: { data: { user: User | null } }) => {
-        if (!active) return;
-        setUser(user);
-        // Await the profile fetch BEFORE clearing loading. Otherwise `loading`
-        // flips to false while `profile` is still null, and route guards that
-        // check `!profile` redirect an authenticated user to /auth/login.
-        if (user) await fetchProfile(user.id);
+    // Initial session check. getSession() reads the auth cookie LOCALLY (no
+    // network) — proxy.ts has already validated the JWT server-side on this very
+    // request, so re-validating here with getUser() only added a sequential
+    // Supabase Auth round trip to every page load.
+    supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
+      if (!active) return;
+      const sessionUser = session?.user ?? null;
+      setUser(sessionUser);
+
+      if (!sessionUser) {
+        setLoading(false);
+        return;
+      }
+
+      // Warm path: seed from the persistent cache and render the shell NOW;
+      // revalidate in the background if the cache is older than the TTL.
+      const cached = readProfileCache(sessionUser.id);
+      if (cached) {
+        profileCacheRef.current = cached;
+        setProfile(cached.data);
+        syncLegacyAdminUser(cached.data);
+        setLoading(false);
+        if (Date.now() - cached.timestamp >= PROFILE_CACHE_TTL) {
+          void fetchProfile(sessionUser.id, { force: true });
+        }
+        return;
+      }
+
+      // Cold path (first visit on this browser): must await the profile before
+      // clearing loading, else `!profile` guards bounce an authenticated user.
+      fetchProfile(sessionUser.id).finally(() => {
         if (active) setLoading(false);
       });
+    });
 
     const {
       data: { subscription },
@@ -147,6 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setProfile(null);
         profileCacheRef.current = null;
+        writeProfileCache(null);
         syncLegacyAdminUser(null);
       }
       // TOKEN_REFRESHED / USER_UPDATED leave the profile unchanged → skip.
