@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -85,6 +86,13 @@ async function mark(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Failed to save attendance' }, { status: 500 });
     }
 
+    await logActivity(auth, request, {
+      module: 'boarding',
+      action: 'mark',
+      entityType: 'tms_attendance',
+      description: `Manually marked attendance for ${rows.length} learner(s) on route ${routeId} (${direction})`,
+      metadata: { routeId, direction, count: rows.length },
+    });
     return NextResponse.json({ success: true, updated: rows.length });
   } catch (e) {
     console.error('boarding manual mark error:', e);

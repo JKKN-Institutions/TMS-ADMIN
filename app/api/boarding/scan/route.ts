@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 import { verifyPass } from '@/lib/boarding/pass';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -92,6 +93,15 @@ async function scan(request: NextRequest, auth: AuthContext) {
     }
 
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
+    await logActivity(auth, request, {
+      module: 'boarding',
+      action: 'scan',
+      entityType: 'tms_attendance',
+      entityId: learner.id,
+      entityLabel: learner.roll_number ?? name,
+      description: `Scanned boarding pass for ${name} (${direction})`,
+      metadata: { learnerId: learner.id, direction, rollNumber: learner.roll_number },
+    });
     return NextResponse.json({
       ok: true,
       learner: { name, rollNumber: learner.roll_number },
