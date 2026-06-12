@@ -63,6 +63,11 @@ export const TMS_PERMISSIONS = {
 
   // Admin activity log (read-only module; entries are written server-side).
   ACTIVITY_VIEW: 'tms.activity.view',
+
+  TRANSPORT_YEARS_VIEW: 'tms.transport_years.view',
+  TRANSPORT_YEARS_CREATE: 'tms.transport_years.create',
+  TRANSPORT_YEARS_EDIT: 'tms.transport_years.edit',
+  TRANSPORT_YEARS_DELETE: 'tms.transport_years.delete',
 } as const;
 
 export type TmsPermissionKey =

@@ -15,7 +15,7 @@ export type ActivityAction =
 export type ActivityModule =
   | 'drivers' | 'vehicles' | 'routes' | 'gps-devices' | 'passengers'
   | 'staff-route-assignments' | 'boarding' | 'enrollment' | 'grievances'
-  | 'settings';
+  | 'settings' | 'transport-years';
 
 export interface ActivityEntry {
   module: ActivityModule;
