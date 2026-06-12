@@ -60,6 +60,9 @@ export const TMS_PERMISSIONS = {
 
   // Driver self-service (seeded on the `driver` role) — read-only shell in v1.
   DRIVER_SELF_VIEW: 'tms.driver.self.view',
+
+  // Admin activity log (read-only module; entries are written server-side).
+  ACTIVITY_VIEW: 'tms.activity.view',
 } as const;
 
 export type TmsPermissionKey =
