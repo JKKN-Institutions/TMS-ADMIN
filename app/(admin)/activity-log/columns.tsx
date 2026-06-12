@@ -53,6 +53,7 @@ const MODULE_LABEL: Record<string, string> = {
   'passengers': 'Passengers',
   'staff-route-assignments': 'Staff Assignments',
   'boarding': 'Boarding',
+  'transport-years': 'Transport Years',
   'enrollment': 'Enrollment',
   'grievances': 'Grievances',
   'settings': 'Settings',
