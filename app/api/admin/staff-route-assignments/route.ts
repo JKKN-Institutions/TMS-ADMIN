@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 
 // Service-role client bypasses RLS, so writes are gated by an explicit
 // tms.drivers.assign check here (defense-in-depth; super admins bypass).
@@ -158,6 +159,15 @@ async function postAssignment(request: NextRequest, auth: AuthContext) {
     }
     // Grant the boarding-scanner role so this staff can enter /boarding (best-effort).
     await grantBoardingRole(supabase, staffEmail, auth.userId);
+    await logActivity(auth, request, {
+      module: 'staff-route-assignments',
+      action: 'assign',
+      entityType: 'tms_staff_route_assignment',
+      entityId: assignment?.id,
+      entityLabel: staffEmail,
+      description: `Assigned ${staffEmail} to route ${routeId}`,
+      metadata: { staffEmail, routeId },
+    });
     return NextResponse.json({ success: true, message: 'Route assigned successfully', assignment }, { status: 201 });
   } catch (e) {
     console.error('Assignment create error:', e);
@@ -186,6 +196,13 @@ async function deleteAssignment(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ success: false, error: 'Failed to remove assignment' }, { status: 500 });
     }
     await maybeRevokeBoardingRole(supabase, assignmentId);
+    await logActivity(auth, request, {
+      module: 'staff-route-assignments',
+      action: 'unassign',
+      entityType: 'tms_staff_route_assignment',
+      entityId: assignmentId,
+      description: `Removed assignment ${assignmentId}`,
+    });
     return NextResponse.json({ success: true, message: 'Assignment removed successfully' });
   } catch (e) {
     console.error('Assignment remove error:', e);
