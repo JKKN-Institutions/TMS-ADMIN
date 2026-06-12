@@ -144,6 +144,7 @@ export default function StaffPassengersPage() {
           data={staff}
           entityName="staff"
           isLoading={isLoading}
+          enableRowSelection
           getRowId={(s) => s.id}
           searchPlaceholder="Search name, staff ID, email..."
           filters={filters}

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Eye, MoreHorizontal } from 'lucide-react';
 import type { LearnerPassenger } from '@/lib/passengers/types';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import {
   DropdownMenu,
@@ -42,6 +43,22 @@ export function getLearnerColumns(
   onView: (l: LearnerPassenger) => void
 ): ColumnDef<LearnerPassenger>[] {
   return [
+    {
+      id: 'select',
+      enableSorting: false,
+      enableHiding: false,
+      size: 40,
+      header: ({ table }) => (
+        <Checkbox
+          checked={table.getIsAllPageRowsSelected() ? true : table.getIsSomePageRowsSelected() ? 'indeterminate' : false}
+          onCheckedChange={(v) => table.toggleAllPageRowsSelected(v)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(v)} aria-label="Select row" />
+      ),
+    },
     {
       accessorKey: 'name',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,

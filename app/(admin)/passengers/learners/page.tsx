@@ -130,6 +130,7 @@ export default function LearnersPage() {
           data={learners}
           entityName="learners"
           isLoading={isLoading}
+          enableRowSelection
           getRowId={(l) => l.id}
           searchPlaceholder="Search name, roll no, email..."
           filters={filters}

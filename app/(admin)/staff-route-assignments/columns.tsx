@@ -2,6 +2,7 @@
 
 import type { ColumnDef } from '@tanstack/react-table';
 import { Clock, Mail, MapPin, MoreHorizontal, Route as RouteIcon, Trash2, Users } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import {
   DropdownMenu,
@@ -43,7 +44,25 @@ export function getAssignmentColumns(
   onRemove: (a: AssignmentRow) => void,
   canManage: boolean
 ): ColumnDef<AssignmentRow>[] {
+  const selectColumn: ColumnDef<AssignmentRow> = {
+    id: 'select',
+    enableSorting: false,
+    enableHiding: false,
+    size: 40,
+    header: ({ table }) => (
+      <Checkbox
+        checked={table.getIsAllPageRowsSelected() ? true : table.getIsSomePageRowsSelected() ? 'indeterminate' : false}
+        onCheckedChange={(v) => table.toggleAllPageRowsSelected(v)}
+        aria-label="Select all"
+      />
+    ),
+    cell: ({ row }) => (
+      <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(v)} aria-label="Select row" />
+    ),
+  };
+
   return [
+    ...(canManage ? [selectColumn] : []),
     {
       accessorKey: 'staff_email',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Staff Email" />,

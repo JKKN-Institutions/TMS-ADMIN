@@ -110,6 +110,7 @@ const StaffRouteAssignmentsPage = () => {
         entityName="assignments"
         isLoading={loading}
         searchPlaceholder="Search staff email, route…"
+        enableRowSelection={canManage}
         getRowId={(a) => a.id}
       />
 
