@@ -72,15 +72,7 @@ export async function logActivity(
   request: NextRequest,
   entry: ActivityEntry
 ): Promise<void> {
-  // Email isn't on AuthContext; resolve lazily and tolerate failure.
-  let email: string | null = null;
-  try {
-    const { data } = await auth.supabase.auth.getUser();
-    email = data.user?.email ?? null;
-  } catch {
-    /* logged row still useful without email */
-  }
-  await insertLog({ id: auth.userId, email, role: auth.userRole }, request, entry);
+  await insertLog({ id: auth.userId, email: auth.email, role: auth.userRole }, request, entry);
 }
 
 /**
