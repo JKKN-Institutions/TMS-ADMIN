@@ -17,7 +17,6 @@ import {
   ArrowRight,
   Zap,
   Target,
-  Shield,
   Activity,
   RefreshCw,
   BookOpen,
@@ -173,16 +172,6 @@ const EnhancedQuickActions: React.FC<EnhancedQuickActionsProps> = ({
       bgColor: 'bg-gradient-to-br from-pink-100 to-pink-200',
       roles: ['super_admin', 'transport_manager'],
       badge: 'New'
-    },
-    {
-      id: 'authorize-users',
-      title: 'User Authorization',
-      description: 'Manage admin access',
-      href: '/authorize',
-      icon: Shield,
-      color: 'text-rose-700',
-      bgColor: 'bg-gradient-to-br from-rose-100 to-rose-200',
-      roles: ['super_admin']
     }
   ];
 

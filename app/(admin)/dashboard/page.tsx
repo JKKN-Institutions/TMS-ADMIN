@@ -107,13 +107,6 @@ const DashboardPage = () => {
         href: '/analytics'
       },
       {
-        title: 'User Management',
-        desc: 'Manage admin users and permissions',
-        icon: Shield,
-        color: 'bg-gradient-to-br from-red-500 to-rose-600',
-        href: '/authorize'
-      },
-      {
         title: 'System Settings',
         desc: 'Configure system preferences',
         icon: Settings,
