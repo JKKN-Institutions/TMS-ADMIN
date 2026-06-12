@@ -187,6 +187,11 @@ async function deleteAssignment(request: NextRequest, auth: AuthContext) {
     }
 
     const supabase = createServiceRoleClient();
+    const { data: existing } = await supabase
+      .from('tms_staff_route_assignment')
+      .select('staff_email, route_id')
+      .eq('id', assignmentId)
+      .single();
     const { error } = await supabase
       .from('tms_staff_route_assignment')
       .update({ is_active: false })
@@ -201,7 +206,9 @@ async function deleteAssignment(request: NextRequest, auth: AuthContext) {
       action: 'unassign',
       entityType: 'tms_staff_route_assignment',
       entityId: assignmentId,
-      description: `Removed assignment ${assignmentId}`,
+      entityLabel: existing?.staff_email ?? null,
+      description: `Removed assignment for ${existing?.staff_email ?? assignmentId}`,
+      metadata: { staffEmail: existing?.staff_email, routeId: existing?.route_id },
     });
     return NextResponse.json({ success: true, message: 'Assignment removed successfully' });
   } catch (e) {

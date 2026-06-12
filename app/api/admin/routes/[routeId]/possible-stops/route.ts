@@ -285,7 +285,7 @@ export async function POST(
 
     await logActivityFromHeaders(request, {
       module: 'routes',
-      action: 'update',
+      action: 'create',
       entityType: 'tms_route_possible_stop',
       entityId: routeId,
       description: `Added ${addedCount} possible stop(s) to route ${routeId}`,
@@ -345,7 +345,7 @@ export async function DELETE(
 
     await logActivityFromHeaders(request, {
       module: 'routes',
-      action: 'update',
+      action: 'delete',
       entityType: 'tms_route_possible_stop',
       entityId: routeId,
       description: `Removed possible stop ${stopId} from route ${routeId}`,
