@@ -123,6 +123,7 @@ async function deleteVehicle(request: NextRequest, auth: AuthContext) {
     if (!id) return NextResponse.json({ error: 'Vehicle id is required' }, { status: 400 });
 
     const supabase = createServiceRoleClient();
+    const { data: existing } = await supabase.from('tms_vehicle').select('registration_number').eq('id', id).single();
     const { error } = await supabase.from('tms_vehicle').delete().eq('id', id);
     if (error) {
       console.error('Vehicle delete error:', error);
@@ -133,7 +134,8 @@ async function deleteVehicle(request: NextRequest, auth: AuthContext) {
       action: 'delete',
       entityType: 'tms_vehicle',
       entityId: id,
-      description: `Deleted vehicle ${id}`,
+      entityLabel: existing?.registration_number ?? null,
+      description: `Deleted vehicle ${existing?.registration_number ?? id}`,
     });
     return NextResponse.json({ success: true, message: 'Vehicle deleted successfully' });
   } catch (e) {

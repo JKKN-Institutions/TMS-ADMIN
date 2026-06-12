@@ -95,6 +95,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Device id is required' }, { status: 400 });
 
+    const { data: existing } = await supabase.from('gps_devices').select('device_name').eq('id', id).single();
     const { error } = await supabase.from('gps_devices').delete().eq('id', id);
     if (error) {
       console.error('GPS device delete error:', error);
@@ -105,7 +106,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
       action: 'delete',
       entityType: 'gps_devices',
       entityId: id,
-      description: `Deleted GPS device ${id}`,
+      entityLabel: existing?.device_name ?? null,
+      description: `Deleted GPS device ${existing?.device_name ?? id}`,
     });
     return NextResponse.json({ success: true, message: 'GPS device deleted successfully' });
   } catch (e) {
