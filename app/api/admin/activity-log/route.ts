@@ -24,6 +24,10 @@ async function getActivityLog(request: NextRequest, auth: AuthContext) {
     const dateTo = searchParams.get('date_to');
     const limit = Math.min(parseInt(searchParams.get('limit') || '500', 10) || 500, 1000);
 
+    // A bare YYYY-MM-DD end bound means "through the end of that day".
+    const dateToBound =
+      dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo) ? `${dateTo}T23:59:59.999Z` : dateTo;
+
     const supabase = createServiceRoleClient();
     let query = supabase
       .from('tms_activity_log')
@@ -35,7 +39,7 @@ async function getActivityLog(request: NextRequest, auth: AuthContext) {
     if (actionFilter) query = query.eq('action', actionFilter);
     if (actorFilter) query = query.eq('actor_id', actorFilter);
     if (dateFrom) query = query.gte('created_at', dateFrom);
-    if (dateTo) query = query.lte('created_at', dateTo);
+    if (dateToBound) query = query.lte('created_at', dateToBound);
 
     const { data: logs, error } = await query;
     if (error) {
@@ -52,27 +56,31 @@ async function getActivityLog(request: NextRequest, auth: AuthContext) {
     }
 
     // Quick stats (cheap head-count queries, unfiltered — "what happened lately").
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // Isolated try/catch: stats are decorative, a count failure must not discard
+    // the successfully fetched logs.
+    let stats = { total: 0, today: 0, week: 0 };
+    try {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [{ count: total }, { count: today }, { count: week }] = await Promise.all([
-      supabase.from('tms_activity_log').select('id', { count: 'exact', head: true }),
-      supabase
-        .from('tms_activity_log')
-        .select('id', { count: 'exact', head: true })
-        .gte('created_at', startOfToday.toISOString()),
-      supabase
-        .from('tms_activity_log')
-        .select('id', { count: 'exact', head: true })
-        .gte('created_at', weekAgo.toISOString()),
-    ]);
+      const [{ count: total }, { count: today }, { count: week }] = await Promise.all([
+        supabase.from('tms_activity_log').select('id', { count: 'exact', head: true }),
+        supabase
+          .from('tms_activity_log')
+          .select('id', { count: 'exact', head: true })
+          .gte('created_at', startOfToday.toISOString()),
+        supabase
+          .from('tms_activity_log')
+          .select('id', { count: 'exact', head: true })
+          .gte('created_at', weekAgo.toISOString()),
+      ]);
+      stats = { total: total ?? 0, today: today ?? 0, week: week ?? 0 };
+    } catch (e) {
+      console.error('Activity log stats error:', e);
+    }
 
-    return NextResponse.json({
-      success: true,
-      data: logs ?? [],
-      stats: { total: total ?? 0, today: today ?? 0, week: week ?? 0 },
-    });
+    return NextResponse.json({ success: true, data: logs ?? [], stats });
   } catch (e) {
     console.error('Activity log API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
