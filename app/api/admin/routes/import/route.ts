@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { applyRouteImport } from '@/lib/routes/import-routes';
 import type { ParsedRoute } from '@/lib/routes/parse-route-workbook';
+import { logActivity } from '@/lib/activity/log';
 
 /**
  * Bulk route import. Accepts pre-parsed routes (parsed client-side by
@@ -31,6 +32,13 @@ async function importRoutesOp(request: NextRequest, auth: AuthContext) {
 
     const supabase = createServiceRoleClient();
     const result = await applyRouteImport(supabase, routes, { userId: auth.userId });
+    await logActivity(auth, request, {
+      module: 'routes',
+      action: 'import',
+      entityType: 'tms_route',
+      description: `Imported routes: ${result.created} created, ${result.updated} updated, ${result.failed} failed`,
+      metadata: { created: result.created, updated: result.updated, failed: result.failed },
+    });
     return NextResponse.json(result);
   } catch (e) {
     console.error('Route import error:', e);
