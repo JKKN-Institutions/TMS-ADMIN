@@ -131,7 +131,7 @@ async function upsertDriverOps(request: NextRequest, auth: AuthContext) {
       action: 'update',
       entityType: 'tms_driver',
       entityId: data?.staff_id ?? staffId,
-      description: `Updated driver ops for staff ${staffId}`,
+      description: `Updated driver for staff ${staffId}`,
     });
     return NextResponse.json({ success: true, data });
   } catch (e) {
