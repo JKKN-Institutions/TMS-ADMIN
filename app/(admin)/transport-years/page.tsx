@@ -2,9 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, CalendarRange, CheckCircle, Star } from 'lucide-react';
+import { Plus, CalendarRange, CheckCircle, Star, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { getTransportYearColumns, type TransportYearRow } from './columns';
 
@@ -13,6 +14,10 @@ export default function TransportYearsPage() {
   const [user, setUser] = useState<{ role?: string } | null>(null);
   const [years, setYears] = useState<TransportYearRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<TransportYearRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [bulkTarget, setBulkTarget] = useState<{ rows: TransportYearRow[]; reset: () => void } | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     const u = localStorage.getItem('adminUser');
@@ -40,31 +45,53 @@ export default function TransportYearsPage() {
     }
   };
 
-  const handleDelete = async (year: TransportYearRow) => {
-    if (!confirm(`Delete transport year "${year.name}"?`)) return;
+  const handleDelete = (year: TransportYearRow) => setDeleteTarget(year);
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/transport-years?id=${year.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/transport-years?id=${deleteTarget.id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
       const result = await res.json();
       if (!res.ok || !result.success) throw new Error(result.error || 'Failed to delete');
-      toast.success('Transport year deleted');
+      toast.success(`Deleted ${deleteTarget.name}`);
+      setDeleteTarget(null);
       await fetchYears();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete transport year');
+    } finally {
+      setDeleting(false);
     }
   };
 
-  const handleBulkDelete = async (rows: TransportYearRow[], reset: () => void) => {
-    if (!confirm(`Delete ${rows.length} transport year(s)?\n\nThis cannot be undone.`)) return;
+  const confirmBulkDelete = async () => {
+    if (!bulkTarget) return;
+    setBulkDeleting(true);
     try {
-      await Promise.all(
-        rows.map((r) => fetch(`/api/admin/transport-years?id=${r.id}`, { method: 'DELETE' }))
+      const results = await Promise.allSettled(
+        bulkTarget.rows.map((r) =>
+          fetch(`/api/admin/transport-years?id=${r.id}`, { method: 'DELETE', credentials: 'same-origin' }).then(
+            async (res) => {
+              const j = await res.json().catch(() => ({}));
+              if (!res.ok || !j.success) throw new Error(j.error || 'Delete failed');
+            }
+          )
+        )
       );
-      toast.success(`Deleted ${rows.length} transport year(s)`);
-      reset();
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      const ok = bulkTarget.rows.length - failed;
+      if (failed === 0) toast.success(`Deleted ${ok} transport year(s)`);
+      else toast.error(`Deleted ${ok}, failed ${failed}`);
+      bulkTarget.reset();
+      setBulkTarget(null);
       await fetchYears();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to delete selected');
-      await fetchYears();
+      toast.error(e instanceof Error ? e.message : 'Bulk delete failed');
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -145,13 +172,45 @@ export default function TransportYearsPage() {
           canDelete && selectedRows.length > 0 ? (
             <button
               type="button"
-              onClick={() => handleBulkDelete(selectedRows, resetSelection)}
+              onClick={() => setBulkTarget({ rows: selectedRows, reset: resetSelection })}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
             >
-              Delete Selected ({selectedRows.length})
+              <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
             </button>
           ) : null
         }
+      />
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete transport year?"
+        description={
+          deleteTarget
+            ? `This permanently deletes "${deleteTarget.name}". This action cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        loading={deleting}
+        danger
+      />
+
+      {/* Bulk delete confirmation */}
+      <ConfirmDialog
+        open={!!bulkTarget}
+        onOpenChange={(open) => {
+          if (!open) setBulkTarget(null);
+        }}
+        title={`Delete ${bulkTarget?.rows.length ?? 0} transport year(s)?`}
+        description="This permanently deletes the selected transport years. This action cannot be undone."
+        confirmLabel="Delete Selected"
+        onConfirm={confirmBulkDelete}
+        loading={bulkDeleting}
+        danger
       />
     </div>
   );
