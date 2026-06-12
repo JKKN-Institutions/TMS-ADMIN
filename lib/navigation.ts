@@ -18,6 +18,7 @@ import {
   ClipboardCheck,
   GraduationCap,
   CalendarRange,
+  History,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -72,6 +73,7 @@ export const allNavigation: NavItem[] = [
     ],
   },
   { name: 'Bug Management', href: '/bug-management', icon: Bug, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'services' },
+  { name: 'Activity Log', href: '/activity-log', icon: History, permission: TMS_PERMISSIONS.ACTIVITY_VIEW, group: 'system' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
 ];
 
