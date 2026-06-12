@@ -73,8 +73,8 @@ export const allNavigation: NavItem[] = [
     ],
   },
   { name: 'Bug Management', href: '/bug-management', icon: Bug, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'services' },
-  { name: 'Activity Log', href: '/activity-log', icon: History, permission: TMS_PERMISSIONS.ACTIVITY_VIEW, group: 'system' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
+  { name: 'Activity Log', href: '/activity-log', icon: History, permission: TMS_PERMISSIONS.ACTIVITY_VIEW, group: 'system' },
 ];
 
 export const GROUP_TITLES: Record<NavGroup, string> = {
