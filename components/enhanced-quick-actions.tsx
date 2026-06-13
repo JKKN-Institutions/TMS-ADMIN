@@ -10,8 +10,7 @@ import {
   Car, 
   Route, 
   Bell, 
-  MessageSquare, 
-  CreditCard,
+  MessageSquare,
   Settings,
   BarChart3,
   ArrowRight,
@@ -99,17 +98,6 @@ const EnhancedQuickActions: React.FC<EnhancedQuickActionsProps> = ({
       color: 'text-orange-700',
       bgColor: 'bg-gradient-to-br from-orange-100 to-orange-200',
       roles: ['super_admin', 'transport_manager']
-    },
-    {
-      id: 'view-payments',
-      title: 'Payment Overview',
-      description: 'Monitor transactions',
-      href: '/payments',
-      icon: CreditCard,
-      color: 'text-emerald-700',
-      bgColor: 'bg-gradient-to-br from-emerald-100 to-emerald-200',
-      roles: ['super_admin', 'finance_admin'],
-      badge: '₹12.5K'
     },
     {
       id: 'send-notification',

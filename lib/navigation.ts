@@ -4,7 +4,6 @@ import {
   Users,
   Car,
   Calendar,
-  CreditCard,
   Bell,
   MessageCircle,
   BarChart3,
@@ -60,7 +59,6 @@ export const allNavigation: NavItem[] = [
   { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
   { name: 'My Grievances', href: '/my-grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_SUBMIT, group: 'services' },
-  { name: 'Payments', href: '/payments', icon: CreditCard, permission: TMS_PERMISSIONS.BOOKINGS_VIEW_ALL, group: 'services' },
   {
     name: 'Notifications',
     href: '/notifications',
