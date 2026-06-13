@@ -68,6 +68,13 @@ export const TMS_PERMISSIONS = {
   TRANSPORT_YEARS_CREATE: 'tms.transport_years.create',
   TRANSPORT_YEARS_EDIT: 'tms.transport_years.edit',
   TRANSPORT_YEARS_DELETE: 'tms.transport_years.delete',
+
+  // Transport fees structures + bill generation.
+  FEES_VIEW: 'tms.fees.view',
+  FEES_CREATE: 'tms.fees.create',
+  FEES_EDIT: 'tms.fees.edit',
+  FEES_DELETE: 'tms.fees.delete',
+  FEES_GENERATE: 'tms.fees.generate',
 } as const;
 
 export type TmsPermissionKey =

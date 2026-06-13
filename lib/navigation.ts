@@ -18,6 +18,7 @@ import {
   GraduationCap,
   CalendarRange,
   History,
+  Receipt,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -59,6 +60,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
   { name: 'My Grievances', href: '/my-grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_SUBMIT, group: 'services' },
+  { name: 'Fees', href: '/fees', icon: Receipt, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
   {
     name: 'Notifications',
     href: '/notifications',
