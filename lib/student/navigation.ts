@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Route, QrCode, ClipboardCheck,
+  LayoutDashboard, Route, QrCode, ClipboardCheck, Receipt,
   MessageCircle, Bell, MapPin, User, Settings,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
@@ -22,6 +22,7 @@ export const studentNavigation: StudentNavItem[] = [
   { name: 'My Route', href: '/student/routes', icon: Route },
   { name: 'Boarding Pass', shortName: 'Pass', href: '/student/pass', icon: QrCode },
   { name: 'My Attendance', shortName: 'Attendance', href: '/student/attendance', icon: ClipboardCheck },
+  { name: 'Transport Fees', shortName: 'Fees', href: '/student/fees', icon: Receipt },
   { name: 'Grievances', href: '/student/grievances', icon: MessageCircle },
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
   { name: 'Live Track', href: '/student/live-track', icon: MapPin, comingSoon: true },

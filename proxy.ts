@@ -101,8 +101,8 @@ export async function proxy(request: NextRequest) {
   // 5. Area-based access gate (super admins bypass all areas). Each area (admin /
   //    student / driver / boarding) requires its own permission; a user lacking it
   //    is sent to their OWN area's home rather than a dead-end 403.
+  const area = resolveArea(pathname);
   if (!profile.is_super_admin) {
-    const area = resolveArea(pathname);
     const { data: hasAccess } = await supabase.rpc('user_has_permission', {
       permission_name: AREA_PERMISSION[area],
     });
@@ -126,6 +126,30 @@ export async function proxy(request: NextRequest) {
         );
       }
       return NextResponse.redirect(new URL(home, request.url));
+    }
+  }
+
+  // 5b. Transport-payment gate (student area, non-super-admins). A learner who is
+  //     "behind" — a term past its due date is unpaid for the current transport
+  //     year — is confined to the fees page + grievances + sign-out until cleared.
+  //     Evaluated by the SECURITY DEFINER RPC (user-scoped client can't read the
+  //     RLS-deny billing/fee tables, same reason step 5 uses user_has_permission).
+  if (!profile.is_super_admin && area === 'student') {
+    const EXEMPT_WHEN_BLOCKED = ['/student/fees', '/student/grievances', '/api/student/transport-access'];
+    const exempt = EXEMPT_WHEN_BLOCKED.some((p) => pathname === p || pathname.startsWith(p + '/'));
+    if (!exempt) {
+      const { data: access } = await supabase.rpc('tms_student_transport_access', {
+        p_profile_id: profile.id,
+      });
+      if (access && access.allowed === false) {
+        if (isApi) {
+          return NextResponse.json(
+            { error: 'Transport fees overdue', reason: 'fees_overdue' },
+            { status: 402 }
+          );
+        }
+        return NextResponse.redirect(new URL('/student/fees', request.url));
+      }
     }
   }
 
