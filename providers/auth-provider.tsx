@@ -117,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClientSupabaseClient();
 
   const fetchProfile = useCallback(
-    async (userId: string, opts?: { force?: boolean }) => {
+    async (userId: string, opts?: { force?: boolean; fallbackUser?: User }) => {
       if (!opts?.force) {
         const cached = profileCacheRef.current;
         if (
@@ -155,6 +155,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(fallback.data);
         profileCacheRef.current = fallback;
         syncLegacyAdminUser(fallback.data);
+        return;
+      }
+
+      // No cache either. Synthesize a minimal display profile from the auth user
+      // so the admin shell still renders — the layout's `!profile` guard would
+      // otherwise hold "Loading MYJKKN TMS…" indefinitely on any transient
+      // profiles-fetch error. Display-only: proxy.ts + the API routes do the real
+      // authorization, and usePermissions() still resolves this user's permissions
+      // from the RPC by id, so a thin client profile never widens access.
+      if (opts?.fallbackUser) {
+        const minimal: Profile = {
+          id: userId,
+          email: opts.fallbackUser.email ?? '',
+          full_name: null,
+          role: '',
+          is_super_admin: false,
+          is_active: true,
+          institution_id: null,
+          department_id: null,
+          avatar_url: null,
+          phone_number: null,
+        };
+        setProfile(minimal);
+        syncLegacyAdminUser(minimal);
       }
     },
     [supabase]
@@ -179,12 +203,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    // Fail-safe: the "Loading MYJKKN TMS…" splash gates on `loading`, and the
+    // session probe below can stall — getSession() acquires the Supabase auth
+    // lock, which is shared ACROSS TABS via the Web Locks API, so another open
+    // admin tab mid token-refresh can block this one. Never let that pin the
+    // splash: after 4s, stop waiting and let the shell render. proxy.ts already
+    // authorized the request server-side, so clearing the spinner is safe.
+    const failSafe = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 4000);
+
     // Initial session check. getSession() reads the auth cookie LOCALLY (no
     // network) — proxy.ts has already validated the JWT server-side on this very
     // request, so re-validating here with getUser() only added a sequential
-    // Supabase Auth round trip to every page load.
-    supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
+    // Supabase Auth round trip to every page load. Wrapped so a rejection (lock
+    // timeout, storage error) can't leave the splash up forever.
+    const bootstrap = async () => {
+      let session: Session | null = null;
+      try {
+        const res = await supabase.auth.getSession();
+        session = res.data.session;
+      } catch (e) {
+        console.error('getSession failed:', e);
+      }
       if (!active) return;
+
       const sessionUser = session?.user ?? null;
       setUser(sessionUser);
 
@@ -202,37 +245,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         syncLegacyAdminUser(cached.data);
         setLoading(false);
         if (Date.now() - cached.timestamp >= PROFILE_CACHE_TTL) {
-          void fetchProfile(sessionUser.id, { force: true });
+          void fetchProfile(sessionUser.id, { force: true, fallbackUser: sessionUser });
         }
         return;
       }
 
-      // Cold path (first visit on this browser): must await the profile before
+      // Cold path (first visit on this browser): await the profile before
       // clearing loading, else `!profile` guards bounce an authenticated user.
-      fetchProfile(sessionUser.id).finally(() => {
+      // fetchProfile falls back to a minimal profile if the fetch fails, so this
+      // always resolves to a non-null profile and the splash can't stick.
+      try {
+        await fetchProfile(sessionUser.id, { fallbackUser: sessionUser });
+      } finally {
         if (active) setLoading(false);
-      });
-    });
+      }
+    };
+
+    void bootstrap();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      async (event: AuthChangeEvent, session: Session | null) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        setUser(session.user);
-        await fetchProfile(session.user.id);
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setProfile(null);
-        profileCacheRef.current = null;
-        writeProfileCache(null);
-        syncLegacyAdminUser(null);
+      (event: AuthChangeEvent, session: Session | null) => {
+        // CRITICAL: do NOT `await` Supabase calls inside this callback. auth-js
+        // invokes it while holding the auth lock; awaiting a token-dependent
+        // query (supabase.from(...) needs the access token, which re-acquires
+        // that same lock) deadlocks until the lock times out — the root cause of
+        // the multi-second splash, especially with several admin tabs open.
+        // Fire-and-forget the profile fetch instead.
+        if (event === 'SIGNED_IN' && session?.user) {
+          setUser(session.user);
+          void fetchProfile(session.user.id, { fallbackUser: session.user });
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setProfile(null);
+          profileCacheRef.current = null;
+          writeProfileCache(null);
+          syncLegacyAdminUser(null);
+        }
+        // TOKEN_REFRESHED / USER_UPDATED / INITIAL_SESSION → no profile change.
       }
-      // TOKEN_REFRESHED / USER_UPDATED leave the profile unchanged → skip.
-    });
+    );
 
     return () => {
       active = false;
+      clearTimeout(failSafe);
       subscription.unsubscribe();
     };
   }, [supabase, fetchProfile]);
