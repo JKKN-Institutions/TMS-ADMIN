@@ -1195,7 +1195,6 @@ export class DatabaseService {
           fitness_expiry: vehicleData.fitnessExpiry || null,
           next_maintenance: vehicleData.nextMaintenance || null,
           mileage: vehicleData.mileage || 0,
-          purchase_date: vehicleData.purchaseDate || null,
           chassis_number: vehicleData.chassisNumber || null,
           engine_number: vehicleData.engineNumber || null,
           gps_device_id: vehicleData.gpsDeviceId || null,

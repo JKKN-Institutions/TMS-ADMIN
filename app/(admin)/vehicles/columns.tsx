@@ -36,12 +36,7 @@ export interface VehicleRow {
   gross_vehicle_weight?: number | string | null;
   // Ownership
   ownership_type?: string | null;
-  purchase_date?: string | null;
-  purchase_cost?: number | string | null;
-  vendor_name?: string | null;
-  warranty_expiry?: string | null;
   // Compliance
-  rc_expiry_date?: string | null;
   permit_number?: string | null;
   permit_expiry_date?: string | null;
   pollution_certificate_number?: string | null;
@@ -50,21 +45,12 @@ export interface VehicleRow {
   // Insurance
   insurance_provider?: string | null;
   insurance_policy_number?: string | null;
-  insurance_amount?: number | string | null;
   // Driver
   assigned_driver_id?: string | null;
   assigned_driver_name?: string | null;
-  assignment_date?: string | null;
   // GPS
   gps_provider?: string | null;
   sim_number?: string | null;
-  // Maintenance
-  current_odometer?: number | string | null;
-  maintenance_interval_km?: number | string | null;
-  maintenance_interval_days?: number | null;
-  last_service_odometer?: number | string | null;
-  next_service_odometer?: number | string | null;
-  service_vendor?: string | null;
   // Financial
   monthly_emi?: number | string | null;
   fuel_card_number?: string | null;

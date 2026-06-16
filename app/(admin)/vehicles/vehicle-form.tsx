@@ -17,15 +17,13 @@ interface VehicleFormState {
   registrationNumber: string; vehicleType: string; manufacturer: string; model: string;
   modelYear: string; color: string; capacity: string; grossVehicleWeight: string;
   fuelType: string; status: string; mileage: string;
-  ownershipType: string; purchaseDate: string; purchaseCost: string; vendorName: string; warrantyExpiry: string;
-  rcExpiryDate: string; permitNumber: string; permitExpiryDate: string;
+  ownershipType: string;
+  permitNumber: string; permitExpiryDate: string;
   pollutionCertificateNumber: string; pollutionExpiryDate: string; roadTaxExpiryDate: string; fitnessExpiry: string;
-  insuranceProvider: string; insurancePolicyNumber: string; insuranceExpiry: string; insuranceAmount: string;
-  assignedDriverId: string; assignedDriverName: string; assignmentDate: string;
+  insuranceProvider: string; insurancePolicyNumber: string; insuranceExpiry: string;
+  assignedDriverId: string; assignedDriverName: string;
   gpsDeviceId: string; liveTrackingEnabled: boolean; gpsProvider: string; simNumber: string;
-  lastMaintenance: string; nextMaintenance: string; currentOdometer: string;
-  maintenanceIntervalKm: string; maintenanceIntervalDays: string;
-  lastServiceOdometer: string; nextServiceOdometer: string; serviceVendor: string;
+  lastMaintenance: string; nextMaintenance: string;
   monthlyEmi: string; fuelCardNumber: string; operatingCostPerKm: string;
   emergencyContactName: string; emergencyContactPhone: string; firstAidAvailable: boolean; fireExtinguisherExpiry: string;
   rcDocumentUrl: string; insuranceDocumentUrl: string; fitnessCertificateUrl: string; permitDocumentUrl: string;
@@ -35,14 +33,13 @@ interface VehicleFormState {
 const EMPTY: VehicleFormState = {
   registrationNumber: '', vehicleType: '', manufacturer: '', model: '', modelYear: '', color: '',
   capacity: '', grossVehicleWeight: '', fuelType: 'diesel', status: 'active', mileage: '',
-  ownershipType: '', purchaseDate: '', purchaseCost: '', vendorName: '', warrantyExpiry: '',
-  rcExpiryDate: '', permitNumber: '', permitExpiryDate: '', pollutionCertificateNumber: '',
+  ownershipType: '',
+  permitNumber: '', permitExpiryDate: '', pollutionCertificateNumber: '',
   pollutionExpiryDate: '', roadTaxExpiryDate: '', fitnessExpiry: '',
-  insuranceProvider: '', insurancePolicyNumber: '', insuranceExpiry: '', insuranceAmount: '',
-  assignedDriverId: '', assignedDriverName: '', assignmentDate: '',
+  insuranceProvider: '', insurancePolicyNumber: '', insuranceExpiry: '',
+  assignedDriverId: '', assignedDriverName: '',
   gpsDeviceId: '', liveTrackingEnabled: false, gpsProvider: '', simNumber: '',
-  lastMaintenance: '', nextMaintenance: '', currentOdometer: '', maintenanceIntervalKm: '',
-  maintenanceIntervalDays: '', lastServiceOdometer: '', nextServiceOdometer: '', serviceVendor: '',
+  lastMaintenance: '', nextMaintenance: '',
   monthlyEmi: '', fuelCardNumber: '', operatingCostPerKm: '',
   emergencyContactName: '', emergencyContactPhone: '', firstAidAvailable: false, fireExtinguisherExpiry: '',
   rcDocumentUrl: '', insuranceDocumentUrl: '', fitnessCertificateUrl: '', permitDocumentUrl: '',
@@ -58,22 +55,17 @@ function fromVehicle(v: VehicleRow): VehicleFormState {
     manufacturer: v.manufacturer ?? '', model: v.model ?? '', modelYear: s(v.model_year),
     color: v.color ?? '', capacity: s(v.capacity), grossVehicleWeight: s(v.gross_vehicle_weight),
     fuelType: v.fuel_type ?? 'diesel', status: v.status ?? 'active', mileage: s(v.mileage),
-    ownershipType: v.ownership_type ?? '', purchaseDate: toDateInput(v.purchase_date),
-    purchaseCost: s(v.purchase_cost), vendorName: v.vendor_name ?? '', warrantyExpiry: toDateInput(v.warranty_expiry),
-    rcExpiryDate: toDateInput(v.rc_expiry_date), permitNumber: v.permit_number ?? '',
+    ownershipType: v.ownership_type ?? '',
+    permitNumber: v.permit_number ?? '',
     permitExpiryDate: toDateInput(v.permit_expiry_date), pollutionCertificateNumber: v.pollution_certificate_number ?? '',
     pollutionExpiryDate: toDateInput(v.pollution_expiry_date), roadTaxExpiryDate: toDateInput(v.road_tax_expiry_date),
     fitnessExpiry: toDateInput(v.fitness_expiry),
     insuranceProvider: v.insurance_provider ?? '', insurancePolicyNumber: v.insurance_policy_number ?? '',
-    insuranceExpiry: toDateInput(v.insurance_expiry), insuranceAmount: s(v.insurance_amount),
+    insuranceExpiry: toDateInput(v.insurance_expiry),
     assignedDriverId: v.assigned_driver_id ?? '', assignedDriverName: v.assigned_driver_name ?? '',
-    assignmentDate: toDateInput(v.assignment_date),
     gpsDeviceId: v.gps_device_id ?? '', liveTrackingEnabled: !!v.live_tracking_enabled,
     gpsProvider: v.gps_provider ?? '', simNumber: v.sim_number ?? '',
     lastMaintenance: toDateInput(v.last_maintenance), nextMaintenance: toDateInput(v.next_maintenance),
-    currentOdometer: s(v.current_odometer), maintenanceIntervalKm: s(v.maintenance_interval_km),
-    maintenanceIntervalDays: s(v.maintenance_interval_days), lastServiceOdometer: s(v.last_service_odometer),
-    nextServiceOdometer: s(v.next_service_odometer), serviceVendor: v.service_vendor ?? '',
     monthlyEmi: s(v.monthly_emi), fuelCardNumber: v.fuel_card_number ?? '', operatingCostPerKm: s(v.operating_cost_per_km),
     emergencyContactName: v.emergency_contact_name ?? '', emergencyContactPhone: v.emergency_contact_phone ?? '',
     firstAidAvailable: !!v.first_aid_available, fireExtinguisherExpiry: toDateInput(v.fire_extinguisher_expiry),
@@ -91,26 +83,19 @@ function toPayload(f: VehicleFormState): Record<string, unknown> {
     model_year: f.modelYear || null, color: f.color.trim() || null,
     capacity: f.capacity, gross_vehicle_weight: f.grossVehicleWeight || null,
     fuel_type: f.fuelType, status: f.status, mileage: f.mileage || 0,
-    ownership_type: f.ownershipType || null, purchase_date: f.purchaseDate || null,
-    purchase_cost: f.purchaseCost || null, vendor_name: f.vendorName.trim() || null,
-    warranty_expiry: f.warrantyExpiry || null,
-    rc_expiry_date: f.rcExpiryDate || null, permit_number: f.permitNumber.trim() || null,
+    ownership_type: f.ownershipType || null,
+    permit_number: f.permitNumber.trim() || null,
     permit_expiry_date: f.permitExpiryDate || null,
     pollution_certificate_number: f.pollutionCertificateNumber.trim() || null,
     pollution_expiry_date: f.pollutionExpiryDate || null, road_tax_expiry_date: f.roadTaxExpiryDate || null,
     fitness_expiry: f.fitnessExpiry || null,
     insurance_provider: f.insuranceProvider.trim() || null,
     insurance_policy_number: f.insurancePolicyNumber.trim() || null,
-    insurance_expiry: f.insuranceExpiry || null, insurance_amount: f.insuranceAmount || null,
+    insurance_expiry: f.insuranceExpiry || null,
     assigned_driver_id: f.assignedDriverId || null, assigned_driver_name: f.assignedDriverName || null,
-    assignment_date: f.assignmentDate || null,
     gps_device_id: f.gpsDeviceId || null, live_tracking_enabled: f.liveTrackingEnabled,
     gps_provider: f.gpsProvider.trim() || null, sim_number: f.simNumber.trim() || null,
     last_maintenance: f.lastMaintenance || null, next_maintenance: f.nextMaintenance || null,
-    current_odometer: f.currentOdometer || null, maintenance_interval_km: f.maintenanceIntervalKm || null,
-    maintenance_interval_days: f.maintenanceIntervalDays || null,
-    last_service_odometer: f.lastServiceOdometer || null, next_service_odometer: f.nextServiceOdometer || null,
-    service_vendor: f.serviceVendor.trim() || null,
     monthly_emi: f.monthlyEmi || null, fuel_card_number: f.fuelCardNumber.trim() || null,
     operating_cost_per_km: f.operatingCostPerKm || null,
     emergency_contact_name: f.emergencyContactName.trim() || null,
@@ -303,23 +288,18 @@ export default function VehicleForm({
         </div>
       </SectionCard>
 
-      <SectionCard title="Ownership & purchase">
+      <SectionCard title="Ownership">
         <div className={grid}>
           <div className={fieldCls}>
             <span className={labelCls}>Ownership Type</span>
             <SelectMenu className="mt-1" ariaLabel="Ownership type" value={form.ownershipType}
               onValueChange={(v) => set('ownershipType', v)} options={[{ value: '', label: '—' }, ...OWNERSHIP_OPTIONS]} />
           </div>
-          {DateF('purchaseDate', 'Purchase Date')}
-          {Num('purchaseCost', 'Purchase Cost', '0.01')}
-          {Text('vendorName', 'Vendor Name')}
-          {DateF('warrantyExpiry', 'Warranty Expiry')}
         </div>
       </SectionCard>
 
       <SectionCard title="Compliance & legal">
         <div className={grid}>
-          {DateF('rcExpiryDate', 'RC Expiry')}
           {Text('permitNumber', 'Permit Number')}
           {DateF('permitExpiryDate', 'Permit Expiry')}
           {Text('pollutionCertificateNumber', 'Pollution Cert. Number')}
@@ -334,7 +314,6 @@ export default function VehicleForm({
           {Text('insuranceProvider', 'Insurance Provider')}
           {Text('insurancePolicyNumber', 'Policy Number')}
           {DateF('insuranceExpiry', 'Insurance Expiry')}
-          {Num('insuranceAmount', 'Insured Amount', '0.01')}
         </div>
       </SectionCard>
 
@@ -352,7 +331,6 @@ export default function VehicleForm({
               <span className="mt-1 block text-xs text-gray-400">No onboarded drivers found.</span>
             )}
           </div>
-          {DateF('assignmentDate', 'Assignment Date')}
         </div>
       </SectionCard>
 
@@ -378,12 +356,6 @@ export default function VehicleForm({
         <div className={grid}>
           {DateF('lastMaintenance', 'Last Maintenance')}
           {DateF('nextMaintenance', 'Next Maintenance')}
-          {Num('currentOdometer', 'Current Odometer (km)', '0.01')}
-          {Num('maintenanceIntervalKm', 'Service Interval (km)', '0.01')}
-          {Num('maintenanceIntervalDays', 'Service Interval (days)', '1')}
-          {Num('lastServiceOdometer', 'Last Service Odometer (km)', '0.01')}
-          {Num('nextServiceOdometer', 'Next Service Odometer (km)', '0.01')}
-          {Text('serviceVendor', 'Service Vendor')}
         </div>
       </SectionCard>
 
