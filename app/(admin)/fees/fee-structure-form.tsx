@@ -7,6 +7,7 @@ import { Loader2, Save, Plus, Trash2, Wand2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchMasters, fetchTransportYearOptions, type MasterOption } from './fee-api';
 import type { FeeAudience, FeeStatus } from '@/lib/fees/types';
+import { SelectMenu, type SelectMenuOption } from '@/components/ui/select-menu';
 import { inr } from './columns';
 
 interface TermRow { term_label: string; amount: string; due_date: string }
@@ -35,6 +36,24 @@ interface Props {
 }
 
 const blankTerm = (n: number): TermRow => ({ term_label: `Term ${n}`, amount: '', due_date: '' });
+
+// Static enum options for the SelectMenu pickers (matches the routes/vehicles forms).
+const AUDIENCE_OPTIONS: SelectMenuOption[] = [
+  { value: 'student', label: 'Learners (students)' },
+  { value: 'staff', label: 'Staff' },
+];
+const STATUS_OPTIONS: SelectMenuOption[] = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'active', label: 'Active' },
+  { value: 'archived', label: 'Archived' },
+];
+
+// Map a master/reference list to dropdown options, prefixed with a clearable
+// "Any" entry so an optional condition filter can be reset back to "any".
+const toOptions = (list: MasterOption[], anyLabel = 'Any'): SelectMenuOption[] => [
+  { value: '', label: anyLabel },
+  ...list.map((o) => ({ value: o.id, label: o.name })),
+];
 
 export function FeeStructureForm({ mode, feeId, initial }: Props) {
   const router = useRouter();
@@ -213,41 +232,39 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Transport Year *</label>
-            <select
+            <SelectMenu
               value={form.transport_year_id}
-              onChange={(e) => set('transport_year_id', e.target.value)}
-              className={selectCls(errors.transport_year_id)}
+              onValueChange={(v) => set('transport_year_id', v)}
+              options={transportYears.map((y) => ({ value: y.id, label: y.name }))}
+              placeholder="Select year…"
+              ariaLabel="Transport year"
               disabled={saving}
-            >
-              <option value="">Select year…</option>
-              {transportYears.map((y) => (
-                <option key={y.id} value={y.id}>{y.name}</option>
-              ))}
-            </select>
+              className={errors.transport_year_id ? 'border-red-500!' : ''}
+            />
             {errors.transport_year_id && <p className="mt-1 text-xs text-red-500">{errors.transport_year_id}</p>}
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Applies to *</label>
-            <select
+            <SelectMenu
               value={form.audience}
-              onChange={(e) => set('audience', e.target.value as FeeAudience)}
-              className="input"
+              onValueChange={(v) => set('audience', v as FeeAudience)}
+              options={AUDIENCE_OPTIONS}
+              ariaLabel="Applies to"
               disabled={saving}
-            >
-              <option value="student">Learners (students)</option>
-              <option value="staff">Staff</option>
-            </select>
+            />
             <p className="mt-1 text-xs text-gray-500">
               {isStudent ? 'Bills go under the “Transport Fee” category.' : 'Staff are recorded for coverage; real staff billing is phase 2.'}
             </p>
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Status</label>
-            <select value={form.status} onChange={(e) => set('status', e.target.value as FeeStatus)} className="input" disabled={saving}>
-              <option value="draft">Draft</option>
-              <option value="active">Active</option>
-              <option value="archived">Archived</option>
-            </select>
+            <SelectMenu
+              value={form.status}
+              onValueChange={(v) => set('status', v as FeeStatus)}
+              options={STATUS_OPTIONS}
+              ariaLabel="Status"
+              disabled={saving}
+            />
             <p className="mt-1 text-xs text-gray-500">Bills can only be generated from an Active structure.</p>
           </div>
         </div>
@@ -260,49 +277,73 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Institution</label>
-            <select value={form.institution_id} onChange={(e) => { set('institution_id', e.target.value); set('degree_id',''); set('department_id',''); set('programme_id',''); set('semester_id',''); }} className="input" disabled={saving}>
-              <option value="">Any</option>
-              {institutions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+            <SelectMenu
+              value={form.institution_id}
+              onValueChange={(v) => { set('institution_id', v); set('degree_id',''); set('department_id',''); set('programme_id',''); set('semester_id',''); }}
+              options={toOptions(institutions)}
+              placeholder="Any"
+              ariaLabel="Institution"
+              disabled={saving}
+            />
           </div>
           {isStudent && (
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">Degree</label>
-              <select value={form.degree_id} onChange={(e) => { set('degree_id', e.target.value); set('department_id',''); set('programme_id',''); set('semester_id',''); }} className="input" disabled={saving || !form.institution_id}>
-                <option value="">Any</option>
-                {degrees.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-              </select>
+              <SelectMenu
+                value={form.degree_id}
+                onValueChange={(v) => { set('degree_id', v); set('department_id',''); set('programme_id',''); set('semester_id',''); }}
+                options={toOptions(degrees)}
+                placeholder="Any"
+                ariaLabel="Degree"
+                disabled={saving || !form.institution_id}
+              />
             </div>
           )}
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Department</label>
-            <select value={form.department_id} onChange={(e) => { set('department_id', e.target.value); set('programme_id',''); set('semester_id',''); }} className="input" disabled={saving || !form.institution_id}>
-              <option value="">Any</option>
-              {departments.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+            <SelectMenu
+              value={form.department_id}
+              onValueChange={(v) => { set('department_id', v); set('programme_id',''); set('semester_id',''); }}
+              options={toOptions(departments)}
+              placeholder="Any"
+              ariaLabel="Department"
+              disabled={saving || !form.institution_id}
+            />
           </div>
           {isStudent && (
             <>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Programme</label>
-                <select value={form.programme_id} onChange={(e) => { set('programme_id', e.target.value); set('semester_id',''); }} className="input" disabled={saving || !form.department_id}>
-                  <option value="">Any</option>
-                  {programmes.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
+                <SelectMenu
+                  value={form.programme_id}
+                  onValueChange={(v) => { set('programme_id', v); set('semester_id',''); }}
+                  options={toOptions(programmes)}
+                  placeholder="Any"
+                  ariaLabel="Programme"
+                  disabled={saving || !form.department_id}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Semester</label>
-                <select value={form.semester_id} onChange={(e) => set('semester_id', e.target.value)} className="input" disabled={saving || !form.programme_id}>
-                  <option value="">Any</option>
-                  {semesters.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
+                <SelectMenu
+                  value={form.semester_id}
+                  onValueChange={(v) => set('semester_id', v)}
+                  options={toOptions(semesters)}
+                  placeholder="Any"
+                  ariaLabel="Semester"
+                  disabled={saving || !form.programme_id}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Quota</label>
-                <select value={form.quota_id} onChange={(e) => set('quota_id', e.target.value)} className="input" disabled={saving}>
-                  <option value="">Any</option>
-                  {quotas.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
+                <SelectMenu
+                  value={form.quota_id}
+                  onValueChange={(v) => set('quota_id', v)}
+                  options={toOptions(quotas)}
+                  placeholder="Any"
+                  ariaLabel="Quota"
+                  disabled={saving}
+                />
               </div>
             </>
           )}
