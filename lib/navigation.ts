@@ -19,6 +19,7 @@ import {
   CalendarRange,
   History,
   Receipt,
+  Wallet,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -61,6 +62,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
   { name: 'My Grievances', href: '/my-grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_SUBMIT, group: 'services' },
   { name: 'Fees', href: '/fees', icon: Receipt, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
+  { name: 'Bill Management', href: '/bill-management', icon: Wallet, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
   {
     name: 'Notifications',
     href: '/notifications',

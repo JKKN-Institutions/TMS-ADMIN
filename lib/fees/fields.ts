@@ -6,16 +6,15 @@
 
 export const TEXT_FIELDS = ['name', 'notes'] as const;          // trimmed or null
 export const ENUM_FIELDS = ['audience', 'status'] as const;     // validated by DB CHECK
-export const UUID_FIELDS = [                                     // '' -> null = "any"
-  'transport_year_id', 'institution_id', 'degree_id',
-  'department_id', 'programme_id', 'semester_id', 'quota_id',
-] as const;
+export const UUID_FIELDS = ['transport_year_id'] as const;      // '' -> null
 export const NUM_FIELDS = ['total_amount', 'split_count'] as const;
+// Array (uuid[] / text[]) condition fields; empty -> null = "any".
+export const ARRAY_FIELDS = ['institution_ids', 'staff_role_keys'] as const;
 
 // Every column the API will write (whitelist). Audit columns (created_by,
 // updated_by), the PK, and child term rows are NOT listed here.
 export const EDITABLE: readonly string[] = [
-  ...TEXT_FIELDS, ...ENUM_FIELDS, ...UUID_FIELDS, ...NUM_FIELDS, 'staff_role_keys',
+  ...TEXT_FIELDS, ...ENUM_FIELDS, ...UUID_FIELDS, ...NUM_FIELDS, ...ARRAY_FIELDS,
 ];
 
 // Normalise a snake_case body into a typed tms_fee_structure payload. Only keys
@@ -30,9 +29,11 @@ export function buildFeeStructurePayload(
   for (const k of ENUM_FIELDS) if (has(k)) out[k] = (body[k] as string) || null;
   for (const k of UUID_FIELDS) if (has(k)) out[k] = (body[k] as string) || null; // '' -> null ("any")
   for (const k of NUM_FIELDS) if (has(k)) out[k] = body[k] == null || body[k] === '' ? null : Number(body[k]);
-  if (has('staff_role_keys')) {
-    const v = body['staff_role_keys'];
-    out['staff_role_keys'] = Array.isArray(v) && v.length ? v.map(String) : null;
+  for (const k of ARRAY_FIELDS) {
+    if (has(k)) {
+      const v = body[k];
+      out[k] = Array.isArray(v) && v.length ? v.map(String) : null; // empty -> null ("any")
+    }
   }
 
   return out;

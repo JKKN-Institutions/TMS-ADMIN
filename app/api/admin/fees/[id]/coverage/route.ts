@@ -63,6 +63,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       }
     }
 
+    // Resolve institution names (for the institution column + filter on the table).
+    const instIds = [...new Set(people.map((p) => p.institution_id).filter(Boolean))] as string[];
+    const instMap = new Map<string, string>();
+    if (instIds.length) {
+      const { data } = await supabase.from('institutions').select('id, name').in('id', instIds);
+      for (const r of data ?? []) instMap.set(r.id, r.name);
+    }
+
     const rows = people.map((p) => {
       const e = byPerson.get(p.person_id);
       const termsBilled = e ? e.terms.size : 0;
@@ -80,6 +88,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         person_type: p.person_type,
         name: nm?.name ?? '—',
         code: nm?.code ?? null,
+        institution_id: p.institution_id,
+        institution_name: p.institution_id ? instMap.get(p.institution_id) ?? null : null,
         terms_billed: termsBilled,
         total_terms: totalTerms,
         status,

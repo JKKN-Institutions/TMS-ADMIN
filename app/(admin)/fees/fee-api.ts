@@ -77,6 +77,8 @@ export interface CoveragePerson {
   person_type: 'learner' | 'staff';
   name: string;
   code: string | null;
+  institution_id: string | null;
+  institution_name: string | null;
   terms_billed: number;
   total_terms: number;
   status: 'billed' | 'partial' | 'unbilled' | 'staff_deferred';

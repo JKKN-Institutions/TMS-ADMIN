@@ -1,27 +1,23 @@
 'use client';
 
-import { use, useEffect, useState, type ReactNode } from 'react';
+import { use, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Pencil, Play, Loader2, Users, CheckCircle2, AlertTriangle, Clock, FileText } from 'lucide-react';
+import { Pencil, Play, Loader2, Users, CheckCircle2, AlertTriangle, Clock, FileText, Building2, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
+import { DataTable } from '@/components/ui/data-table';
+import { getCoverageColumns } from './coverage-columns';
+import { exportCoverage } from './coverage-export';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   fetchFeeStructure, fetchCoverage, fetchMasters, runGeneration,
-  type GeneratePreview, type CoverageResult, type MasterOption,
+  type GeneratePreview, type CoverageResult,
 } from '../fee-api';
 import { feeStatusBadge, audienceBadge, inr } from '../columns';
 
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-
-const COVERAGE_STYLE: Record<string, string> = {
-  billed: 'bg-green-100 text-green-800',
-  partial: 'bg-amber-100 text-amber-800',
-  unbilled: 'bg-gray-100 text-gray-700',
-  staff_deferred: 'bg-purple-100 text-purple-800',
-};
 
 export default function FeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -41,25 +37,22 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
     }
   }, []);
 
-  // Resolve condition dimension names for display.
-  const [cond, setCond] = useState<Record<string, string>>({});
+  // Resolve institution names for display (institution_ids is the only condition).
+  const [institutionNames, setInstitutionNames] = useState<string[]>([]);
   useEffect(() => {
     if (!fee) return;
     let alive = true;
     (async () => {
-      const labels: Record<string, string> = {};
-      const find = (opts: MasterOption[], v: string | null) => (v ? opts.find((o) => o.id === v)?.name ?? v : '');
+      let names: string[] = [];
       try {
-        if (fee.institution_id) labels.institution = find(await fetchMasters('institutions'), fee.institution_id);
-        if (fee.audience === 'student') {
-          if (fee.degree_id) labels.degree = find(await fetchMasters('degrees', { institution_id: fee.institution_id ?? undefined }), fee.degree_id);
-          if (fee.department_id) labels.department = find(await fetchMasters('departments', { institution_id: fee.institution_id ?? undefined, degree_id: fee.degree_id ?? undefined }), fee.department_id);
-          if (fee.programme_id) labels.programme = find(await fetchMasters('programmes', { institution_id: fee.institution_id ?? undefined, degree_id: fee.degree_id ?? undefined, department_id: fee.department_id ?? undefined }), fee.programme_id);
-          if (fee.semester_id) labels.semester = find(await fetchMasters('semesters', { program_id: fee.programme_id ?? undefined }), fee.semester_id);
-          if (fee.quota_id) labels.quota = find(await fetchMasters('quotas'), fee.quota_id);
+        const ids = fee.institution_ids ?? [];
+        if (ids.length) {
+          const opts = await fetchMasters('institutions');
+          const byId = new Map(opts.map((o) => [o.id, o.name]));
+          names = ids.map((id) => byId.get(id) ?? id);
         }
       } catch { /* tolerate */ }
-      if (alive) setCond(labels);
+      if (alive) setInstitutionNames(names);
     })();
     return () => { alive = false; };
   }, [fee]);
@@ -70,6 +63,13 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
     queryFn: () => fetchCoverage(id),
     enabled: !!fee,
   });
+  const coverageColumns = useMemo(() => getCoverageColumns(), []);
+  // Institution filter options derived from the rows actually present.
+  const institutionFilterOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const p of coverage?.people ?? []) if (p.institution_name) names.add(p.institution_name);
+    return Array.from(names).sort().map((n) => ({ label: n, value: n }));
+  }, [coverage]);
 
   // Generation
   const [preview, setPreview] = useState<GeneratePreview | null>(null);
@@ -157,22 +157,51 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
       </SectionCard>
 
       <SectionCard title="Conditions">
-        <p className="mb-3 text-xs text-gray-500">Who this fee applies to (blank = any)</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Institution" value={cond.institution || 'Any'} />
-          {isStudent ? (
-            <>
-              <Field label="Degree" value={cond.degree || 'Any'} />
-              <Field label="Department" value={cond.department || 'Any'} />
-              <Field label="Programme" value={cond.programme || 'Any'} />
-              <Field label="Semester" value={cond.semester || 'Any'} />
-              <Field label="Quota" value={cond.quota || 'Any'} />
-            </>
-          ) : (
-            <Field
-              label="Staff roles"
-              value={fee.staff_role_keys && fee.staff_role_keys.length ? fee.staff_role_keys.join(', ') : 'All roles'}
-            />
+        <div className="space-y-5">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Institutions</p>
+              {institutionNames.length > 0 && (
+                <span className="text-xs text-gray-400">{institutionNames.length} selected</span>
+              )}
+            </div>
+            {institutionNames.length ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {institutionNames.map((n) => (
+                  <span
+                    key={n}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"
+                  >
+                    <Building2 className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                    {n}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm font-medium text-gray-500">
+                Any institution <span className="text-gray-400">— all bus-required {isStudent ? 'learners' : 'staff'} are included</span>
+              </p>
+            )}
+          </div>
+
+          {!isStudent && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Staff roles</p>
+              {fee.staff_role_keys && fee.staff_role_keys.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {fee.staff_role_keys.map((r) => (
+                    <span
+                      key={r}
+                      className="inline-flex items-center rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs font-medium capitalize text-purple-700 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-300"
+                    >
+                      {r.replace(/[-_]/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-sm font-medium text-gray-500">All roles</p>
+              )}
+            </div>
           )}
         </div>
       </SectionCard>
@@ -250,56 +279,76 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
         </SectionCard>
       )}
 
-      {/* Coverage */}
+      {/* Coverage — aggregate summary in the card, per-person breakdown in the table below */}
       <SectionCard title="Coverage">
-        <p className="mb-3 text-xs text-gray-500">Who is billed for this transport year</p>
+        <p className="mb-4 text-xs text-gray-500">Who is billed for this transport year</p>
         {coverageLoading ? (
-          <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg bg-gray-100" />
+            ))}
+          </div>
         ) : coverage ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <Stat label="Applicable" value={coverage.summary.applicable} icon={<Users className="h-4 w-4 text-blue-500" />} />
-              <Stat label="Billed" value={coverage.summary.billed} icon={<CheckCircle2 className="h-4 w-4 text-green-500" />} />
-              <Stat label="Partial" value={coverage.summary.partial} icon={<Clock className="h-4 w-4 text-amber-500" />} />
-              <Stat label="Unbilled" value={coverage.summary.unbilled} icon={<AlertTriangle className="h-4 w-4 text-gray-400" />} />
-              <Stat label="Staff deferred" value={coverage.summary.staffDeferred} icon={<Clock className="h-4 w-4 text-purple-500" />} />
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-                    <th className="py-2 pr-4">Name</th>
-                    <th className="py-2 pr-4">Code</th>
-                    <th className="py-2 pr-4">Type</th>
-                    <th className="py-2 pr-4">Terms billed</th>
-                    <th className="py-2 pr-4">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {coverage.people.map((p) => (
-                    <tr key={p.person_id} className="border-b border-gray-100">
-                      <td className="py-2 pr-4 font-medium text-gray-900">{p.name}</td>
-                      <td className="py-2 pr-4 text-gray-500">{p.code || '—'}</td>
-                      <td className="py-2 pr-4 capitalize text-gray-600">{p.person_type}</td>
-                      <td className="py-2 pr-4 text-gray-600">{p.terms_billed}/{p.total_terms}</td>
-                      <td className="py-2 pr-4">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${COVERAGE_STYLE[p.status]}`}>
-                          {p.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {coverage.people.length === 0 && (
-                    <tr><td colSpan={5} className="py-4 text-center text-gray-400">No one currently matches this structure’s conditions.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <Stat label="Applicable" value={coverage.summary.applicable} icon={<Users className="h-4 w-4 text-blue-500" />} />
+            <Stat label="Billed" value={coverage.summary.billed} icon={<CheckCircle2 className="h-4 w-4 text-green-500" />} />
+            <Stat label="Partial" value={coverage.summary.partial} icon={<Clock className="h-4 w-4 text-amber-500" />} />
+            <Stat label="Unbilled" value={coverage.summary.unbilled} icon={<AlertTriangle className="h-4 w-4 text-gray-400" />} />
+            <Stat label="Staff deferred" value={coverage.summary.staffDeferred} icon={<Clock className="h-4 w-4 text-purple-500" />} />
           </div>
         ) : (
           <p className="text-sm text-gray-500">Coverage unavailable.</p>
         )}
       </SectionCard>
+
+      {coverage &&
+        (coverage.people.length > 0 ? (
+          <DataTable
+            columns={coverageColumns}
+            data={coverage.people}
+            entityName="people"
+            getRowId={(p) => p.person_id}
+            enableRowSelection
+            searchPlaceholder="Search name, code or institution..."
+            filters={[
+              ...(institutionFilterOptions.length
+                ? [{ columnId: 'institution', title: 'Institution', options: institutionFilterOptions }]
+                : []),
+              {
+                columnId: 'person_type',
+                title: 'Type',
+                options: [
+                  { label: 'Learner', value: 'learner' },
+                  { label: 'Staff', value: 'staff' },
+                ],
+              },
+              {
+                columnId: 'status',
+                title: 'Status',
+                options: [
+                  { label: 'Billed', value: 'billed' },
+                  { label: 'Partial', value: 'partial' },
+                  { label: 'Unbilled', value: 'unbilled' },
+                  { label: 'Staff deferred', value: 'staff_deferred' },
+                ],
+              },
+            ]}
+            toolbarActions={({ selectedRows }) => (
+              <button
+                type="button"
+                onClick={() => exportCoverage(selectedRows.length ? selectedRows : coverage.people, fee.name)}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <Download className="h-4 w-4" />
+                Export{selectedRows.length ? ` (${selectedRows.length})` : ''}
+              </button>
+            )}
+          />
+        ) : (
+          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
+            No one currently matches this structure’s conditions.
+          </div>
+        ))}
 
       <ConfirmDialog
         open={confirmGen}

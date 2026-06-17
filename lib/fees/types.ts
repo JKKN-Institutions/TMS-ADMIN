@@ -18,14 +18,9 @@ export interface FeeStructureRow {
   name: string;
   transport_year_id: string;
   audience: FeeAudience;
-  // condition dimensions — null = "any"
-  institution_id: string | null;
-  degree_id: string | null;
-  department_id: string | null;
-  programme_id: string | null; // maps to learners_profiles.program_id
-  semester_id: string | null;
-  quota_id: string | null;
-  staff_role_keys: string[] | null;
+  // condition dimensions — null/empty = "any"
+  institution_ids: string[] | null; // multi-institution; filters learners_profiles/staff.institution_id
+  staff_role_keys: string[] | null; // audience='staff' only
   total_amount: number;
   split_count: number;
   status: FeeStatus;

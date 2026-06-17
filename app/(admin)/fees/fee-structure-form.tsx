@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { fetchMasters, fetchTransportYearOptions, type MasterOption } from './fee-api';
 import type { FeeAudience, FeeStatus } from '@/lib/fees/types';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/select-menu';
+import { SelectMenuMulti } from '@/components/ui/select-menu-multi';
 import { inr } from './columns';
 
 interface TermRow { term_label: string; amount: string; due_date: string }
@@ -17,12 +18,7 @@ export interface FeeFormInitial {
   transport_year_id: string;
   audience: FeeAudience;
   status: FeeStatus;
-  institution_id: string;
-  degree_id: string;
-  department_id: string;
-  programme_id: string;
-  semester_id: string;
-  quota_id: string;
+  institution_ids: string[];
   staff_role_keys: string[];
   total_amount: string;
   notes: string;
@@ -48,13 +44,6 @@ const STATUS_OPTIONS: SelectMenuOption[] = [
   { value: 'archived', label: 'Archived' },
 ];
 
-// Map a master/reference list to dropdown options, prefixed with a clearable
-// "Any" entry so an optional condition filter can be reset back to "any".
-const toOptions = (list: MasterOption[], anyLabel = 'Any'): SelectMenuOption[] => [
-  { value: '', label: anyLabel },
-  ...list.map((o) => ({ value: o.id, label: o.name })),
-];
-
 export function FeeStructureForm({ mode, feeId, initial }: Props) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -62,12 +51,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
     transport_year_id: initial?.transport_year_id ?? '',
     audience: (initial?.audience ?? 'student') as FeeAudience,
     status: (initial?.status ?? 'draft') as FeeStatus,
-    institution_id: initial?.institution_id ?? '',
-    degree_id: initial?.degree_id ?? '',
-    department_id: initial?.department_id ?? '',
-    programme_id: initial?.programme_id ?? '',
-    semester_id: initial?.semester_id ?? '',
-    quota_id: initial?.quota_id ?? '',
+    institution_ids: initial?.institution_ids ?? ([] as string[]),
     staff_role_keys: initial?.staff_role_keys ?? ([] as string[]),
     total_amount: initial?.total_amount ?? '',
     notes: initial?.notes ?? '',
@@ -80,11 +64,6 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
 
   const [transportYears, setTransportYears] = useState<MasterOption[]>([]);
   const [institutions, setInstitutions] = useState<MasterOption[]>([]);
-  const [degrees, setDegrees] = useState<MasterOption[]>([]);
-  const [departments, setDepartments] = useState<MasterOption[]>([]);
-  const [programmes, setProgrammes] = useState<MasterOption[]>([]);
-  const [semesters, setSemesters] = useState<MasterOption[]>([]);
-  const [quotas, setQuotas] = useState<MasterOption[]>([]);
   const [staffRoles, setStaffRoles] = useState<MasterOption[]>([]);
 
   const set = (k: keyof typeof form, v: unknown) => {
@@ -92,37 +71,12 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
     setErrors((e) => ({ ...e, [k]: '' }));
   };
 
-  // base option lists
+  // Option lists. Institution is the only academic condition, so no cascading.
   useEffect(() => {
     fetchTransportYearOptions().then(setTransportYears).catch(() => {});
     fetchMasters('institutions').then(setInstitutions).catch(() => {});
-    fetchMasters('quotas').then(setQuotas).catch(() => {});
     fetchMasters('staff-roles').then(setStaffRoles).catch(() => {});
   }, []);
-
-  // cascading dropdowns
-  useEffect(() => {
-    if (!form.institution_id) { setDegrees([]); return; }
-    fetchMasters('degrees', { institution_id: form.institution_id }).then(setDegrees).catch(() => {});
-  }, [form.institution_id]);
-  useEffect(() => {
-    if (!form.institution_id) { setDepartments([]); return; }
-    // students narrow departments by degree; staff narrow by institution only
-    fetchMasters('departments', {
-      institution_id: form.institution_id,
-      degree_id: form.audience === 'student' ? form.degree_id : undefined,
-    }).then(setDepartments).catch(() => {});
-  }, [form.institution_id, form.degree_id, form.audience]);
-  useEffect(() => {
-    if (!form.department_id) { setProgrammes([]); return; }
-    fetchMasters('programmes', {
-      institution_id: form.institution_id, degree_id: form.degree_id, department_id: form.department_id,
-    }).then(setProgrammes).catch(() => {});
-  }, [form.department_id, form.degree_id, form.institution_id]);
-  useEffect(() => {
-    if (!form.programme_id) { setSemesters([]); return; }
-    fetchMasters('semesters', { program_id: form.programme_id }).then(setSemesters).catch(() => {});
-  }, [form.programme_id]);
 
   const totalNum = Number(form.total_amount) || 0;
   const termsSum = terms.reduce((s, t) => s + (Number(t.amount) || 0), 0);
@@ -173,12 +127,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         transport_year_id: form.transport_year_id,
         audience: form.audience,
         status: form.status,
-        institution_id: form.institution_id || null,
-        degree_id: isStudent ? form.degree_id || null : null,
-        department_id: form.department_id || null,
-        programme_id: isStudent ? form.programme_id || null : null,
-        semester_id: isStudent ? form.semester_id || null : null,
-        quota_id: isStudent ? form.quota_id || null : null,
+        institution_ids: form.institution_ids.length ? form.institution_ids : null,
         staff_role_keys: !isStudent && form.staff_role_keys.length ? form.staff_role_keys : null,
         total_amount: totalNum,
         split_count: terms.length,
@@ -273,80 +222,22 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
       {/* ── Conditions ── */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <h3 className="mb-1 text-sm font-semibold text-gray-900">Conditions</h3>
-        <p className="mb-4 text-xs text-gray-500">Leave a field blank to mean “any”. Only bus-required, active people matching these are billed.</p>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <p className="mb-4 text-xs text-gray-500">Leave institutions empty to mean “any”. Only bus-required, active people in the chosen institution(s) are billed.</p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="mb-2 block text-sm font-medium text-gray-700">Institution</label>
-            <SelectMenu
-              value={form.institution_id}
-              onValueChange={(v) => { set('institution_id', v); set('degree_id',''); set('department_id',''); set('programme_id',''); set('semester_id',''); }}
-              options={toOptions(institutions)}
-              placeholder="Any"
-              ariaLabel="Institution"
+            <label className="mb-2 block text-sm font-medium text-gray-700">Institutions</label>
+            <SelectMenuMulti
+              value={form.institution_ids}
+              onValueChange={(v) => set('institution_ids', v)}
+              options={institutions.map((o) => ({ value: o.id, label: o.name }))}
+              placeholder="Any institution"
+              ariaLabel="Institutions"
               disabled={saving}
             />
+            {form.institution_ids.length > 0 && (
+              <p className="mt-1 text-xs text-gray-500">{form.institution_ids.length} institution(s) selected</p>
+            )}
           </div>
-          {isStudent && (
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">Degree</label>
-              <SelectMenu
-                value={form.degree_id}
-                onValueChange={(v) => { set('degree_id', v); set('department_id',''); set('programme_id',''); set('semester_id',''); }}
-                options={toOptions(degrees)}
-                placeholder="Any"
-                ariaLabel="Degree"
-                disabled={saving || !form.institution_id}
-              />
-            </div>
-          )}
-          <div>
-            <label className="mb-2 block text-sm font-medium text-gray-700">Department</label>
-            <SelectMenu
-              value={form.department_id}
-              onValueChange={(v) => { set('department_id', v); set('programme_id',''); set('semester_id',''); }}
-              options={toOptions(departments)}
-              placeholder="Any"
-              ariaLabel="Department"
-              disabled={saving || !form.institution_id}
-            />
-          </div>
-          {isStudent && (
-            <>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Programme</label>
-                <SelectMenu
-                  value={form.programme_id}
-                  onValueChange={(v) => { set('programme_id', v); set('semester_id',''); }}
-                  options={toOptions(programmes)}
-                  placeholder="Any"
-                  ariaLabel="Programme"
-                  disabled={saving || !form.department_id}
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Semester</label>
-                <SelectMenu
-                  value={form.semester_id}
-                  onValueChange={(v) => set('semester_id', v)}
-                  options={toOptions(semesters)}
-                  placeholder="Any"
-                  ariaLabel="Semester"
-                  disabled={saving || !form.programme_id}
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Quota</label>
-                <SelectMenu
-                  value={form.quota_id}
-                  onValueChange={(v) => set('quota_id', v)}
-                  options={toOptions(quotas)}
-                  placeholder="Any"
-                  ariaLabel="Quota"
-                  disabled={saving}
-                />
-              </div>
-            </>
-          )}
         </div>
         {!isStudent && (
           <div className="mt-4">
