@@ -92,8 +92,8 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
   const doGenerate = async () => {
     setGenerating(true);
     try {
-      const res = (await runGeneration(id, 'generate')) as { learnerBilled: number; staffDeferred: number; skipped: number };
-      toast.success(`Generated ${res.learnerBilled} learner bill(s); ${res.staffDeferred} staff deferred; ${res.skipped} skipped`);
+      const res = (await runGeneration(id, 'generate')) as { learnerBilled: number; staffDeferred: number; skipped: number; unresolved: number };
+      toast.success(`Generated ${res.learnerBilled} learner bill(s); ${res.staffDeferred} staff deferred; ${res.skipped} skipped${res.unresolved ? `; ${res.unresolved} unresolved` : ''}`);
       setConfirmGen(false);
       setPreview(null);
       await refetchCoverage();
@@ -150,8 +150,24 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
           <Field label="Transport Year" value={fee.transport_year_name ?? '—'} />
           <Field label="Applies to" value={audienceBadge(fee.audience)} />
           <Field label="Status" value={feeStatusBadge(fee.status)} />
-          <Field label="Total Fee" value={inr(fee.total_amount)} />
-          <Field label="Terms" value={`${fee.split_count}`} />
+          {fee.fee_mode === 'tiered' ? (
+            <>
+              <Field
+                label="Fee mode"
+                value={
+                  <span className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
+                    Tiered by year of study
+                  </span>
+                }
+              />
+              <Field label="Year bands" value={`${(fee.bands ?? []).length}`} />
+            </>
+          ) : (
+            <>
+              <Field label="Total Fee" value={inr(fee.total_amount)} />
+              <Field label="Terms" value={`${fee.split_count}`} />
+            </>
+          )}
           <Field label="Notes" value={fee.notes || '—'} />
         </div>
       </SectionCard>
@@ -184,6 +200,22 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
             )}
           </div>
 
+          {isStudent && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Learner statuses billed</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(fee.lifecycle_statuses && fee.lifecycle_statuses.length ? fee.lifecycle_statuses : ['active']).map((s) => (
+                  <span
+                    key={s}
+                    className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium capitalize text-gray-700 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"
+                  >
+                    {s.replace(/[-_]/g, ' ')}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!isStudent && (
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Staff roles</p>
@@ -206,30 +238,71 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
         </div>
       </SectionCard>
 
-      <SectionCard title="Terms">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-                <th className="py-2 pr-4">#</th>
-                <th className="py-2 pr-4">Term</th>
-                <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Due date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(fee.terms ?? []).map((t) => (
-                <tr key={t.term_no} className="border-b border-gray-100">
-                  <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
-                  <td className="py-2 pr-4 font-medium text-gray-900">{t.term_label || `Term ${t.term_no}`}</td>
-                  <td className="py-2 pr-4">{inr(t.amount)}</td>
-                  <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
+      {fee.fee_mode === 'tiered' ? (
+        <SectionCard title="Year bands">
+          <div className="space-y-5">
+            {(fee.bands ?? []).map((b, bi) => (
+              <div key={bi} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {b.label || `Years ${b.study_years.join(', ')}`}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    Year{b.study_years.length === 1 ? '' : 's'} {b.study_years.join(', ')} · {inr(b.total_amount)}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
+                        <th className="py-2 pr-4">#</th>
+                        <th className="py-2 pr-4">Term</th>
+                        <th className="py-2 pr-4">Amount</th>
+                        <th className="py-2 pr-4">Due date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(b.terms ?? []).map((t) => (
+                        <tr key={t.term_no} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
+                          <td className="py-2 pr-4 font-medium text-gray-900 dark:text-gray-100">{t.term_label || `Term ${t.term_no}`}</td>
+                          <td className="py-2 pr-4">{inr(t.amount)}</td>
+                          <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      ) : (
+        <SectionCard title="Terms">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
+                  <th className="py-2 pr-4">#</th>
+                  <th className="py-2 pr-4">Term</th>
+                  <th className="py-2 pr-4">Amount</th>
+                  <th className="py-2 pr-4">Due date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
+              </thead>
+              <tbody>
+                {(fee.terms ?? []).map((t) => (
+                  <tr key={t.term_no} className="border-b border-gray-100">
+                    <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
+                    <td className="py-2 pr-4 font-medium text-gray-900">{t.term_label || `Term ${t.term_no}`}</td>
+                    <td className="py-2 pr-4">{inr(t.amount)}</td>
+                    <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Generate panel */}
       {canGenerate && (
@@ -257,10 +330,26 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                     <Stat label="Applicable" value={preview.applicable} />
                     <Stat label="New bills to create" value={preview.toGeneratePairs} />
                     <Stat label="Already billed (skip)" value={preview.alreadyBilledPairs} />
-                    <Stat label="Fee / person" value={inr(preview.totalPerPerson)} />
+                    {preview.feeMode === 'tiered' ? (
+                      <Stat label="Unresolved" value={preview.unresolved} />
+                    ) : (
+                      <Stat label="Fee / person" value={inr(preview.totalPerPerson ?? 0)} />
+                    )}
                   </div>
+                  {preview.feeMode === 'tiered' && preview.bands && (
+                    <div className="mt-3 space-y-1 rounded-lg bg-gray-50 p-3">
+                      {preview.bands.map((b, i) => (
+                        <p key={i} className="text-xs text-gray-600">
+                          <span className="font-medium text-gray-800">{b.label || `Years ${b.study_years.join(', ')}`}</span>
+                          {' — '}{b.applicable} learner(s) · {inr(b.totalPerPerson)} · {b.termsPerPerson} term(s)
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <p className="mt-3 text-xs text-gray-500">
-                    {preview.learnerCount} learner(s), {preview.staffCount} staff · {preview.termsPerPerson} term(s) each.
+                    {preview.learnerCount} learner(s), {preview.staffCount} staff
+                    {preview.feeMode === 'flat' && preview.termsPerPerson != null && ` · ${preview.termsPerPerson} term(s) each`}.
+                    {preview.unresolved > 0 && ` ⚠️ ${preview.unresolved} learner(s) have no admission year / no matching band — skipped.`}
                     {preview.staffDeferred && ' Staff are recorded for coverage only (real staff billing is phase 2).'}
                     {preview.conflictCount > 0 && ` ⚠️ ${preview.conflictCount} person(s) already billed by another structure for this year.`}
                   </p>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { resolveApplicablePeople } from '@/lib/fees/applicability';
+import { currentYearOf, deriveStudyYear, bandForYear } from '@/lib/fees/year-of-study';
 
 // Coverage for a fee structure: the applicable population vs the tms_fee_bill
 // ledger → billed / partial / unbilled / staff-deferred. Plain handler (proxy
@@ -13,13 +14,46 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const { data: fs } = await supabase.from('tms_fee_structure').select('*').eq('id', id).maybeSingle();
     if (!fs) return NextResponse.json({ error: 'Fee structure not found' }, { status: 404 });
 
-    const people = await resolveApplicablePeople(supabase, fs);
+    const allPeople = await resolveApplicablePeople(supabase, fs);
 
-    const { count: termCount } = await supabase
-      .from('tms_fee_structure_term')
-      .select('id', { count: 'exact', head: true })
-      .eq('fee_structure_id', id);
-    const totalTerms = termCount ?? 0;
+    // Total-terms-per-person depends on mode: flat = the structure's own terms;
+    // tiered = the terms of the band matching each learner's derived year. For a
+    // tiered structure, only people who match a band are "applicable".
+    const isTiered = fs.fee_mode === 'tiered';
+    let people = allPeople;
+    const totalTermsFor = new Map<string, number>();
+    if (isTiered) {
+      const { data: tyRow } = await supabase
+        .from('tms_transport_year').select('start_date').eq('id', fs.transport_year_id).maybeSingle();
+      const currentYear = currentYearOf(tyRow?.start_date ?? null);
+      const { data: bandRows } = await supabase
+        .from('tms_fee_structure_year_band').select('id, study_years').eq('fee_structure_id', id);
+      const bands = (bandRows ?? []) as Array<{ id: string; study_years: number[] }>;
+      const bandIds = bands.map((b) => b.id);
+      const termCountByBand = new Map<string, number>();
+      if (bandIds.length) {
+        const { data: bandTerms } = await supabase
+          .from('tms_fee_structure_term').select('year_band_id').in('year_band_id', bandIds);
+        for (const t of bandTerms ?? []) {
+          termCountByBand.set(t.year_band_id, (termCountByBand.get(t.year_band_id) ?? 0) + 1);
+        }
+      }
+      people = [];
+      for (const p of allPeople) {
+        const band = bandForYear(bands, deriveStudyYear(currentYear, p.admission_year));
+        if (!band) continue; // year matches no band → not applicable for this structure
+        totalTermsFor.set(p.person_id, termCountByBand.get(band.id) ?? 0);
+        people.push(p);
+      }
+    } else {
+      const { count: termCount } = await supabase
+        .from('tms_fee_structure_term')
+        .select('id', { count: 'exact', head: true })
+        .eq('fee_structure_id', id)
+        .is('year_band_id', null);
+      const flatTotal = termCount ?? 0;
+      for (const p of allPeople) totalTermsFor.set(p.person_id, flatTotal);
+    }
 
     const { data: bills } = await supabase
       .from('tms_fee_bill')
@@ -76,6 +110,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       const termsBilled = e ? e.terms.size : 0;
       const deferred = e ? e.statuses.has('staff_deferred') : false;
       const nm = nameMap.get(p.person_id);
+      const totalTerms = totalTermsFor.get(p.person_id) ?? 0;
       const status = deferred
         ? 'staff_deferred'
         : totalTerms > 0 && termsBilled >= totalTerms

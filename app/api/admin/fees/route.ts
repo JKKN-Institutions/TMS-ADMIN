@@ -18,6 +18,14 @@ interface TermInput {
   due_date: string;
 }
 
+interface BandInput {
+  study_years?: unknown;
+  total_amount?: number | string;
+  label?: string | null;
+  band_order?: number;
+  terms?: unknown;
+}
+
 // Terms must equal split_count and sum to total_amount.
 function validateTerms(total: number, splitCount: number, terms: unknown): string | null {
   if (!Array.isArray(terms) || terms.length === 0) return 'At least one term is required';
@@ -37,14 +45,68 @@ function validateTerms(total: number, splitCount: number, terms: unknown): strin
   return null;
 }
 
-function buildTermRows(feeStructureId: string, terms: TermInput[]) {
+// Tiered structures: ≥1 band, each band's terms valid & summing to its total, and
+// study_years DISJOINT across bands (a year can belong to only one band).
+function validateBands(bands: unknown): string | null {
+  if (!Array.isArray(bands) || bands.length === 0) return 'At least one year band is required';
+  const seenYears = new Set<number>();
+  for (const [i, b] of (bands as BandInput[]).entries()) {
+    const years = Array.isArray(b.study_years) ? (b.study_years as unknown[]).map(Number) : [];
+    if (!years.length || years.some((y) => !Number.isInteger(y) || y < 1)) {
+      return `Band ${i + 1}: choose at least one valid year of study`;
+    }
+    for (const y of years) {
+      if (seenYears.has(y)) return `Year ${y} is in more than one band — each year can belong to only one band`;
+      seenYears.add(y);
+    }
+    const total = Number(b.total_amount);
+    if (Number.isNaN(total) || total < 0) return `Band ${i + 1}: total must be a non-negative number`;
+    const termErr = validateTerms(total, Array.isArray(b.terms) ? b.terms.length : 0, b.terms);
+    if (termErr) return `Band ${i + 1}: ${termErr}`;
+  }
+  return null;
+}
+
+function buildTermRows(feeStructureId: string, terms: TermInput[], yearBandId: string | null = null) {
   return terms.map((t, i) => ({
     fee_structure_id: feeStructureId,
+    year_band_id: yearBandId,
     term_no: t.term_no ?? i + 1,
     term_label: t.term_label?.toString().trim() || `Term ${i + 1}`,
     amount: Number(t.amount),
     due_date: t.due_date,
   }));
+}
+
+// Insert each band + its terms for a tiered structure. Bands are few; insert one
+// at a time so we can attach each band's terms to its generated id.
+async function writeBands(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  feeStructureId: string,
+  bands: BandInput[]
+): Promise<string | null> {
+  for (const [i, b] of bands.entries()) {
+    const years = (b.study_years as unknown[]).map(Number);
+    const terms = b.terms as TermInput[];
+    const { data: band, error: bErr } = await supabase
+      .from('tms_fee_structure_year_band')
+      .insert([{
+        fee_structure_id: feeStructureId,
+        band_order: b.band_order ?? i + 1,
+        label: b.label?.toString().trim() || null,
+        study_years: years,
+        total_amount: Number(b.total_amount),
+        split_count: terms.length,
+      }])
+      .select('id')
+      .single();
+    if (bErr || !band) return bErr?.message || 'Failed to save year band';
+    const { error: tErr } = await supabase
+      .from('tms_fee_structure_term')
+      .insert(buildTermRows(feeStructureId, terms, band.id));
+    if (tErr) return tErr.message || 'Failed to save year band terms';
+  }
+  return null;
 }
 
 async function getFees() {
@@ -69,9 +131,25 @@ async function getFees() {
         .in('id', yearIds as string[]);
       for (const y of years ?? []) yearMap.set(y.id, y.name);
     }
+    // Lightweight band summary for tiered rows (so the list can show a range).
+    const tieredIds = (data ?? []).filter((r) => r.fee_mode === 'tiered').map((r) => r.id);
+    const bandsByFs = new Map<string, Array<{ study_years: number[]; total_amount: number }>>();
+    if (tieredIds.length) {
+      const { data: bandRows } = await supabase
+        .from('tms_fee_structure_year_band')
+        .select('fee_structure_id, study_years, total_amount, band_order')
+        .in('fee_structure_id', tieredIds)
+        .order('band_order', { ascending: true });
+      for (const b of bandRows ?? []) {
+        const arr = bandsByFs.get(b.fee_structure_id) ?? [];
+        arr.push({ study_years: b.study_years, total_amount: Number(b.total_amount) });
+        bandsByFs.set(b.fee_structure_id, arr);
+      }
+    }
     const rows = (data ?? []).map((r) => ({
       ...r,
       transport_year_name: yearMap.get(r.transport_year_id) ?? null,
+      bands: r.fee_mode === 'tiered' ? bandsByFs.get(r.id) ?? [] : undefined,
     }));
     return NextResponse.json({ success: true, data: rows, count: rows.length });
   } catch (e) {
@@ -96,6 +174,42 @@ async function postFee(request: NextRequest, auth: AuthContext) {
     if (audience !== 'student' && audience !== 'staff') {
       return NextResponse.json({ error: 'Audience must be student or staff' }, { status: 400 });
     }
+    const feeMode = payload.fee_mode === 'tiered' ? 'tiered' : 'flat';
+    if (feeMode === 'tiered' && audience !== 'student') {
+      return NextResponse.json({ error: 'Year-of-study tiers apply to learners only' }, { status: 400 });
+    }
+
+    const supabase = createServiceRoleClient();
+
+    if (feeMode === 'tiered') {
+      const bandErr = validateBands(body.bands);
+      if (bandErr) return NextResponse.json({ error: bandErr }, { status: 400 });
+
+      // Structure-level total/split are unused in tiered mode (each band owns its own).
+      const { data: parent, error } = await supabase
+        .from('tms_fee_structure')
+        .insert([{ ...payload, audience, fee_mode: 'tiered', total_amount: 0, split_count: 1, created_by: auth.userId, updated_by: auth.userId }])
+        .select()
+        .single();
+      if (error) {
+        console.error('Fee structure create error:', error);
+        return NextResponse.json({ error: 'Failed to create fee structure' }, { status: 500 });
+      }
+      const writeErr = await writeBands(supabase, parent.id, body.bands as BandInput[]);
+      if (writeErr) {
+        await supabase.from('tms_fee_structure').delete().eq('id', parent.id); // cascades bands + terms
+        console.error('Fee band create error:', writeErr);
+        return NextResponse.json({ error: 'Failed to save year bands' }, { status: 500 });
+      }
+      await logActivity(auth, request, {
+        module: 'fees', action: 'create', entityType: 'tms_fee_structure',
+        entityId: parent.id, entityLabel: parent.name,
+        description: `Created tiered fee structure ${parent.name}`, changes: { after: parent },
+      });
+      return NextResponse.json({ success: true, data: parent, message: 'Fee structure created successfully' });
+    }
+
+    // ── flat ──────────────────────────────────────────────────────────────────
     const total = Number(payload.total_amount);
     if (Number.isNaN(total) || total < 0) {
       return NextResponse.json({ error: 'Total amount must be a non-negative number' }, { status: 400 });
@@ -107,10 +221,9 @@ async function postFee(request: NextRequest, auth: AuthContext) {
     const termError = validateTerms(total, splitCount, body.terms);
     if (termError) return NextResponse.json({ error: termError }, { status: 400 });
 
-    const supabase = createServiceRoleClient();
     const { data: parent, error } = await supabase
       .from('tms_fee_structure')
-      .insert([{ ...payload, audience, split_count: splitCount, created_by: auth.userId, updated_by: auth.userId }])
+      .insert([{ ...payload, audience, fee_mode: 'flat', split_count: splitCount, created_by: auth.userId, updated_by: auth.userId }])
       .select()
       .single();
     if (error) {
@@ -122,20 +235,15 @@ async function postFee(request: NextRequest, auth: AuthContext) {
       .from('tms_fee_structure_term')
       .insert(buildTermRows(parent.id, body.terms as TermInput[]));
     if (termErr) {
-      // manual rollback — no multi-statement transaction over PostgREST
       await supabase.from('tms_fee_structure').delete().eq('id', parent.id);
       console.error('Fee structure term create error:', termErr);
       return NextResponse.json({ error: 'Failed to save terms' }, { status: 500 });
     }
 
     await logActivity(auth, request, {
-      module: 'fees',
-      action: 'create',
-      entityType: 'tms_fee_structure',
-      entityId: parent.id,
-      entityLabel: parent.name,
-      description: `Created fee structure ${parent.name}`,
-      changes: { after: parent },
+      module: 'fees', action: 'create', entityType: 'tms_fee_structure',
+      entityId: parent.id, entityLabel: parent.name,
+      description: `Created fee structure ${parent.name}`, changes: { after: parent },
     });
     return NextResponse.json({ success: true, data: parent, message: 'Fee structure created successfully' });
   } catch (e) {
@@ -162,8 +270,46 @@ async function putFee(request: NextRequest, auth: AuthContext) {
       .maybeSingle();
     if (!before) return NextResponse.json({ error: 'Fee structure not found' }, { status: 404 });
 
-    // If terms are being replaced, validate against the effective total/split.
+    // Effective mode = the new fee_mode if provided, else the stored one.
+    const feeMode = (payload.fee_mode ?? before.fee_mode) === 'tiered' ? 'tiered' : 'flat';
     const hasTerms = 'terms' in body;
+    const hasBands = 'bands' in body;
+
+    if (feeMode === 'tiered') {
+      if (hasBands) {
+        const bandErr = validateBands(body.bands);
+        if (bandErr) return NextResponse.json({ error: bandErr }, { status: 400 });
+      }
+      // tiered structures don't use the structure-level total/split.
+      const { data: updated, error } = await supabase
+        .from('tms_fee_structure')
+        .update({ ...payload, fee_mode: 'tiered', total_amount: 0, split_count: 1, updated_by: auth.userId })
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) {
+        console.error('Fee structure update error:', error);
+        return NextResponse.json({ error: 'Failed to update fee structure' }, { status: 500 });
+      }
+      if (hasBands) {
+        // Replace all children: clear any flat terms AND existing bands (cascade).
+        await supabase.from('tms_fee_structure_term').delete().eq('fee_structure_id', id).is('year_band_id', null);
+        await supabase.from('tms_fee_structure_year_band').delete().eq('fee_structure_id', id);
+        const writeErr = await writeBands(supabase, id, body.bands as BandInput[]);
+        if (writeErr) {
+          console.error('Fee band replace error:', writeErr);
+          return NextResponse.json({ error: 'Fee structure updated but failed to save year bands' }, { status: 500 });
+        }
+      }
+      await logActivity(auth, request, {
+        module: 'fees', action: 'update', entityType: 'tms_fee_structure',
+        entityId: id, entityLabel: updated.name,
+        description: `Updated tiered fee structure ${updated.name}`, changes: { before, after: updated },
+      });
+      return NextResponse.json({ success: true, data: updated, message: 'Fee structure updated successfully' });
+    }
+
+    // ── flat ──────────────────────────────────────────────────────────────────
     if (hasTerms) {
       const total = payload.total_amount != null ? Number(payload.total_amount) : Number(before.total_amount);
       const splitCount = payload.split_count != null ? Number(payload.split_count) : Number(before.split_count);
@@ -173,7 +319,7 @@ async function putFee(request: NextRequest, auth: AuthContext) {
 
     const { data: updated, error } = await supabase
       .from('tms_fee_structure')
-      .update({ ...payload, updated_by: auth.userId })
+      .update({ ...payload, fee_mode: 'flat', updated_by: auth.userId })
       .eq('id', id)
       .select()
       .single();
@@ -183,6 +329,8 @@ async function putFee(request: NextRequest, auth: AuthContext) {
     }
 
     if (hasTerms) {
+      // Switching to flat also clears any leftover bands (cascade their terms).
+      await supabase.from('tms_fee_structure_year_band').delete().eq('fee_structure_id', id);
       await supabase.from('tms_fee_structure_term').delete().eq('fee_structure_id', id);
       const { error: termErr } = await supabase
         .from('tms_fee_structure_term')
@@ -194,13 +342,9 @@ async function putFee(request: NextRequest, auth: AuthContext) {
     }
 
     await logActivity(auth, request, {
-      module: 'fees',
-      action: 'update',
-      entityType: 'tms_fee_structure',
-      entityId: id,
-      entityLabel: updated.name,
-      description: `Updated fee structure ${updated.name}`,
-      changes: { before, after: updated },
+      module: 'fees', action: 'update', entityType: 'tms_fee_structure',
+      entityId: id, entityLabel: updated.name,
+      description: `Updated fee structure ${updated.name}`, changes: { before, after: updated },
     });
     return NextResponse.json({ success: true, data: updated, message: 'Fee structure updated successfully' });
   } catch (e) {
@@ -245,13 +389,9 @@ async function deleteFee(request: NextRequest, auth: AuthContext) {
     }
 
     await logActivity(auth, request, {
-      module: 'fees',
-      action: 'delete',
-      entityType: 'tms_fee_structure',
-      entityId: id,
-      entityLabel: existing.name,
-      description: `Deleted fee structure ${existing.name}`,
-      changes: { before: existing },
+      module: 'fees', action: 'delete', entityType: 'tms_fee_structure',
+      entityId: id, entityLabel: existing.name,
+      description: `Deleted fee structure ${existing.name}`, changes: { before: existing },
     });
     return NextResponse.json({ success: true, message: 'Fee structure deleted successfully' });
   } catch (e) {

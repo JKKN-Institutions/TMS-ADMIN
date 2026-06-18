@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveApplicablePeople } from './applicability';
+import { currentYearOf, deriveStudyYear, bandForYear } from './year-of-study';
 
 export type BillStatus =
   | 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'staff_deferred' | 'unknown';
@@ -262,10 +263,31 @@ export async function loadUnbilledPeople(
   }
   if (!structures?.length) return { count: 0, people: [] };
 
+  // For tiered structures, year-of-study derivation keys off the transport year's
+  // calendar year — so a learner whose derived year matches no band is NOT
+  // "expected" and must not be counted as unbilled.
+  const { data: tyRow } = await supabase
+    .from('tms_transport_year')
+    .select('start_date')
+    .eq('id', transportYearId)
+    .maybeSingle();
+  const currentYear = currentYearOf(tyRow?.start_date ?? null);
+
   const applicable = new Map<string, { person_id: string; person_type: 'learner' | 'staff'; institution_id: string | null }>();
   for (const fs of structures) {
     const people = await resolveApplicablePeople(supabase, fs);
-    for (const p of people) if (!applicable.has(p.person_id)) applicable.set(p.person_id, p);
+    let eligible = people;
+    if (fs.fee_mode === 'tiered') {
+      const { data: bandRows } = await supabase
+        .from('tms_fee_structure_year_band')
+        .select('id, study_years')
+        .eq('fee_structure_id', fs.id);
+      const bands = (bandRows ?? []) as Array<{ id: string; study_years: number[] }>;
+      eligible = people.filter(
+        (p) => bandForYear(bands, deriveStudyYear(currentYear, p.admission_year)) !== null
+      );
+    }
+    for (const p of eligible) if (!applicable.has(p.person_id)) applicable.set(p.person_id, p);
   }
   if (applicable.size === 0) return { count: 0, people: [] };
 

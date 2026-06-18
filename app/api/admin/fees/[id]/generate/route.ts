@@ -3,8 +3,9 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
-import { resolveApplicablePeople } from '@/lib/fees/applicability';
+import { resolveApplicablePeople, type ApplicablePerson } from '@/lib/fees/applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from '@/lib/fees/types';
+import { currentYearOf, deriveStudyYear, bandForYear } from '@/lib/fees/year-of-study';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -21,6 +22,18 @@ function feeIdFromPath(request: NextRequest): string | null {
 }
 
 interface Term { term_no: number; term_label: string | null; amount: number; due_date: string }
+interface Band {
+  id: string;
+  band_order: number;
+  label: string | null;
+  study_years: number[];
+  total_amount: number;
+  split_count: number;
+  terms: Term[];
+}
+// A person resolved to the terms that apply to them (flat: structure terms;
+// tiered: their year band's terms). `band` is null for flat structures.
+interface Resolved { person: ApplicablePerson; terms: Term[]; band: Band | null }
 
 async function generate(request: NextRequest, auth: AuthContext) {
   try {
@@ -40,18 +53,83 @@ async function generate(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Activate the fee structure before generating bills.' }, { status: 400 });
     }
 
-    const { data: termsData } = await supabase
-      .from('tms_fee_structure_term')
-      .select('*')
-      .eq('fee_structure_id', id)
-      .order('term_no', { ascending: true });
-    const terms = (termsData ?? []) as Term[];
-    if (terms.length === 0) {
-      return NextResponse.json({ error: 'This fee structure has no terms defined.' }, { status: 400 });
+    const isTiered = fs.fee_mode === 'tiered';
+
+    // Transport year start → the calendar year used to derive year of study, and
+    // the date used to resolve each learner's academic_year. Needed for dry-run too.
+    const { data: ty } = await supabase
+      .from('tms_transport_year')
+      .select('start_date')
+      .eq('id', fs.transport_year_id)
+      .maybeSingle();
+    const tyStart: string | null = ty?.start_date ?? null;
+    const currentYear = currentYearOf(tyStart);
+
+    // Load the terms that drive billing: flat = structure terms; tiered = bands+terms.
+    let flatTerms: Term[] = [];
+    let bands: Band[] = [];
+    if (isTiered) {
+      const { data: bandRows } = await supabase
+        .from('tms_fee_structure_year_band')
+        .select('*')
+        .eq('fee_structure_id', id)
+        .order('band_order', { ascending: true });
+      const bandList = (bandRows ?? []) as Array<Omit<Band, 'terms'>>;
+      if (bandList.length === 0) {
+        return NextResponse.json({ error: 'This tiered fee structure has no year bands defined.' }, { status: 400 });
+      }
+      const bandIds = bandList.map((b) => b.id);
+      const { data: bandTermRows } = await supabase
+        .from('tms_fee_structure_term')
+        .select('*')
+        .in('year_band_id', bandIds)
+        .order('term_no', { ascending: true });
+      const byBand = new Map<string, Term[]>();
+      for (const t of (bandTermRows ?? []) as Array<Term & { year_band_id: string }>) {
+        const arr = byBand.get(t.year_band_id) ?? [];
+        arr.push({ term_no: t.term_no, term_label: t.term_label, amount: Number(t.amount), due_date: t.due_date });
+        byBand.set(t.year_band_id, arr);
+      }
+      bands = bandList.map((b) => ({ ...b, terms: byBand.get(b.id) ?? [] }));
+      const emptyBand = bands.find((b) => b.terms.length === 0);
+      if (emptyBand) {
+        return NextResponse.json(
+          { error: `Year band "${emptyBand.label || emptyBand.study_years.join(', ')}" has no terms defined.` },
+          { status: 400 }
+        );
+      }
+    } else {
+      const { data: termsData } = await supabase
+        .from('tms_fee_structure_term')
+        .select('*')
+        .eq('fee_structure_id', id)
+        .is('year_band_id', null)
+        .order('term_no', { ascending: true });
+      flatTerms = (termsData ?? []) as Term[];
+      if (flatTerms.length === 0) {
+        return NextResponse.json({ error: 'This fee structure has no terms defined.' }, { status: 400 });
+      }
     }
 
     const people = await resolveApplicablePeople(supabase, fs);
-    const personIds = people.map((p) => p.person_id);
+
+    // Resolve each person to the terms that apply to them. For tiered structures a
+    // learner with no derivable year, or whose year matches no band, is UNRESOLVED
+    // (skipped + reported, never guessed).
+    const resolved: Resolved[] = [];
+    let unresolved = 0;
+    for (const person of people) {
+      if (!isTiered) {
+        resolved.push({ person, terms: flatTerms, band: null });
+        continue;
+      }
+      const year = deriveStudyYear(currentYear, person.admission_year);
+      const band = bandForYear(bands, year);
+      if (!band) { unresolved++; continue; }
+      resolved.push({ person, terms: band.terms, band });
+    }
+
+    const resolvedIds = resolved.map((r) => r.person.person_id);
 
     // Existing ledger for this structure+year (idempotency + coverage).
     const { data: existing } = await supabase
@@ -63,43 +141,58 @@ async function generate(request: NextRequest, auth: AuthContext) {
 
     // Anyone already billed by ANOTHER structure for the same transport year?
     let conflictCount = 0;
-    if (personIds.length) {
+    if (resolvedIds.length) {
       const { data: other } = await supabase
         .from('tms_fee_bill')
         .select('person_id')
         .eq('transport_year_id', fs.transport_year_id)
         .neq('fee_structure_id', id)
-        .in('person_id', personIds);
+        .in('person_id', resolvedIds);
       conflictCount = new Set((other ?? []).map((r) => r.person_id)).size;
     }
 
     let toGenerate = 0;
     let alreadyBilled = 0;
-    for (const p of people) {
-      for (const t of terms) {
-        if (billedKey.has(`${p.person_id}:${t.term_no}`)) alreadyBilled++;
+    for (const r of resolved) {
+      for (const t of r.terms) {
+        if (billedKey.has(`${r.person.person_id}:${t.term_no}`)) alreadyBilled++;
         else toGenerate++;
       }
     }
-    const learnerCount = people.filter((p) => p.person_type === 'learner').length;
-    const staffCount = people.filter((p) => p.person_type === 'staff').length;
-    const totalPerPerson = terms.reduce((s, t) => s + Number(t.amount), 0);
+    const learnerCount = resolved.filter((r) => r.person.person_type === 'learner').length;
+    const staffCount = resolved.filter((r) => r.person.person_type === 'staff').length;
+
+    // Per-band summary (tiered only): how many resolved people + per-person total.
+    const bandSummary = isTiered
+      ? bands.map((b) => ({
+          label: b.label,
+          study_years: b.study_years,
+          totalPerPerson: b.terms.reduce((s, t) => s + Number(t.amount), 0),
+          termsPerPerson: b.terms.length,
+          applicable: resolved.filter((r) => r.band?.id === b.id).length,
+        }))
+      : null;
 
     const preview = {
       mode,
       audience: fs.audience,
-      applicable: people.length,
+      feeMode: fs.fee_mode,
+      applicable: resolved.length,
+      unresolved, // tiered: no admission year / year matches no band
       learnerCount,
       staffCount,
-      termsPerPerson: terms.length,
+      termsPerPerson: isTiered ? null : flatTerms.length,
       alreadyBilledPairs: alreadyBilled,
       toGeneratePairs: toGenerate,
       conflictCount,
-      totalPerPerson,
+      totalPerPerson: isTiered ? null : flatTerms.reduce((s, t) => s + Number(t.amount), 0),
       staffDeferred: fs.audience === 'staff',
-      terms: terms.map((t) => ({
-        term_no: t.term_no, term_label: t.term_label, amount: Number(t.amount), due_date: t.due_date,
-      })),
+      bands: bandSummary,
+      terms: isTiered
+        ? undefined
+        : flatTerms.map((t) => ({
+            term_no: t.term_no, term_label: t.term_label, amount: Number(t.amount), due_date: t.due_date,
+          })),
     };
 
     if (mode === 'dry_run') {
@@ -114,13 +207,6 @@ async function generate(request: NextRequest, auth: AuthContext) {
       .eq('category_name', catName)
       .maybeSingle();
     const categoryId = cat?.id ?? null;
-
-    const { data: ty } = await supabase
-      .from('tms_transport_year')
-      .select('start_date')
-      .eq('id', fs.transport_year_id)
-      .maybeSingle();
-    const tyStart: string | null = ty?.start_date ?? null;
 
     // academic_year_id is institution-scoped — cache per institution.
     const acadCache = new Map<string, string | null>();
@@ -158,9 +244,11 @@ async function generate(request: NextRequest, auth: AuthContext) {
     let skipped = 0;
     let errors = 0;
 
-    for (const p of people) {
+    for (const r of resolved) {
+      const p = r.person;
+      const bandPrefix = r.band?.label ? `${r.band.label} - ` : '';
       const acadYear = p.person_type === 'learner' ? await resolveAcademicYear(p.institution_id) : null;
-      for (const t of terms) {
+      for (const t of r.terms) {
         if (billedKey.has(`${p.person_id}:${t.term_no}`)) { skipped++; continue; }
         const amount = Number(t.amount);
 
@@ -172,7 +260,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
               institution_id: p.institution_id,
               item_category_id: categoryId,
               fee_source: 'ad_hoc',
-              bill_description: `${fs.name} - ${t.term_label || `Term ${t.term_no}`}`,
+              bill_description: `${fs.name} - ${bandPrefix}${t.term_label || `Term ${t.term_no}`}`,
               due_date: t.due_date,
               quantity: 1,
               unit_amount: amount,
@@ -225,13 +313,16 @@ async function generate(request: NextRequest, auth: AuthContext) {
     }
 
     if (runId) {
+      const noteParts: string[] = [];
+      if (errors > 0) noteParts.push(`${errors} row(s) errored`);
+      if (unresolved > 0) noteParts.push(`${unresolved} learner(s) unresolved (no admission year / no matching band)`);
       await supabase.from('tms_fee_generation_run').update({
-        applicable_count: people.length,
+        applicable_count: resolved.length,
         learner_billed_count: learnerBilled,
         staff_deferred_count: staffDeferred,
         skipped_count: skipped,
         status: errors > 0 ? 'partial' : 'completed',
-        notes: errors > 0 ? `${errors} row(s) errored` : null,
+        notes: noteParts.length ? noteParts.join('; ') : null,
       }).eq('id', runId);
     }
 
@@ -241,14 +332,14 @@ async function generate(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_fee_structure',
       entityId: id,
       entityLabel: fs.name,
-      description: `Generated transport bills for ${fs.name}: ${learnerBilled} learner bill(s), ${staffDeferred} staff deferred, ${skipped} skipped`,
-      metadata: { runId, learnerBilled, staffDeferred, skipped, errors },
+      description: `Generated transport bills for ${fs.name}: ${learnerBilled} learner bill(s), ${staffDeferred} staff deferred, ${skipped} skipped, ${unresolved} unresolved`,
+      metadata: { runId, learnerBilled, staffDeferred, skipped, unresolved, errors, feeMode: fs.fee_mode },
     });
 
     return NextResponse.json({
       success: true,
-      data: { mode: 'generate', runId, applicable: people.length, learnerBilled, staffDeferred, skipped, errors },
-      message: `Generated ${learnerBilled} learner bill(s); ${staffDeferred} staff deferred; ${skipped} already billed (skipped).`,
+      data: { mode: 'generate', runId, applicable: resolved.length, learnerBilled, staffDeferred, skipped, unresolved, errors },
+      message: `Generated ${learnerBilled} learner bill(s); ${staffDeferred} staff deferred; ${skipped} already billed (skipped)${unresolved ? `; ${unresolved} unresolved` : ''}.`,
     });
   } catch (e) {
     console.error('Fee generation error:', e);

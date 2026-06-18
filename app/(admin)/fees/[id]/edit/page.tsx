@@ -55,14 +55,26 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
           transport_year_id: data.transport_year_id ?? '',
           audience: data.audience,
           status: data.status,
+          fee_mode: data.fee_mode ?? 'flat',
           institution_ids: data.institution_ids ?? [],
           staff_role_keys: data.staff_role_keys ?? [],
+          lifecycle_statuses: data.lifecycle_statuses ?? [],
           total_amount: data.total_amount != null ? String(data.total_amount) : '',
           notes: data.notes ?? '',
           terms: (data.terms ?? []).map((t) => ({
             term_label: t.term_label ?? `Term ${t.term_no}`,
             amount: String(t.amount),
             due_date: t.due_date ? String(t.due_date).split('T')[0] : '',
+          })),
+          bands: (data.bands ?? []).map((b) => ({
+            label: b.label ?? '',
+            study_years: b.study_years ?? [],
+            total_amount: b.total_amount != null ? String(b.total_amount) : '',
+            terms: (b.terms ?? []).map((t) => ({
+              term_label: t.term_label ?? `Term ${t.term_no}`,
+              amount: String(t.amount),
+              due_date: t.due_date ? String(t.due_date).split('T')[0] : '',
+            })),
           })),
         }}
       />

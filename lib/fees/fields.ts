@@ -4,12 +4,13 @@
 // UI and API agree on the field set. Terms (tms_fee_structure_term) are written
 // separately — see the route's term-replacement logic.
 
-export const TEXT_FIELDS = ['name', 'notes'] as const;          // trimmed or null
-export const ENUM_FIELDS = ['audience', 'status'] as const;     // validated by DB CHECK
-export const UUID_FIELDS = ['transport_year_id'] as const;      // '' -> null
+export const TEXT_FIELDS = ['name', 'notes'] as const;                    // trimmed or null
+export const ENUM_FIELDS = ['audience', 'status', 'fee_mode'] as const;   // validated by DB CHECK
+export const UUID_FIELDS = ['transport_year_id'] as const;                // '' -> null
 export const NUM_FIELDS = ['total_amount', 'split_count'] as const;
 // Array (uuid[] / text[]) condition fields; empty -> null = "any".
-export const ARRAY_FIELDS = ['institution_ids', 'staff_role_keys'] as const;
+// lifecycle_statuses empty -> null, which applicability reads as ['active'].
+export const ARRAY_FIELDS = ['institution_ids', 'staff_role_keys', 'lifecycle_statuses'] as const;
 
 // Every column the API will write (whitelist). Audit columns (created_by,
 // updated_by), the PK, and child term rows are NOT listed here.

@@ -33,19 +33,30 @@ export async function fetchTransportYearOptions(): Promise<MasterOption[]> {
   return (j.data as Array<{ id: string; name: string }>).map((y) => ({ id: y.id, name: y.name }));
 }
 
+export interface GeneratePreviewBand {
+  label: string | null;
+  study_years: number[];
+  totalPerPerson: number;
+  termsPerPerson: number;
+  applicable: number;
+}
+
 export interface GeneratePreview {
   mode: 'dry_run' | 'generate';
   audience: 'student' | 'staff';
+  feeMode: 'flat' | 'tiered';
   applicable: number;
+  unresolved: number; // tiered: no admission year / year matches no band
   learnerCount: number;
   staffCount: number;
-  termsPerPerson: number;
+  termsPerPerson: number | null; // null for tiered (varies by band)
   alreadyBilledPairs: number;
   toGeneratePairs: number;
   conflictCount: number;
-  totalPerPerson: number;
+  totalPerPerson: number | null; // null for tiered (varies by band)
   staffDeferred: boolean;
-  terms: Array<{ term_no: number; term_label: string | null; amount: number; due_date: string }>;
+  bands: GeneratePreviewBand[] | null; // tiered only
+  terms?: Array<{ term_no: number; term_label: string | null; amount: number; due_date: string }>;
 }
 
 export interface GenerateResult {
@@ -55,6 +66,7 @@ export interface GenerateResult {
   learnerBilled: number;
   staffDeferred: number;
   skipped: number;
+  unresolved: number;
   errors: number;
 }
 

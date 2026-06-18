@@ -91,19 +91,38 @@ export function getFeeColumns(
     {
       accessorKey: 'total_amount',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Total Fee" />,
-      cell: ({ row }) => (
-        <span className="font-medium text-gray-900 dark:text-gray-100">{inr(row.original.total_amount)}</span>
-      ),
-      size: 120,
+      cell: ({ row }) => {
+        const f = row.original;
+        if (f.fee_mode === 'tiered') {
+          const totals = (f.bands ?? []).map((b) => Number(b.total_amount));
+          const min = totals.length ? Math.min(...totals) : 0;
+          const max = totals.length ? Math.max(...totals) : 0;
+          return (
+            <span className="flex items-center gap-1.5 font-medium text-gray-900 dark:text-gray-100">
+              {min === max ? inr(min) : `${inr(min)}–${inr(max)}`}
+              <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">Tiered</span>
+            </span>
+          );
+        }
+        return <span className="font-medium text-gray-900 dark:text-gray-100">{inr(f.total_amount)}</span>;
+      },
+      size: 150,
     },
     {
       accessorKey: 'split_count',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Terms" />,
-      cell: ({ row }) => (
-        <span className="text-sm text-gray-600 dark:text-gray-300">
-          {row.original.split_count} {row.original.split_count === 1 ? 'term' : 'terms'}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const f = row.original;
+        if (f.fee_mode === 'tiered') {
+          const n = (f.bands ?? []).length;
+          return <span className="text-sm text-gray-600 dark:text-gray-300">{n} band{n === 1 ? '' : 's'}</span>;
+        }
+        return (
+          <span className="text-sm text-gray-600 dark:text-gray-300">
+            {f.split_count} {f.split_count === 1 ? 'term' : 'terms'}
+          </span>
+        );
+      },
       size: 90,
     },
     {
