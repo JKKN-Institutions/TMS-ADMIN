@@ -24,6 +24,8 @@ export interface TransportBillRow {
   structure_name: string | null;
   transport_year_id: string;
   year_name: string | null;
+  academic_year_id: string | null;
+  academic_year_name: string | null;
   term_no: number;
   amount: number;
   due_date: string;
@@ -182,7 +184,10 @@ export async function loadTransportBills(
 
   const peopleMap = await resolvePeople(supabase, learnerIds, staffIds);
 
-  const billMap = new Map<string, { final: number; balance: number; status: string; payment_date: string | null }>();
+  const billMap = new Map<
+    string,
+    { final: number; balance: number; status: string; payment_date: string | null; due_date: string | null; academic_year_id: string | null }
+  >();
   if (billIds.length) {
     const data = await selectByIds<{
       id: string;
@@ -190,13 +195,17 @@ export async function loadTransportBills(
       balance_amount: number | string | null;
       status: string | null;
       payment_date: string | null;
-    }>(supabase, 'billing_student_bills', 'id, final_amount, balance_amount, status, payment_date', billIds);
+      due_date: string | null;
+      academic_year_id: string | null;
+    }>(supabase, 'billing_student_bills', 'id, final_amount, balance_amount, status, payment_date, due_date, academic_year_id', billIds);
     for (const b of data) {
       billMap.set(b.id, {
         final: Number(b.final_amount ?? 0),
         balance: Number(b.balance_amount ?? 0),
         status: b.status ?? 'unpaid',
         payment_date: b.payment_date ?? null,
+        due_date: b.due_date ?? null,
+        academic_year_id: b.academic_year_id ?? null,
       });
     }
   }
@@ -205,6 +214,8 @@ export async function loadTransportBills(
   const yearMap = await nameMapFor(supabase, 'tms_transport_year', 'name', yearIds);
   const instIds = uniq([...peopleMap.values()].map((p) => p.institution_id));
   const instMap = await nameMapFor(supabase, 'institutions', 'name', instIds);
+  const acadYearIds = uniq([...billMap.values()].map((b) => b.academic_year_id));
+  const acadYearMap = await nameMapFor(supabase, 'academic_years', 'academic_year_name', acadYearIds);
 
   const td = today();
 
@@ -214,8 +225,11 @@ export async function loadTransportBills(
     const institutionId = person?.institution_id ?? null;
     const billRef = r.billing_student_bill_id as string | null;
     const bill = billRef ? billMap.get(billRef) : undefined;
-    const amount = Number(r.amount ?? 0);
-    const dueDate = r.due_date as string;
+    // Prefer the LIVE money row for amount/due_date so MyJKKN edits reflect; fall back
+    // to the ledger snapshot for staff (no money row) or a missing row.
+    const amount = personType === 'learner' && bill ? bill.final : Number(r.amount ?? 0);
+    const dueDate = (personType === 'learner' && bill ? bill.due_date : null) ?? (r.due_date as string);
+    const acadYearId = bill?.academic_year_id ?? null;
 
     let paid = 0;
     let pending = 0;
@@ -250,6 +264,8 @@ export async function loadTransportBills(
       structure_name: structureMap.get(r.fee_structure_id as string) ?? null,
       transport_year_id: r.transport_year_id as string,
       year_name: yearMap.get(r.transport_year_id as string) ?? null,
+      academic_year_id: acadYearId,
+      academic_year_name: acadYearId ? acadYearMap.get(acadYearId) ?? null : null,
       term_no: Number(r.term_no ?? 0),
       amount,
       due_date: dueDate,
