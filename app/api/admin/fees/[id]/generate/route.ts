@@ -221,10 +221,13 @@ async function generate(request: NextRequest, auth: AuthContext) {
     ];
     const acadYearNameById = new Map<string, string>();
     if (learnerAyIds.length) {
-      const { data: ays } = await supabase
+      const { data: ays, error: ayErr } = await supabase
         .from('academic_years')
         .select('id, academic_year_name')
         .in('id', learnerAyIds);
+      if (ayErr) {
+        return NextResponse.json({ error: 'Failed to resolve academic years for bill naming.' }, { status: 500 });
+      }
       for (const a of (ays ?? []) as Array<{ id: string; academic_year_name: string | null }>) {
         if (a.academic_year_name) acadYearNameById.set(a.id, a.academic_year_name);
       }
