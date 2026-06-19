@@ -18,6 +18,7 @@ export interface ApplicablePerson {
   person_type: 'learner' | 'staff';
   institution_id: string | null;
   admission_year: number | null; // learners only (null for staff / missing data)
+  academic_year_id: string | null; // learners only — their current academic year (null for staff)
 }
 
 export type ApplicabilityFilter = Pick<
@@ -39,7 +40,7 @@ export async function resolveApplicablePeople(
 
     let q = supabase
       .from('learners_profiles')
-      .select('id, institution_id, admission_year_id')
+      .select('id, institution_id, admission_year_id, academic_year_id')
       .eq('bus_required', true)
       .in('lifecycle_status', statuses);
     if (institutionIds.length) q = q.in('institution_id', institutionIds);
@@ -50,6 +51,7 @@ export async function resolveApplicablePeople(
       id: string;
       institution_id: string | null;
       admission_year_id: string | null;
+      academic_year_id: string | null;
     }>;
 
     // Resolve admission_year_id -> admission_years.year in one batch query.
@@ -67,6 +69,7 @@ export async function resolveApplicablePeople(
       person_type: 'learner' as const,
       institution_id: r.institution_id,
       admission_year: r.admission_year_id ? yearById.get(r.admission_year_id) ?? null : null,
+      academic_year_id: r.academic_year_id ?? null,
     }));
   }
 
@@ -86,5 +89,6 @@ export async function resolveApplicablePeople(
     person_type: 'staff' as const,
     institution_id: r.institution_id,
     admission_year: null,
+    academic_year_id: null,
   }));
 }
