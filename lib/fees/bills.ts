@@ -70,6 +70,33 @@ const uniq = <T,>(xs: (T | null | undefined)[]): T[] =>
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+// PostgREST serializes `.in('col', ids)` into the request URL. A few hundred
+// UUIDs overflow the Supabase API gateway's request-size limit (measured on this
+// project: 500 ids → 200 OK, 768 ids → HTTP 400 "Bad Request"), which supabase-js
+// surfaces as { data: null, error }. Left UNCHECKED that yields an empty map and
+// silently mislabels every bill 'unknown'. So: batch ids into small chunks AND
+// throw on error (fail loud) instead of returning a quietly-wrong result.
+const IN_CHUNK = 150;
+
+async function selectByIds<T = Record<string, unknown>>(
+  supabase: SupabaseClient,
+  table: string,
+  columns: string,
+  ids: string[],
+  idColumn = 'id'
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .in(idColumn, ids.slice(i, i + IN_CHUNK));
+    if (error) throw error;
+    out.push(...((data ?? []) as T[]));
+  }
+  return out;
+}
+
 // Resolve learner/staff display names + their institution_id in two batch queries.
 async function resolvePeople(
   supabase: SupabaseClient,
@@ -78,11 +105,14 @@ async function resolvePeople(
 ): Promise<Map<string, { name: string; code: string | null; institution_id: string | null }>> {
   const map = new Map<string, { name: string; code: string | null; institution_id: string | null }>();
   if (learnerIds.length) {
-    const { data } = await supabase
-      .from('learners_profiles')
-      .select('id, first_name, last_name, roll_number, institution_id')
-      .in('id', learnerIds);
-    for (const r of data ?? []) {
+    const data = await selectByIds<{
+      id: string;
+      first_name: string | null;
+      last_name: string | null;
+      roll_number: string | null;
+      institution_id: string | null;
+    }>(supabase, 'learners_profiles', 'id, first_name, last_name, roll_number, institution_id', learnerIds);
+    for (const r of data) {
       map.set(r.id, {
         name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
         code: r.roll_number ?? null,
@@ -91,11 +121,14 @@ async function resolvePeople(
     }
   }
   if (staffIds.length) {
-    const { data } = await supabase
-      .from('staff')
-      .select('id, first_name, last_name, staff_id, institution_id')
-      .in('id', staffIds);
-    for (const r of data ?? []) {
+    const data = await selectByIds<{
+      id: string;
+      first_name: string | null;
+      last_name: string | null;
+      staff_id: string | null;
+      institution_id: string | null;
+    }>(supabase, 'staff', 'id, first_name, last_name, staff_id, institution_id', staffIds);
+    for (const r of data) {
       map.set(r.id, {
         name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
         code: r.staff_id ?? null,
@@ -114,9 +147,9 @@ async function nameMapFor(
 ): Promise<Map<string, string>> {
   const m = new Map<string, string>();
   if (!ids.length) return m;
-  const { data } = await supabase.from(table).select(`id, ${nameCol}`).in('id', ids);
   // Dynamic select string → cast past supabase-js's literal-only type parser.
-  for (const r of (data ?? []) as unknown as Array<Record<string, unknown>>) {
+  const data = await selectByIds<Record<string, unknown>>(supabase, table, `id, ${nameCol}`, ids);
+  for (const r of data) {
     m.set(r.id as string, (r[nameCol] as string) ?? '');
   }
   return m;
@@ -151,11 +184,14 @@ export async function loadTransportBills(
 
   const billMap = new Map<string, { final: number; balance: number; status: string; payment_date: string | null }>();
   if (billIds.length) {
-    const { data } = await supabase
-      .from('billing_student_bills')
-      .select('id, final_amount, balance_amount, status, payment_date')
-      .in('id', billIds);
-    for (const b of data ?? []) {
+    const data = await selectByIds<{
+      id: string;
+      final_amount: number | string | null;
+      balance_amount: number | string | null;
+      status: string | null;
+      payment_date: string | null;
+    }>(supabase, 'billing_student_bills', 'id, final_amount, balance_amount, status, payment_date', billIds);
+    for (const b of data) {
       billMap.set(b.id, {
         final: Number(b.final_amount ?? 0),
         balance: Number(b.balance_amount ?? 0),
