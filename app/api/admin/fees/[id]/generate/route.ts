@@ -208,23 +208,27 @@ async function generate(request: NextRequest, auth: AuthContext) {
       .maybeSingle();
     const categoryId = cat?.id ?? null;
 
-    // academic_year_id is institution-scoped — cache per institution.
-    const acadCache = new Map<string, string | null>();
-    const resolveAcademicYear = async (institutionId: string | null): Promise<string | null> => {
-      if (!institutionId || !tyStart) return null;
-      if (acadCache.has(institutionId)) return acadCache.get(institutionId)!;
-      const { data: ay } = await supabase
+    // Each learner's academic year comes from their PROFILE (resolveApplicablePeople
+    // already loaded learners_profiles.academic_year_id). Resolve the distinct ids ->
+    // display name in one query; the number of distinct academic years is tiny (one or
+    // two per institution), so a single .in() stays well under the gateway limit.
+    const learnerAyIds = [
+      ...new Set(
+        resolved
+          .filter((r) => r.person.person_type === 'learner' && r.person.academic_year_id)
+          .map((r) => r.person.academic_year_id as string)
+      ),
+    ];
+    const acadYearNameById = new Map<string, string>();
+    if (learnerAyIds.length) {
+      const { data: ays } = await supabase
         .from('academic_years')
-        .select('id')
-        .eq('institution_id', institutionId)
-        .lte('start_date', tyStart)
-        .gte('end_date', tyStart)
-        .limit(1)
-        .maybeSingle();
-      const v = ay?.id ?? null;
-      acadCache.set(institutionId, v);
-      return v;
-    };
+        .select('id, academic_year_name')
+        .in('id', learnerAyIds);
+      for (const a of (ays ?? []) as Array<{ id: string; academic_year_name: string | null }>) {
+        if (a.academic_year_name) acadYearNameById.set(a.id, a.academic_year_name);
+      }
+    }
 
     const { data: run } = await supabase
       .from('tms_fee_generation_run')
@@ -247,7 +251,9 @@ async function generate(request: NextRequest, auth: AuthContext) {
     for (const r of resolved) {
       const p = r.person;
       const bandPrefix = r.band?.label ? `${r.band.label} - ` : '';
-      const acadYear = p.person_type === 'learner' ? await resolveAcademicYear(p.institution_id) : null;
+      const acadYearId = p.person_type === 'learner' ? p.academic_year_id : null;
+      const acadYearName = acadYearId ? acadYearNameById.get(acadYearId) ?? null : null;
+      const ayPart = acadYearName ? `${acadYearName} - ` : '';
       for (const t of r.terms) {
         if (billedKey.has(`${p.person_id}:${t.term_no}`)) { skipped++; continue; }
         const amount = Number(t.amount);
@@ -260,7 +266,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
               institution_id: p.institution_id,
               item_category_id: categoryId,
               fee_source: 'ad_hoc',
-              bill_description: `${fs.name} - ${bandPrefix}${t.term_label || `Term ${t.term_no}`}`,
+              bill_description: `${catName} - ${ayPart}${bandPrefix}${t.term_label || `Term ${t.term_no}`}`,
               due_date: t.due_date,
               quantity: 1,
               unit_amount: amount,
@@ -269,7 +275,8 @@ async function generate(request: NextRequest, auth: AuthContext) {
               final_amount: amount,
               balance_amount: amount,
               status: 'unpaid',
-              academic_year_id: acadYear,
+              academic_year_id: acadYearId,
+              transport_year_id: fs.transport_year_id,
               created_by: auth.userId,
             }])
             .select('id')
