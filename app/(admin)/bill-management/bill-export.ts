@@ -17,6 +17,7 @@ export function exportBills(rows: TransportBillRow[], yearLabel?: string) {
     Type: r.person_type === 'staff' ? 'Staff' : 'Learner',
     Institution: r.institution_name ?? '',
     Structure: r.structure_name ?? '',
+    'Academic year': r.academic_year_name ?? '',
     Term: r.term_no,
     'Transport year': r.year_name ?? '',
     Amount: r.amount,
@@ -28,7 +29,7 @@ export function exportBills(rows: TransportBillRow[], yearLabel?: string) {
   }));
 
   const header = [
-    'Person', 'Code', 'Type', 'Institution', 'Structure', 'Term', 'Transport year',
+    'Person', 'Code', 'Type', 'Institution', 'Structure', 'Academic year', 'Term', 'Transport year',
     'Amount', 'Paid', 'Pending', 'Due date', 'Status', 'Payment date',
   ];
   const ws = XLSX.utils.json_to_sheet(data, { header });
