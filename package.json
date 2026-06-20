@@ -9,6 +9,8 @@
     "lint": "npx eslint .",
     "lint:fix": "npx eslint . --fix",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:setup": "node scripts/setup-database.mjs",
     "db:migrate": "node scripts/migrate-database.mjs",
     "db:seed": "node scripts/seed-database.mjs",
@@ -61,6 +63,7 @@
     "eslint-config-next": "^16.2.6",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vitest": "^4.1.9",
     "web-push": "^3.6.7"
   },
   "engines": {
