@@ -30,6 +30,7 @@ export const TMS_PERMISSIONS = {
   BOOKINGS_VIEW_ALL: 'tms.bookings.view_all',
   BOOKINGS_CREATE: 'tms.bookings.create',
   BOOKINGS_MANAGE: 'tms.bookings.manage',
+  BOOKINGS_SELF: 'tms.bookings.self',
 
   ATTENDANCE_VIEW: 'tms.attendance.view',
   ATTENDANCE_SCAN: 'tms.attendance.scan',
