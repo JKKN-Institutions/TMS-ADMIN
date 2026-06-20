@@ -3,6 +3,8 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { bookedCount, routeCapacity } from '@/lib/booking/repo';
+import { istToday } from '@/lib/booking/window';
 
 /**
  * Roster for one route: every allocated learner + their attendance status today
@@ -40,14 +42,18 @@ async function getRoster(auth: AuthContext, routeId: string) {
       .from('tms_route').select('id, route_number, route_name').eq('id', routeId).maybeSingle();
     if (!route) return NextResponse.json({ error: 'Route not found' }, { status: 404 });
 
-    const { data: studs } = await svc
-      .from('learners_profiles')
-      .select('id, first_name, last_name, roll_number')
-      .eq('transport_route_id', routeId);
-    const students = (studs ?? []) as LearnerLite[];
+    const today = istToday();
+
+    // Roster = learners who BOOKED today ∪ learners with attendance today (walk-ups).
+    const { data: bookings } = await svc
+      .from('tms_booking')
+      .select('learner_id')
+      .eq('route_id', routeId)
+      .eq('travel_date', today)
+      .eq('status', 'booked');
+    const rosterIds = new Set<string>(((bookings ?? []) as { learner_id: string }[]).map((b) => b.learner_id));
 
     // Today's attendance for this route, keyed by learner + direction.
-    const today = new Date().toISOString().slice(0, 10);
     const byLearner: Record<string, { onward: string | null; return: string | null; last: string | null }> = {};
     const { data: att, error } = await svc
       .from('tms_attendance')
@@ -56,11 +62,21 @@ async function getRoster(auth: AuthContext, routeId: string) {
       .eq('route_id', routeId);
     if (!error && att) {
       for (const a of att as AttRow[]) {
+        rosterIds.add(a.learner_id); // include walk-ups (attended but not booked)
         const e = (byLearner[a.learner_id] ??= { onward: null, return: null, last: null });
         if (a.direction === 'return') e.return = a.status; else e.onward = a.status;
         if (a.scanned_at && (!e.last || a.scanned_at > e.last)) e.last = a.scanned_at;
       }
     }
+
+    const idList = Array.from(rosterIds);
+    const { data: studs } = idList.length
+      ? await svc
+          .from('learners_profiles')
+          .select('id, first_name, last_name, roll_number')
+          .in('id', idList)
+      : { data: [] as LearnerLite[] };
+    const students = (studs ?? []) as LearnerLite[];
 
     let presentOnward = 0, presentReturn = 0;
     const rows = students
@@ -79,11 +95,22 @@ async function getRoster(auth: AuthContext, routeId: string) {
       })
       .sort((a, b) => (a.roll_number ?? a.name).localeCompare(b.roll_number ?? b.name));
 
+    const [booked, capacity] = await Promise.all([
+      bookedCount(svc, routeId, today),
+      routeCapacity(svc, routeId),
+    ]);
+
     return NextResponse.json({
       success: true,
       data: {
         route: { id: route.id, route_number: route.route_number, route_name: route.route_name },
-        counts: { total: students.length, present_onward: presentOnward, present_return: presentReturn },
+        counts: {
+          total: students.length,
+          booked,
+          capacity,
+          present_onward: presentOnward,
+          present_return: presentReturn,
+        },
         students: rows,
       },
     });
