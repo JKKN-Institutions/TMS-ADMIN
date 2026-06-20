@@ -66,6 +66,7 @@ async function sendReminders(_request: NextRequest, auth: AuthContext) {
         priority: 'normal',
         url: urlMarker,
         targeting: { type: 'user', user_id: l.profile_id },
+        created_by: auth.userId,
       }));
 
     if (toInsert.length === 0) return NextResponse.json({ success: true, data: { date, reminded: 0 } });
