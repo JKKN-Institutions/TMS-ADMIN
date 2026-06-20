@@ -6,6 +6,8 @@ import { mapLearner } from '@/lib/passengers/types';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { signPass } from '@/lib/boarding/pass';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { hasBookingForDate } from '@/lib/booking/repo';
+import { istToday } from '@/lib/booking/window';
 
 /**
  * GET the signed-in learner's boarding pass (a signed QR token) + allocation
@@ -26,7 +28,13 @@ async function getPass(_request: NextRequest, auth: AuthContext) {
     if (!learner) return NextResponse.json({ error: 'Learner profile not found' }, { status: 404 });
 
     if (!learner.transport_route_id) {
-      return NextResponse.json({ success: true, data: { hasPass: false } });
+      return NextResponse.json({ success: true, data: { hasPass: false, reason: 'no_route' } });
+    }
+
+    const svcGate = createServiceRoleClient();
+    const booked = await hasBookingForDate(svcGate, learner.id, istToday());
+    if (!booked) {
+      return NextResponse.json({ success: true, data: { hasPass: false, reason: 'not_booked' } });
     }
 
     const svc = createServiceRoleClient();
