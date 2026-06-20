@@ -10,6 +10,9 @@ type ScanResult = {
   ok: boolean;
   learner?: { name: string; rollNumber: string | null };
   direction?: string;
+  walkUp?: boolean;
+  reason?: 'not_booked' | 'bus_full';
+  seatsRemaining?: number;
   error?: string;
 };
 
@@ -22,23 +25,24 @@ export default function BoardingScanPage() {
   const busyRef = useRef(false);
   const directionRef = useRef(direction);
   directionRef.current = direction;
+  const lastTokenRef = useRef<string>('');
 
-  async function submit(token: string) {
+  async function submit(token: string, walkUp = false) {
     if (busyRef.current || !token) return;
     busyRef.current = true;
+    lastTokenRef.current = token;
     try {
       const res = await fetch('/api/boarding/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ token, direction: directionRef.current }),
+        body: JSON.stringify({ token, direction: directionRef.current, walkUp }),
       });
       const json = await res.json();
-      setResult(res.ok && json.ok ? json : { ok: false, error: json.error || 'Scan failed' });
+      setResult(json.ok ? json : { ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
     } catch {
       setResult({ ok: false, error: 'Network error' });
     } finally {
-      // Debounce so a held QR code doesn't fire repeatedly.
       setTimeout(() => {
         busyRef.current = false;
       }, 1500);
@@ -136,16 +140,32 @@ export default function BoardingScanPage() {
 
       {result && (
         <Card className={result.ok ? 'border-green-400' : 'border-red-400'}>
-          <CardContent className="py-4 text-sm">
+          <CardContent className="py-4 text-sm space-y-2">
             {result.ok ? (
               <div>
                 <p className="font-medium text-green-700 dark:text-green-300">
-                  ✓ Marked present ({result.direction})
+                  ✓ Marked present ({result.direction}){result.walkUp ? ' · walk-up' : ''}
                 </p>
                 <p>
                   {result.learner?.name}
                   {result.learner?.rollNumber ? ` · ${result.learner.rollNumber}` : ''}
                 </p>
+              </div>
+            ) : result.reason === 'not_booked' ? (
+              <div className="space-y-2">
+                <p className="text-amber-700 dark:text-amber-300">
+                  ⚠ {result.learner?.name ?? 'Learner'} has no booking for today.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Seats remaining: {result.seatsRemaining ?? 0}
+                </p>
+                <Button
+                  className="w-full"
+                  disabled={(result.seatsRemaining ?? 0) <= 0}
+                  onClick={() => submit(lastTokenRef.current, true)}
+                >
+                  {(result.seatsRemaining ?? 0) > 0 ? 'Add as walk-up' : 'Bus full'}
+                </Button>
               </div>
             ) : (
               <p className="text-red-700 dark:text-red-300">✗ {result.error}</p>
