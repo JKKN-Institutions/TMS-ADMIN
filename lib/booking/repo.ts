@@ -40,17 +40,16 @@ export async function bookedCount(svc: SupabaseClient, routeId: string, date: st
   return count ?? 0;
 }
 
-/** Count of onward walk-up attendance rows for a route on a date (seat accounting). */
+/** Count of distinct walk-up learners for a route on a date (any direction). */
 export async function walkUpCount(svc: SupabaseClient, routeId: string, date: string): Promise<number> {
-  const { count, error } = await svc
+  const { data, error } = await svc
     .from('tms_attendance')
-    .select('id', { count: 'exact', head: true })
+    .select('learner_id')
     .eq('route_id', routeId)
     .eq('trip_date', date)
-    .eq('is_walk_up', true)
-    .eq('direction', 'onward');
+    .eq('is_walk_up', true);
   if (error && !isMissingTable(error)) throw error;
-  return count ?? 0;
+  return new Set(((data ?? []) as { learner_id: string }[]).map((r) => r.learner_id)).size;
 }
 
 /** Seat capacity: the assigned vehicle's capacity, falling back to the route's. */

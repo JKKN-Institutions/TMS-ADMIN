@@ -28,7 +28,8 @@ export default function BoardingScanPage() {
   const lastTokenRef = useRef<string>('');
 
   async function submit(token: string, walkUp = false) {
-    if (busyRef.current || !token) return;
+    if (!token) return;
+    if (busyRef.current && !walkUp) return;
     busyRef.current = true;
     lastTokenRef.current = token;
     try {

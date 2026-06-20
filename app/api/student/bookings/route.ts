@@ -50,9 +50,11 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       .eq('learner_id', learner.id)
       .eq('status', 'booked')
       .in('travel_date', dates);
-    if (!res.error) {
-      for (const row of (res.data ?? []) as { travel_date: string }[]) booked.add(row.travel_date);
+    if (res.error && (res.error as { code?: string }).code !== '42P01') {
+      console.error('student/bookings GET error:', res.error);
+      return NextResponse.json({ error: 'Failed to load bookings' }, { status: 500 });
     }
+    for (const row of (res.data ?? []) as { travel_date: string }[]) booked.add(row.travel_date);
 
     const days = dates.map((date) => ({
       date,
@@ -94,26 +96,32 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       if (!isBookingOpen(travelDate)) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });
       }
-      const up = await svc
+      const existing = await svc
         .from('tms_booking')
-        .upsert(
-          {
-            learner_id: learner.id,
-            route_id: learner.transport_route_id,
-            stop_id: learner.transport_stop_id,
-            travel_date: travelDate,
-            status: 'booked',
-            booked_at: new Date().toISOString(),
-            cancelled_at: null,
-            created_by: auth.userId,
-            updated_by: auth.userId,
-          },
-          { onConflict: 'learner_id,travel_date' }
-        )
         .select('id')
+        .eq('learner_id', learner.id)
+        .eq('travel_date', travelDate)
         .maybeSingle();
-      if (up.error) {
-        console.error('student/bookings book error:', up.error);
+      const nowIso = new Date().toISOString();
+      const writeErr = existing.data
+        ? (await svc
+            .from('tms_booking')
+            .update({ status: 'booked', booked_at: nowIso, cancelled_at: null, updated_by: auth.userId })
+            .eq('id', existing.data.id)).error
+        : (await svc
+            .from('tms_booking')
+            .insert({
+              learner_id: learner.id,
+              route_id: learner.transport_route_id,
+              stop_id: learner.transport_stop_id,
+              travel_date: travelDate,
+              status: 'booked',
+              booked_at: nowIso,
+              created_by: auth.userId,
+              updated_by: auth.userId,
+            })).error;
+      if (writeErr) {
+        console.error('student/bookings book error:', writeErr);
         return NextResponse.json({ error: 'Failed to book' }, { status: 500 });
       }
       return NextResponse.json({ success: true, data: { travel_date: travelDate, status: 'booked' } });

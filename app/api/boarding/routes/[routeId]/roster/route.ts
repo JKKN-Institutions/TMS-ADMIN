@@ -7,10 +7,9 @@ import { bookedCount, routeCapacity } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
 
 /**
- * Roster for one route: every allocated learner + their attendance status today
- * (onward / return). Authority boundary: the staff must be assigned to this route
- * (getAssignedRouteIdsForUser) — super admins bypass. Read-only; manual marking
- * lands in a later module.
+ * Roster for one route TODAY: learners who booked today UNION walk-ups (learners
+ * with an attendance row today), each with their onward/return status. Authority
+ * boundary: staff must be assigned to this route; super admins bypass.
  */
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;

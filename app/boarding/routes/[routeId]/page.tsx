@@ -136,7 +136,7 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
           <Users className="h-4 w-4" /> {meta.booked} booked / {meta.capacity} seats
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-gray-700">
-          <Users className="h-4 w-4 text-gray-400" /> {counts.total} students
+          <Users className="h-4 w-4 text-gray-400" /> {counts.total} on roster
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-green-700 dark:text-green-300">
           <CheckCircle2 className="h-4 w-4" /> {counts.onward} onward
