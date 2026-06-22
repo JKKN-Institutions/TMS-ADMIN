@@ -10,7 +10,7 @@ export function pickServiceCalendar(body: Record<string, unknown>): ServiceCalen
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'exception_date must be YYYY-MM-DD' };
   const kind = body.kind === 'no_service' ? 'no_service' : body.kind === 'holiday' ? 'holiday' : null;
   if (!kind) return { error: "kind must be 'holiday' or 'no_service'" };
-  const routeId = body.route_id ? String(body.route_id) : null;
+  const routeId = typeof body.route_id === 'string' && body.route_id.trim() ? body.route_id.trim() : null;
   const note = body.note == null ? null : String(body.note).slice(0, 280);
   return { exception_date: date, route_id: routeId, kind, note };
 }
@@ -24,7 +24,7 @@ export interface BookingWindowInput {
   note: string | null;
 }
 export function pickBookingWindow(body: Record<string, unknown>): BookingWindowInput | { error: string } {
-  const routeId = String(body.route_id ?? '');
+  const routeId = typeof body.route_id === 'string' ? body.route_id.trim() : '';
   const date = String(body.travel_date ?? '');
   if (!routeId) return { error: 'route_id is required' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'travel_date must be YYYY-MM-DD' };
