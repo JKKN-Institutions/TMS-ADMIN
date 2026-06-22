@@ -68,6 +68,9 @@ export async function loadExceptions(
   from: string,
   to: string
 ): Promise<Map<string, CalendarException>> {
+  if (routeId && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(routeId)) {
+    throw new Error('loadExceptions: routeId must be a UUID');
+  }
   const map = new Map<string, CalendarException>();
   let q = svc
     .from('tms_service_calendar')
