@@ -5,7 +5,7 @@
  */
 const IST_OFFSET_MIN = 5 * 60 + 30; // +05:30
 const CUTOFF_HOUR_IST = 18; // 18:00 IST on the prior day
-const HORIZON_DAYS = 7; // bookable: tomorrow .. tomorrow+6
+export const HORIZON_DAYS = 7; // bookable: tomorrow .. tomorrow+6
 
 export type DayStatus = 'not_booked' | 'booked' | 'locked' | 'closed';
 
