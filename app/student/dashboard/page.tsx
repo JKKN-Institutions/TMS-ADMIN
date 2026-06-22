@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import type { ComponentType } from 'react';
 import {
-  Bus, MapPin, CreditCard, Route as RouteIcon, QrCode, MessageCircle, Bell, AlertTriangle,
+  MapPin, CreditCard, Route as RouteIcon, QrCode, MessageCircle, Bell, AlertTriangle,
 } from 'lucide-react';
 import { useMe } from '@/lib/student/use-me';
 
@@ -84,13 +84,7 @@ export default function StudentDashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          icon={Bus}
-          label="Transport"
-          value={me.busRequired ? 'Required' : 'Not required'}
-          tone="bg-gradient-to-br from-green-500 to-emerald-600"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard
           icon={RouteIcon}
           label="Route"

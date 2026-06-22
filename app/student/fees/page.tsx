@@ -119,32 +119,62 @@ export default function StudentFeesPage() {
         </div>
       )}
 
-      {/* Terms */}
+      {/* Terms — stacked cards on mobile (no cramped/clipped table), table from sm up */}
       {hasTerms && (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400">
-                <th className="px-4 py-3">Term</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Due date</th>
-                <th className="px-4 py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.terms.map((t, i) => (
-                <tr key={`${t.term_no}-${i}`} className="border-b border-gray-100 last:border-0 dark:border-gray-800">
-                  <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">Term {t.term_no}</td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-gray-200">{inr(t.amount)}</td>
-                  <td className={`px-4 py-3 ${t.overdue ? 'font-medium text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'}`}>
-                    {fmtDate(t.due_date)}
-                  </td>
-                  <td className="px-4 py-3">{termBadge(t)}</td>
+        <>
+          {/* Mobile: one card per term, so nothing overflows a narrow screen */}
+          <div className="space-y-3 sm:hidden">
+            {data.terms.map((t, i) => (
+              <div
+                key={`${t.term_no}-${i}`}
+                className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">Term {t.term_no}</span>
+                  {termBadge(t)}
+                </div>
+                <div className="mt-3 flex items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">Amount</p>
+                    <p className="truncate text-lg font-bold text-gray-900 dark:text-white">{inr(t.amount)}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">Due date</p>
+                    <p className={`text-sm ${t.overdue ? 'font-semibold text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'}`}>
+                      {fmtDate(t.due_date)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* sm and up: table (overflow-x-auto so it can scroll if it ever exceeds the box) */}
+          <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white sm:block dark:border-gray-700 dark:bg-gray-900">
+            <table className="w-full min-w-[480px] text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400">
+                  <th className="px-4 py-3">Term</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Due date</th>
+                  <th className="px-4 py-3">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {data.terms.map((t, i) => (
+                  <tr key={`${t.term_no}-${i}`} className="border-b border-gray-100 last:border-0 dark:border-gray-800">
+                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">Term {t.term_no}</td>
+                    <td className="px-4 py-3 text-gray-700 dark:text-gray-200">{inr(t.amount)}</td>
+                    <td className={`px-4 py-3 ${t.overdue ? 'font-medium text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'}`}>
+                      {fmtDate(t.due_date)}
+                    </td>
+                    <td className="px-4 py-3">{termBadge(t)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <p className="text-xs text-gray-400 dark:text-gray-500">
