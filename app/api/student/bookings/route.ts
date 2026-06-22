@@ -4,7 +4,8 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getLearnerRowForUser } from '@/lib/student/identity';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { bookableDates, cutoffFor, dayStatus, isBookingOpen, isCancelable } from '@/lib/booking/window';
+import { bookableDates, cutoffFor, dayStatus, isCancelable } from '@/lib/booking/window';
+import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
 
 /**
@@ -43,7 +44,6 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       stopLabel = learner.transport_stop_id ? refs.stops.get(learner.transport_stop_id) ?? null : null;
     }
 
-    const svc2 = svc; // svc already created above
     const monthParam = new URL(_request.url).searchParams.get('month');
 
     if (monthParam) {
@@ -54,7 +54,7 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       const to = `${monthParam}-${String(new Date(Date.UTC(Number(monthParam.slice(0, 4)), Number(monthParam.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')}`;
 
       const bookedDates = new Set<string>();
-      const mres = await svc2
+      const mres = await svc
         .from('tms_booking')
         .select('travel_date')
         .eq('learner_id', learner.id)
@@ -68,10 +68,10 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       for (const row of (mres.data ?? []) as { travel_date: string }[]) bookedDates.add(row.travel_date);
 
       const exceptions: Map<string, CalendarException> = await loadExceptions(
-        svc2, learner.transport_route_id ?? null, from, to
+        svc, learner.transport_route_id ?? null, from, to
       );
       const windows: Map<string, WindowOverride> = await loadWindows(
-        svc2, learner.transport_route_id ?? null, from, to
+        svc, learner.transport_route_id ?? null, from, to
       );
       const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows }).map((c) => ({
         ...c,
@@ -145,6 +145,15 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       if (blocking.has(travelDate)) {
         return NextResponse.json({ error: 'That date is a holiday / no-service day' }, { status: 409 });
       }
+      // capacity gate — only blocks when the learner is taking a NEW seat
+      const holdsSeat = await hasBookingForDate(svc, learner.id, travelDate);
+      if (!holdsSeat) {
+        const cap = winMap.get(travelDate)?.capacityOverride ?? (await routeCapacity(svc, learner.transport_route_id));
+        if (cap > 0 && (await bookedCount(svc, learner.transport_route_id, travelDate)) >= cap) {
+          return NextResponse.json({ error: 'This bus is fully booked for that date' }, { status: 409 });
+        }
+      }
+
       const existing = await svc
         .from('tms_booking')
         .select('id')

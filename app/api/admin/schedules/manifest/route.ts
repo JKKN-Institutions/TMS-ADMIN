@@ -55,9 +55,12 @@ async function manifest(request: NextRequest, auth: AuthContext) {
   const rt = await svc.from('tms_route').select('route_number, route_name').eq('id', routeId).maybeSingle();
   const routeLabel = rt.data ? `${rt.data.route_number ?? '—'} · ${rt.data.route_name ?? ''}`.trim() : routeId;
 
+  const winRow = await svc.from('tms_booking_window').select('capacity_override').eq('route_id', routeId).eq('travel_date', date).maybeSingle();
+  const capOverride = (winRow.data as { capacity_override: number | null } | null)?.capacity_override ?? null;
+
   return NextResponse.json({
     success: true,
-    data: { date, routeLabel, booked: await bookedCount(svc, routeId, date), capacity: await routeCapacity(svc, routeId), learners },
+    data: { date, routeLabel, booked: await bookedCount(svc, routeId, date), capacity: capOverride ?? (await routeCapacity(svc, routeId)), learners },
   });
 }
 
