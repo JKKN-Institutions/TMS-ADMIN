@@ -5,7 +5,7 @@ import { getLearnerRowForUser } from '@/lib/student/identity';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { bookableDates, cutoffFor, dayStatus, isBookingOpen, isCancelable } from '@/lib/booking/window';
-import { buildMonthCells, loadExceptions, type CalendarException } from '@/lib/booking/calendar';
+import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
 
 /**
  * Self-scoped daily booking board + book/cancel. The learner (and their route/stop)
@@ -70,9 +70,14 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       const exceptions: Map<string, CalendarException> = await loadExceptions(
         svc2, learner.transport_route_id ?? null, from, to
       );
-      const cells = buildMonthCells(monthParam, { bookedDates, exceptions }).map((c) => ({
+      const windows: Map<string, WindowOverride> = await loadWindows(
+        svc2, learner.transport_route_id ?? null, from, to
+      );
+      const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows }).map((c) => ({
         ...c,
-        cutoff: c.status === 'open' || c.status === 'booked' ? cutoffFor(c.date).toISOString() : null,
+        cutoff: c.status === 'open' || c.status === 'booked'
+          ? (windows.get(c.date)?.deadline ?? cutoffFor(c.date).toISOString())
+          : null,
       }));
 
       return NextResponse.json({
@@ -132,7 +137,8 @@ async function mutate(request: NextRequest, auth: AuthContext) {
     const svc = createServiceRoleClient();
 
     if (action === 'book') {
-      if (!isBookingOpen(travelDate)) {
+      const winMap = await loadWindows(svc, learner.transport_route_id, travelDate, travelDate);
+      if (!effectiveOpen(travelDate, { window: winMap.get(travelDate) })) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });
       }
       const blocking = await loadExceptions(svc, learner.transport_route_id, travelDate, travelDate);
