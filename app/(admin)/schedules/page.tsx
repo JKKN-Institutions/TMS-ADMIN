@@ -39,7 +39,7 @@ export default function SchedulesPage() {
 
       {tab === 'calendar' && <ServiceCalendarTab />}
       {tab === 'windows' && <BookingWindowsTab routes={routes} />}
-      {tab === 'manifest' && <ManifestTab routes={routes} />}
+      {tab === 'manifest' && <ManifestTab />}
     </div>
   );
 }
@@ -103,7 +103,7 @@ function ServiceCalendarTab() {
         </label>
         <label className="flex-1 text-sm">Note<input className={`mt-1 block w-full ${input}`} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Pongal" /></label>
         <button type="button" disabled={add.isPending} onClick={() => add.mutate()}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-50">
           <Plus className="h-4 w-4" /> Add
         </button>
       </div>
@@ -147,7 +147,7 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
     mutationFn: async () => {
       const res = await fetch('/api/admin/schedules/booking-window', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-        body: JSON.stringify({ route_id: routeId, travel_date: date, booking_enabled: enabled, deadline: deadline ? new Date(deadline).toISOString() : null, capacity_override: cap || null }),
+        body: JSON.stringify({ route_id: routeId, travel_date: date, booking_enabled: enabled, deadline: deadline ? new Date(deadline).toISOString() : null, capacity_override: cap !== '' ? Number(cap) : null }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed');
@@ -156,7 +156,10 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed'),
   });
   const del = useMutation({
-    mutationFn: async (id: string) => { await fetch(`/api/admin/schedules/booking-window?id=${id}`, { method: 'DELETE', credentials: 'same-origin' }); },
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/schedules/booking-window?id=${id}`, { method: 'DELETE', credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Failed');
+    },
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['windows', routeId] }); },
   });
 
@@ -174,7 +177,7 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
         <label className="text-sm">Deadline<input type="datetime-local" className={`mt-1 block ${input}`} value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
         <label className="text-sm">Cap<input type="number" min={0} className={`mt-1 block w-24 ${input}`} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="auto" /></label>
         <button type="button" disabled={!routeId || save.isPending} onClick={() => save.mutate()}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50">Save window</button>
+          className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-50">Save window</button>
       </div>
       {routeId && (
         <div className={card}>
@@ -197,7 +200,7 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
 /* ---- Tab 3: Load & Manifest ---- */
 interface SummaryRoute { id: string; label: string; booked: number; capacity: number }
 interface Manifest { routeLabel: string; booked: number; capacity: number; learners: Array<{ id: string; name: string; roll: string | null; stop: string | null }> }
-function ManifestTab({ routes }: { routes: RouteOpt[] }) {
+function ManifestTab() {
   const [date, setDate] = useState(istToday());
   const [openRoute, setOpenRoute] = useState<string | null>(null);
 
