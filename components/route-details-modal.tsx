@@ -29,6 +29,18 @@ import LiveTrackingMap from './live-tracking-map';
 import PossibleStopsManager from './possible-stops-manager';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+/** 'HH:MM:SS' / 'HH:MM' → '7:30 AM'; '—' when missing. */
+const fmtTime = (t?: string | null): string => {
+  if (!t) return '—';
+  const [hStr, mStr] = String(t).split(':');
+  const h = parseInt(hStr, 10);
+  if (Number.isNaN(h)) return String(t);
+  const minute = mStr ?? '00';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${minute} ${ampm}`;
+};
+
 interface RouteDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -547,13 +559,14 @@ const RouteDetailsModal: React.FC<RouteDetailsModalProps> = ({
                                   <div className="flex items-center justify-between">
                                     <div>
                                       <p className="font-medium text-gray-900">{stop.stop_name || `Stop ${index + 1}`}</p>
-                                      <div className="flex items-center space-x-4 text-sm text-gray-600">
+                                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
                                         <div className="flex items-center space-x-1">
                                           <Clock className="w-3 h-3" />
-                                          <span>
-                                            {index === 0 ? 'Departure: ' : 'Arrival: '}
-                                            {stop.stop_time || stop.time || 'Not specified'}
-                                          </span>
+                                          <span><span className="text-gray-400">Morning</span> {fmtTime(stop.stop_time || stop.time)}</span>
+                                        </div>
+                                        <div className="flex items-center space-x-1">
+                                          <Clock className="w-3 h-3" />
+                                          <span><span className="text-gray-400">Evening</span> {fmtTime(stop.evening_time)}</span>
                                         </div>
                                         {stop.is_major_stop && (
                                           <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
@@ -682,17 +695,15 @@ const RouteDetailsModal: React.FC<RouteDetailsModalProps> = ({
                                         <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">Major</span>
                                       )}
                                     </div>
-                                    <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+                                    <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mt-1 text-sm text-gray-600">
                                       <div className="flex items-center space-x-1">
                                         <Clock className="w-3 h-3" />
-                                        <span>{stop.stop_time}</span>
+                                        <span><span className="text-gray-400">Morning</span> {fmtTime(stop.stop_time)}</span>
                                       </div>
-                                      {stop.morning_arrival_time && (
-                                        <span className="text-xs">Morning: {stop.morning_arrival_time}</span>
-                                      )}
-                                      {stop.evening_arrival_time && (
-                                        <span className="text-xs">Evening: {stop.evening_arrival_time}</span>
-                                      )}
+                                      <div className="flex items-center space-x-1">
+                                        <Clock className="w-3 h-3" />
+                                        <span><span className="text-gray-400">Evening</span> {fmtTime(stop.evening_time)}</span>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>

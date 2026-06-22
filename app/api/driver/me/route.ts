@@ -22,6 +22,17 @@ async function getMe(_request: NextRequest, auth: AuthContext) {
     }
 
     let routeLabel: string | null = null;
+    // The assigned route's ordered stops, with both the morning (stop_time, inbound
+    // to-college pickup) and evening (evening_time, outbound from-college drop) times,
+    // so the driver dashboard can show the full two-way timetable.
+    let stops: Array<{
+      id: string;
+      name: string;
+      time: string | null;
+      eveningTime: string | null;
+      order: number | null;
+      isMajor: boolean | null;
+    }> = [];
     if (drv.assigned_route_id) {
       const svc = createServiceRoleClient();
       const r = await svc
@@ -31,6 +42,28 @@ async function getMe(_request: NextRequest, auth: AuthContext) {
         .maybeSingle();
       const rr = r.data as { route_number: string; route_name: string } | null;
       if (rr) routeLabel = `${rr.route_number} · ${rr.route_name}`;
+
+      const stopsRes = await svc
+        .from('tms_route_stop')
+        .select('id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
+        .eq('route_id', drv.assigned_route_id)
+        .order('sequence_order', { ascending: true });
+      const stopRows = (stopsRes.data ?? []) as Array<{
+        id: string;
+        stop_name: string;
+        stop_time: string | null;
+        evening_time: string | null;
+        sequence_order: number | null;
+        is_major_stop: boolean | null;
+      }>;
+      stops = stopRows.map((s) => ({
+        id: s.id,
+        name: s.stop_name,
+        time: s.stop_time,
+        eveningTime: s.evening_time,
+        order: s.sequence_order,
+        isMajor: s.is_major_stop,
+      }));
     }
 
     return NextResponse.json({
@@ -44,6 +77,7 @@ async function getMe(_request: NextRequest, auth: AuthContext) {
         totalTrips: drv.total_trips,
         assignedRouteId: drv.assigned_route_id,
         routeLabel,
+        stops,
       },
     });
   } catch (e) {

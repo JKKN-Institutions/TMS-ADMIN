@@ -8,7 +8,8 @@ import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-vie
 interface RouteStop {
   id: string;
   stop_name: string;
-  stop_time: string;
+  stop_time: string; // morning / inbound (to-college) pickup
+  evening_time?: string | null; // evening / outbound (from-college) drop
   sequence_order: number;
   is_major_stop: boolean;
   latitude?: number | null;
@@ -40,7 +41,7 @@ interface RouteDetail {
   _vehicleReg?: string | null;
 }
 
-const fmtTime = (t?: string) => (t ? t.slice(0, 5) : '—');
+const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '—');
 
 async function fetchRouteDetail(id: string): Promise<RouteDetail> {
   const res = await fetch(`/api/admin/routes/${id}`);
@@ -212,7 +213,14 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-gray-900">{s.stop_name}</p>
-                  <p className="text-xs text-gray-500">{fmtTime(s.stop_time)}</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs">
+                    <span className="text-gray-600 dark:text-gray-300">
+                      <span className="text-gray-400 dark:text-gray-500">Morning</span> {fmtTime(s.stop_time)}
+                    </span>
+                    <span className="text-gray-600 dark:text-gray-300">
+                      <span className="text-gray-400 dark:text-gray-500">Evening</span> {fmtTime(s.evening_time)}
+                    </span>
+                  </div>
                 </div>
                 {s.is_major_stop && (
                   <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
