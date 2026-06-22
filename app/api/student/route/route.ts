@@ -28,6 +28,7 @@ interface StopRow {
   id: string;
   stop_name: string;
   stop_time: string | null;
+  evening_time: string | null;
   sequence_order: number | null;
   is_major_stop: boolean | null;
 }
@@ -70,7 +71,7 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
 
     const stopsRes = await svc
       .from('tms_route_stop')
-      .select('id, stop_name, stop_time, sequence_order, is_major_stop')
+      .select('id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
       .eq('route_id', route.id)
       .order('sequence_order', { ascending: true });
     const stops = (stopsRes.data ?? []) as StopRow[];
@@ -126,6 +127,7 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
             id: s.id,
             name: s.stop_name,
             time: s.stop_time,
+            eveningTime: s.evening_time,
             order: s.sequence_order,
             isMajor: s.is_major_stop,
           })),

@@ -11,7 +11,8 @@ import { cn } from '@/lib/utils';
 interface Stop {
   id: string;
   name: string;
-  time: string | null;
+  time: string | null; // morning / inbound (to-college) pickup
+  eveningTime: string | null; // evening / outbound (from-college) drop
   order: number | null;
   isMajor: boolean | null;
 }
@@ -349,10 +350,12 @@ export default function StudentRoutesPage() {
                       {s.order ?? i + 1}
                     </span>
 
-                    {/* content */}
+                    {/* content — stacks on mobile (name wraps full-width over a compact
+                        times row) and switches to name-left / times-right from sm up, so a
+                        long stop name can never get squeezed/clipped on a narrow phone. */}
                     <div
                       className={cn(
-                        '-mt-0.5 flex flex-1 items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors',
+                        '-mt-0.5 flex flex-1 flex-col gap-1.5 rounded-lg px-3 py-2 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3',
                         isBoarding
                           ? 'bg-green-50 dark:bg-green-950/30'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
@@ -361,7 +364,7 @@ export default function StudentRoutesPage() {
                       <div className="min-w-0">
                         <p
                           className={cn(
-                            'truncate font-medium',
+                            'font-medium break-words sm:truncate',
                             isBoarding
                               ? 'text-green-700 dark:text-green-300'
                               : s.isMajor
@@ -378,9 +381,20 @@ export default function StudentRoutesPage() {
                           {s.isMajor && !isFirst && !isLast && !isBoarding && <Tag tone="gray">Major</Tag>}
                         </div>
                       </div>
-                      <time className="shrink-0 text-sm tabular-nums text-gray-500 dark:text-gray-400">
-                        {fmtTime(s.time)}
-                      </time>
+                      <div className="flex shrink-0 items-center gap-4 text-sm tabular-nums sm:flex-col sm:items-end sm:gap-0.5 sm:text-right">
+                        <div className="flex items-baseline gap-1 text-gray-700 dark:text-gray-300">
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                            Morning
+                          </span>
+                          {fmtTime(s.time)}
+                        </div>
+                        <div className="flex items-baseline gap-1 text-gray-700 dark:text-gray-300">
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                            Evening
+                          </span>
+                          {fmtTime(s.eveningTime)}
+                        </div>
+                      </div>
                     </div>
                   </li>
                 );
@@ -405,7 +419,7 @@ export default function StudentRoutesPage() {
                   {boardingStop.name}
                 </p>
                 <p className="text-xs text-green-700/80 dark:text-green-300/80">
-                  Pickup {fmtTime(boardingStop.time)}
+                  Pickup {fmtTime(boardingStop.time)} · Drop {fmtTime(boardingStop.eveningTime)}
                 </p>
               </div>
             </div>
