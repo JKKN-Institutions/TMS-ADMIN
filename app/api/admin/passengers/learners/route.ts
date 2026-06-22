@@ -57,6 +57,8 @@ async function getLearners(_request: NextRequest, auth: AuthContext) {
       departmentIds: rows.map((r) => r.department_id),
       routeIds: rows.map((r) => r.transport_route_id),
       stopIds: rows.map((r) => r.transport_stop_id),
+      programIds: rows.map((r) => r.program_id),
+      semesterIds: rows.map((r) => r.semester_id),
     });
 
     const result = rows.map((r) => mapLearner(r, refs));

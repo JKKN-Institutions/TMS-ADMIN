@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { logActivityFromHeaders } from '@/lib/activity/log';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,6 +41,14 @@ export async function POST(
       );
     }
 
+    await logActivityFromHeaders(request, {
+      module: 'gps-devices',
+      action: 'activate',
+      entityType: 'gps_devices',
+      entityId: updatedDevice?.id ?? id,
+      entityLabel: updatedDevice?.device_name,
+      description: `Activated GPS device ${updatedDevice.device_name}`,
+    });
     return NextResponse.json({
       success: true,
       data: updatedDevice,

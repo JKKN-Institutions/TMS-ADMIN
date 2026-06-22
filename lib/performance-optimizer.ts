@@ -145,13 +145,12 @@ export class PerformanceOptimizer {
       {
         key: 'dashboard-stats',
         query: async () => {
-          const [students, drivers, routes, vehicles, bookings, payments] = await Promise.all([
+          const [students, drivers, routes, vehicles, bookings] = await Promise.all([
             supabase.from('students').select('id', { count: 'exact', head: true }),
             supabase.from('drivers').select('id', { count: 'exact', head: true }),
             supabase.from('routes').select('id', { count: 'exact', head: true }),
             supabase.from('tms_vehicle').select('id', { count: 'exact', head: true }),
-            supabase.from('bookings').select('id', { count: 'exact', head: true }),
-            supabase.from('payments').select('amount').eq('status', 'completed')
+            supabase.from('bookings').select('id', { count: 'exact', head: true })
           ]);
 
           return {
@@ -160,7 +159,7 @@ export class PerformanceOptimizer {
             totalRoutes: routes.count || 0,
             totalVehicles: vehicles.count || 0,
             totalBookings: bookings.count || 0,
-            totalRevenue: payments.data?.reduce((sum, p) => sum + p.amount, 0) || 0
+            totalRevenue: 0
           };
         },
         ttl: 2 * 60 * 1000 // 2 minutes

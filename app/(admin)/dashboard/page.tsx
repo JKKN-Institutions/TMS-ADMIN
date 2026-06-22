@@ -107,13 +107,6 @@ const DashboardPage = () => {
         href: '/analytics'
       },
       {
-        title: 'User Management',
-        desc: 'Manage admin users and permissions',
-        icon: Shield,
-        color: 'bg-gradient-to-br from-red-500 to-rose-600',
-        href: '/authorize'
-      },
-      {
         title: 'System Settings',
         desc: 'Configure system preferences',
         icon: Settings,
@@ -176,18 +169,18 @@ const DashboardPage = () => {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 break-words">Welcome back, {profile?.full_name || profile?.email || 'Admin'}!</h1>
           <p className="text-gray-600 mt-1 text-sm sm:text-base">Here's what's happening with your transport management system today.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
+        <div className="flex items-center gap-3 sm:shrink-0">
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="inline-flex items-center whitespace-nowrap px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            className="inline-flex flex-1 justify-center sm:flex-none items-center whitespace-nowrap px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? 'Refreshing...' : 'Refresh Data'}
           </button>
           <button
             onClick={() => router.push('/passengers/learners')}
-            className="inline-flex items-center whitespace-nowrap px-4 py-2 border border-transparent rounded-lg shadow-sm bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="inline-flex flex-1 justify-center sm:flex-none items-center whitespace-nowrap px-4 py-2 border border-transparent rounded-lg shadow-sm bg-green-600 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Student

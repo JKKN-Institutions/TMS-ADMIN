@@ -100,8 +100,8 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
               <h2 className="text-lg font-semibold text-gray-900">{driver.name}</h2>
               <ActiveBadge isActive={driver.isActive} />
             </div>
-            <p className="text-sm text-gray-500">{driver.designation || '—'}</p>
-            <p className="text-sm text-gray-500">{driver.email || '—'}</p>
+            <p className="break-words text-sm text-gray-500">{driver.designation || '—'}</p>
+            <p className="break-words text-sm text-gray-500">{driver.email || '—'}</p>
           </div>
         </div>
       </div>

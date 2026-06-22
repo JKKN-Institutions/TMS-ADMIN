@@ -41,6 +41,8 @@ export async function GET(
       departmentIds: [learnerRow.department_id],
       routeIds: [learnerRow.transport_route_id],
       stopIds: [learnerRow.transport_stop_id],
+      programIds: [learnerRow.program_id],
+      semesterIds: [learnerRow.semester_id],
     });
 
     return NextResponse.json({ success: true, data: mapLearner(learnerRow, refs) });

@@ -18,7 +18,6 @@ export async function GET() {
 
     // Fetch all analytics data in parallel
     const [
-      paymentsData,
       studentsData,
       routesData,
       driversData,
@@ -26,7 +25,6 @@ export async function GET() {
       grievancesData,
       bookingsData
     ] = await Promise.all([
-      supabase.from('payments').select('*').order('created_at', { ascending: false }),
       supabase.from('students').select('*').order('created_at', { ascending: false }),
       supabase.from('routes').select('*').order('created_at', { ascending: false }),
       supabase.from('drivers').select('*').order('created_at', { ascending: false }),
@@ -36,9 +34,6 @@ export async function GET() {
     ]);
 
     // Check for errors
-    if (paymentsData.error) {
-      console.error('Payments error:', paymentsData.error);
-    }
     if (studentsData.error) {
       console.error('Students error:', studentsData.error);
     }
@@ -61,7 +56,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        payments: paymentsData.data || [],
+        payments: [],
         students: studentsData.data || [],
         routes: routesData.data || [],
         drivers: driversData.data || [],

@@ -6,7 +6,6 @@ import {
   Vehicle,
   Schedule,
   Booking,
-  Payment,
   Notification,
   Grievance,
   DashboardStats
@@ -59,7 +58,6 @@ export class DatabaseService {
         { count: totalVehicles },
         { count: totalBookings },
         { count: activeBookings },
-        { count: pendingPayments },
         { count: openGrievances }
       ] = await Promise.all([
         supabase.from('students').select('*', { count: 'exact', head: true }),
@@ -68,7 +66,6 @@ export class DatabaseService {
         supabase.from('tms_vehicle').select('*', { count: 'exact', head: true }),
         supabase.from('bookings').select('*', { count: 'exact', head: true }),
         supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
-        supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('grievances').select('*', { count: 'exact', head: true }).eq('status', 'open')
       ])
 
@@ -77,15 +74,6 @@ export class DatabaseService {
       const todayStr = today.getFullYear() + '-' + 
                       String(today.getMonth() + 1).padStart(2, '0') + '-' + 
                       String(today.getDate()).padStart(2, '0')
-      const { data: todayPayments } = await supabase
-        .from('payments')
-        .select('amount')
-        .eq('status', 'paid')
-        .gte('created_at', `${todayStr}T00:00:00`)
-        .lt('created_at', `${todayStr}T23:59:59`)
-
-      const todayRevenue = todayPayments?.reduce((sum, payment) => sum + (payment.amount || 0), 0) || 0
-
       // Get today's bookings
       const { count: todayBookings } = await supabase
         .from('bookings')
@@ -102,9 +90,9 @@ export class DatabaseService {
         totalBookings: totalBookings || 0,
         activeBookings: activeBookings || 0,
         todayBookings: todayBookings || 0,
-        pendingPayments: pendingPayments || 0,
+        pendingPayments: 0,
         pendingGrievances: openGrievances || 0,
-        todayRevenue: todayRevenue || 0,
+        todayRevenue: 0,
         maintenanceAlerts: 0
       }
     } catch (error) {
@@ -154,32 +142,6 @@ export class DatabaseService {
             details: `Route: ${Array.isArray(booking.routes) ? booking.routes[0]?.route_name : (booking.routes as any)?.route_name || 'Unknown Route'}`,
             timestamp: booking.created_at,
             status: booking.status
-          })
-        })
-      }
-
-      // Get recent payments
-      const { data: recentPayments } = await supabase
-        .from('payments')
-        .select(`
-          id,
-          created_at,
-          amount,
-          status,
-          students (student_name, roll_number)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (recentPayments) {
-        recentPayments.forEach(payment => {
-          activities.push({
-            id: `payment-${payment.id}`,
-            type: 'payment',
-            message: `Payment of ₹${payment.amount} by ${Array.isArray(payment.students) ? payment.students[0]?.student_name : (payment.students as any)?.student_name || 'Unknown Student'}`,
-            details: `Status: ${payment.status}`,
-            timestamp: payment.created_at,
-            status: payment.status
           })
         })
       }
@@ -245,34 +207,6 @@ export class DatabaseService {
         })
       }
 
-      // Pending payments over 30 days
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-      
-      const { data: overduePayments } = await supabase
-        .from('payments')
-        .select(`
-          id,
-          amount,
-          due_date,
-          students (student_name, roll_number)
-        `)
-        .eq('status', 'pending')
-        .lt('due_date', thirtyDaysAgo.toISOString())
-
-      if (overduePayments) {
-        overduePayments.forEach(payment => {
-          alerts.push({
-            id: `payment-${payment.id}`,
-            type: 'payment',
-            severity: 'medium',
-            title: 'Overdue Payment',
-            message: `Payment of ₹${payment.amount} overdue from ${Array.isArray(payment.students) ? payment.students[0]?.student_name : (payment.students as any)?.student_name}`,
-            timestamp: payment.due_date
-          })
-        })
-      }
-
       // High priority unresolved grievances
       const { data: urgentGrievances } = await supabase
         .from('grievances')
@@ -329,17 +263,6 @@ export class DatabaseService {
         avgOccupancy = Math.round((totalOccupancy / routeStats.length) * 100)
       }
 
-      // Calculate payment collection rate
-      const { data: paymentStats } = await supabase
-        .from('payments')
-        .select('status')
-
-      let collectionRate = 0
-      if (paymentStats && paymentStats.length > 0) {
-        const paidPayments = paymentStats.filter(p => p.status === 'paid').length
-        collectionRate = Math.round((paidPayments / paymentStats.length) * 100)
-      }
-
       // Calculate grievance resolution rate
       const { data: grievanceStats } = await supabase
         .from('grievances')
@@ -357,7 +280,7 @@ export class DatabaseService {
       return {
         routeEfficiency: avgOccupancy || 0,
         routeUtilization: avgOccupancy || 0,
-        paymentCollection: collectionRate || 0,
+        paymentCollection: 0,
         grievanceResolution: resolutionRate || 0,
         onTimePerformance: 95, // Mock value
         systemUptime: systemUptime || 99.5
@@ -808,51 +731,6 @@ export class DatabaseService {
     }
   }
 
-  // Payments
-  static async getPayments() {
-    try {
-      console.log('Fetching payments from database...');
-      
-      const { data, error } = await supabase
-        .from('payments')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) {
-        console.error('Supabase error in getPayments:', error)
-        return []
-      }
-
-      if (!data) {
-        console.log('No payments data returned from database')
-        return []
-      }
-
-      console.log(`Found ${data.length} payments in database`);
-
-      return data.map(payment => ({
-        ...payment,
-        // Default relationship fields
-        student_name: null,
-        roll_number: null,
-        trip_date: null,
-        // Safe defaults
-        amount: payment.amount || 0,
-        status: payment.status || 'pending',
-        payment_method: payment.payment_method || 'unknown',
-        transaction_id: payment.transaction_id || null,
-        description: payment.description || 'Payment'
-      })) || []
-
-    } catch (error) {
-      console.error('Error fetching payments:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        error: error
-      })
-      return []
-    }
-  }
-
   // Schedules
   static async getSchedules() {
     try {
@@ -1144,17 +1022,6 @@ export class DatabaseService {
   }
 
   // Helper methods
-  static calculatePaymentStatus(payments: any[]) {
-    if (!payments.length) return 'no_payments'
-    
-    const hasPending = payments.some(p => p.status === 'pending')
-    const hasOverdue = payments.some(p => p.status === 'overdue')
-    
-    if (hasOverdue) return 'overdue'
-    if (hasPending) return 'pending'
-    return 'paid'
-  }
-
   static calculateMaintenanceStatus(maintenanceDue: string | null) {
     if (!maintenanceDue) return 'unknown'
     
@@ -1328,7 +1195,6 @@ export class DatabaseService {
           fitness_expiry: vehicleData.fitnessExpiry || null,
           next_maintenance: vehicleData.nextMaintenance || null,
           mileage: vehicleData.mileage || 0,
-          purchase_date: vehicleData.purchaseDate || null,
           chassis_number: vehicleData.chassisNumber || null,
           engine_number: vehicleData.engineNumber || null,
           gps_device_id: vehicleData.gpsDeviceId || null,

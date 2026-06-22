@@ -1,169 +1,194 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextResponse, type NextRequest } from 'next/server';
+import { withAuth, type AuthContext } from '@/lib/api/with-auth';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+import { LEARNER_SELECT, mapLearner, type LearnerRow } from '@/lib/passengers/types';
+import { loadPassengerRefs } from '@/lib/passengers/refs';
+import { notifyLearner } from '@/lib/notifications/notify';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
-export async function GET(request: NextRequest) {
+/**
+ * Admin Transport Enrollment — DIRECT ALLOCATION (no student self-service, no
+ * request queue). An admin allocates / changes / clears a bus-required learner's
+ * route + boarding stop, written straight onto learners_profiles
+ * (transport_route_id / transport_stop_id).
+ *
+ *   GET   -> bus-required active learners (+ current allocation) + route/stop options
+ *   PATCH -> { learnerId, routeId, stopId } to allocate/change; { learnerId, routeId:null } to clear
+ *
+ * Replaces the legacy enrollment-requests routes (which queried dropped tables).
+ */
+interface RouteRow {
+  id: string;
+  route_number: string;
+  route_name: string;
+}
+interface StopRow {
+  id: string;
+  route_id: string;
+  stop_name: string;
+  sequence_order: number | null;
+}
+
+async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
+  if (auth.isSuperAdmin) return true;
+  const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: permission });
+  return !!data;
+}
+
+async function handleGet(_request: NextRequest, auth: AuthContext) {
   try {
-    // Create Supabase admin client
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Server configuration error' },
-        { status: 500 }
-      );
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.ENROLLMENT_VIEW))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
+    const svc = createServiceRoleClient();
+
+    // All bus-required learners (NOT lifecycle-filtered): this is an allocation
+    // tool, so admins must be able to allocate not-yet-active learners too. (The
+    // read-only Learners *roster* page filters to active; enrollment does not.)
+    const learnersRes = await svc
+      .from('learners_profiles')
+      .select(LEARNER_SELECT)
+      .eq('bus_required', true)
+      .order('first_name', { ascending: true });
+
+    if (learnersRes.error) {
+      if ((learnersRes.error as { code?: string }).code === '42P01') {
+        return NextResponse.json({ success: true, data: { learners: [], routes: [] } });
       }
-    });
-
-    // Fetch all enrollment requests with related data
-    const { data: requests, error: requestsError } = await supabaseAdmin
-      .from('transport_enrollment_requests')
-      .select(`
-        id,
-        student_id,
-        preferred_route_id,
-        preferred_stop_id,
-        request_status,
-        request_type,
-        semester_id,
-        academic_year,
-        requested_at,
-        approved_at,
-        approved_by,
-        rejection_reason,
-        admin_notes,
-        special_requirements,
-        students!transport_enrollment_requests_student_id_fkey (
-          id,
-          student_name,
-          email,
-          mobile,
-          roll_number,
-          father_name,
-          mother_name,
-          parent_mobile,
-          departments!students_department_id_fkey (
-            department_name
-          ),
-          programs!students_program_id_fkey (
-            program_name,
-            degree_name
-          )
-        ),
-        routes!transport_enrollment_requests_preferred_route_id_fkey (
-          id,
-          route_number,
-          route_name,
-          start_location,
-          end_location,
-          fare,
-          total_capacity,
-          current_passengers,
-          status
-        ),
-        route_stops!transport_enrollment_requests_preferred_stop_id_fkey (
-          id,
-          stop_name,
-          stop_time,
-          sequence_order,
-          is_major_stop
-        )
-      `)
-      .order('requested_at', { ascending: false });
-
-    if (requestsError) {
-      console.error('Error fetching enrollment requests:', requestsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch enrollment requests' },
-        { status: 500 }
-      );
+      console.error('admin enrollment learners error:', learnersRes.error);
+      return NextResponse.json({ error: 'Failed to fetch learners' }, { status: 500 });
     }
 
-    // Format the data for easier consumption
-    const formattedRequests = requests.map(request => ({
-      id: request.id,
-      student_id: request.student_id,
-      preferred_route_id: request.preferred_route_id,
-      preferred_stop_id: request.preferred_stop_id,
-      request_status: request.request_status,
-      request_type: request.request_type,
-      semester_id: request.semester_id,
-      academic_year: request.academic_year,
-      requested_at: request.requested_at,
-      approved_at: request.approved_at,
-      approved_by: request.approved_by,
-      rejection_reason: request.rejection_reason,
-      admin_notes: request.admin_notes,
-      special_requirements: request.special_requirements,
-      student: {
-        id: request.students?.id,
-        student_name: request.students?.student_name || 'N/A',
-        email: request.students?.email || 'N/A',
-        mobile: request.students?.mobile || 'N/A',
-        roll_number: request.students?.roll_number || 'N/A',
-        father_name: request.students?.father_name || 'N/A',
-        mother_name: request.students?.mother_name || 'N/A',
-        parent_mobile: request.students?.parent_mobile || 'N/A',
-        department: {
-          department_name: request.students?.departments?.department_name || 'N/A'
-        },
-        program: {
-          program_name: request.students?.programs?.program_name || 'N/A',
-          degree_name: request.students?.programs?.degree_name || 'N/A'
-        }
-      },
-      route: request.routes ? {
-        id: request.routes.id,
-        route_number: request.routes.route_number,
-        route_name: request.routes.route_name,
-        start_location: request.routes.start_location,
-        end_location: request.routes.end_location,
-        fare: request.routes.fare,
-        total_capacity: request.routes.total_capacity,
-        current_passengers: request.routes.current_passengers || 0,
-        status: request.routes.status
-      } : null,
-      stop: request.route_stops ? {
-        id: request.route_stops.id,
-        stop_name: request.route_stops.stop_name,
-        stop_time: request.route_stops.stop_time,
-        sequence_order: request.route_stops.sequence_order,
-        is_major_stop: request.route_stops.is_major_stop
-      } : null
-    }));
+    const rows = (learnersRes.data ?? []) as unknown as LearnerRow[];
+    const refs = await loadPassengerRefs(svc, {
+      institutionIds: rows.map((r) => r.institution_id),
+      departmentIds: rows.map((r) => r.department_id),
+      routeIds: rows.map((r) => r.transport_route_id),
+      stopIds: rows.map((r) => r.transport_stop_id),
+      programIds: rows.map((r) => r.program_id),
+      semesterIds: rows.map((r) => r.semester_id),
+    });
+    const learners = rows.map((r) => mapLearner(r, refs));
 
-    // Calculate summary statistics
-    const stats = {
-      total: formattedRequests.length,
-      pending: formattedRequests.filter(r => r.request_status === 'pending').length,
-      approved: formattedRequests.filter(r => r.request_status === 'approved').length,
-      rejected: formattedRequests.filter(r => r.request_status === 'rejected').length,
-      thisMonth: formattedRequests.filter(r => {
-        const requestDate = new Date(r.requested_at);
-        const now = new Date();
-        return requestDate.getMonth() === now.getMonth() && 
-               requestDate.getFullYear() === now.getFullYear();
-      }).length
-    };
+    const routesRes = await svc
+      .from('tms_route')
+      .select('id, route_number, route_name')
+      .eq('status', 'active')
+      .order('route_number', { ascending: true });
+    const routes = (routesRes.data ?? []) as RouteRow[];
+    const routeIds = routes.map((r) => r.id);
+    const stopsRes = routeIds.length
+      ? await svc
+          .from('tms_route_stop')
+          .select('id, route_id, stop_name, sequence_order')
+          .in('route_id', routeIds)
+          .order('sequence_order', { ascending: true })
+      : { data: [] as StopRow[] };
+    const stops = (stopsRes.data ?? []) as StopRow[];
+    const stopsByRoute = new Map<string, { id: string; name: string }[]>();
+    for (const s of stops) {
+      const arr = stopsByRoute.get(s.route_id) ?? [];
+      arr.push({ id: s.id, name: s.stop_name });
+      stopsByRoute.set(s.route_id, arr);
+    }
+    const routeOptions = routes.map((r) => ({
+      id: r.id,
+      label: `${r.route_number} · ${r.route_name}`,
+      stops: stopsByRoute.get(r.id) ?? [],
+    }));
 
     return NextResponse.json({
       success: true,
-      requests: formattedRequests,
-      stats: stats,
-      count: formattedRequests.length
+      data: { learners, routes: routeOptions },
+      count: learners.length,
     });
-
-  } catch (error: any) {
-    console.error('Error in enrollment requests API:', error);
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    );
+  } catch (e) {
+    console.error('admin enrollment GET error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-} 
+}
+
+async function handlePatch(request: NextRequest, auth: AuthContext) {
+  try {
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.ENROLLMENT_MANAGE))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as {
+      learnerId?: string;
+      routeId?: string | null;
+      stopId?: string | null;
+    };
+    if (!body.learnerId) {
+      return NextResponse.json({ error: 'learnerId is required' }, { status: 400 });
+    }
+
+    const svc = createServiceRoleClient();
+
+    // Clear allocation.
+    if (!body.routeId) {
+      const upd = await svc
+        .from('learners_profiles')
+        .update({ transport_route_id: null, transport_stop_id: null })
+        .eq('id', body.learnerId)
+        .eq('bus_required', true)
+        .select('id')
+        .maybeSingle();
+      if (upd.error) {
+        console.error('admin enrollment clear error:', upd.error);
+        return NextResponse.json({ error: 'Failed to clear allocation' }, { status: 500 });
+      }
+      if (!upd.data) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
+      await notifyLearner(svc, {
+        learnerId: body.learnerId,
+        actorId: auth.userId,
+        title: 'Transport allocation removed',
+        body: 'Your transport route allocation has been removed. Contact the transport office if this is unexpected.',
+        url: '/student/routes',
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Allocate / change — stop is required and must belong to the route.
+    if (!body.stopId) {
+      return NextResponse.json({ error: 'stopId is required when a route is set' }, { status: 400 });
+    }
+    const stopChk = await svc
+      .from('tms_route_stop')
+      .select('id')
+      .eq('id', body.stopId)
+      .eq('route_id', body.routeId)
+      .maybeSingle();
+    if (!stopChk.data) {
+      return NextResponse.json({ error: 'Selected stop does not belong to the route' }, { status: 400 });
+    }
+
+    const upd = await svc
+      .from('learners_profiles')
+      .update({ transport_route_id: body.routeId, transport_stop_id: body.stopId })
+      .eq('id', body.learnerId)
+      .eq('bus_required', true)
+      .select('id')
+      .maybeSingle();
+    if (upd.error) {
+      console.error('admin enrollment allocate error:', upd.error);
+      return NextResponse.json({ error: 'Failed to update allocation' }, { status: 500 });
+    }
+    if (!upd.data) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
+    await notifyLearner(svc, {
+      learnerId: body.learnerId,
+      actorId: auth.userId,
+      title: 'Transport allocated',
+      body: 'You have been allocated to a transport route. View it under My Route, and your boarding pass is ready.',
+      url: '/student/routes',
+    });
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    console.error('admin enrollment PATCH error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export const GET = withAuth((request, auth) => handleGet(request, auth));
+export const PATCH = withAuth((request, auth) => handlePatch(request, auth));

@@ -9,18 +9,15 @@ export const ENUM_FIELDS: Record<string, readonly string[]> = {
   status: ['active', 'maintenance', 'retired'],
 };
 
-export const INT_FIELDS = ['capacity', 'model_year', 'maintenance_interval_days'] as const;
+export const INT_FIELDS = ['capacity', 'model_year'] as const;
 
 export const NUM_FIELDS = [
-  'mileage', 'gross_vehicle_weight', 'purchase_cost', 'insurance_amount', 'current_odometer',
-  'maintenance_interval_km', 'last_service_odometer', 'next_service_odometer', 'monthly_emi',
-  'operating_cost_per_km',
+  'mileage', 'gross_vehicle_weight', 'monthly_emi', 'operating_cost_per_km',
 ] as const;
 
 export const DATE_FIELDS = [
-  'purchase_date', 'warranty_expiry', 'rc_expiry_date', 'permit_expiry_date',
-  'pollution_expiry_date', 'road_tax_expiry_date', 'fitness_expiry', 'insurance_expiry',
-  'assignment_date', 'last_maintenance', 'next_maintenance', 'fire_extinguisher_expiry',
+  'permit_expiry_date', 'pollution_expiry_date', 'road_tax_expiry_date', 'fitness_expiry',
+  'insurance_expiry', 'last_maintenance', 'next_maintenance', 'fire_extinguisher_expiry',
 ] as const;
 
 export const BOOL_FIELDS = ['live_tracking_enabled', 'first_aid_available'] as const;
@@ -28,9 +25,9 @@ export const BOOL_FIELDS = ['live_tracking_enabled', 'first_aid_available'] as c
 export const UUID_FIELDS = ['gps_device_id', 'assigned_driver_id'] as const;
 
 export const TEXT_FIELDS = [
-  'registration_number', 'manufacturer', 'model', 'color', 'vendor_name', 'permit_number',
+  'registration_number', 'manufacturer', 'model', 'color', 'permit_number',
   'pollution_certificate_number', 'insurance_provider', 'insurance_policy_number',
-  'assigned_driver_name', 'gps_provider', 'sim_number', 'service_vendor', 'fuel_card_number',
+  'assigned_driver_name', 'gps_provider', 'sim_number', 'fuel_card_number',
   'emergency_contact_name', 'emergency_contact_phone', 'chassis_number', 'engine_number',
   'remarks', 'rc_document_url', 'insurance_document_url', 'fitness_certificate_url',
   'permit_document_url',

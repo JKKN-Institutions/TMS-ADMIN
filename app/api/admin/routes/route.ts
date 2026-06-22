@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { withAuth } from '@/lib/api/with-auth';
+import { withAuth, type AuthContext } from '@/lib/api/with-auth';
+import { logActivity } from '@/lib/activity/log';
 
 async function getRoutes() {
   try {
@@ -17,10 +18,12 @@ async function getRoutes() {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Fetch routes from database
+    // Fetch routes with their stops embedded (single query — the list page only
+    // needs route_stops.length, so we select just the stop ids). This replaces
+    // the old per-route getRouteStops calls the client used to fan out.
     const { data: routes, error } = await supabase
       .from('tms_route')
-      .select('*')
+      .select('*, route_stops:tms_route_stop(id)')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -46,7 +49,7 @@ async function getRoutes() {
   }
 }
 
-async function postRoute(request: Request) {
+async function postRoute(request: NextRequest, auth: AuthContext) {
   try {
     const { action, routeId, routeData, stops } = await request.json();
 
@@ -55,7 +58,7 @@ async function postRoute(request: Request) {
     }
 
     if (action === 'addRoute') {
-      return await addRoute(routeData, stops);
+      return await addRoute(request, routeData, stops, auth);
     }
 
     return NextResponse.json(
@@ -113,7 +116,7 @@ async function getRouteStops(routeId: string) {
   }
 }
 
-async function addRoute(routeData: any, stops: any[]) {
+async function addRoute(request: NextRequest, routeData: any, stops: any[], auth: AuthContext) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -160,6 +163,14 @@ async function addRoute(routeData: any, stops: any[]) {
       }
     }
 
+    await logActivity(auth, request, {
+      module: 'routes',
+      action: 'create',
+      entityType: 'tms_route',
+      entityId: route.id,
+      entityLabel: route.route_number ?? route.route_name,
+      description: `Created route ${route.route_number ?? route.route_name}`,
+    });
     return NextResponse.json({
       success: true,
       data: route
@@ -174,7 +185,7 @@ async function addRoute(routeData: any, stops: any[]) {
   }
 }
 
-async function putRoute(request: NextRequest) {
+async function putRoute(request: NextRequest, auth: AuthContext) {
   try {
     const { routeId, routeData } = await request.json();
 
@@ -233,6 +244,14 @@ async function putRoute(request: NextRequest) {
       );
     }
 
+    await logActivity(auth, request, {
+      module: 'routes',
+      action: 'update',
+      entityType: 'tms_route',
+      entityId: updatedRoute?.id ?? routeId,
+      entityLabel: updatedRoute?.route_number ?? updatedRoute?.route_name,
+      description: `Updated route ${updatedRoute?.route_number ?? routeId}`,
+    });
     return NextResponse.json({
       success: true,
       data: updatedRoute,
@@ -249,5 +268,5 @@ async function putRoute(request: NextRequest) {
 }
 
 export const GET = withAuth(() => getRoutes());
-export const POST = withAuth((request) => postRoute(request));
-export const PUT = withAuth((request) => putRoute(request)); 
+export const POST = withAuth((request, auth) => postRoute(request, auth));
+export const PUT = withAuth((request, auth) => putRoute(request, auth));

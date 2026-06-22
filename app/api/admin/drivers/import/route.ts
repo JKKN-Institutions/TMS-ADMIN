@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 
 interface ImportRow {
   staffId?: string;
@@ -103,7 +104,15 @@ async function importDriverOps(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    return NextResponse.json({ success: true, updated, failed: rows.length - updated, results });
+    const failed = rows.length - updated;
+    await logActivity(auth, request, {
+      module: 'drivers',
+      action: 'import',
+      entityType: 'tms_driver',
+      description: `Imported ${updated} driver(s), ${failed} failed`,
+      metadata: { imported: updated, failed },
+    });
+    return NextResponse.json({ success: true, updated, failed, results });
   } catch (e) {
     console.error('Driver import error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

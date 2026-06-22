@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 
 // Bulk-upload endpoint for the Vehicles module. Mirrors the Drivers import
 // (app/api/admin/drivers/import) but a vehicle is a STANDALONE entity whose
@@ -93,10 +94,6 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
         return;
       }
       const model = str(pick(r, 'model'));
-      if (!model) {
-        results.push({ row: i + 1, registration_number: reg, status: 'error', message: 'model is required' });
-        return;
-      }
       const capacity = parseInt(String(pick(r, 'capacity') ?? '')) || 0;
       if (capacity <= 0) {
         results.push({ row: i + 1, registration_number: reg, status: 'error', message: 'capacity must be greater than 0' });
@@ -112,7 +109,7 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
         reg,
         payload: {
           registration_number: reg,
-          model,
+          model: model || null,
           capacity,
           vehicle_type: enumOrNull(pick(r, 'vehicle_type', 'vehicleType'), ['bus','van','car','truck','ambulance','other']),
           manufacturer: str(pick(r, 'manufacturer')) || null,
@@ -123,11 +120,6 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
           status: STATUSES.includes(status) ? status : 'active',
           mileage: mileage != null && mileage !== '' ? parseFloat(String(mileage)) || 0 : 0,
           ownership_type: enumOrNull(pick(r, 'ownership_type', 'ownershipType'), ['owned','leased','rented']),
-          purchase_date: toDate(pick(r, 'purchase_date', 'purchaseDate')),
-          purchase_cost: numOrNull(pick(r, 'purchase_cost', 'purchaseCost')),
-          vendor_name: str(pick(r, 'vendor_name', 'vendorName')) || null,
-          warranty_expiry: toDate(pick(r, 'warranty_expiry', 'warrantyExpiry')),
-          rc_expiry_date: toDate(pick(r, 'rc_expiry_date', 'rcExpiryDate')),
           permit_number: str(pick(r, 'permit_number', 'permitNumber')) || null,
           permit_expiry_date: toDate(pick(r, 'permit_expiry_date', 'permitExpiryDate')),
           pollution_certificate_number: str(pick(r, 'pollution_certificate_number', 'pollutionCertificateNumber')) || null,
@@ -137,20 +129,12 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
           insurance_provider: str(pick(r, 'insurance_provider', 'insuranceProvider')) || null,
           insurance_policy_number: str(pick(r, 'insurance_policy_number', 'insurancePolicyNumber')) || null,
           insurance_expiry: toDate(pick(r, 'insurance_expiry', 'insuranceExpiry')),
-          insurance_amount: numOrNull(pick(r, 'insurance_amount', 'insuranceAmount')),
-          assignment_date: toDate(pick(r, 'assignment_date', 'assignmentDate')),
           gps_device_id: str(pick(r, 'gps_device_id', 'gpsDeviceId')) || null,
           live_tracking_enabled: toBool(pick(r, 'live_tracking_enabled', 'liveTrackingEnabled')),
           gps_provider: str(pick(r, 'gps_provider', 'gpsProvider')) || null,
           sim_number: str(pick(r, 'sim_number', 'simNumber')) || null,
           last_maintenance: toDate(pick(r, 'last_maintenance', 'lastMaintenance')),
           next_maintenance: toDate(pick(r, 'next_maintenance', 'nextMaintenance')),
-          current_odometer: numOrNull(pick(r, 'current_odometer', 'currentOdometer')),
-          maintenance_interval_km: numOrNull(pick(r, 'maintenance_interval_km', 'maintenanceIntervalKm')),
-          maintenance_interval_days: intOrNull(pick(r, 'maintenance_interval_days', 'maintenanceIntervalDays')),
-          last_service_odometer: numOrNull(pick(r, 'last_service_odometer', 'lastServiceOdometer')),
-          next_service_odometer: numOrNull(pick(r, 'next_service_odometer', 'nextServiceOdometer')),
-          service_vendor: str(pick(r, 'service_vendor', 'serviceVendor')) || null,
           monthly_emi: numOrNull(pick(r, 'monthly_emi', 'monthlyEmi')),
           fuel_card_number: str(pick(r, 'fuel_card_number', 'fuelCardNumber')) || null,
           operating_cost_per_km: numOrNull(pick(r, 'operating_cost_per_km', 'operatingCostPerKm')),
@@ -203,6 +187,13 @@ async function importVehicles(request: NextRequest, auth: AuthContext) {
 
     results.sort((a, b) => a.row - b.row);
     const failed = results.filter((r) => r.status === 'error').length;
+    await logActivity(auth, request, {
+      module: 'vehicles',
+      action: 'import',
+      entityType: 'tms_vehicle',
+      description: `Imported vehicles: ${created} created, ${updated} updated, ${failed} failed`,
+      metadata: { created, updated, failed },
+    });
     return NextResponse.json({ success: true, created, updated, failed, results });
   } catch (e) {
     console.error('Vehicle import error:', e);

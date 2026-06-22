@@ -774,6 +774,16 @@ html {
     display: none;
   }
 
+  /* Student/driver/boarding shells slide the sidebar in via a hamburger on mobile
+     (the admin uses the bottom nav instead). When opened it must sit ABOVE the
+     z-40 overlay rendered by those layouts. */
+  .sidebar-modern.open {
+    display: flex;
+    z-index: 50;
+    width: 17rem;
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.25), 0 8px 10px -6px rgb(0 0 0 / 0.2);
+  }
+
   .main-content {
     margin-left: 0;
   }

@@ -224,21 +224,6 @@ export interface Booking {
   updatedAt: Date;
 }
 
-// Payment Types
-export interface Payment {
-  id: string;
-  studentId: string;
-  bookingId?: string;
-  amount: number;
-  paymentType: 'trip_fare' | 'fine' | 'semester_fee' | 'registration';
-  paymentMethod: 'cash' | 'upi' | 'card' | 'net_banking' | 'wallet';
-  status: 'completed' | 'pending' | 'failed' | 'refunded';
-  transactionId?: string;
-  description: string;
-  student?: Student;
-  createdAt: Date;
-}
-
 // Notification Types
 export interface Notification {
   id: string;
@@ -372,16 +357,6 @@ export interface BookingFilters {
   dateFrom?: string;
   dateTo?: string;
   paymentStatus?: Booking['paymentStatus'];
-}
-
-export interface PaymentFilters {
-  status?: Payment['status'];
-  paymentType?: Payment['paymentType'];
-  studentId?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  amountFrom?: number;
-  amountTo?: number;
 }
 
 // Table Types

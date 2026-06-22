@@ -6,7 +6,6 @@ import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2 }
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import { DatabaseService } from '@/lib/database';
-import AddRouteModal from '@/components/add-route-modal';
 import { RouteImportDialog } from './route-import-dialog';
 import { getRouteColumns, type RouteRow } from './columns';
 
@@ -18,7 +17,6 @@ const RoutesPage = () => {
   const [user, setUser] = useState<any>(null);
   const [routes, setRoutes] = useState<RouteRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
 
   useEffect(() => {
@@ -30,8 +28,9 @@ const RoutesPage = () => {
     fetchRoutes();
   }, []);
 
-  // Fetches routes and enriches each with its stop count + driver/vehicle info
-  // (the API returns bare tms_route rows). Unchanged from the previous card view.
+  // Single request: the API embeds route_stops (ids only) via a nested select,
+  // and the table/stats need nothing else — no per-route stop fetches, no
+  // driver/vehicle list downloads (the columns never render those).
   const fetchRoutes = async () => {
     try {
       setLoading(true);
@@ -39,73 +38,13 @@ const RoutesPage = () => {
       const routesResult = await routesResponse.json();
       if (!routesResult.success) throw new Error(routesResult.error || 'Failed to fetch routes');
 
-      const routesData = routesResult.data || [];
-      let allDrivers: any = null;
-      let allVehicles: any = null;
+      const routesData: RouteRow[] = (routesResult.data || []).map((route: any) => ({
+        ...route,
+        route_stops: route.route_stops || [],
+        total_capacity: route.total_capacity || route.capacity || 0,
+      }));
 
-      const enhancedRoutes = await Promise.all(
-        (routesData || []).map(async (route: any) => {
-          try {
-            const stopsResponse = await fetch('/api/admin/routes', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'getRouteStops', routeId: route.id }),
-            });
-            const stopsResult = await stopsResponse.json();
-            const routeStops = stopsResult.success ? stopsResult.data : [];
-
-            let driverInfo = route.drivers;
-            let vehicleInfo = route.vehicles;
-
-            if (route.driver_id && !route.drivers) {
-              try {
-                if (!allDrivers) {
-                  const driversResponse = await fetch('/api/admin/drivers');
-                  const driversResult = await driversResponse.json();
-                  allDrivers = driversResult.success ? driversResult.data : [];
-                }
-                const foundDriver = allDrivers.find((d: any) => d.id === route.driver_id);
-                if (foundDriver) {
-                  driverInfo = { id: foundDriver.id, name: foundDriver.driver_name || foundDriver.name };
-                }
-              } catch {
-                /* non-fatal: leave driver unassigned */
-              }
-            }
-
-            if (route.vehicle_id && !route.vehicles) {
-              try {
-                if (!allVehicles) {
-                  const vehiclesResponse = await fetch('/api/admin/vehicles');
-                  const vehiclesResult = await vehiclesResponse.json();
-                  allVehicles = vehiclesResult.success ? vehiclesResult.data : [];
-                }
-                const foundVehicle = allVehicles.find((v: any) => v.id === route.vehicle_id);
-                if (foundVehicle) {
-                  vehicleInfo = {
-                    id: foundVehicle.id,
-                    registration_number: foundVehicle.registration_number || foundVehicle.vehicle_number,
-                  };
-                }
-              } catch {
-                /* non-fatal: leave vehicle unassigned */
-              }
-            }
-
-            return {
-              ...route,
-              route_stops: routeStops || [],
-              drivers: driverInfo || null,
-              vehicles: vehicleInfo || null,
-              total_capacity: route.total_capacity || route.capacity || 0,
-            };
-          } catch {
-            return route;
-          }
-        })
-      );
-
-      setRoutes(enhancedRoutes);
+      setRoutes(routesData);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error occurred';
       toast.error(`Failed to load routes: ${message}`);
@@ -198,8 +137,9 @@ const RoutesPage = () => {
             <button onClick={() => setIsImportOpen(true)} className={outlineBtn}>
               <Upload className="h-4 w-4" /> Import Routes
             </button>
+            {/* Add Route is an in-module page (no popup), matching the drivers module. */}
             <button
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={() => router.push('/routes/new')}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
             >
               <Plus className="h-4 w-4" /> Add Route
@@ -252,7 +192,6 @@ const RoutesPage = () => {
         }
       />
 
-      <AddRouteModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onSuccess={fetchRoutes} />
       <RouteImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={fetchRoutes} />
     </div>
   );

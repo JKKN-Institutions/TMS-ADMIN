@@ -25,10 +25,17 @@ async function getDashboard() {
       vehiclesCount,
       totalBookings,
       confirmedBookings,
-      pendingPayments,
       openGrievances
     ] = await Promise.all([
-      supabase.from('students').select('*', { count: 'exact', head: true }),
+      // "Students" on the TMS dashboard = transport learners, counted EXACTLY like
+      // the Passengers > Learners page: bus_required = true AND lifecycle_status =
+      // 'active' (current learners only — excludes enquiry/reserved/account prospects).
+      // The legacy `students` table is dropped (would always count 0).
+      supabase
+        .from('learners_profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('bus_required', true)
+        .eq('lifecycle_status', 'active'),
       // Drivers live in MyJKKN `staff` (role_key='driver') — same source as the
       // /drivers page. The legacy `drivers` table is empty/absent (would count 0).
       supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role_key', 'driver'),
@@ -38,19 +45,9 @@ async function getDashboard() {
       supabase.from('tms_vehicle').select('*', { count: 'exact', head: true }),
       supabase.from('bookings').select('*', { count: 'exact', head: true }),
       supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
-      supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('grievances').select('*', { count: 'exact', head: true }).eq('status', 'open')
+      // Transport grievances live in tms_grievance now (legacy `grievances` dropped).
+      supabase.from('tms_grievance').select('*', { count: 'exact', head: true }).in('status', ['open', 'in_progress'])
     ]);
-
-    // Calculate today's revenue
-    const today = new Date().toISOString().split('T')[0];
-    const { data: todayPayments } = await supabase
-      .from('payments')
-      .select('amount')
-      .eq('status', 'completed')
-      .gte('created_at', today);
-
-    const todayRevenue = todayPayments?.reduce((sum, payment) => sum + (payment.amount || 0), 0) || 0;
 
     const stats = {
       totalStudents: studentsCount.count || 0,
@@ -59,10 +56,10 @@ async function getDashboard() {
       totalVehicles: vehiclesCount.count || 0,
       totalBookings: totalBookings.count || 0,
       confirmedBookings: confirmedBookings.count || 0,
-      pendingPayments: pendingPayments.count || 0,
+      pendingPayments: 0,
       openGrievances: openGrievances.count || 0,
-      todayRevenue: todayRevenue,
-      totalRevenue: todayRevenue // Simplified for now
+      todayRevenue: 0,
+      totalRevenue: 0
     };
 
     // Fetch recent activities (simplified)
@@ -74,7 +71,6 @@ async function getDashboard() {
 
     // Create mock critical alerts
     const criticalAlerts = [
-      ...((pendingPayments.count || 0) > 10 ? [{ type: 'payment', message: `${pendingPayments.count || 0} pending payments require attention` }] : []),
       ...((openGrievances.count || 0) > 5 ? [{ type: 'grievance', message: `${openGrievances.count || 0} unresolved grievances` }] : [])
     ];
 

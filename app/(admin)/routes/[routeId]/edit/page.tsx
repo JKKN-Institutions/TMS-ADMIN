@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Clock, Loader2, MapPin, Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
+import { SelectMenu } from '@/components/ui/select-menu';
 import PossibleStopsManager from '@/components/possible-stops-manager';
 
 interface Stop {
@@ -298,20 +299,28 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
 
         <SectionCard title="Assignment">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className={field}>
+            <div className={field}>
               <span className={labelText}>Driver</span>
-              <select className="input mt-1" value={form.driver_id} onChange={(e) => set('driver_id', e.target.value)}>
-                <option value="">Unassigned</option>
-                {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            </label>
-            <label className={field}>
+              <SelectMenu
+                className="mt-1"
+                ariaLabel="Driver"
+                value={form.driver_id}
+                onValueChange={(v) => set('driver_id', v)}
+                placeholder="Unassigned"
+                options={[{ value: '', label: 'Unassigned' }, ...drivers.map((d) => ({ value: d.id, label: d.name }))]}
+              />
+            </div>
+            <div className={field}>
               <span className={labelText}>Vehicle</span>
-              <select className="input mt-1" value={form.vehicle_id} onChange={(e) => set('vehicle_id', e.target.value)}>
-                <option value="">Unassigned</option>
-                {vehicles.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-              </select>
-            </label>
+              <SelectMenu
+                className="mt-1"
+                ariaLabel="Vehicle"
+                value={form.vehicle_id}
+                onValueChange={(v) => set('vehicle_id', v)}
+                placeholder="Unassigned"
+                options={[{ value: '', label: 'Unassigned' }, ...vehicles.map((v) => ({ value: v.id, label: v.label }))]}
+              />
+            </div>
           </div>
         </SectionCard>
 

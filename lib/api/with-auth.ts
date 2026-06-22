@@ -10,6 +10,7 @@ import { createServerClient } from '@supabase/ssr';
  */
 export interface AuthContext {
   userId: string;
+  email: string | null;
   userRole: string;
   isSuperAdmin: boolean;
   institutionId: string | null;
@@ -54,7 +55,7 @@ export function withAuth(handler: AuthenticatedHandler) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, role, is_super_admin, institution_id')
+      .select('id, email, role, is_super_admin, institution_id')
       .eq('id', user.id)
       .single();
 
@@ -64,6 +65,7 @@ export function withAuth(handler: AuthenticatedHandler) {
 
     return handler(request, {
       userId: profile.id,
+      email: profile.email ?? null,
       userRole: profile.role,
       isSuperAdmin: profile.is_super_admin,
       institutionId: profile.institution_id,

@@ -7,9 +7,8 @@ import { ThemeProvider, themeInitScript } from "@/components/theme-provider";
 export const metadata: Metadata = {
   title: "MYJKKN TMS - Admin Portal",
   description: "Transportation Management System - Admin Portal",
-  icons: {
-    icon: "/favicon.ico",
-  },
+  // Favicon comes from the app/icon.png file convention (JKKN logo) — Next
+  // generates the <link rel="icon"> tags automatically.
 };
 
 export default function RootLayout({

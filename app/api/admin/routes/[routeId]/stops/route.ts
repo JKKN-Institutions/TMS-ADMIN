@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { logActivityFromHeaders } from '@/lib/activity/log';
 
 export async function GET(
   request: NextRequest,
@@ -204,6 +205,15 @@ export async function POST(
       );
     }
 
+    await logActivityFromHeaders(request, {
+      module: 'routes',
+      action: 'create',
+      entityType: 'tms_route_stop',
+      entityId: newStop?.id,
+      entityLabel: stopData.stop_name,
+      description: `Added stop ${stopData.stop_name} to route ${routeId}`,
+      metadata: { routeId },
+    });
     return NextResponse.json({
       success: true,
       message: 'Stop added successfully',
@@ -328,6 +338,14 @@ export async function DELETE(
       }
     }
 
+    await logActivityFromHeaders(request, {
+      module: 'routes',
+      action: 'delete',
+      entityType: 'tms_route_stop',
+      entityId: stopId,
+      description: `Deleted stop ${stopId} from route ${routeId}`,
+      metadata: { routeId, stopId },
+    });
     return NextResponse.json({
       success: true,
       message: 'Stop deleted successfully'

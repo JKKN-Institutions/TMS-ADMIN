@@ -66,6 +66,8 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
           <Field label="Mobile" value={learner.mobile} />
           <Field label="Institution" value={learner.institutionName} />
           <Field label="Department" value={learner.departmentName} />
+          <Field label="Program" value={learner.programName} />
+          <Field label="Semester" value={learner.semesterName} />
           <Field label="Lifecycle Status" value={learner.lifecycleStatus?.replace(/_/g, ' ')} />
         </div>
       </SectionCard>

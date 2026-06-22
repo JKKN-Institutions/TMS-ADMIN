@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 
 async function bulkDeleteDriverOps(request: NextRequest, auth: AuthContext) {
   try {
@@ -23,7 +24,15 @@ async function bulkDeleteDriverOps(request: NextRequest, auth: AuthContext) {
       console.error('tms_driver bulk delete error:', error);
       return NextResponse.json({ error: 'Failed to remove driver operational records' }, { status: 500 });
     }
-    return NextResponse.json({ success: true, deleted: count ?? staffIds.length });
+    const deleted = count ?? staffIds.length;
+    await logActivity(auth, request, {
+      module: 'drivers',
+      action: 'delete',
+      entityType: 'tms_driver',
+      description: `Bulk deleted ${deleted} driver(s)`,
+      metadata: { count: deleted, ids: staffIds },
+    });
+    return NextResponse.json({ success: true, deleted });
   } catch (e) {
     console.error('Driver bulk delete error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

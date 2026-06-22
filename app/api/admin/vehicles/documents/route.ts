@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 
 const BUCKET = 'tms-vehicle-documents';
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -56,6 +57,13 @@ async function uploadDocument(request: NextRequest, auth: AuthContext) {
       console.error('Vehicle document upload error:', error);
       return NextResponse.json({ error: 'Failed to upload document' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'vehicles',
+      action: 'upload',
+      entityType: 'tms_vehicle',
+      description: `Uploaded vehicle document: ${file.name}`,
+      metadata: { path, fileName: file.name, fileType: file.type },
+    });
     return NextResponse.json({ success: true, path });
   } catch (e) {
     console.error('Vehicle document upload error:', e);

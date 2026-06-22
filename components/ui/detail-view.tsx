@@ -45,8 +45,8 @@ export function DetailPageHeader({
         ))}
       </nav>
 
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 items-center gap-3">
           {backHref && (
             <Link
               href={backHref}
@@ -61,7 +61,7 @@ export function DetailPageHeader({
             {subtitle && <p className="text-gray-600">{subtitle}</p>}
           </div>
         </div>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">{actions}</div>}
       </div>
     </div>
   );
@@ -94,7 +94,7 @@ export function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-0.5 text-sm font-medium text-gray-900">{empty ? '—' : value}</p>
+      <p className="mt-0.5 break-words text-sm font-medium text-gray-900">{empty ? '—' : value}</p>
     </div>
   );
 }

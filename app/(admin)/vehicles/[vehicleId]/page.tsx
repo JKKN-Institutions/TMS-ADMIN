@@ -111,7 +111,7 @@ export default function VehicleViewPage({ params }: { params: Promise<{ vehicleI
         crumbs={crumbs(vehicle.registration_number)}
         backHref="/vehicles"
         title={vehicle.registration_number}
-        subtitle={vehicle.model}
+        subtitle={vehicle.model ?? undefined}
         actions={
           <>
             <StatusBadge status={vehicle.status} />
@@ -149,19 +149,14 @@ export default function VehicleViewPage({ params }: { params: Promise<{ vehicleI
         </div>
       </SectionCard>
 
-      <SectionCard title="Ownership & purchase">
+      <SectionCard title="Ownership">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Ownership" value={vehicle.ownership_type} />
-          <Field label="Purchase Date" value={fmtDate(vehicle.purchase_date)} />
-          <Field label="Purchase Cost" value={vehicle.purchase_cost} />
-          <Field label="Vendor" value={vehicle.vendor_name} />
-          <Field label="Warranty Expiry" value={fmtDate(vehicle.warranty_expiry)} />
         </div>
       </SectionCard>
 
       <SectionCard title="Compliance & legal">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="RC Expiry" value={fmtDate(vehicle.rc_expiry_date)} />
           <Field label="Permit Number" value={vehicle.permit_number} />
           <Field label="Permit Expiry" value={fmtDate(vehicle.permit_expiry_date)} />
           <Field label="Pollution Cert. No." value={vehicle.pollution_certificate_number} />
@@ -176,14 +171,12 @@ export default function VehicleViewPage({ params }: { params: Promise<{ vehicleI
           <Field label="Provider" value={vehicle.insurance_provider} />
           <Field label="Policy Number" value={vehicle.insurance_policy_number} />
           <Field label="Insurance Expiry" value={fmtDate(vehicle.insurance_expiry)} />
-          <Field label="Insured Amount" value={vehicle.insurance_amount} />
         </div>
       </SectionCard>
 
       <SectionCard title="Driver assignment">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Assigned Driver" value={vehicle.assigned_driver_name} />
-          <Field label="Assignment Date" value={fmtDate(vehicle.assignment_date)} />
         </div>
       </SectionCard>
 
@@ -200,12 +193,6 @@ export default function VehicleViewPage({ params }: { params: Promise<{ vehicleI
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Last Maintenance" value={fmtDate(vehicle.last_maintenance)} />
           <Field label="Next Maintenance" value={fmtDate(vehicle.next_maintenance)} />
-          <Field label="Current Odometer" value={vehicle.current_odometer} />
-          <Field label="Service Interval (km)" value={vehicle.maintenance_interval_km} />
-          <Field label="Service Interval (days)" value={vehicle.maintenance_interval_days != null ? String(vehicle.maintenance_interval_days) : ''} />
-          <Field label="Last Service Odometer" value={vehicle.last_service_odometer} />
-          <Field label="Next Service Odometer" value={vehicle.next_service_odometer} />
-          <Field label="Service Vendor" value={vehicle.service_vendor} />
         </div>
       </SectionCard>
 

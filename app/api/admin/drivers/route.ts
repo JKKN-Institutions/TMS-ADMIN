@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
 import {
   STAFF_SELECT,
   mapStaffToDriver,
@@ -91,6 +92,13 @@ async function createDriver(request: NextRequest, auth: AuthContext) {
       console.error('Create driver tms_driver upsert error:', error);
       return NextResponse.json({ error: 'Failed to save driver details' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'drivers',
+      action: 'create',
+      entityType: 'tms_driver',
+      entityId: data?.staff_id ?? staffId,
+      description: `Created driver for staff ${staffId}`,
+    });
     return NextResponse.json({ success: true, data });
   } catch (e) {
     console.error('Create driver error:', e);
@@ -118,6 +126,13 @@ async function upsertDriverOps(request: NextRequest, auth: AuthContext) {
       console.error('tms_driver upsert error:', error);
       return NextResponse.json({ error: 'Failed to save driver details' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'drivers',
+      action: 'update',
+      entityType: 'tms_driver',
+      entityId: data?.staff_id ?? staffId,
+      description: `Updated driver for staff ${staffId}`,
+    });
     return NextResponse.json({ success: true, data });
   } catch (e) {
     console.error('Driver upsert error:', e);
@@ -139,6 +154,13 @@ async function deleteDriverOps(request: NextRequest, auth: AuthContext) {
       console.error('tms_driver delete error:', error);
       return NextResponse.json({ error: 'Failed to remove driver operational record' }, { status: 500 });
     }
+    await logActivity(auth, request, {
+      module: 'drivers',
+      action: 'delete',
+      entityType: 'tms_driver',
+      entityId: staffId,
+      description: `Deleted driver ops for staff ${staffId}`,
+    });
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error('Driver delete error:', e);

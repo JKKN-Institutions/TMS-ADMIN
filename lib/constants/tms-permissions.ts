@@ -50,6 +50,31 @@ export const TMS_PERMISSIONS = {
 
   ENROLLMENT_VIEW: 'tms.enrollment.view',
   ENROLLMENT_MANAGE: 'tms.enrollment.manage',
+
+  // Learner / Passenger self-service (seeded on the `student` role). Pass-based +
+  // admin-recorded payments (confirmed v1): learner VIEWS payment status (admin
+  // records it), so payment is `.view`, not `.pay`. No per-trip booking key.
+  PASSENGER_SELF_VIEW: 'tms.passenger.self.view',
+  PASSENGER_PAYMENT_VIEW: 'tms.passenger.payment.view',
+  PASSENGER_ENROLL: 'tms.passenger.enrollment.request',
+
+  // Driver self-service (seeded on the `driver` role) — read-only shell in v1.
+  DRIVER_SELF_VIEW: 'tms.driver.self.view',
+
+  // Admin activity log (read-only module; entries are written server-side).
+  ACTIVITY_VIEW: 'tms.activity.view',
+
+  TRANSPORT_YEARS_VIEW: 'tms.transport_years.view',
+  TRANSPORT_YEARS_CREATE: 'tms.transport_years.create',
+  TRANSPORT_YEARS_EDIT: 'tms.transport_years.edit',
+  TRANSPORT_YEARS_DELETE: 'tms.transport_years.delete',
+
+  // Transport fees structures + bill generation.
+  FEES_VIEW: 'tms.fees.view',
+  FEES_CREATE: 'tms.fees.create',
+  FEES_EDIT: 'tms.fees.edit',
+  FEES_DELETE: 'tms.fees.delete',
+  FEES_GENERATE: 'tms.fees.generate',
 } as const;
 
 export type TmsPermissionKey =

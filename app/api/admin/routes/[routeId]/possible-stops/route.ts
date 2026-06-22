@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { logActivityFromHeaders } from '@/lib/activity/log';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -282,12 +283,20 @@ export async function POST(
       message = `Successfully added ${addedCount} new stop${addedCount === 1 ? '' : 's'}. ${skippedCount} stop${skippedCount === 1 ? ' was' : 's were'} already present and skipped`;
     }
 
-    return NextResponse.json({ 
+    await logActivityFromHeaders(request, {
+      module: 'routes',
+      action: 'create',
+      entityType: 'tms_route_possible_stop',
+      entityId: routeId,
+      description: `Added ${addedCount} possible stop(s) to route ${routeId}`,
+      metadata: { routeId, addedCount, skippedCount },
+    });
+    return NextResponse.json({
       message,
       addedCount,
       skippedCount,
       skippedStops: duplicateStops,
-      data 
+      data
     });
   } catch (error) {
     console.error('Error in POST possible stops:', error);
@@ -334,8 +343,16 @@ export async function DELETE(
       );
     }
 
-    return NextResponse.json({ 
-      message: 'Possible stop deleted successfully' 
+    await logActivityFromHeaders(request, {
+      module: 'routes',
+      action: 'delete',
+      entityType: 'tms_route_possible_stop',
+      entityId: routeId,
+      description: `Removed possible stop ${stopId} from route ${routeId}`,
+      metadata: { routeId, stopId },
+    });
+    return NextResponse.json({
+      message: 'Possible stop deleted successfully'
     });
   } catch (error) {
     console.error('Error in DELETE possible stop:', error);

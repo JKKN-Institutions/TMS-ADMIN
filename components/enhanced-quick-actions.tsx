@@ -10,14 +10,12 @@ import {
   Car, 
   Route, 
   Bell, 
-  MessageSquare, 
-  CreditCard,
+  MessageSquare,
   Settings,
   BarChart3,
   ArrowRight,
   Zap,
   Target,
-  Shield,
   Activity,
   RefreshCw,
   BookOpen,
@@ -102,17 +100,6 @@ const EnhancedQuickActions: React.FC<EnhancedQuickActionsProps> = ({
       roles: ['super_admin', 'transport_manager']
     },
     {
-      id: 'view-payments',
-      title: 'Payment Overview',
-      description: 'Monitor transactions',
-      href: '/payments',
-      icon: CreditCard,
-      color: 'text-emerald-700',
-      bgColor: 'bg-gradient-to-br from-emerald-100 to-emerald-200',
-      roles: ['super_admin', 'finance_admin'],
-      badge: '₹12.5K'
-    },
-    {
       id: 'send-notification',
       title: 'Send Notification',
       description: 'Broadcast message',
@@ -173,16 +160,6 @@ const EnhancedQuickActions: React.FC<EnhancedQuickActionsProps> = ({
       bgColor: 'bg-gradient-to-br from-pink-100 to-pink-200',
       roles: ['super_admin', 'transport_manager'],
       badge: 'New'
-    },
-    {
-      id: 'authorize-users',
-      title: 'User Authorization',
-      description: 'Manage admin access',
-      href: '/authorize',
-      icon: Shield,
-      color: 'text-rose-700',
-      bgColor: 'bg-gradient-to-br from-rose-100 to-rose-200',
-      roles: ['super_admin']
     }
   ];
 
