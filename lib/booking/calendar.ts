@@ -4,7 +4,7 @@
  * The builder is pure + unit-tested; loadExceptions wraps the DB for the API.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { bookableDates, dayStatus } from './window';
+import { bookableDates, cutoffFor, dayStatus } from './window';
 
 export type CalendarStatus =
   | 'open' | 'booked' | 'locked' | 'closed'
@@ -21,6 +21,12 @@ export interface CalendarException {
   note: string | null;
 }
 
+export interface WindowOverride {
+  enabled: boolean;
+  deadline: string | null;        // ISO; overrides cutoffFor(date)
+  capacityOverride: number | null;
+}
+
 /** Every 'YYYY-MM-DD' in a 'YYYY-MM' month, ascending. */
 export function monthDays(monthStr: string): string[] {
   const [y, m] = monthStr.split('-').map(Number);
@@ -30,28 +36,58 @@ export function monthDays(monthStr: string): string[] {
   return out;
 }
 
+/** Is booking open for a date, honoring an optional window override? */
+export function effectiveOpen(
+  date: string,
+  opts: { window?: WindowOverride; now?: Date }
+): boolean {
+  const now = opts.now ?? new Date();
+  if (opts.window && !opts.window.enabled) return false;
+  if (!bookableDates(now).includes(date)) return false;
+  const deadlineMs = opts.window?.deadline
+    ? new Date(opts.window.deadline).getTime()
+    : cutoffFor(date).getTime();
+  return now.getTime() < deadlineMs;
+}
+
 /** Status for ONE date. A service-calendar exception wins over everything. */
 export function cellStatus(
   date: string,
-  opts: { hasBooking: boolean; exception?: CalendarException; now?: Date }
+  opts: { hasBooking: boolean; exception?: CalendarException; window?: WindowOverride; now?: Date }
 ): CalendarStatus {
   if (opts.exception) return opts.exception.kind; // 'holiday' | 'no_service'
   const now = opts.now ?? new Date();
   if (!bookableDates(now).includes(date)) return opts.hasBooking ? 'locked' : 'out_of_horizon';
-  const s = dayStatus(opts.hasBooking, date, now); // 'not_booked'|'booked'|'locked'|'closed'
+  // window-aware open/closed; falls back to the pure dayStatus when no window.
+  if (opts.window) {
+    const open = effectiveOpen(date, { window: opts.window, now });
+    if (opts.hasBooking) return open ? 'booked' : 'locked';
+    return open ? 'open' : 'closed';
+  }
+  const s = dayStatus(opts.hasBooking, date, now);
   return s === 'not_booked' ? 'open' : s;
 }
 
 /** Build all cells for a month from the learner's bookings + the gate. */
 export function buildMonthCells(
   monthStr: string,
-  opts: { bookedDates: Set<string>; exceptions: Map<string, CalendarException>; now?: Date }
+  opts: {
+    bookedDates: Set<string>;
+    exceptions: Map<string, CalendarException>;
+    windows?: Map<string, WindowOverride>;
+    now?: Date;
+  }
 ): DayCell[] {
   return monthDays(monthStr).map((date) => {
     const exception = opts.exceptions.get(date);
     return {
       date,
-      status: cellStatus(date, { hasBooking: opts.bookedDates.has(date), exception, now: opts.now }),
+      status: cellStatus(date, {
+        hasBooking: opts.bookedDates.has(date),
+        exception,
+        window: opts.windows?.get(date),
+        now: opts.now,
+      }),
       note: exception?.note ?? null,
     };
   });
@@ -88,6 +124,32 @@ export async function loadExceptions(
     const existing = map.get(row.exception_date);
     // a route-specific row wins over an all-routes row for the same date
     if (!existing || row.route_id) map.set(row.exception_date, { kind: row.kind, note: row.note });
+  }
+  return map;
+}
+
+/** Load per-date booking-window overrides for a route over [from,to]. */
+export async function loadWindows(
+  svc: SupabaseClient,
+  routeId: string | null,
+  from: string,
+  to: string
+): Promise<Map<string, WindowOverride>> {
+  const map = new Map<string, WindowOverride>();
+  if (!routeId) return map;
+  const { data, error } = await svc
+    .from('tms_booking_window')
+    .select('travel_date, booking_enabled, deadline, capacity_override')
+    .eq('route_id', routeId)
+    .gte('travel_date', from)
+    .lte('travel_date', to);
+  if (error) {
+    if (isMissingTable(error)) return map;
+    throw error;
+  }
+  type Row = { travel_date: string; booking_enabled: boolean; deadline: string | null; capacity_override: number | null };
+  for (const r of (data ?? []) as Row[]) {
+    map.set(r.travel_date, { enabled: r.booking_enabled, deadline: r.deadline, capacityOverride: r.capacity_override });
   }
   return map;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { monthDays, cellStatus, buildMonthCells } from './calendar';
+import { monthDays, cellStatus, buildMonthCells, effectiveOpen } from './calendar';
 
 // Frozen clock: now + 5:30 IST => IST today = 2026-06-22, so bookable = 06-23..06-29.
 const NOW = new Date('2026-06-22T03:00:00Z');
@@ -44,5 +44,22 @@ describe('buildMonthCells', () => {
     expect(by('2026-06-25').status).toBe('holiday');
     expect(by('2026-06-25').note).toBe('Test');
     expect(by('2026-06-22').status).toBe('out_of_horizon'); // today
+  });
+});
+
+describe('booking-window overrides', () => {
+  const NOW2 = new Date('2026-06-22T03:00:00Z'); // IST today 2026-06-22 => bookable 06-23..29
+  it('a disabled window closes an otherwise-open date', () => {
+    expect(cellStatus('2026-06-23', { hasBooking: false, window: { enabled: false, deadline: null, capacityOverride: null }, now: NOW2 })).toBe('closed');
+  });
+  it('an earlier custom deadline can close a date before the default cutoff', () => {
+    // default cutoff for 06-23 is 18:00 IST on 06-22; a deadline already in the past => closed
+    expect(effectiveOpen('2026-06-23', { window: { enabled: true, deadline: '2026-06-22T00:00:00Z', capacityOverride: null }, now: NOW2 })).toBe(false);
+  });
+  it('a later custom deadline keeps a date open past the default', () => {
+    expect(effectiveOpen('2026-06-23', { window: { enabled: true, deadline: '2026-06-23T18:00:00+05:30', capacityOverride: null }, now: NOW2 })).toBe(true);
+  });
+  it('an exception still wins over an (enabled) window', () => {
+    expect(cellStatus('2026-06-23', { hasBooking: false, exception: { kind: 'holiday', note: null }, window: { enabled: true, deadline: null, capacityOverride: null }, now: NOW2 })).toBe('holiday');
   });
 });
