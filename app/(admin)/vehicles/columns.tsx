@@ -28,6 +28,61 @@ export interface VehicleRow {
   next_maintenance?: string | null;
   gps_device_id?: string | null;
   live_tracking_enabled?: boolean;
+  // Identity
+  vehicle_type?: string | null;
+  manufacturer?: string | null;
+  model_year?: number | null;
+  color?: string | null;
+  gross_vehicle_weight?: number | string | null;
+  // Ownership
+  ownership_type?: string | null;
+  purchase_date?: string | null;
+  purchase_cost?: number | string | null;
+  vendor_name?: string | null;
+  warranty_expiry?: string | null;
+  // Compliance
+  rc_expiry_date?: string | null;
+  permit_number?: string | null;
+  permit_expiry_date?: string | null;
+  pollution_certificate_number?: string | null;
+  pollution_expiry_date?: string | null;
+  road_tax_expiry_date?: string | null;
+  // Insurance
+  insurance_provider?: string | null;
+  insurance_policy_number?: string | null;
+  insurance_amount?: number | string | null;
+  // Driver
+  assigned_driver_id?: string | null;
+  assigned_driver_name?: string | null;
+  assignment_date?: string | null;
+  // GPS
+  gps_provider?: string | null;
+  sim_number?: string | null;
+  // Maintenance
+  current_odometer?: number | string | null;
+  maintenance_interval_km?: number | string | null;
+  maintenance_interval_days?: number | null;
+  last_service_odometer?: number | string | null;
+  next_service_odometer?: number | string | null;
+  service_vendor?: string | null;
+  // Financial
+  monthly_emi?: number | string | null;
+  fuel_card_number?: string | null;
+  operating_cost_per_km?: number | string | null;
+  // Emergency
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  first_aid_available?: boolean | null;
+  fire_extinguisher_expiry?: string | null;
+  // Documents (storage paths)
+  rc_document_url?: string | null;
+  insurance_document_url?: string | null;
+  fitness_certificate_url?: string | null;
+  permit_document_url?: string | null;
+  // Notes
+  chassis_number?: string | null;
+  engine_number?: string | null;
+  remarks?: string | null;
 }
 
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
@@ -123,6 +178,18 @@ export function getVehicleColumns(
       accessorKey: 'model',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Model" />,
       cell: ({ row }) => <span className="text-gray-700 dark:text-gray-300">{row.original.model || '—'}</span>,
+    },
+    {
+      id: 'vehicle_type',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Type" />,
+      accessorFn: (v) => v.vehicle_type ?? '',
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      size: 110,
+      cell: ({ row }) => (
+        <span className="capitalize text-gray-700 dark:text-gray-300">
+          {row.original.vehicle_type || '—'}
+        </span>
+      ),
     },
     {
       accessorKey: 'capacity',

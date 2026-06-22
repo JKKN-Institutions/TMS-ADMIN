@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Car, CheckCircle, Wrench, AlertTriangle, Trash2, Upload } from 'lucide-react';
+import { Plus, Car, CheckCircle, Wrench, AlertTriangle, Trash2, Upload, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import UniversalStatCard from '@/components/universal-stat-card';
@@ -10,6 +10,7 @@ import { createVehicleStats } from '@/lib/stat-utils';
 import LiveGPSTrackingModal from '@/components/live-gps-tracking-modal';
 import { getVehicleColumns, type VehicleRow } from './columns';
 import { VehicleImportDialog } from './vehicle-import-dialog';
+import { exportVehicles } from './vehicle-export';
 
 const VehiclesPage = () => {
   const router = useRouter();
@@ -133,6 +134,13 @@ const VehiclesPage = () => {
         {canManage && (
           <div className="flex shrink-0 items-center gap-2">
             <button
+              onClick={() => exportVehicles(vehicles)}
+              disabled={vehicles.length === 0}
+              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" /> Export
+            </button>
+            <button
               onClick={() => setIsImportOpen(true)}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
             >
@@ -198,6 +206,18 @@ const VehiclesPage = () => {
               { label: 'Petrol', value: 'petrol' },
               { label: 'Electric', value: 'electric' },
               { label: 'CNG', value: 'cng' },
+            ],
+          },
+          {
+            columnId: 'vehicle_type',
+            title: 'Type',
+            options: [
+              { label: 'Bus', value: 'bus' },
+              { label: 'Van', value: 'van' },
+              { label: 'Car', value: 'car' },
+              { label: 'Truck', value: 'truck' },
+              { label: 'Ambulance', value: 'ambulance' },
+              { label: 'Other', value: 'other' },
             ],
           },
         ]}
