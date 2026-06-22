@@ -5,6 +5,7 @@ import { getLearnerRowForUser } from '@/lib/student/identity';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { bookableDates, cutoffFor, dayStatus, isBookingOpen, isCancelable } from '@/lib/booking/window';
+import { buildMonthCells, loadExceptions, type CalendarException } from '@/lib/booking/calendar';
 
 /**
  * Self-scoped daily booking board + book/cancel. The learner (and their route/stop)
@@ -40,6 +41,44 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       const r = refs.routes.get(learner.transport_route_id);
       routeLabel = r ? `${r.routeNumber} · ${r.routeName}` : null;
       stopLabel = learner.transport_stop_id ? refs.stops.get(learner.transport_stop_id) ?? null : null;
+    }
+
+    const svc2 = svc; // svc already created above
+    const monthParam = new URL(_request.url).searchParams.get('month');
+
+    if (monthParam) {
+      if (!/^\d{4}-\d{2}$/.test(monthParam)) {
+        return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
+      }
+      const from = `${monthParam}-01`;
+      const to = `${monthParam}-${String(new Date(Date.UTC(Number(monthParam.slice(0, 4)), Number(monthParam.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')}`;
+
+      const bookedDates = new Set<string>();
+      const mres = await svc2
+        .from('tms_booking')
+        .select('travel_date')
+        .eq('learner_id', learner.id)
+        .eq('status', 'booked')
+        .gte('travel_date', from)
+        .lte('travel_date', to);
+      if (mres.error && (mres.error as { code?: string }).code !== '42P01') {
+        console.error('student/bookings GET month error:', mres.error);
+        return NextResponse.json({ error: 'Failed to load bookings' }, { status: 500 });
+      }
+      for (const row of (mres.data ?? []) as { travel_date: string }[]) bookedDates.add(row.travel_date);
+
+      const exceptions: Map<string, CalendarException> = await loadExceptions(
+        svc2, learner.transport_route_id ?? null, from, to
+      );
+      const cells = buildMonthCells(monthParam, { bookedDates, exceptions }).map((c) => ({
+        ...c,
+        cutoff: c.status === 'open' || c.status === 'booked' ? cutoffFor(c.date).toISOString() : null,
+      }));
+
+      return NextResponse.json({
+        success: true,
+        data: { routeLabel, stopLabel, assigned: !!learner.transport_route_id, month: monthParam, cells },
+      });
     }
 
     // Which of the horizon dates already have an active booking?
@@ -95,6 +134,10 @@ async function mutate(request: NextRequest, auth: AuthContext) {
     if (action === 'book') {
       if (!isBookingOpen(travelDate)) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });
+      }
+      const blocking = await loadExceptions(svc, learner.transport_route_id, travelDate, travelDate);
+      if (blocking.has(travelDate)) {
+        return NextResponse.json({ error: 'That date is a holiday / no-service day' }, { status: 409 });
       }
       const existing = await svc
         .from('tms_booking')
