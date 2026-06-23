@@ -89,8 +89,11 @@ create index idx_booking_route_date
 - **Partition-ready:** `travel_date` is in the PK, so a later `PARTITION BY RANGE (travel_date)`
   (monthly) needs no schema redesign. **Not** partitioned now (YAGNI at <1M rows).
 
-**Trade-off accepted:** delete-on-cancel keeps no in-table cancellation history. Mitigation:
-log `book` / `cancel` events to the existing `tms_activity_log` so the audit trail lives there.
+**Trade-off accepted:** delete-on-cancel keeps no in-table cancellation history. For a daily
+bus booking this is low-value, so cancellation is **not** separately audited (the active row's
+`booked_at` is the only timestamp). We deliberately do **not** write book/cancel to
+`tms_activity_log` — that feed is for admin mutations and would be flooded by routine
+self-service. If per-cancel audit is ever needed, add a dedicated lightweight table then.
 
 **RLS:** unchanged approach — learner may `SELECT` own rows; all writes via service-role.
 
