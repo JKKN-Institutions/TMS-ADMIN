@@ -41,8 +41,7 @@ async function sendReminders(_request: NextRequest, auth: AuthContext) {
     const { data: booked } = await svc
       .from('tms_booking')
       .select('learner_id')
-      .eq('travel_date', date)
-      .eq('status', 'booked');
+      .eq('travel_date', date);
     const bookedIds = new Set<string>(((booked ?? []) as { learner_id: string }[]).map((b) => b.learner_id));
 
     // Who already got tomorrow's reminder (avoid dupes).

@@ -48,8 +48,7 @@ async function getRoster(auth: AuthContext, routeId: string) {
       .from('tms_booking')
       .select('learner_id')
       .eq('route_id', routeId)
-      .eq('travel_date', today)
-      .eq('status', 'booked');
+      .eq('travel_date', today);
     const rosterIds = new Set<string>(((bookings ?? []) as { learner_id: string }[]).map((b) => b.learner_id));
 
     // Today's attendance for this route, keyed by learner + direction.

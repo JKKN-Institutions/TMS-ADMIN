@@ -58,7 +58,7 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
         .from('tms_booking')
         .select('travel_date')
         .eq('learner_id', learner.id)
-        .eq('status', 'booked')
+        // (status filter removed — presence = booked)
         .gte('travel_date', from)
         .lte('travel_date', to);
       if (mres.error && (mres.error as { code?: string }).code !== '42P01') {
@@ -92,7 +92,7 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       .from('tms_booking')
       .select('travel_date')
       .eq('learner_id', learner.id)
-      .eq('status', 'booked')
+      // (status filter removed — presence = booked)
       .in('travel_date', dates);
     if (res.error && (res.error as { code?: string }).code !== '42P01') {
       console.error('student/bookings GET error:', res.error);
@@ -154,32 +154,21 @@ async function mutate(request: NextRequest, auth: AuthContext) {
         }
       }
 
-      const existing = await svc
+      const upErr = (await svc
         .from('tms_booking')
-        .select('id')
-        .eq('learner_id', learner.id)
-        .eq('travel_date', travelDate)
-        .maybeSingle();
-      const nowIso = new Date().toISOString();
-      const writeErr = existing.data
-        ? (await svc
-            .from('tms_booking')
-            .update({ status: 'booked', booked_at: nowIso, cancelled_at: null, updated_by: auth.userId })
-            .eq('id', existing.data.id)).error
-        : (await svc
-            .from('tms_booking')
-            .insert({
-              learner_id: learner.id,
-              route_id: learner.transport_route_id,
-              stop_id: learner.transport_stop_id,
-              travel_date: travelDate,
-              status: 'booked',
-              booked_at: nowIso,
-              created_by: auth.userId,
-              updated_by: auth.userId,
-            })).error;
-      if (writeErr) {
-        console.error('student/bookings book error:', writeErr);
+        .upsert(
+          {
+            learner_id: learner.id,
+            route_id: learner.transport_route_id,
+            stop_id: learner.transport_stop_id,
+            travel_date: travelDate,
+            booked_at: new Date().toISOString(),
+            booked_by: auth.userId,
+          },
+          { onConflict: 'learner_id,travel_date' }
+        )).error;
+      if (upErr) {
+        console.error('student/bookings book error:', upErr);
         return NextResponse.json({ error: 'Failed to book' }, { status: 500 });
       }
       return NextResponse.json({ success: true, data: { travel_date: travelDate, status: 'booked' } });
@@ -189,13 +178,13 @@ async function mutate(request: NextRequest, auth: AuthContext) {
     if (!isCancelable(travelDate)) {
       return NextResponse.json({ error: 'Cancellation is closed for that date' }, { status: 409 });
     }
-    const upd = await svc
+    const del = await svc
       .from('tms_booking')
-      .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), updated_by: auth.userId })
+      .delete()
       .eq('learner_id', learner.id)
       .eq('travel_date', travelDate);
-    if (upd.error) {
-      console.error('student/bookings cancel error:', upd.error);
+    if (del.error) {
+      console.error('student/bookings cancel error:', del.error);
       return NextResponse.json({ error: 'Failed to cancel' }, { status: 500 });
     }
     return NextResponse.json({ success: true, data: { travel_date: travelDate, status: 'cancelled' } });

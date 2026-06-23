@@ -23,7 +23,7 @@ async function manifest(request: NextRequest, auth: AuthContext) {
   const bk = await svc
     .from('tms_booking')
     .select('learner_id, stop_id')
-    .eq('route_id', routeId).eq('travel_date', date).eq('status', 'booked');
+    .eq('route_id', routeId).eq('travel_date', date);
   if (bk.error && (bk.error as { code?: string }).code !== '42P01') {
     return NextResponse.json({ error: 'Failed to load manifest' }, { status: 500 });
   }
