@@ -35,13 +35,11 @@ describe('cutoffFor', () => {
 });
 
 describe('bookableDates', () => {
-  it('returns tomorrow..+6 in IST', () => {
-    // istToday == 2026-06-20
-    const dates = bookableDates(new Date('2026-06-20T06:00:00Z'));
-    expect(dates).toEqual([
-      '2026-06-21', '2026-06-22', '2026-06-23', '2026-06-24',
-      '2026-06-25', '2026-06-26', '2026-06-27',
-    ]);
+  it('returns the next 92 dates starting tomorrow (IST)', () => {
+    const dates = bookableDates(new Date('2026-06-20T06:00:00Z')); // istToday == 2026-06-20
+    expect(dates).toHaveLength(92);
+    expect(dates[0]).toBe('2026-06-21');
+    expect(dates[91]).toBe(addDays('2026-06-20', 92));
   });
 });
 
@@ -52,8 +50,11 @@ describe('isBookingOpen', () => {
   it('is closed just after the cutoff', () => {
     expect(isBookingOpen('2026-06-22', new Date('2026-06-21T12:31:00Z'))).toBe(false);
   });
-  it('rejects a date beyond the 7-day horizon', () => {
-    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(false);
+  it('allows a date later this month (no longer capped at 7 days)', () => {
+    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(true);
+  });
+  it('rejects a date beyond the 92-day horizon', () => {
+    expect(isBookingOpen(addDays('2026-06-20', 100), new Date('2026-06-20T06:00:00Z'))).toBe(false);
   });
   it('rejects today and past dates', () => {
     expect(isBookingOpen('2026-06-20', new Date('2026-06-20T06:00:00Z'))).toBe(false);

@@ -5,7 +5,7 @@
  */
 const IST_OFFSET_MIN = 5 * 60 + 30; // +05:30
 const CUTOFF_HOUR_IST = 18; // 18:00 IST on the prior day
-export const HORIZON_DAYS = 7; // bookable: tomorrow .. tomorrow+6
+export const MAX_BOOKING_HORIZON_DAYS = 92; // tomorrow .. +92 (current month + ~2 ahead)
 
 export type DayStatus = 'not_booked' | 'booked' | 'locked' | 'closed';
 
@@ -30,10 +30,10 @@ export function cutoffFor(travelDate: string): Date {
   return new Date(ms);
 }
 
-/** The 7 ascending bookable dates (tomorrow..+6) relative to IST today. */
+/** The ascending bookable dates (tomorrow .. +MAX_BOOKING_HORIZON_DAYS) relative to IST today. */
 export function bookableDates(now: Date = new Date()): string[] {
   const today = istToday(now);
-  return Array.from({ length: HORIZON_DAYS }, (_, i) => addDays(today, i + 1));
+  return Array.from({ length: MAX_BOOKING_HORIZON_DAYS }, (_, i) => addDays(today, i + 1));
 }
 
 export function isBookingOpen(travelDate: string, now: Date = new Date()): boolean {

@@ -25,9 +25,10 @@ describe('cellStatus', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, now: NOW })).toBe('open');
     expect(cellStatus('2026-06-23', { hasBooking: true, now: NOW })).toBe('booked');
   });
-  it('out-of-horizon future => out_of_horizon; past booking => locked', () => {
-    expect(cellStatus('2026-06-30', { hasBooking: false, now: NOW })).toBe('out_of_horizon');
-    expect(cellStatus('2026-06-10', { hasBooking: true, now: NOW })).toBe('locked');
+  it('in-month future is open now (horizon widened); far future is out_of_horizon', () => {
+    expect(cellStatus('2026-06-30', { hasBooking: false, now: NOW })).toBe('open');
+    expect(cellStatus('2026-12-01', { hasBooking: false, now: NOW })).toBe('out_of_horizon');
+    expect(cellStatus('2026-06-10', { hasBooking: true, now: NOW })).toBe('locked'); // past booking
   });
 });
 
