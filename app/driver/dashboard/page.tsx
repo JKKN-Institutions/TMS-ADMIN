@@ -3,6 +3,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+interface DriverStop {
+  id: string;
+  name: string;
+  time: string | null; // morning / inbound (to-college) pickup
+  eveningTime: string | null; // evening / outbound (from-college) drop
+  order: number | null;
+  isMajor: boolean | null;
+}
 interface DriverMe {
   licenseNumber: string | null;
   licenseExpiry: string | null;
@@ -12,8 +20,21 @@ interface DriverMe {
   totalTrips: number | null;
   assignedRouteId: string | null;
   routeLabel: string | null;
+  stops: DriverStop[];
 }
 type Resp = { data?: DriverMe; notFound?: boolean };
+
+/** 'HH:MM:SS' / 'HH:MM' → '7:30 AM'; '—' when missing. */
+function fmtTime(t: string | null): string {
+  if (!t) return '—';
+  const [hStr, mStr] = t.split(':');
+  const h = parseInt(hStr, 10);
+  if (Number.isNaN(h)) return t;
+  const minute = mStr ?? '00';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${minute} ${ampm}`;
+}
 
 async function fetchMe(): Promise<Resp> {
   const res = await fetch('/api/driver/me', { cache: 'no-store', credentials: 'same-origin' });
@@ -51,6 +72,7 @@ export default function DriverDashboardPage() {
   }
 
   const me = data.data;
+  const stops = me.stops ?? [];
   return (
     <div className="max-w-3xl space-y-4">
       <h1 className="text-xl font-semibold">Driver Dashboard</h1>
@@ -67,6 +89,47 @@ export default function DriverDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {me.routeLabel && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Route timetable ({stops.length} stops)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm">
+            {stops.length === 0 ? (
+              <p className="text-muted-foreground">No stops configured for this route yet.</p>
+            ) : (
+              <ol className="divide-y divide-border">
+                {stops.map((s, i) => (
+                  <li key={s.id} className="flex items-center gap-3 py-2">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                      {s.order ?? i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {s.name}
+                      {s.isMajor && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                          Major
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-right tabular-nums text-muted-foreground">
+                      <span className="block">
+                        <span className="mr-1 text-[10px] uppercase tracking-wide text-gray-400">Morning</span>
+                        {fmtTime(s.time)}
+                      </span>
+                      <span className="block">
+                        <span className="mr-1 text-[10px] uppercase tracking-wide text-gray-400">Evening</span>
+                        {fmtTime(s.eveningTime)}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

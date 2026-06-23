@@ -23,6 +23,7 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [meta, setMeta] = useState<{ booked: number; capacity: number }>({ booked: 0, capacity: 0 });
 
   const load = async () => {
     try {
@@ -32,6 +33,7 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load roster');
       setRoute(json.data.route);
       setStudents(json.data.students as RosterStudent[]);
+      setMeta({ booked: json.data.counts?.booked ?? 0, capacity: json.data.counts?.capacity ?? 0 });
       setError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load roster';
@@ -130,8 +132,11 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
 
       {/* Summary */}
       <div className="flex flex-wrap gap-3 text-sm">
+        <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-blue-700 dark:text-blue-300">
+          <Users className="h-4 w-4" /> {meta.booked} booked / {meta.capacity} seats
+        </span>
         <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-gray-700">
-          <Users className="h-4 w-4 text-gray-400" /> {counts.total} students
+          <Users className="h-4 w-4 text-gray-400" /> {counts.total} on roster
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-green-700 dark:text-green-300">
           <CheckCircle2 className="h-4 w-4" /> {counts.onward} onward

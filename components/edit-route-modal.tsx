@@ -6,10 +6,23 @@ import { X, Plus, MapPin, Clock, Trash2, ArrowUp, ArrowDown, Save, Loader2 } fro
 import toast from 'react-hot-toast';
 import { DatabaseService } from '@/lib/database';
 
+/** 'HH:MM:SS' / 'HH:MM' → '7:30 AM'; '—' when missing. */
+const fmtTime = (t?: string | null): string => {
+  if (!t) return '—';
+  const [hStr, mStr] = String(t).split(':');
+  const h = parseInt(hStr, 10);
+  if (Number.isNaN(h)) return String(t);
+  const minute = mStr ?? '00';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${minute} ${ampm}`;
+};
+
 interface Stop {
   id?: string;
   stop_name: string;
-  stop_time: string;
+  stop_time: string; // morning / inbound (to-college) pickup
+  evening_time?: string; // evening / outbound (from-college) drop
   sequence_order: number;
   latitude?: number;
   longitude?: number;
@@ -54,6 +67,7 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
   const [newStop, setNewStop] = useState<Omit<Stop, 'sequence_order'>>({
     stop_name: '',
     stop_time: '',
+    evening_time: '',
     is_major_stop: false
   });
   const [insertAfterIndex, setInsertAfterIndex] = useState<number | null>(null);
@@ -158,6 +172,7 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
           stopData: {
             stop_name: newStop.stop_name.trim(),
             stop_time: newStop.stop_time,
+            evening_time: newStop.evening_time || null,
             is_major_stop: newStop.is_major_stop
           },
           insertAfterSequence: insertAfter
@@ -181,6 +196,7 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
       setNewStop({
         stop_name: '',
         stop_time: '',
+        evening_time: '',
         is_major_stop: false
       });
       setInsertAfterIndex(null);
@@ -323,6 +339,7 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
     setNewStop({
       stop_name: '',
       stop_time: '',
+      evening_time: '',
       is_major_stop: false
     });
     setInsertAfterIndex(null);
@@ -534,8 +551,9 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
               {/* Add New Stop */}
               <div className="border rounded-lg p-4">
                 <h4 className="font-medium text-gray-900 mb-3">Add New Stop</h4>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                   <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Stop name</label>
                     <input
                       type="text"
                       value={newStop.stop_name}
@@ -545,6 +563,7 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
                     />
                   </div>
                   <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Morning time</label>
                     <input
                       type="time"
                       value={newStop.stop_time}
@@ -553,6 +572,16 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
                     />
                   </div>
                   <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Evening time</label>
+                    <input
+                      type="time"
+                      value={newStop.evening_time || ''}
+                      onChange={(e) => setNewStop({ ...newStop, evening_time: e.target.value })}
+                      className="input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-0.5">Position</label>
                     <select
                       value={insertAfterIndex !== null ? insertAfterIndex : ''}
                       onChange={(e) => setInsertAfterIndex(e.target.value ? parseInt(e.target.value) : null)}
@@ -566,7 +595,7 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
                       ))}
                     </select>
                   </div>
-                  <div className="flex items-center">
+                  <div className="flex items-center h-[38px]">
                     <label className="flex items-center space-x-1">
                       <input
                         type="checkbox"
@@ -629,9 +658,15 @@ export default function EditRouteModal({ isOpen, onClose, onSuccess, route }: Ed
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center text-sm text-gray-600">
-                            <Clock className="w-4 h-4 mr-1" />
-                            {stop.stop_time}
+                          <div className="flex flex-col justify-center gap-0.5 text-sm text-gray-600">
+                            <span className="flex items-center">
+                              <Clock className="w-4 h-4 mr-1" />
+                              <span className="text-gray-400 mr-1">Morning</span>{fmtTime(stop.stop_time)}
+                            </span>
+                            <span className="flex items-center">
+                              <Clock className="w-4 h-4 mr-1" />
+                              <span className="text-gray-400 mr-1">Evening</span>{fmtTime(stop.evening_time)}
+                            </span>
                           </div>
                           <div className="flex items-center justify-end">
                             <button

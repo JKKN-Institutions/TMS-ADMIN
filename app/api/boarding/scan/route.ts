@@ -5,6 +5,8 @@ import { logActivity } from '@/lib/activity/log';
 import { verifyPass } from '@/lib/boarding/pass';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
+import { istToday } from '@/lib/booking/window';
 
 /**
  * POST a scanned boarding-pass token → mark the learner present for today.
@@ -35,7 +37,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as { token?: string; direction?: string };
+    const body = (await request.json().catch(() => ({}))) as { token?: string; direction?: string; walkUp?: boolean };
     const learnerId = verifyPass(String(body.token ?? ''));
     if (!learnerId) {
       return NextResponse.json({ ok: false, error: 'Invalid or unrecognised pass' }, { status: 400 });
@@ -67,7 +69,30 @@ async function scan(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = istToday();
+    const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
+
+    // Booking gate: a learner must have booked today, unless staff explicitly add
+    // them as a walk-up (seats permitting).
+    const booked = await hasBookingForDate(svc, learner.id, today);
+    let isWalkUp = false;
+    if (!booked) {
+      if (!body.walkUp) {
+        const seats = await seatsRemaining(svc, learner.transport_route_id, today);
+        return NextResponse.json({
+          ok: false,
+          reason: 'not_booked',
+          seatsRemaining: seats,
+          learner: { name, rollNumber: learner.roll_number },
+        });
+      }
+      const seats = await seatsRemaining(svc, learner.transport_route_id, today);
+      if (seats <= 0) {
+        return NextResponse.json({ ok: false, reason: 'bus_full', error: 'Bus is full' }, { status: 409 });
+      }
+      isWalkUp = true;
+    }
+
     const up = await svc
       .from('tms_attendance')
       .upsert(
@@ -79,6 +104,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
           direction,
           status: 'present',
           method: 'qr_scan',
+          is_walk_up: isWalkUp,
           scanned_by: auth.userId,
           scanned_at: new Date().toISOString(),
         },
@@ -92,20 +118,20 @@ async function scan(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ ok: false, error: 'Failed to record attendance' }, { status: 500 });
     }
 
-    const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
     await logActivity(auth, request, {
       module: 'boarding',
       action: 'scan',
       entityType: 'tms_attendance',
       entityId: learner.id,
       entityLabel: learner.roll_number ?? name,
-      description: `Scanned boarding pass for ${name} (${direction})`,
-      metadata: { learnerId: learner.id, direction, rollNumber: learner.roll_number },
+      description: `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}`,
+      metadata: { learnerId: learner.id, direction, rollNumber: learner.roll_number, walkUp: isWalkUp },
     });
     return NextResponse.json({
       ok: true,
       learner: { name, rollNumber: learner.roll_number },
       direction,
+      walkUp: isWalkUp,
     });
   } catch (e) {
     console.error('boarding scan error:', e);

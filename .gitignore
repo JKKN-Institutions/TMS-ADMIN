@@ -51,3 +51,6 @@ yarn-error.log*
 
 .mcp.json
 mcp.json
+
+# Subagent-driven-development scratch (ledger, briefs, reports)
+.superpowers/

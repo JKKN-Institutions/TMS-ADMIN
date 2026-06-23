@@ -44,10 +44,10 @@ export async function GET(
       );
     }
 
-    // Fetch route stops
+    // Fetch route stops (stop_time = inbound/morning, evening_time = outbound/evening)
     const { data: stops, error: stopsError } = await supabase
       .from('tms_route_stop')
-      .select('id, stop_name, stop_time, sequence_order, is_major_stop')
+      .select('id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
       .eq('route_id', routeId)
       .order('sequence_order');
 
@@ -188,6 +188,7 @@ export async function POST(
         route_id: routeId,
         stop_name: stopData.stop_name.trim(),
         stop_time: stopData.stop_time,
+        evening_time: stopData.evening_time || null,
         sequence_order: newSequenceOrder,
         latitude: stopData.latitude || null,
         longitude: stopData.longitude || null,

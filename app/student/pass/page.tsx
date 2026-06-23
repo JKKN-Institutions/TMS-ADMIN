@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface Pass {
   hasPass: boolean;
+  reason?: 'no_route' | 'not_booked';
   token?: string;
   name?: string;
   rollNumber?: string | null;
@@ -35,13 +36,23 @@ export default function StudentPassPage() {
 
   const p = data.data;
   if (!p.hasPass) {
+    const notBooked = p.reason === 'not_booked';
     return (
       <Card className="mx-auto w-full max-w-sm">
         <CardHeader>
-          <CardTitle>No boarding pass yet</CardTitle>
+          <CardTitle>{notBooked ? 'No booking for today' : 'No boarding pass yet'}</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Your boarding pass appears here once you have a transport route allocated.
+        <CardContent className="text-sm text-muted-foreground space-y-3">
+          <p>
+            {notBooked
+              ? 'Your boarding pass unlocks only on days you have booked a bus.'
+              : 'Your boarding pass appears here once you have a transport route allocated.'}
+          </p>
+          {notBooked && (
+            <a href="/student/bookings" className="inline-flex items-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+              Book a seat
+            </a>
+          )}
         </CardContent>
       </Card>
     );
