@@ -1,16 +1,16 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useRouter } from 'next/navigation';
+import type { ComponentType } from 'react';
+import {
+  Route as RouteIcon, Activity, Star, Bus, Users, MapPin, User, AlertTriangle, IdCard,
+} from 'lucide-react';
+import { useAuth } from '@/providers/auth-provider';
+import type { TimetableStop } from '@/components/driver/route-timetable';
+import { PageHeader, StatCard, Spinner, NoticeCard, TILE, type Tone } from '@/components/driver/ui';
+import { cn } from '@/lib/utils';
 
-interface DriverStop {
-  id: string;
-  name: string;
-  time: string | null; // morning / inbound (to-college) pickup
-  eveningTime: string | null; // evening / outbound (from-college) drop
-  order: number | null;
-  isMajor: boolean | null;
-}
 interface DriverMe {
   licenseNumber: string | null;
   licenseExpiry: string | null;
@@ -18,23 +18,12 @@ interface DriverMe {
   experienceYears: number | null;
   rating: number | null;
   totalTrips: number | null;
+  passengerCount: number | null;
   assignedRouteId: string | null;
   routeLabel: string | null;
-  stops: DriverStop[];
+  stops: TimetableStop[];
 }
 type Resp = { data?: DriverMe; notFound?: boolean };
-
-/** 'HH:MM:SS' / 'HH:MM' → '7:30 AM'; '—' when missing. */
-function fmtTime(t: string | null): string {
-  if (!t) return '—';
-  const [hStr, mStr] = t.split(':');
-  const h = parseInt(hStr, 10);
-  if (Number.isNaN(h)) return t;
-  const minute = mStr ?? '00';
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${minute} ${ampm}`;
-}
 
 async function fetchMe(): Promise<Resp> {
   const res = await fetch('/api/driver/me', { cache: 'no-store', credentials: 'same-origin' });
@@ -43,110 +32,117 @@ async function fetchMe(): Promise<Resp> {
   return { data: (await res.json()).data as DriverMe };
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="font-medium break-words">{value}</span>
-    </div>
-  );
-}
+const QUICK: { title: string; desc: string; icon: ComponentType<{ className?: string }>; tone: Tone; href: string }[] = [
+  { title: 'My Routes', desc: 'Route & full timetable', icon: RouteIcon, tone: 'blue', href: '/driver/routes' },
+  { title: 'Passengers', desc: 'Riders on your route', icon: Users, tone: 'green', href: '/driver/passengers' },
+  { title: 'Live Location', desc: "Your bus's position", icon: MapPin, tone: 'purple', href: '/driver/location' },
+  { title: 'Profile', desc: 'License & details', icon: User, tone: 'orange', href: '/driver/profile' },
+];
 
 export default function DriverDashboardPage() {
+  const router = useRouter();
+  const { profile } = useAuth();
   const { data, isLoading, error } = useQuery({ queryKey: ['driver-me'], queryFn: fetchMe });
 
-  if (isLoading) return <div className="text-muted-foreground">Loading…</div>;
-  if (error) return <div className="text-destructive">Could not load your driver profile.</div>;
+  const firstName = (profile?.full_name ?? '').split(' ')[0];
+
+  if (isLoading) return <Spinner />;
+  if (error) {
+    return (
+      <NoticeCard
+        tone="red"
+        icon={AlertTriangle}
+        title="Couldn't load your dashboard"
+        body="Something went wrong loading your driver profile. Please refresh or try again shortly."
+      />
+    );
+  }
   if (data?.notFound || !data?.data) {
     return (
-      <Card className="max-w-xl">
-        <CardHeader>
-          <CardTitle>Driver profile not found</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          We couldn&apos;t find a driver record linked to your account. Please contact the
-          transport office.
-        </CardContent>
-      </Card>
+      <NoticeCard
+        tone="amber"
+        icon={AlertTriangle}
+        title="Driver profile not found"
+        body="We couldn't find a driver record linked to your account. Please contact the transport office."
+      />
     );
   }
 
   const me = data.data;
-  const stops = me.stops ?? [];
   return (
-    <div className="max-w-3xl space-y-4">
-      <h1 className="text-xl font-semibold">Driver Dashboard</h1>
+    <div className="space-y-8">
+      <PageHeader
+        title={`Welcome${firstName ? `, ${firstName}` : ''}!`}
+        subtitle="Here's your route and driving overview."
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Assigned route</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm">
-          {me.routeLabel ? (
-            <p className="font-medium">{me.routeLabel}</p>
-          ) : (
-            <p className="text-muted-foreground">No route assigned yet.</p>
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={RouteIcon} tone="blue" label="Assigned route" value={me.routeLabel ?? 'Not assigned'} />
+        <StatCard icon={Activity} tone="green" label="Status" value={me.status ?? '—'} />
+        <StatCard icon={Bus} tone="purple" label="Total trips" value={me.totalTrips != null ? String(me.totalTrips) : '—'} />
+        <StatCard icon={Users} tone="orange" label="Passengers" value={me.passengerCount != null ? String(me.passengerCount) : '—'} />
+      </div>
 
-      {me.routeLabel && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Route timetable ({stops.length} stops)</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm">
-            {stops.length === 0 ? (
-              <p className="text-muted-foreground">No stops configured for this route yet.</p>
-            ) : (
-              <ol className="divide-y divide-border">
-                {stops.map((s, i) => (
-                  <li key={s.id} className="flex items-center gap-3 py-2">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-                      {s.order ?? i + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-medium">
-                      {s.name}
-                      {s.isMajor && (
-                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
-                          Major
-                        </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-right tabular-nums text-muted-foreground">
-                      <span className="block">
-                        <span className="mr-1 text-[10px] uppercase tracking-wide text-gray-400">Morning</span>
-                        {fmtTime(s.time)}
-                      </span>
-                      <span className="block">
-                        <span className="mr-1 text-[10px] uppercase tracking-wide text-gray-400">Evening</span>
-                        {fmtTime(s.eveningTime)}
-                      </span>
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </CardContent>
-        </Card>
+      {!me.routeLabel && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            You don&apos;t have a route assigned yet. Please contact the transport office to be assigned a route.
+          </p>
+        </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>My details</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-          <Field label="Status" value={me.status ?? '—'} />
-          <Field label="License" value={me.licenseNumber ?? '—'} />
-          <Field label="License expiry" value={me.licenseExpiry ?? '—'} />
-          <Field
-            label="Experience"
-            value={me.experienceYears != null ? `${me.experienceYears} yrs` : '—'}
-          />
-          <Field label="Rating" value={me.rating != null ? String(me.rating) : '—'} />
-          <Field label="Total trips" value={me.totalTrips != null ? String(me.totalTrips) : '—'} />
-        </CardContent>
-      </Card>
+      <div>
+        <h2 className="mb-4 text-xl font-semibold text-gray-900 dark:text-white">Quick actions</h2>
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {QUICK.map((a) => (
+            <button
+              key={a.href}
+              onClick={() => router.push(a.href)}
+              className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-6 text-left shadow-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
+            >
+              <div className="flex items-center gap-4">
+                <div
+                  className={cn(
+                    'flex h-12 w-12 items-center justify-center rounded-xl shadow-lg transition-transform duration-300 group-hover:scale-110',
+                    TILE[a.tone]
+                  )}
+                >
+                  <a.icon className="h-6 w-6 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-white">{a.title}</h3>
+                  <p className="truncate text-sm text-gray-600 dark:text-gray-400">{a.desc}</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white shadow-lg', TILE.slate)}>
+            <IdCard className="h-6 w-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">License</p>
+            <p className="truncate text-base font-semibold text-gray-900 dark:text-white">{me.licenseNumber ?? '—'}</p>
+            {me.licenseExpiry && <p className="text-xs text-gray-500 dark:text-gray-400">Expires {me.licenseExpiry}</p>}
+          </div>
+        </div>
+        <div className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white shadow-lg', TILE.blue)}>
+            <Star className="h-6 w-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">Experience</p>
+            <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
+              {me.experienceYears != null ? `${me.experienceYears} years` : '—'}
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

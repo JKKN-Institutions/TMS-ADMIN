@@ -39,9 +39,21 @@ interface RouteDetail {
   route_stops?: RouteStop[];
   _driverName?: string | null;
   _vehicleReg?: string | null;
+  _vehicleCapacity?: number | null;
+  _passengerCount?: number;
 }
 
 const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '—');
+
+// Occupancy "{riders} / {seats}". Seats come from the assigned vehicle (tms_route's
+// total_capacity is 0 for most routes); riders are counted live by the API.
+function capacityLabel(route: RouteDetail): string {
+  const seats =
+    route._vehicleCapacity ??
+    (route.total_capacity && route.total_capacity > 0 ? route.total_capacity : null);
+  if (seats != null) return `${route._passengerCount ?? 0} / ${seats}`;
+  return route._passengerCount != null ? `${route._passengerCount} riders` : '—';
+}
 
 async function fetchRouteDetail(id: string): Promise<RouteDetail> {
   const res = await fetch(`/api/admin/routes/${id}`);
@@ -172,7 +184,7 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
           <Field label="Distance" value={route.distance ? `${route.distance} km` : ''} />
           <Field label="Duration" value={route.duration} />
           <Field label="Fare" value={route.fare ? `₹${route.fare}` : ''} />
-          <Field label="Capacity" value={`${route.current_passengers ?? 0} / ${route.total_capacity ?? 0}`} />
+          <Field label="Capacity" value={capacityLabel(route)} />
           <Field label="Status" value={<StatusBadge status={route.status} />} />
         </div>
       </SectionCard>

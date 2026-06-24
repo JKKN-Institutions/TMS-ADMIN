@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 
 /**
  * GET one route (full tms_route row + its ordered stops) by id. Backs the
@@ -48,7 +49,34 @@ export async function GET(
       .eq('route_id', routeId)
       .order('sequence_order', { ascending: true });
 
-    return NextResponse.json({ success: true, data: { ...route, route_stops: stops ?? [] } });
+    // Occupancy: seats come from the assigned vehicle (tms_route.total_capacity is
+    // stale — 0 for most routes); riders are counted live from the allocation
+    // (current_passengers is stale too), using the same roster filter as the portals.
+    let vehicleCapacity: number | null = null;
+    if (route.vehicle_id) {
+      const { data: veh } = await supabase
+        .from('tms_vehicle')
+        .select('capacity')
+        .eq('id', route.vehicle_id)
+        .maybeSingle();
+      vehicleCapacity = (veh as { capacity: number | null } | null)?.capacity ?? null;
+    }
+    const { count: passengerCount } = await supabase
+      .from('learners_profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('transport_route_id', routeId)
+      .eq('bus_required', true)
+      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES]);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...route,
+        route_stops: stops ?? [],
+        _vehicleCapacity: vehicleCapacity,
+        _passengerCount: passengerCount ?? 0,
+      },
+    });
   } catch (e) {
     console.error('Route detail API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -1,4 +1,4 @@
-import type { DriverListItem, DriverOps } from '@/types';
+import type { DriverListItem, DriverOps, DriverRouteRef } from '@/types';
 
 /**
  * Shared row→DTO mapping for the drivers feature.
@@ -66,7 +66,11 @@ export function mapOps(o: OpsRow): DriverOps {
   };
 }
 
-export function mapStaffToDriver(s: StaffRow, ops: OpsRow | null): DriverListItem {
+export function mapStaffToDriver(
+  s: StaffRow,
+  ops: OpsRow | null,
+  routes: DriverRouteRef[] = []
+): DriverListItem {
   const name = `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim();
   return {
     id: s.id,
@@ -84,6 +88,7 @@ export function mapStaffToDriver(s: StaffRow, ops: OpsRow | null): DriverListIte
     institutionId: s.institution_id,
     profileId: s.profile_id,
     ops: ops ? mapOps(ops) : null,
+    routes,
   };
 }
 

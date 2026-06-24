@@ -99,6 +99,23 @@ export function getDriverColumns(
       cell: ({ row }) => <ActiveBadge isActive={row.original.isActive} />,
     },
     {
+      id: 'route',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
+      accessorFn: (d) => d.routes.map((r) => r.label).join(', '),
+      cell: ({ row }) => {
+        const routes = row.original.routes;
+        if (routes.length === 0) return <span className="text-gray-400">—</span>;
+        return (
+          <span className="text-gray-700 dark:text-gray-300">
+            {routes[0].label}
+            {routes.length > 1 && (
+              <span className="ml-1 text-xs text-gray-500">+{routes.length - 1}</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       id: 'licenseNumber',
       header: ({ column }) => <DataTableColumnHeader column={column} title="License No." />,
       accessorFn: (d) => d.ops?.licenseNumber ?? '',

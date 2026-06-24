@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { STAFF_SELECT, mapStaffToDriver, type StaffRow, type OpsRow } from '@/lib/drivers/map';
+import { getRoutesForDrivers } from '@/lib/drivers/routes';
 
 /**
  * GET one driver (staff + TMS ops) by staff id. Backs the in-module view/edit
@@ -42,7 +43,11 @@ export async function GET(
       .eq('staff_id', driverId)
       .maybeSingle();
 
-    const driver = mapStaffToDriver(staffRow as unknown as StaffRow, (opsRow as OpsRow | null) ?? null);
+    const ops = (opsRow as OpsRow | null) ?? null;
+    const routesByStaff = await getRoutesForDrivers(supabase, [
+      { staffId: driverId, assignedRouteId: ops?.assigned_route_id ?? null },
+    ]);
+    const driver = mapStaffToDriver(staffRow as unknown as StaffRow, ops, routesByStaff.get(driverId) ?? []);
     return NextResponse.json({ success: true, data: driver });
   } catch (e) {
     console.error('Driver detail API error:', e);

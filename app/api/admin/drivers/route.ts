@@ -9,6 +9,7 @@ import {
   type StaffRow,
   type OpsRow,
 } from '@/lib/drivers/map';
+import { getRoutesForDrivers } from '@/lib/drivers/routes';
 
 async function getDrivers() {
   try {
@@ -28,7 +29,13 @@ async function getDrivers() {
       ? await supabase.from('tms_driver').select('*').in('staff_id', ids)
       : { data: [] as OpsRow[] };
     const opsByStaff = new Map<string, OpsRow>(((opsRows ?? []) as OpsRow[]).map((o) => [o.staff_id, o]));
-    const drivers = staff.map((s) => mapStaffToDriver(s, opsByStaff.get(s.id) ?? null));
+    const routesByStaff = await getRoutesForDrivers(
+      supabase,
+      staff.map((s) => ({ staffId: s.id, assignedRouteId: opsByStaff.get(s.id)?.assigned_route_id ?? null }))
+    );
+    const drivers = staff.map((s) =>
+      mapStaffToDriver(s, opsByStaff.get(s.id) ?? null, routesByStaff.get(s.id) ?? [])
+    );
     return NextResponse.json({ success: true, data: drivers, count: drivers.length });
   } catch (e) {
     console.error('Drivers API error:', e);

@@ -142,7 +142,10 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
             <Field label="Aadhar No." value={ops.aadharNumber} />
             <Field label="Medical Cert. Expiry" value={ops.medicalCertificateExpiry} />
             <Field label="Location Sharing" value={ops.locationSharingEnabled ? 'Enabled' : 'Disabled'} />
-            <Field label="Assigned Route ID" value={ops.assignedRouteId} />
+            <Field
+              label="Assigned Route(s)"
+              value={driver.routes.length ? driver.routes.map((r) => r.label).join(', ') : '—'}
+            />
             <Field label="Notes" value={ops.notes} />
           </div>
         ) : (

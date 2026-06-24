@@ -57,6 +57,11 @@ export interface DriverOps {
   notes: string | null;
 }
 
+export interface DriverRouteRef {
+  id: string;
+  label: string; // "20 · CHENNAMPATTI"
+}
+
 export interface DriverListItem {
   id: string;            // staff.id
   name: string;
@@ -73,6 +78,7 @@ export interface DriverListItem {
   institutionId: string;
   profileId: string | null;
   ops: DriverOps | null; // null = no tms_driver row yet
+  routes: DriverRouteRef[]; // assigned route(s): tms_route.driver_id=staff.id ∪ tms_driver.assigned_route_id
 }
 
 export interface Permission {

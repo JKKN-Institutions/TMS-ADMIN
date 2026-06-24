@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getDriverForUser } from '@/lib/driver/identity';
+import { getDriverRoutes } from '@/lib/driver/routes';
+import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -21,49 +23,26 @@ async function getMe(_request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
     }
 
-    let routeLabel: string | null = null;
-    // The assigned route's ordered stops, with both the morning (stop_time, inbound
-    // to-college pickup) and evening (evening_time, outbound from-college drop) times,
-    // so the driver dashboard can show the full two-way timetable.
-    let stops: Array<{
-      id: string;
-      name: string;
-      time: string | null;
-      eveningTime: string | null;
-      order: number | null;
-      isMajor: boolean | null;
-    }> = [];
-    if (drv.assigned_route_id) {
-      const svc = createServiceRoleClient();
-      const r = await svc
-        .from('tms_route')
-        .select('route_number, route_name')
-        .eq('id', drv.assigned_route_id)
-        .maybeSingle();
-      const rr = r.data as { route_number: string; route_name: string } | null;
-      if (rr) routeLabel = `${rr.route_number} · ${rr.route_name}`;
+    // A driver's route(s) live on tms_route.driver_id = staff.id (the canonical
+    // assignment), not tms_driver.assigned_route_id. The dashboard shows the primary
+    // (first) route's two-way timetable: morning (stop_time, inbound pickup) + evening
+    // (evening_time, outbound drop).
+    const routes = await getDriverRoutes(drv.staff_id, drv.assigned_route_id);
+    const primary = routes[0] ?? null;
 
-      const stopsRes = await svc
-        .from('tms_route_stop')
-        .select('id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
-        .eq('route_id', drv.assigned_route_id)
-        .order('sequence_order', { ascending: true });
-      const stopRows = (stopsRes.data ?? []) as Array<{
-        id: string;
-        stop_name: string;
-        stop_time: string | null;
-        evening_time: string | null;
-        sequence_order: number | null;
-        is_major_stop: boolean | null;
-      }>;
-      stops = stopRows.map((s) => ({
-        id: s.id,
-        name: s.stop_name,
-        time: s.stop_time,
-        eveningTime: s.evening_time,
-        order: s.sequence_order,
-        isMajor: s.is_major_stop,
-      }));
+    // Total riders across the driver's route(s) — same roster definition as
+    // /api/driver/passengers (bus-required, actively-enrolled learners).
+    const routeIds = routes.map((r) => r.id);
+    let passengerCount = 0;
+    if (routeIds.length > 0) {
+      const svc = createServiceRoleClient();
+      const { count } = await svc
+        .from('learners_profiles')
+        .select('id', { count: 'exact', head: true })
+        .in('transport_route_id', routeIds)
+        .eq('bus_required', true)
+        .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES]);
+      passengerCount = count ?? 0;
     }
 
     return NextResponse.json({
@@ -75,9 +54,10 @@ async function getMe(_request: NextRequest, auth: AuthContext) {
         experienceYears: drv.experience_years,
         rating: drv.rating,
         totalTrips: drv.total_trips,
-        assignedRouteId: drv.assigned_route_id,
-        routeLabel,
-        stops,
+        passengerCount,
+        assignedRouteId: primary?.id ?? null,
+        routeLabel: primary?.label ?? null,
+        stops: primary?.stops ?? [],
       },
     });
   } catch (e) {

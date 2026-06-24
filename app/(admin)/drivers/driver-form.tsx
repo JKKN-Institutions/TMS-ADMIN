@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
@@ -67,6 +67,33 @@ export default function DriverForm({
 
   const set = (k: keyof FormState, v: string | boolean) => setForm((p) => ({ ...p, [k]: v }));
 
+  // Routes for the "Assigned Route" dropdown. The driver portal reads this column
+  // (tms_driver.assigned_route_id), so the value MUST be a real route UUID — hence a
+  // dropdown, not the old free-text box where a typed route number failed to save.
+  const [routes, setRoutes] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/routes');
+        const json = await res.json();
+        if (active && json.success) {
+          setRoutes(
+            (json.data as { id: string; route_number: string | null; route_name: string | null }[]).map((r) => ({
+              id: r.id,
+              label: `${r.route_number ?? '?'} · ${r.route_name ?? ''}`.trim(),
+            }))
+          );
+        }
+      } catch {
+        /* non-fatal — the dropdown just stays empty */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const mutation = useMutation({
     mutationFn: async () => {
       const res = await fetch('/api/admin/drivers', {
@@ -126,8 +153,13 @@ export default function DriverForm({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-gray-600">Assigned Route ID</span>
-            <input className="input mt-1" value={form.assignedRouteId} onChange={(e) => set('assignedRouteId', e.target.value)} placeholder="Optional" />
+            <span className="text-gray-600">Assigned Route</span>
+            <select className="input mt-1" value={form.assignedRouteId} onChange={(e) => set('assignedRouteId', e.target.value)}>
+              <option value="">Unassigned</option>
+              {routes.map((r) => (
+                <option key={r.id} value={r.id}>{r.label}</option>
+              ))}
+            </select>
           </label>
         </div>
       </SectionCard>
