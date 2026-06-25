@@ -125,10 +125,16 @@ function SuggestionRow({
   s,
   selected,
   onToggle,
+  routeOptions,
+  targets,
+  onTarget,
 }: {
   s: ConsolidationSuggestion;
   selected: boolean;
   onToggle: (routeId: string) => void;
+  routeOptions: { id: string; label: string; spare: number }[];
+  targets: Record<string, string>;
+  onTarget: (learnerId: string, routeId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const badge = consolidationBadge[s.classification];
@@ -207,18 +213,22 @@ function SuggestionRow({
                     </td>
                     <td className="px-3 py-2 text-gray-600">{r.boardingStop || '—'}</td>
                     <td className="px-3 py-2">
-                      {r.feasible ? (
-                        <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
-                          <ArrowRight className="h-3.5 w-3.5" />
-                          {r.targetRouteName}
-                          {r.targetRouteNumber && (
-                            <span className="text-gray-500">#{r.targetRouteNumber}</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-red-600 dark:text-red-400" title={r.reason ?? ''}>
-                          {r.reason || 'Not transferable'}
-                        </span>
+                      <select
+                        value={targets[r.learnerId] ?? ''}
+                        onChange={(e) => onTarget(r.learnerId, e.target.value)}
+                        className="h-8 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-900"
+                      >
+                        <option value="">— pick a bus —</option>
+                        {routeOptions
+                          .filter((o) => o.id !== s.routeId)
+                          .map((o) => (
+                            <option key={o.id} value={o.id} disabled={o.spare <= 0 && o.id !== (r.feasible ? r.targetRouteId : '')}>
+                              {o.label} ({o.spare} free){r.feasible && o.id === r.targetRouteId ? ' · suggested' : ''}
+                            </option>
+                          ))}
+                      </select>
+                      {targets[r.learnerId] && !r.feasible && (
+                        <span className="mt-1 block text-xs text-amber-600 dark:text-amber-400">manual override</span>
                       )}
                     </td>
                   </tr>
@@ -243,6 +253,8 @@ export default function RouteOptimizationPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [targets, setTargets] = useState<Record<string, string>>({});
+  const [mode, setMode] = useState<'today_booking' | 'permanent'>('today_booking');
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -278,6 +290,24 @@ export default function RouteOptimizationPage() {
     });
   }, []);
 
+  const routeOptions = useMemo(() => {
+    const rs = analysis?.routes ?? [];
+    return rs.map((r) => ({
+      id: r.routeId,
+      label: `${r.routeName}${r.routeNumber ? ` #${r.routeNumber}` : ''}`,
+      spare: Math.max(0, r.capacity - r.currentPassengers),
+    }));
+  }, [analysis]);
+
+  useEffect(() => {
+    if (!analysis) return;
+    const init: Record<string, string> = {};
+    for (const s of analysis.suggestions)
+      for (const r of s.relocations)
+        init[r.learnerId] = r.feasible && r.targetRouteId ? r.targetRouteId : '';
+    setTargets(init);
+  }, [analysis]);
+
   const selectedSuggestions = useMemo(
     () => (analysis?.suggestions ?? []).filter((s) => selected.has(s.routeId)),
     [analysis, selected]
@@ -287,20 +317,24 @@ export default function RouteOptimizationPage() {
     [selectedSuggestions]
   );
 
-  const applySelected = useCallback(async () => {
+  const applySelected = useCallback(async (applyMode: 'today_booking' | 'permanent') => {
     setApplying(true);
     try {
+      const moves: { learnerId: string; fromRouteId: string; toRouteId: string }[] = [];
+      for (const s of (analysis?.suggestions ?? []).filter((x) => selected.has(x.routeId)))
+        for (const r of s.relocations) {
+          const to = targets[r.learnerId];
+          if (to) moves.push({ learnerId: r.learnerId, fromRouteId: s.routeId, toRouteId: to });
+        }
+      if (moves.length === 0) { toast.error('No targets chosen for the selected routes'); return; }
       const res = await fetch('/api/admin/route-optimization/execute-transfers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, threshold, routeIds: Array.from(selected) }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, threshold, mode: applyMode, moves }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to apply');
       const r = json.result;
-      toast.success(
-        `Moved ${r.totalMoves} passenger(s)${r.routesCancelled ? `, freed ${r.routesCancelled} bus(es)` : ''}`
-      );
+      toast.success(`Applied ${r.applied} move(s)${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`);
       setConfirmOpen(false);
       await runAnalysis();
     } catch (e) {
@@ -308,7 +342,7 @@ export default function RouteOptimizationPage() {
     } finally {
       setApplying(false);
     }
-  }, [date, threshold, selected, runAnalysis]);
+  }, [analysis, selected, targets, date, threshold, runAnalysis]);
 
   const undoRun = useCallback(
     async (runId: string) => {
@@ -501,6 +535,11 @@ export default function RouteOptimizationPage() {
                     s={sug}
                     selected={selected.has(sug.routeId)}
                     onToggle={toggle}
+                    routeOptions={routeOptions}
+                    targets={targets}
+                    onTarget={(learnerId, routeId) =>
+                      setTargets((prev) => ({ ...prev, [learnerId]: routeId }))
+                    }
                   />
                 ))}
               </div>
@@ -598,6 +637,16 @@ export default function RouteOptimizationPage() {
               <strong>{selected.size}</strong> route(s) for <strong>{date}</strong> onto healthy
               routes. You can undo this run afterwards from the Applied runs list.
             </p>
+            <fieldset className="mt-4 space-y-2">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="radio" name="mode" checked={mode === 'today_booking'} onChange={() => setMode('today_booking')} />
+                Today only — move this date&apos;s bookings
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="radio" name="mode" checked={mode === 'permanent'} onChange={() => setMode('permanent')} />
+                Permanent — change the learners&apos; standing route (does not alter this date&apos;s booking)
+              </label>
+            </fieldset>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -609,7 +658,7 @@ export default function RouteOptimizationPage() {
               </button>
               <button
                 type="button"
-                onClick={applySelected}
+                onClick={() => applySelected(mode)}
                 disabled={applying}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
               >
