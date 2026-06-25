@@ -13,9 +13,9 @@ export type ActivityAction =
   | 'upload' | 'activate' | 'deactivate' | 'scan' | 'mark' | 'generate';
 
 export type ActivityModule =
-  | 'drivers' | 'vehicles' | 'routes' | 'gps-devices' | 'passengers'
-  | 'staff-route-assignments' | 'boarding' | 'enrollment' | 'grievances'
-  | 'settings' | 'transport-years' | 'fees';
+  | 'drivers' | 'vehicles' | 'routes' | 'route-optimization' | 'gps-devices'
+  | 'passengers' | 'staff-route-assignments' | 'boarding' | 'enrollment'
+  | 'grievances' | 'settings' | 'transport-years' | 'fees';
 
 export interface ActivityEntry {
   module: ActivityModule;

@@ -50,6 +50,7 @@ const MODULE_LABEL: Record<string, string> = {
   'drivers': 'Drivers',
   'vehicles': 'Vehicles',
   'routes': 'Routes',
+  'route-optimization': 'Route Optimization',
   'gps-devices': 'GPS Devices',
   'passengers': 'Passengers',
   'staff-route-assignments': 'Staff Assignments',
