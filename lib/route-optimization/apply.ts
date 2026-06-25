@@ -17,6 +17,16 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadOptimizationAnalysis } from './data';
+import {
+  planManualMoves,
+  type MoveRequest,
+  type RouteCapacity,
+  type CurrentAllocation,
+} from './allocate';
+import { normalizeStopName } from './engine';
+
+const CHUNK = 150;
+const DEFAULT_DAILY_BUS_COST = 2500;
 
 export interface ApplyParams {
   date: string;
@@ -138,6 +148,25 @@ export async function applyConsolidations(
   return { runId, date, totalMoves: applied, routesCancelled, estimatedSavings, skipped };
 }
 
+export type ApplyMode = 'today_booking' | 'permanent';
+
+export interface ManualApplyParams {
+  date: string;
+  mode: ApplyMode;
+  threshold: number;
+  moves: MoveRequest[];
+  actorId: string | null;
+}
+export interface ManualApplyResult {
+  runId: string;
+  mode: ApplyMode;
+  date: string;
+  applied: number;
+  skipped: { learnerId: string; reason: string }[];
+  routesCancelled: number;
+  estimatedSavings: number;
+}
+
 export interface RollbackResult {
   restored: number;
   skipped: number;
@@ -150,13 +179,14 @@ export async function rollbackRun(
 ): Promise<RollbackResult> {
   const { data: run, error: runErr } = await supabase
     .from('tms_route_optimization')
-    .select('id, status')
+    .select('id, status, mode')
     .eq('id', runId)
     .single();
   if (runErr || !run) throw new Error('Optimization run not found');
   if (run.status === 'rolled_back') {
     return { restored: 0, skipped: 0, alreadyRolledBack: true };
   }
+  const mode = (run.mode ?? 'today_booking') as ApplyMode;
 
   const { data: itemRows, error: itemErr } = await supabase
     .from('tms_route_optimization_item')
@@ -167,32 +197,209 @@ export async function rollbackRun(
   let restored = 0;
   let skipped = 0;
   for (const it of itemRows ?? []) {
-    if (!it.from_route_id) {
-      skipped++;
-      continue;
+    if (!it.from_route_id) { skipped++; continue; }
+    let ok = false;
+    if (mode === 'today_booking') {
+      const { data, error } = await supabase
+        .from('tms_booking').update({ route_id: it.from_route_id, stop_id: it.from_stop_id })
+        .eq('learner_id', it.learner_id).eq('travel_date', it.travel_date).eq('route_id', it.to_route_id)
+        .select('learner_id');
+      ok = !error && !!data && data.length > 0;
+    } else {
+      const { data, error } = await supabase
+        .from('learners_profiles').update({ transport_route_id: it.from_route_id, transport_stop_id: it.from_stop_id })
+        .eq('id', it.learner_id).eq('transport_route_id', it.to_route_id)
+        .select('id');
+      ok = !error && !!data && data.length > 0;
     }
-    const { data: updated, error } = await supabase
-      .from('tms_booking')
-      .update({ route_id: it.from_route_id, stop_id: it.from_stop_id })
-      .eq('learner_id', it.learner_id)
-      .eq('travel_date', it.travel_date)
-      .eq('route_id', it.to_route_id) // only if still where we moved it
-      .select('learner_id');
-    if (error || !updated || updated.length === 0) {
-      skipped++;
-      continue;
-    }
+    if (!ok) { skipped++; continue; }
     restored++;
   }
 
   await supabase
     .from('tms_route_optimization')
-    .update({
-      status: 'rolled_back',
-      rolled_back_at: new Date().toISOString(),
-      rolled_back_by: actorId,
-    })
+    .update({ status: 'rolled_back', rolled_back_at: new Date().toISOString(), rolled_back_by: actorId })
     .eq('id', runId);
 
   return { restored, skipped, alreadyRolledBack: false };
+}
+
+export async function applyManualMoves(
+  supabase: SupabaseClient,
+  { date, mode, threshold, moves, actorId }: ManualApplyParams
+): Promise<ManualApplyResult> {
+  // 1) Routes + capacity.
+  const { data: routeRows, error: routeErr } = await supabase
+    .from('tms_route')
+    .select('id, status, total_capacity, vehicle_id');
+  if (routeErr) throw new Error(`routes: ${routeErr.message}`);
+  const routeList = routeRows ?? [];
+
+  const vehicleIds = Array.from(new Set(routeList.map((r) => r.vehicle_id).filter((v): v is string => !!v)));
+  const vehCap = new Map<string, number | null>();
+  for (let i = 0; i < vehicleIds.length; i += CHUNK) {
+    const { data: vrows, error } = await supabase
+      .from('tms_vehicle').select('id, capacity').in('id', vehicleIds.slice(i, i + CHUNK));
+    if (error) throw new Error(`vehicles: ${error.message}`);
+    for (const v of vrows ?? []) vehCap.set(v.id, v.capacity);
+  }
+  const capacityOf = (r: { vehicle_id: string | null; total_capacity: number | null }) => {
+    const vc = r.vehicle_id ? vehCap.get(r.vehicle_id) : null;
+    if (vc && vc > 0) return vc;
+    if (r.total_capacity && r.total_capacity > 0) return r.total_capacity;
+    return 60;
+  };
+
+  // 2) Occupancy per mode.
+  const occupancy = new Map<string, number>();
+  if (mode === 'today_booking') {
+    const { data, error } = await supabase.from('tms_booking').select('route_id').eq('travel_date', date);
+    if (error) throw new Error(`bookings: ${error.message}`);
+    for (const b of data ?? []) occupancy.set(b.route_id, (occupancy.get(b.route_id) ?? 0) + 1);
+  } else {
+    const { data, error } = await supabase
+      .from('learners_profiles').select('transport_route_id').not('transport_route_id', 'is', null);
+    if (error) throw new Error(`allocations: ${error.message}`);
+    for (const l of data ?? []) occupancy.set(l.transport_route_id, (occupancy.get(l.transport_route_id) ?? 0) + 1);
+  }
+
+  const routes = new Map<string, RouteCapacity>();
+  for (const r of routeList) {
+    routes.set(r.id, {
+      routeId: r.id,
+      active: (r.status ?? 'active') === 'active',
+      capacity: capacityOf(r),
+      occupancy: occupancy.get(r.id) ?? 0,
+    });
+  }
+
+  // 3) Stop name → id per route.
+  const { data: stopRows, error: stopErr } = await supabase
+    .from('tms_route_stop').select('id, route_id, stop_name');
+  if (stopErr) throw new Error(`stops: ${stopErr.message}`);
+  const stops = stopRows ?? [];
+  const stopNameById = new Map<string, string | null>(stops.map((s) => [s.id, s.stop_name]));
+  const stopNameToIdByRoute = new Map<string, Map<string, string>>();
+  for (const s of stops) {
+    const key = normalizeStopName(s.stop_name);
+    if (!key) continue;
+    let m = stopNameToIdByRoute.get(s.route_id);
+    if (!m) { m = new Map(); stopNameToIdByRoute.set(s.route_id, m); }
+    if (!m.has(key)) m.set(key, s.id);
+  }
+
+  // 4) Current allocation for the requested learners.
+  const learnerIds = Array.from(new Set(moves.map((m) => m.learnerId)));
+  const current = new Map<string, CurrentAllocation>();
+  const nameById = new Map<string, { name: string; roll: string | null }>();
+  for (let i = 0; i < learnerIds.length; i += CHUNK) {
+    const slice = learnerIds.slice(i, i + CHUNK);
+    const { data: prof, error } = await supabase
+      .from('learners_profiles')
+      .select('id, first_name, last_name, roll_number, register_number, transport_route_id, transport_stop_id')
+      .in('id', slice);
+    if (error) throw new Error(`learners: ${error.message}`);
+    for (const l of prof ?? []) {
+      const name = [l.first_name, l.last_name].filter(Boolean).join(' ').trim() || 'Unknown learner';
+      nameById.set(l.id, { name, roll: l.roll_number || l.register_number || null });
+      if (mode === 'permanent') {
+        current.set(l.id, {
+          routeId: l.transport_route_id,
+          stopId: l.transport_stop_id,
+          stopName: l.transport_stop_id ? stopNameById.get(l.transport_stop_id) ?? null : null,
+          learnerName: name,
+          learnerRoll: l.roll_number || l.register_number || null,
+        });
+      }
+    }
+  }
+  if (mode === 'today_booking') {
+    for (let i = 0; i < learnerIds.length; i += CHUNK) {
+      const slice = learnerIds.slice(i, i + CHUNK);
+      const { data: bk, error } = await supabase
+        .from('tms_booking').select('learner_id, route_id, stop_id')
+        .eq('travel_date', date).in('learner_id', slice);
+      if (error) throw new Error(`current bookings: ${error.message}`);
+      for (const b of bk ?? []) {
+        const nm = nameById.get(b.learner_id);
+        current.set(b.learner_id, {
+          routeId: b.route_id,
+          stopId: b.stop_id,
+          stopName: b.stop_id ? stopNameById.get(b.stop_id) ?? null : null,
+          learnerName: nm?.name ?? 'Unknown learner',
+          learnerRoll: nm?.roll ?? null,
+        });
+      }
+    }
+  }
+
+  // 5) Plan.
+  const plan = planManualMoves(moves, routes, current, stopNameToIdByRoute);
+
+  // 6) Run header.
+  const { data: run, error: runErr } = await supabase
+    .from('tms_route_optimization')
+    .insert({
+      travel_date: date, mode, threshold_percent: threshold,
+      total_moves: 0, routes_cancelled: 0, estimated_savings: 0,
+      summary: { mode, requested: moves.length, applied: 0, skipped: plan.skipped.length },
+      status: 'applied', created_by: actorId,
+    })
+    .select('id').single();
+  if (runErr || !run) throw new Error(`create run: ${runErr?.message ?? 'no row'}`);
+  const runId = run.id as string;
+
+  // 7) Execute guarded moves.
+  let applied = 0;
+  const extraSkips: { learnerId: string; reason: string }[] = [];
+  const items: Record<string, unknown>[] = [];
+  const fromLabel = (id: string) => routeList.find((r) => r.id === id)?.id ?? id;
+  for (const mv of plan.moves) {
+    let ok = false;
+    if (mode === 'today_booking') {
+      const { data: u, error } = await supabase
+        .from('tms_booking').update({ route_id: mv.toRouteId, stop_id: mv.toStopId })
+        .eq('learner_id', mv.learnerId).eq('travel_date', date).eq('route_id', mv.fromRouteId)
+        .select('learner_id');
+      ok = !error && !!u && u.length > 0;
+    } else {
+      const { data: u, error } = await supabase
+        .from('learners_profiles').update({ transport_route_id: mv.toRouteId, transport_stop_id: mv.toStopId })
+        .eq('id', mv.learnerId).eq('transport_route_id', mv.fromRouteId)
+        .select('id');
+      ok = !error && !!u && u.length > 0;
+    }
+    if (!ok) { extraSkips.push({ learnerId: mv.learnerId, reason: 'Changed during apply' }); continue; }
+    applied++;
+    items.push({
+      optimization_id: runId, learner_id: mv.learnerId, travel_date: date,
+      learner_label: mv.learnerLabel,
+      from_route_id: mv.fromRouteId, from_route_label: fromLabel(mv.fromRouteId), from_stop_id: mv.fromStopId,
+      to_route_id: mv.toRouteId, to_route_label: fromLabel(mv.toRouteId), to_stop_id: mv.toStopId,
+    });
+  }
+  if (items.length) {
+    const { error } = await supabase.from('tms_route_optimization_item').insert(items);
+    if (error) throw new Error(`insert items: ${error.message}`);
+  }
+
+  // 8) routes_cancelled + savings (today mode only).
+  let routesCancelled = 0;
+  let estimatedSavings = 0;
+  if (mode === 'today_booking') {
+    const sourceIds = Array.from(new Set(plan.moves.map((m) => m.fromRouteId)));
+    for (const rid of sourceIds) {
+      const { count } = await supabase
+        .from('tms_booking').select('learner_id', { count: 'exact', head: true })
+        .eq('travel_date', date).eq('route_id', rid);
+      if ((count ?? 0) === 0) { routesCancelled++; estimatedSavings += DEFAULT_DAILY_BUS_COST; }
+    }
+  }
+
+  await supabase.from('tms_route_optimization')
+    .update({ total_moves: applied, routes_cancelled: routesCancelled, estimated_savings: estimatedSavings,
+      summary: { mode, requested: moves.length, applied, skipped: plan.skipped.length + extraSkips.length } })
+    .eq('id', runId);
+
+  return { runId, mode, date, applied, skipped: [...plan.skipped, ...extraSkips], routesCancelled, estimatedSavings };
 }
