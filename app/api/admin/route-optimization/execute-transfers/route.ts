@@ -7,11 +7,12 @@ import { logActivity } from '@/lib/activity/log';
 
 /**
  * POST /api/admin/route-optimization/execute-transfers
- * Body: { date: 'YYYY-MM-DD', threshold?: number, routeIds: string[] }
+ * Body: { date: 'YYYY-MM-DD', mode?: 'today_booking'|'permanent', threshold?: number, moves: [{learnerId, fromRouteId, toRouteId}] }
  *
- * Applies the consolidation for the selected SOURCE routes: the server re-runs
- * the analysis and moves each feasible booking onto a healthy route, recording a
- * reversible run (see /rollback). Requires tms.routes.edit.
+ * Validates each move and applies via `applyManualMoves`:
+ *  - today_booking → writes to tms_booking for the given date
+ *  - permanent     → updates learners_profiles standing allocation
+ * Records an undoable run in tms_route_optimization (see /rollback). Requires tms.routes.edit.
  */
 
 async function canEdit(auth: AuthContext): Promise<boolean> {

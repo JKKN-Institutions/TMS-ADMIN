@@ -34,6 +34,7 @@ interface AppliedRun {
   routes_cancelled: number;
   estimated_savings: number;
   status: 'applied' | 'rolled_back';
+  mode: 'today_booking' | 'permanent';
   created_at: string;
   rolled_back_at: string | null;
 }
@@ -471,6 +472,7 @@ export default function RouteOptimizationPage() {
                   <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                     <tr>
                       <th className="px-4 py-2.5 font-medium">Applied</th>
+                      <th className="px-4 py-2.5 font-medium">Mode</th>
                       <th className="px-4 py-2.5 font-medium">Moves</th>
                       <th className="px-4 py-2.5 font-medium">Buses freed</th>
                       <th className="px-4 py-2.5 font-medium">Est. savings</th>
@@ -482,9 +484,20 @@ export default function RouteOptimizationPage() {
                     {appliedRuns.map((run) => (
                       <tr key={run.id}>
                         <td className="px-4 py-2.5 text-gray-600">{fmtTime(run.created_at)}</td>
+                        <td className="px-4 py-2.5">
+                          {run.mode === 'permanent' ? (
+                            <Badge label="Permanent" cls="bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300" />
+                          ) : (
+                            <Badge label="Today" cls="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" />
+                          )}
+                        </td>
                         <td className="px-4 py-2.5 text-gray-900">{run.total_moves}</td>
-                        <td className="px-4 py-2.5 text-gray-900">{run.routes_cancelled}</td>
-                        <td className="px-4 py-2.5 text-gray-900">{inr(run.estimated_savings)}</td>
+                        <td className="px-4 py-2.5 text-gray-900">
+                          {run.mode === 'permanent' ? <span className="text-gray-400">—</span> : run.routes_cancelled}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-900">
+                          {run.mode === 'permanent' ? <span className="text-gray-400">—</span> : inr(run.estimated_savings)}
+                        </td>
                         <td className="px-4 py-2.5">
                           {run.status === 'applied' ? (
                             <Badge label="Applied" cls="bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300" />

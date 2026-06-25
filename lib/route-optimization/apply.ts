@@ -1,17 +1,27 @@
 /**
  * Route Optimization — apply & rollback (Phase 2).
  *
- * applyConsolidations RE-RUNS the analysis server-side (never trusts a client
- * move-list), keeps only the feasible moves for the admin-selected source
- * routes, and moves each booking (UPDATE tms_booking.route_id/stop_id). Every
- * move is snapshotted into tms_route_optimization_item under one
- * tms_route_optimization run header, so rollbackRun can put each booking back.
+ * applyConsolidations (legacy auto path) — RE-RUNS the analysis server-side
+ * (never trusts a client move-list), keeps only feasible moves for the
+ * admin-selected source routes, and moves each booking
+ * (UPDATE tms_booking.route_id/stop_id). Every move is snapshotted into
+ * tms_route_optimization_item under one tms_route_optimization run header.
+ *
+ * applyManualMoves — applies admin-chosen per-passenger moves supplied by the
+ * client. Supports two modes:
+ *  - today_booking: writes to tms_booking for the given date
+ *  - permanent:     updates learners_profiles standing allocation
+ * Moves are validated (capacity, current allocation) before execution and
+ * snapshotted into tms_route_optimization_item for rollback.
+ *
+ * rollbackRun — reverses either mode by branching on the run's stored `mode`:
+ * restores tms_booking rows (today_booking) or learners_profiles allocations
+ * (permanent), then marks the run as rolled_back.
  *
  * Safety:
- *  - A move only fires if the booking is STILL on the source route
- *    (`.eq('route_id', fromRouteId)`), so a double-apply or a concurrent change
- *    can't move someone twice or move the wrong row.
- *  - Rollback only restores a booking that is STILL on the route we moved it to,
+ *  - A move only fires if the learner is STILL on the source route, so a
+ *    double-apply or concurrent change can't move someone twice.
+ *  - Rollback only restores a row that is STILL on the destination route,
  *    so it never clobbers a later manual reassignment.
  */
 
