@@ -231,7 +231,7 @@ export async function applyManualMoves(
   // 1) Routes + capacity.
   const { data: routeRows, error: routeErr } = await supabase
     .from('tms_route')
-    .select('id, status, total_capacity, vehicle_id');
+    .select('id, route_number, route_name, status, total_capacity, vehicle_id');
   if (routeErr) throw new Error(`routes: ${routeErr.message}`);
   const routeList = routeRows ?? [];
 
@@ -353,7 +353,10 @@ export async function applyManualMoves(
   let applied = 0;
   const extraSkips: { learnerId: string; reason: string }[] = [];
   const items: Record<string, unknown>[] = [];
-  const fromLabel = (id: string) => routeList.find((r) => r.id === id)?.id ?? id;
+  const labelOf = (id: string) => {
+    const r = routeList.find((x) => x.id === id);
+    return r ? (r.route_name?.trim() || (r.route_number ? `Route ${r.route_number}` : id)) : id;
+  };
   for (const mv of plan.moves) {
     let ok = false;
     if (mode === 'today_booking') {
@@ -374,13 +377,15 @@ export async function applyManualMoves(
     items.push({
       optimization_id: runId, learner_id: mv.learnerId, travel_date: date,
       learner_label: mv.learnerLabel,
-      from_route_id: mv.fromRouteId, from_route_label: fromLabel(mv.fromRouteId), from_stop_id: mv.fromStopId,
-      to_route_id: mv.toRouteId, to_route_label: fromLabel(mv.toRouteId), to_stop_id: mv.toStopId,
+      from_route_id: mv.fromRouteId, from_route_label: labelOf(mv.fromRouteId), from_stop_id: mv.fromStopId,
+      to_route_id: mv.toRouteId, to_route_label: labelOf(mv.toRouteId), to_stop_id: mv.toStopId,
     });
   }
-  if (items.length) {
-    const { error } = await supabase.from('tms_route_optimization_item').insert(items);
-    if (error) throw new Error(`insert items: ${error.message}`);
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const { error: itemErr } = await supabase
+      .from('tms_route_optimization_item')
+      .insert(items.slice(i, i + CHUNK));
+    if (itemErr) throw new Error(`insert items: ${itemErr.message}`);
   }
 
   // 8) routes_cancelled + savings (today mode only).
