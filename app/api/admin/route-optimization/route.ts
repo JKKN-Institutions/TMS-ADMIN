@@ -51,7 +51,7 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
     const { data: appliedRuns, error: runsErr } = await supabase
       .from('tms_route_optimization')
       .select(
-        'id, travel_date, threshold_percent, total_moves, routes_cancelled, estimated_savings, status, created_at, created_by, rolled_back_at'
+        'id, travel_date, mode, threshold_percent, total_moves, routes_cancelled, estimated_savings, status, created_at, created_by, rolled_back_at'
       )
       .eq('travel_date', date)
       .order('created_at', { ascending: false });
