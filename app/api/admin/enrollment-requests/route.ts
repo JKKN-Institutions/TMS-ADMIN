@@ -43,13 +43,16 @@ async function handleGet(_request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    // All bus-required learners (NOT lifecycle-filtered): this is an allocation
-    // tool, so admins must be able to allocate not-yet-active learners too. (The
-    // read-only Learners *roster* page filters to active; enrollment does not.)
+    // Bus-required AND currently-active learners only. Enrollment allocates
+    // transport for active learners; admission-pipeline prospects (reserved,
+    // enquiry_submitted, enquiry, …) are intentionally excluded — they are not
+    // active learners yet. 'active' is the live enrolled state that carries the
+    // bus-required cohort (the legacy 'account' state is now effectively empty).
     const learnersRes = await svc
       .from('learners_profiles')
       .select(LEARNER_SELECT)
       .eq('bus_required', true)
+      .eq('lifecycle_status', 'active')
       .order('first_name', { ascending: true });
 
     if (learnersRes.error) {
