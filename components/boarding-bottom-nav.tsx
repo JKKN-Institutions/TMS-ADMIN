@@ -6,7 +6,7 @@ import { boardingNavigation } from '@/lib/boarding/navigation';
 /**
  * Mobile-only bottom navigation for the boarding-staff portal (lg:hidden).
  * Replaces the sidebar on small screens. Mirrors the student/admin bottom bars
- * but, since boarding has only four destinations, every item fits in the bar —
+ * but, since boarding has only five destinations, every item fits in the bar —
  * no "More" sheet needed.
  */
 export default function BoardingBottomNav() {
