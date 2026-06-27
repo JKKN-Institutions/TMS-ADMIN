@@ -19,6 +19,7 @@ type DriverRow = {
   staff_id: string | null;
   location_sharing_enabled: boolean | null;
   active_route_id: string | null;
+  assigned_route_id: string | null;
 };
 type StaffRow = { id: string; first_name: string | null; last_name: string | null };
 type VehRow = {
@@ -35,40 +36,58 @@ type VehRow = {
 };
 
 const NONE = '00000000-0000-0000-0000-000000000000';
+const uniq = (arr: (string | null)[]): string[] =>
+  Array.from(new Set(arr.filter((v): v is string => !!v)));
 
 /** GET /api/admin/track-all/drivers — live positions for the admin Track-All map, read
- *  from the tms_ plane (the legacy drivers/routes/vehicles tables were dropped). Emits
- *  the same DriverLocation[] shape the Leaflet map + page already consume. */
+ *  from the tms_ plane (the legacy drivers/routes/vehicles tables were dropped).
+ *
+ *  DRIVER-CENTRIC: we start from tms_driver and resolve each driver's route honoring
+ *  BOTH assignment columns — `tms_driver.active_route_id`/`assigned_route_id` (Drivers →
+ *  Edit) AND `tms_route.driver_id = staff_id` (Routes → Edit) — the same dual linkage the
+ *  driver's broadcast uses (lib/driver/routes.ts). Discovering drivers only via
+ *  tms_route.driver_id (the old approach) made any driver assigned through the Drivers
+ *  screen invisible here even while actively sharing. Emits the same DriverLocation[]
+ *  shape the Leaflet map + page already consume. */
 export async function GET() {
   try {
-    const { data: routesData, error: routesErr } = await supabase
-      .from('tms_route')
-      .select('id, route_number, route_name, vehicle_id, driver_id')
-      .not('driver_id', 'is', null);
+    // 1. Drivers first (small table) — the discovery is driver-centric, not route-centric.
+    const { data: driversData, error: driversErr } = await supabase
+      .from('tms_driver')
+      .select('id, staff_id, location_sharing_enabled, active_route_id, assigned_route_id');
+    if (driversErr) throw driversErr;
+    const drivers = (driversData ?? []) as DriverRow[];
+
+    if (drivers.length === 0) {
+      return NextResponse.json({
+        success: true,
+        drivers: [],
+        total: 0,
+        active_tracking: 0,
+        online_drivers: 0,
+        last_updated: new Date().toISOString(),
+      });
+    }
+
+    // 2. Ids needed to resolve each driver's route via EITHER linkage column.
+    const staffIds = uniq(drivers.map((d) => d.staff_id));
+    const routeIds = uniq(drivers.flatMap((d) => [d.active_route_id, d.assigned_route_id]));
+
+    // 3. One route fetch covering both paths: driver_id = staff_id (Routes screen) OR
+    //    id ∈ the active/assigned route ids (Drivers screen). Both lists are tiny.
+    const orParts: string[] = [];
+    if (staffIds.length) orParts.push(`driver_id.in.(${staffIds.join(',')})`);
+    if (routeIds.length) orParts.push(`id.in.(${routeIds.join(',')})`);
+    const { data: routesData, error: routesErr } = orParts.length
+      ? await supabase
+          .from('tms_route')
+          .select('id, route_number, route_name, vehicle_id, driver_id')
+          .or(orParts.join(','))
+      : { data: [] as RouteRow[], error: null };
     if (routesErr) throw routesErr;
     const routes = (routesData ?? []) as RouteRow[];
 
-    const staffIds = [...new Set(routes.map((r) => r.driver_id).filter(Boolean))] as string[];
-    const vehicleIds = [...new Set(routes.map((r) => r.vehicle_id).filter(Boolean))] as string[];
-
-    const [driversRes, staffRes, vehRes] = await Promise.all([
-      supabase
-        .from('tms_driver')
-        .select('id, staff_id, location_sharing_enabled, active_route_id')
-        .in('staff_id', staffIds.length ? staffIds : [NONE]),
-      supabase.from('staff').select('id, first_name, last_name').in('id', staffIds.length ? staffIds : [NONE]),
-      supabase
-        .from('tms_vehicle')
-        .select(
-          'id, registration_number, model, current_latitude, current_longitude, gps_speed, gps_heading, gps_accuracy, last_gps_update, live_tracking_enabled'
-        )
-        .in('id', vehicleIds.length ? vehicleIds : [NONE]),
-    ]);
-
-    const drivers = (driversRes.data ?? []) as DriverRow[];
-    const staffById = new Map(((staffRes.data ?? []) as StaffRow[]).map((s) => [s.id, s]));
-    const vehById = new Map(((vehRes.data ?? []) as VehRow[]).map((v) => [v.id, v]));
-
+    const routesById = new Map(routes.map((r) => [r.id, r]));
     const routesByStaff = new Map<string, RouteRow[]>();
     for (const r of routes) {
       if (!r.driver_id) continue;
@@ -77,10 +96,38 @@ export async function GET() {
       routesByStaff.set(r.driver_id, arr);
     }
 
-    const result = drivers.map((d) => {
-      const drvRoutes = d.staff_id ? routesByStaff.get(d.staff_id) ?? [] : [];
-      const route = drvRoutes.find((r) => r.id === d.active_route_id) ?? drvRoutes[0] ?? null;
-      const veh = route?.vehicle_id ? vehById.get(route.vehicle_id) : undefined;
+    // 4. Per-driver route resolution, in the same priority the driver broadcasts on:
+    //    active_route_id → assigned_route_id → first route whose driver_id = staff_id.
+    const pickRoute = (d: DriverRow): RouteRow | null =>
+      (d.active_route_id ? routesById.get(d.active_route_id) : undefined) ??
+      (d.assigned_route_id ? routesById.get(d.assigned_route_id) : undefined) ??
+      (d.staff_id ? routesByStaff.get(d.staff_id)?.[0] : undefined) ??
+      null;
+
+    // 5. Keep drivers that resolve to a route (via either column).
+    const resolved = drivers
+      .map((d) => ({ d, route: pickRoute(d) }))
+      .filter((x): x is { d: DriverRow; route: RouteRow } => x.route !== null);
+
+    // 6. Names + vehicles for the resolved set.
+    const vehicleIds = uniq(resolved.map((x) => x.route.vehicle_id));
+    const [staffRes, vehRes] = await Promise.all([
+      supabase
+        .from('staff')
+        .select('id, first_name, last_name')
+        .in('id', staffIds.length ? staffIds : [NONE]),
+      supabase
+        .from('tms_vehicle')
+        .select(
+          'id, registration_number, model, current_latitude, current_longitude, gps_speed, gps_heading, gps_accuracy, last_gps_update, live_tracking_enabled'
+        )
+        .in('id', vehicleIds.length ? vehicleIds : [NONE]),
+    ]);
+    const staffById = new Map(((staffRes.data ?? []) as StaffRow[]).map((s) => [s.id, s]));
+    const vehById = new Map(((vehRes.data ?? []) as VehRow[]).map((v) => [v.id, v]));
+
+    const result = resolved.map(({ d, route }) => {
+      const veh = route.vehicle_id ? vehById.get(route.vehicle_id) : undefined;
       const s = d.staff_id ? staffById.get(d.staff_id) : undefined;
       const name = s ? `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim() || '—' : '—';
 
@@ -99,9 +146,9 @@ export async function GET() {
         last_location_update: veh?.last_gps_update ?? null,
         location_sharing_enabled: !!d.location_sharing_enabled,
         location_tracking_status: d.location_sharing_enabled ? 'active' : 'inactive',
-        route_id: route?.id ?? null,
-        route_number: route?.route_number ?? null,
-        route_name: route?.route_name ?? null,
+        route_id: route.id,
+        route_number: route.route_number,
+        route_name: route.route_name,
         vehicle_id: veh?.id ?? null,
         registration_number: veh?.registration_number ?? null,
         gps_status: fresh.status,

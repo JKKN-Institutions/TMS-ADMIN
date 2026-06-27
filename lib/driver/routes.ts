@@ -3,10 +3,13 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 /**
  * Shared resolver for a driver's assigned route(s) + ordered stop timetable.
  *
- * IMPORTANT — the canonical driver→route assignment lives on `tms_route.driver_id`,
- * which references `staff.id` (NOT `tms_driver.id`, and NOT the unpopulated
- * `tms_driver.assigned_route_id`). So callers pass the driver's `staff_id`. A driver
- * may own multiple routes. Reused by /api/driver/{me,routes,passengers,location}.
+ * IMPORTANT — driver→route assignment can live on EITHER of two columns, written by
+ * two different admin screens (BOTH are populated in production):
+ *   - tms_route.driver_id = staff.id   (Routes → Edit → "Driver" dropdown)
+ *   - tms_driver.assigned_route_id     (Drivers → Edit → "Assigned Route")
+ * So callers pass the driver's `staff_id` AND `assigned_route_id`; we resolve via both
+ * (see the `.or` below). A driver may own multiple routes. Reused by
+ * /api/driver/{me,routes,passengers,location} and mirrored by the admin Track-All read.
  */
 
 export interface DriverRouteStop {
