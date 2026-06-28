@@ -64,3 +64,19 @@ describe('booking-window overrides', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, exception: { kind: 'holiday', note: null }, window: { enabled: true, deadline: null, capacityOverride: null }, now: NOW2 })).toBe('holiday');
   });
 });
+
+describe('Sunday weekly holiday', () => {
+  // 2026-06-28 is a Sunday and within the open horizon from NOW (IST 2026-06-22)
+  it('marks an unbooked Sunday as weekly_off', () => {
+    expect(cellStatus('2026-06-28', { hasBooking: false, now: NOW })).toBe('weekly_off');
+  });
+  it('shows a legacy booked Sunday as locked, not actionable', () => {
+    expect(cellStatus('2026-06-28', { hasBooking: true, now: NOW })).toBe('locked');
+  });
+  it('lets a real admin exception override the weekly-off label', () => {
+    expect(cellStatus('2026-06-28', { hasBooking: false, exception: { kind: 'holiday', note: 'Pongal' }, now: NOW })).toBe('holiday');
+  });
+  it('keeps booking closed on a Sunday even with an enabled window', () => {
+    expect(effectiveOpen('2026-06-28', { window: { enabled: true, deadline: null, capacityOverride: null }, now: NOW })).toBe(false);
+  });
+});

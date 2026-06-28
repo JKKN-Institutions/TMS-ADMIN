@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getLearnerRowForUser } from '@/lib/student/identity';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { bookableDates, cutoffFor, dayStatus, isCancelable } from '@/lib/booking/window';
+import { bookableDates, cutoffFor, dayStatus, isCancelable, isSunday } from '@/lib/booking/window';
 import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
 
@@ -73,11 +73,34 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
       const windows: Map<string, WindowOverride> = await loadWindows(
         svc, learner.transport_route_id ?? null, from, to
       );
+
+      // Already-marked attendance for the month, grouped by date. Powers the hover
+      // tooltip on each day (direction · status · marked time). Non-fatal on error
+      // so the board still renders even if attendance can't be read.
+      type AttRow = { trip_date: string; direction: string | null; status: string | null; method: string | null; scanned_at: string | null };
+      const attendance = new Map<string, { direction: string; status: string; method: string; scannedAt: string }[]>();
+      const ares = await svc
+        .from('tms_attendance')
+        .select('trip_date, direction, status, method, scanned_at')
+        .eq('learner_id', learner.id)
+        .gte('trip_date', from)
+        .lte('trip_date', to)
+        .order('scanned_at', { ascending: true });
+      if (ares.error && (ares.error as { code?: string }).code !== '42P01') {
+        console.error('student/bookings GET attendance error:', ares.error);
+      }
+      for (const r of (ares.data ?? []) as AttRow[]) {
+        const list = attendance.get(r.trip_date) ?? [];
+        list.push({ direction: r.direction ?? '', status: r.status ?? '', method: r.method ?? '', scannedAt: r.scanned_at ?? '' });
+        attendance.set(r.trip_date, list);
+      }
+
       const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows }).map((c) => ({
         ...c,
         cutoff: c.status === 'open' || c.status === 'booked'
           ? (windows.get(c.date)?.deadline ?? cutoffFor(c.date).toISOString())
           : null,
+        attendance: attendance.get(c.date),
       }));
 
       return NextResponse.json({
@@ -137,6 +160,9 @@ async function mutate(request: NextRequest, auth: AuthContext) {
     const svc = createServiceRoleClient();
 
     if (action === 'book') {
+      if (isSunday(travelDate)) {
+        return NextResponse.json({ error: 'Sunday is a weekly holiday — buses do not run that day' }, { status: 409 });
+      }
       const winMap = await loadWindows(svc, learner.transport_route_id, travelDate, travelDate);
       if (!effectiveOpen(travelDate, { window: winMap.get(travelDate) })) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });

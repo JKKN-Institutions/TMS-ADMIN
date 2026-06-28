@@ -6,6 +6,7 @@ import {
   bookableDates,
   isBookingOpen,
   isCancelable,
+  isSunday,
   dayStatus,
 } from './window';
 
@@ -51,7 +52,8 @@ describe('isBookingOpen', () => {
     expect(isBookingOpen('2026-06-22', new Date('2026-06-21T12:31:00Z'))).toBe(false);
   });
   it('allows a date later this month (no longer capped at 7 days)', () => {
-    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(true);
+    // 2026-06-29 is a Monday (weekdays only — see the Sunday tests below)
+    expect(isBookingOpen('2026-06-29', new Date('2026-06-20T06:00:00Z'))).toBe(true);
   });
   it('rejects a date beyond the 92-day horizon', () => {
     expect(isBookingOpen(addDays('2026-06-20', 100), new Date('2026-06-20T06:00:00Z'))).toBe(false);
@@ -59,12 +61,32 @@ describe('isBookingOpen', () => {
   it('rejects today and past dates', () => {
     expect(isBookingOpen('2026-06-20', new Date('2026-06-20T06:00:00Z'))).toBe(false);
   });
+  it('rejects a Sunday even when it is otherwise within the open window', () => {
+    // 2026-06-28 is a Sunday; well before its cutoff, but the weekly holiday wins
+    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(false);
+  });
+});
+
+describe('isSunday', () => {
+  it('detects Sundays', () => {
+    expect(isSunday('2026-06-28')).toBe(true); // Sunday
+    expect(isSunday('2026-06-21')).toBe(true); // Sunday
+  });
+  it('returns false for other weekdays', () => {
+    expect(isSunday('2026-06-29')).toBe(false); // Monday
+    expect(isSunday('2026-06-27')).toBe(false); // Saturday
+  });
 });
 
 describe('isCancelable', () => {
-  it('mirrors isBookingOpen', () => {
+  it('mirrors the booking window on weekdays', () => {
     expect(isCancelable('2026-06-22', new Date('2026-06-21T12:29:00Z'))).toBe(true);
     expect(isCancelable('2026-06-22', new Date('2026-06-21T12:31:00Z'))).toBe(false);
+  });
+  it('still allows cancelling a Sunday (legacy bookings) within the window', () => {
+    // booking is blocked on Sundays, but a pre-existing one must remain cancelable
+    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(false);
+    expect(isCancelable('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(true);
   });
 });
 

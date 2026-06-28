@@ -36,14 +36,36 @@ export function bookableDates(now: Date = new Date()): string[] {
   return Array.from({ length: MAX_BOOKING_HORIZON_DAYS }, (_, i) => addDays(today, i + 1));
 }
 
-export function isBookingOpen(travelDate: string, now: Date = new Date()): boolean {
+/**
+ * Sunday is a compulsory weekly holiday — buses never run, so a Sunday can
+ * never be booked. This is the single source of truth for the rule; both the
+ * calendar view (`cellStatus`) and the server booking gate (`effectiveOpen`,
+ * POST) consult it. 0 = Sunday via UTC integer math (the 'YYYY-MM-DD' string
+ * is timezone-agnostic, so there is no offset to apply here).
+ */
+export function isSunday(travelDate: string): boolean {
+  const [y, m, d] = travelDate.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 0;
+}
+
+/** Within the rolling horizon AND before the 18:00-prior cutoff (ignores the weekly-off rule). */
+function withinBookingWindow(travelDate: string, now: Date): boolean {
   if (!bookableDates(now).includes(travelDate)) return false;
   return now.getTime() < cutoffFor(travelDate).getTime();
 }
 
-/** Cancellation is allowed under the same condition as booking (free until cutoff). */
+export function isBookingOpen(travelDate: string, now: Date = new Date()): boolean {
+  if (isSunday(travelDate)) return false; // weekly holiday — never bookable
+  return withinBookingWindow(travelDate, now);
+}
+
+/**
+ * Cancellation follows the same horizon/cutoff window as booking, but is NOT
+ * blocked on Sundays: a pre-existing Sunday booking (e.g. legacy data created
+ * before this rule) must still be cancelable by the learner until its cutoff.
+ */
 export function isCancelable(travelDate: string, now: Date = new Date()): boolean {
-  return isBookingOpen(travelDate, now);
+  return withinBookingWindow(travelDate, now);
 }
 
 export function dayStatus(hasBooking: boolean, travelDate: string, now: Date = new Date()): DayStatus {
