@@ -42,6 +42,13 @@ export interface RawStop {
   stop_name: string | null;
   sequence_order: number | null;
   is_major_stop: boolean | null;
+  /** Morning pickup time ('HH:MM[:SS]') — populated for all stops; primary match signal. */
+  stop_time: string | null;
+  /** Evening time ('HH:MM[:SS]'). */
+  evening_time: string | null;
+  /** Geo coordinates — currently unpopulated; enables proximity matching once geocoded. */
+  lat: number | null;
+  long: number | null;
 }
 
 /** A booking for the analyzed date (tms_booking) with display fields resolved. */
@@ -63,6 +70,12 @@ export interface AnalysisOptions {
   defaultCapacity: number;
   /** Fallback daily operating cost when vehicle cost/route distance is unknown. */
   defaultDailyBusCost: number;
+  /** ± minutes a target stop's pickup time may differ for a compatible transfer. */
+  timeWindowMin: number;
+  /** Max distance (km) to accept a differently-named but nearby (geocoded) stop. */
+  proximityKm: number;
+  /** Allow under-utilized routes (not just healthy) as per-passenger transfer targets. */
+  allowUnderUtilizedTargets: boolean;
 }
 
 export interface PassengerRelocation {

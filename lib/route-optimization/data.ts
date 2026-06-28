@@ -50,7 +50,7 @@ export async function loadOptimizationAnalysis(
   // 3) Stops.
   const { data: stopRows, error: stopErr } = await supabase
     .from('tms_route_stop')
-    .select('id, route_id, stop_name, sequence_order, is_major_stop');
+    .select('id, route_id, stop_name, sequence_order, is_major_stop, stop_time, evening_time, latitude, longitude');
   if (stopErr) throw new Error(`stops: ${stopErr.message}`);
   const stops = stopRows ?? [];
   const stopById = new Map<string, string | null>(stops.map((s) => [s.id, s.stop_name]));
@@ -106,6 +106,10 @@ export async function loadOptimizationAnalysis(
     stop_name: s.stop_name,
     sequence_order: s.sequence_order,
     is_major_stop: s.is_major_stop,
+    stop_time: s.stop_time ?? null,
+    evening_time: s.evening_time ?? null,
+    lat: s.latitude ?? null,
+    long: s.longitude ?? null,
   }));
 
   const engineBookings: RawBooking[] = rawBookings.map((b) => {
