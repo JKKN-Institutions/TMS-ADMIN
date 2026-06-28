@@ -267,7 +267,8 @@ function PagerButton({ label, onClick, disabled, children }: { label: string; on
 // Styled replacement for the native <select> column filters so the open menu
 // gets the same rounded corners + green hover as every other Radix dropdown
 // (native <select> popups can't be styled). Shared here → applies to all tables.
-function FilterSelect({
+// Exported so pages with their own (non-column) filters can match the look.
+export function FilterSelect({
   title,
   value,
   options,

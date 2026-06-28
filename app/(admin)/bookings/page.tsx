@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarCheck, Download } from 'lucide-react';
-import { DataTable } from '@/components/ui/data-table';
+import { DataTable, FilterSelect } from '@/components/ui/data-table';
 import { istToday, addDays } from '@/lib/booking/window';
 import { getBookingColumns } from './columns';
 import { toBookingsCsv } from '@/lib/booking/bookings-csv';
@@ -84,12 +84,15 @@ export default function BookingsPage() {
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
         <label className="text-sm">From<input type="date" className={`mt-1 block ${input}`} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="text-sm">To<input type="date" className={`mt-1 block ${input}`} value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        <label className="text-sm">Route
-          <select className={`mt-1 block ${input}`} value={routeId} onChange={(e) => setRouteId(e.target.value)}>
-            <option value="">All routes</option>
-            {routes.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
-        </label>
+        <div className="text-sm">
+          <span className="mb-1 block text-gray-700 dark:text-gray-300">Route</span>
+          <FilterSelect
+            title="Route"
+            value={routeId}
+            options={routes.map((r) => ({ label: r.label, value: r.id }))}
+            onChange={(v) => setRouteId(v ?? '')}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
