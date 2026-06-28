@@ -24,6 +24,7 @@ import type {
   ConsolidationSuggestion,
   MergeSuggestion,
   OptimizationAnalysis,
+  RightsizeSuggestion,
   RouteClassification,
 } from '@/lib/route-optimization/types';
 
@@ -259,6 +260,8 @@ export default function RouteOptimizationPage() {
   const [mode, setMode] = useState<'today_booking' | 'permanent'>('today_booking');
   const [mergeConfirm, setMergeConfirm] = useState<MergeSuggestion | null>(null);
   const [applyingMerge, setApplyingMerge] = useState(false);
+  const [rsConfirm, setRsConfirm] = useState<RightsizeSuggestion | null>(null);
+  const [applyingRs, setApplyingRs] = useState(false);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -381,6 +384,31 @@ export default function RouteOptimizationPage() {
       }
     },
     [date, threshold, runAnalysis]
+  );
+
+  const applyRightsize = useCallback(
+    async (sg: RightsizeSuggestion) => {
+      if (!sg.recommendedVehicleId) return;
+      setApplyingRs(true);
+      try {
+        const res = await fetch('/api/admin/route-optimization/apply-vehicle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, swaps: [{ routeId: sg.routeId, toVehicleId: sg.recommendedVehicleId }] }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to change vehicle');
+        const r = json.result;
+        toast.success(r.applied > 0 ? 'Vehicle reassigned' : r.skipped?.[0]?.reason || 'No change applied');
+        setRsConfirm(null);
+        await runAnalysis();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to change vehicle');
+      } finally {
+        setApplyingRs(false);
+      }
+    },
+    [date, runAnalysis]
   );
 
   const undoRun = useCallback(
@@ -617,6 +645,56 @@ export default function RouteOptimizationPage() {
             </section>
           )}
 
+          {/* Right-size vehicles */}
+          {analysis.rightsize.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-900">Right-size vehicles</h2>
+                <span className="text-sm text-gray-500">Match each bus to its demand</span>
+              </div>
+              <div className="space-y-3">
+                {analysis.rightsize.map((rs) => {
+                  const tone =
+                    rs.kind === 'upsize' ? 'text-amber-600' : rs.kind === 'no_fit' ? 'text-red-600' : 'text-blue-600';
+                  const badge =
+                    rs.kind === 'downsize'
+                      ? { label: 'Downsize', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' }
+                      : rs.kind === 'upsize'
+                        ? { label: 'Upsize', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' }
+                        : { label: 'No fit', cls: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300' };
+                  return (
+                    <div key={rs.routeId} className="rounded-xl border border-gray-200 bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-start gap-2">
+                          <Bus className={`mt-0.5 h-5 w-5 shrink-0 ${tone}`} />
+                          <div>
+                            <p className="font-semibold text-gray-900">
+                              {rs.routeName}
+                              {rs.routeNumber && <span className="text-gray-500"> #{rs.routeNumber}</span>}
+                            </p>
+                            <p className="mt-0.5 text-sm text-gray-600">{rs.reason}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge label={badge.label} cls={badge.cls} />
+                          {rs.recommendedVehicleId && (
+                            <button
+                              type="button"
+                              onClick={() => setRsConfirm(rs)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                            >
+                              Change vehicle
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* Suggestions */}
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -808,6 +886,40 @@ export default function RouteOptimizationPage() {
               >
                 {applyingMerge && <Loader2 className="h-4 w-4 animate-spin" />}
                 {applyingMerge ? 'Merging…' : 'Confirm & merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Right-size confirm modal */}
+      {rsConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Change this route&apos;s vehicle?</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Reassign <strong>{rsConfirm.routeName}</strong> to a{' '}
+              <strong>{rsConfirm.recommendedCapacity}-seat</strong> bus
+              {rsConfirm.recommendedLabel ? ` (${rsConfirm.recommendedLabel})` : ''}. This is a standing
+              fleet change you can undo from the Applied runs list.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRsConfirm(null)}
+                disabled={applyingRs}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => applyRightsize(rsConfirm)}
+                disabled={applyingRs}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              >
+                {applyingRs && <Loader2 className="h-4 w-4 animate-spin" />}
+                {applyingRs ? 'Changing…' : 'Confirm & change'}
               </button>
             </div>
           </div>

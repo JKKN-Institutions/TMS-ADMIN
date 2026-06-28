@@ -330,5 +330,7 @@ export function analyzeOptimization(
     routes: routeAnalysis,
     suggestions,
     merges,
+    // Right-sizing needs the vehicle fleet (a DB concern) — data.ts fills this in.
+    rightsize: [],
   };
 }

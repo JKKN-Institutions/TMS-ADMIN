@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { analyzeOptimization } from './engine';
+import { recommendRightsizing, type FleetVehicle, type RightsizeRouteInput } from './rightsize';
 import type { OptimizationAnalysis, RawBooking, RawRoute, RawStop } from './types';
 
 const CHUNK = 150; // keep .in() lists under the API gateway limit
@@ -124,7 +125,41 @@ export async function loadOptimizationAnalysis(
     };
   });
 
-  return analyzeOptimization(engineRoutes, engineStops, engineBookings, date, {
+  const analysis = analyzeOptimization(engineRoutes, engineStops, engineBookings, date, {
     underUtilizedMaxPercent,
   });
+
+  // Vehicle right-sizing needs the whole fleet (assigned + spare) — a DB concern,
+  // so it's composed here rather than inside the pure engine.
+  const routeVehicleById = new Map<string, string | null>(routes.map((r) => [r.id, r.vehicle_id ?? null]));
+  const assignedVehicleIds = new Set(
+    routes
+      .filter((r) => (r.status ?? 'active') === 'active' && r.vehicle_id)
+      .map((r) => r.vehicle_id as string)
+  );
+  const { data: fleetRows } = await supabase
+    .from('tms_vehicle')
+    .select('id, capacity, registration_number, status');
+  const spareFleet: FleetVehicle[] = (fleetRows ?? [])
+    .filter(
+      (v) =>
+        !!v.id &&
+        !assignedVehicleIds.has(v.id) &&
+        (v.status ?? 'active') === 'active' &&
+        typeof v.capacity === 'number' &&
+        v.capacity > 0
+    )
+    .map((v) => ({ id: v.id as string, capacity: v.capacity as number, label: (v.registration_number as string) ?? null }));
+
+  const rsInputs: RightsizeRouteInput[] = analysis.routes.map((r) => ({
+    routeId: r.routeId,
+    routeName: r.routeName,
+    routeNumber: r.routeNumber,
+    demand: r.currentPassengers,
+    currentVehicleId: routeVehicleById.get(r.routeId) ?? null,
+    currentCapacity: r.capacity,
+  }));
+  const rightsize = recommendRightsizing(rsInputs, spareFleet, { headroomPercent: 15, minDemand: 1 });
+
+  return { ...analysis, rightsize };
 }

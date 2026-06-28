@@ -140,6 +140,23 @@ export interface MergeSuggestion {
   estimatedSavings: number;
 }
 
+export type RightsizeKind = 'downsize' | 'upsize' | 'no_fit';
+
+/** A proposal to swap a route's assigned vehicle to better fit demand. */
+export interface RightsizeSuggestion {
+  routeId: string;
+  routeName: string;
+  routeNumber: string | null;
+  demand: number;
+  currentVehicleId: string | null;
+  currentCapacity: number;
+  kind: RightsizeKind;
+  recommendedVehicleId: string | null;
+  recommendedCapacity: number | null;
+  recommendedLabel: string | null;
+  reason: string;
+}
+
 export interface RouteAnalysis {
   routeId: string;
   routeName: string;
@@ -178,4 +195,5 @@ export interface OptimizationAnalysis {
   routes: RouteAnalysis[];
   suggestions: ConsolidationSuggestion[];
   merges: MergeSuggestion[];
+  rightsize: RightsizeSuggestion[];
 }
