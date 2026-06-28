@@ -42,6 +42,13 @@ export interface RawStop {
   stop_name: string | null;
   sequence_order: number | null;
   is_major_stop: boolean | null;
+  /** Morning pickup time ('HH:MM[:SS]') — populated for all stops; primary match signal. */
+  stop_time: string | null;
+  /** Evening time ('HH:MM[:SS]'). */
+  evening_time: string | null;
+  /** Geo coordinates — currently unpopulated; enables proximity matching once geocoded. */
+  lat: number | null;
+  long: number | null;
 }
 
 /** A booking for the analyzed date (tms_booking) with display fields resolved. */
@@ -63,6 +70,12 @@ export interface AnalysisOptions {
   defaultCapacity: number;
   /** Fallback daily operating cost when vehicle cost/route distance is unknown. */
   defaultDailyBusCost: number;
+  /** ± minutes a target stop's pickup time may differ for a compatible transfer. */
+  timeWindowMin: number;
+  /** Max distance (km) to accept a differently-named but nearby (geocoded) stop. */
+  proximityKm: number;
+  /** Allow under-utilized routes (not just healthy) as per-passenger transfer targets. */
+  allowUnderUtilizedTargets: boolean;
 }
 
 export interface PassengerRelocation {
@@ -97,6 +110,53 @@ export interface ConsolidationSuggestion {
   relocations: PassengerRelocation[];
 }
 
+/** One passenger's planned hop when a whole route is merged into a survivor. */
+export interface MergeRelocation {
+  learnerId: string;
+  learnerName: string;
+  learnerRoll: string | null;
+  fromStopId: string | null;
+  toStopId: string | null;
+  matchedReason: string;
+}
+
+/** A proposal to fold an under-utilized route entirely into a survivor route. */
+export interface MergeSuggestion {
+  survivorRouteId: string;
+  survivorRouteName: string;
+  survivorRouteNumber: string | null;
+  mergedRouteId: string;
+  mergedRouteName: string;
+  mergedRouteNumber: string | null;
+  /** Survivor's load after absorbing this route. */
+  combinedPassengers: number;
+  survivorCapacity: number;
+  /** Distinct survivor stops the merged passengers map onto. */
+  overlapStops: number;
+  relocations: MergeRelocation[];
+  /** Buses taken off the road by this merge (always 1 here). */
+  busesFreed: number;
+  /** Labeled ESTIMATE — the merged route's daily operating cost. */
+  estimatedSavings: number;
+}
+
+export type RightsizeKind = 'downsize' | 'upsize' | 'no_fit';
+
+/** A proposal to swap a route's assigned vehicle to better fit demand. */
+export interface RightsizeSuggestion {
+  routeId: string;
+  routeName: string;
+  routeNumber: string | null;
+  demand: number;
+  currentVehicleId: string | null;
+  currentCapacity: number;
+  kind: RightsizeKind;
+  recommendedVehicleId: string | null;
+  recommendedCapacity: number | null;
+  recommendedLabel: string | null;
+  reason: string;
+}
+
 export interface RouteAnalysis {
   routeId: string;
   routeName: string;
@@ -124,6 +184,8 @@ export interface OptimizationSummary {
   relocatablePassengers: number;
   /** Labeled ESTIMATE — sum of daily cost of buses that can be cancelled. */
   estimatedSavings: number;
+  /** Count of whole-route merges proposed (buses freed by combining). */
+  mergeableBuses: number;
 }
 
 export interface OptimizationAnalysis {
@@ -132,4 +194,6 @@ export interface OptimizationAnalysis {
   summary: OptimizationSummary;
   routes: RouteAnalysis[];
   suggestions: ConsolidationSuggestion[];
+  merges: MergeSuggestion[];
+  rightsize: RightsizeSuggestion[];
 }

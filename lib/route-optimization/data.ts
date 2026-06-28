@@ -9,9 +9,36 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { analyzeOptimization } from './engine';
+import { recommendRightsizing, type FleetVehicle, type RightsizeRouteInput } from './rightsize';
 import type { OptimizationAnalysis, RawBooking, RawRoute, RawStop } from './types';
 
 const CHUNK = 150; // keep .in() lists under the API gateway limit
+
+/**
+ * The busiest travel date (most bookings) within [from,to] — the basis for the
+ * Planning horizon, so merges/right-sizing are sized to the peak day. Returns
+ * null when the range has no bookings.
+ */
+export async function peakBookingDate(
+  supabase: SupabaseClient,
+  from: string,
+  to: string
+): Promise<{ date: string; totalBookings: number; daysWithBookings: number } | null> {
+  const { data, error } = await supabase
+    .from('tms_booking')
+    .select('travel_date')
+    .gte('travel_date', from)
+    .lte('travel_date', to);
+  if (error || !data || data.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const b of data as { travel_date: string }[]) {
+    counts.set(b.travel_date, (counts.get(b.travel_date) ?? 0) + 1);
+  }
+  let date: string | null = null;
+  let max = -1;
+  for (const [d, n] of counts) if (n > max) { date = d; max = n; }
+  return date ? { date, totalBookings: max, daysWithBookings: counts.size } : null;
+}
 
 export async function loadOptimizationAnalysis(
   supabase: SupabaseClient,
@@ -50,7 +77,7 @@ export async function loadOptimizationAnalysis(
   // 3) Stops.
   const { data: stopRows, error: stopErr } = await supabase
     .from('tms_route_stop')
-    .select('id, route_id, stop_name, sequence_order, is_major_stop');
+    .select('id, route_id, stop_name, sequence_order, is_major_stop, stop_time, evening_time, latitude, longitude');
   if (stopErr) throw new Error(`stops: ${stopErr.message}`);
   const stops = stopRows ?? [];
   const stopById = new Map<string, string | null>(stops.map((s) => [s.id, s.stop_name]));
@@ -106,6 +133,10 @@ export async function loadOptimizationAnalysis(
     stop_name: s.stop_name,
     sequence_order: s.sequence_order,
     is_major_stop: s.is_major_stop,
+    stop_time: s.stop_time ?? null,
+    evening_time: s.evening_time ?? null,
+    lat: s.latitude ?? null,
+    long: s.longitude ?? null,
   }));
 
   const engineBookings: RawBooking[] = rawBookings.map((b) => {
@@ -120,7 +151,41 @@ export async function loadOptimizationAnalysis(
     };
   });
 
-  return analyzeOptimization(engineRoutes, engineStops, engineBookings, date, {
+  const analysis = analyzeOptimization(engineRoutes, engineStops, engineBookings, date, {
     underUtilizedMaxPercent,
   });
+
+  // Vehicle right-sizing needs the whole fleet (assigned + spare) — a DB concern,
+  // so it's composed here rather than inside the pure engine.
+  const routeVehicleById = new Map<string, string | null>(routes.map((r) => [r.id, r.vehicle_id ?? null]));
+  const assignedVehicleIds = new Set(
+    routes
+      .filter((r) => (r.status ?? 'active') === 'active' && r.vehicle_id)
+      .map((r) => r.vehicle_id as string)
+  );
+  const { data: fleetRows } = await supabase
+    .from('tms_vehicle')
+    .select('id, capacity, registration_number, status');
+  const spareFleet: FleetVehicle[] = (fleetRows ?? [])
+    .filter(
+      (v) =>
+        !!v.id &&
+        !assignedVehicleIds.has(v.id) &&
+        (v.status ?? 'active') === 'active' &&
+        typeof v.capacity === 'number' &&
+        v.capacity > 0
+    )
+    .map((v) => ({ id: v.id as string, capacity: v.capacity as number, label: (v.registration_number as string) ?? null }));
+
+  const rsInputs: RightsizeRouteInput[] = analysis.routes.map((r) => ({
+    routeId: r.routeId,
+    routeName: r.routeName,
+    routeNumber: r.routeNumber,
+    demand: r.currentPassengers,
+    currentVehicleId: routeVehicleById.get(r.routeId) ?? null,
+    currentCapacity: r.capacity,
+  }));
+  const rightsize = recommendRightsizing(rsInputs, spareFleet, { headroomPercent: 15, minDemand: 1 });
+
+  return { ...analysis, rightsize };
 }

@@ -17,12 +17,15 @@ import {
   Info,
   Undo2,
   History,
+  MapPin,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
   ConsolidationClass,
   ConsolidationSuggestion,
+  MergeSuggestion,
   OptimizationAnalysis,
+  RightsizeSuggestion,
   RouteClassification,
 } from '@/lib/route-optimization/types';
 
@@ -78,6 +81,11 @@ function inr(n: number): string {
 }
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 function fmtTime(d: string): string {
   return new Date(d).toLocaleString(undefined, {
@@ -244,7 +252,11 @@ function SuggestionRow({
 }
 
 export default function RouteOptimizationPage() {
+  const [horizon, setHorizon] = useState<'daily' | 'planning'>('daily');
   const [date, setDate] = useState(todayIso());
+  const [from, setFrom] = useState(todayIso());
+  const [to, setTo] = useState(() => addDaysIso(todayIso(), 13));
+  const [peak, setPeak] = useState<{ date: string; totalBookings: number; daysWithBookings: number } | null>(null);
   const [threshold, setThreshold] = useState(50);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,18 +268,31 @@ export default function RouteOptimizationPage() {
   const [rollingBack, setRollingBack] = useState<string | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<'today_booking' | 'permanent'>('today_booking');
+  const [mergeConfirm, setMergeConfirm] = useState<MergeSuggestion | null>(null);
+  const [applyingMerge, setApplyingMerge] = useState(false);
+  const [rsConfirm, setRsConfirm] = useState<RightsizeSuggestion | null>(null);
+  const [applyingRs, setApplyingRs] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geoMsg, setGeoMsg] = useState<string | null>(null);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
     setError(null);
     setSelected(new Set());
     try {
-      const qs = new URLSearchParams({ date, threshold: String(threshold) });
+      const qs = new URLSearchParams({ threshold: String(threshold) });
+      if (horizon === 'planning') {
+        qs.set('from', from);
+        qs.set('to', to);
+      } else {
+        qs.set('date', date);
+      }
       const res = await fetch(`/api/admin/route-optimization?${qs.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to analyze');
       setAnalysis(json.data as OptimizationAnalysis);
       setAppliedRuns((json.appliedRuns as AppliedRun[]) ?? []);
+      setPeak((json.peak as { date: string; totalBookings: number; daysWithBookings: number } | null) ?? null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to analyze';
       setError(msg);
@@ -275,7 +300,7 @@ export default function RouteOptimizationPage() {
     } finally {
       setLoading(false);
     }
-  }, [date, threshold]);
+  }, [date, threshold, horizon, from, to]);
 
   useEffect(() => {
     runAnalysis();
@@ -328,9 +353,10 @@ export default function RouteOptimizationPage() {
           if (to) moves.push({ learnerId: r.learnerId, fromRouteId: s.routeId, toRouteId: to });
         }
       if (moves.length === 0) { toast.error('No targets chosen for the selected routes'); return; }
+      const useDate = horizon === 'planning' ? peak?.date ?? to : date;
       const res = await fetch('/api/admin/route-optimization/execute-transfers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, threshold, mode: applyMode, moves }),
+        body: JSON.stringify({ date: useDate, threshold, mode: applyMode, moves }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to apply');
@@ -343,7 +369,97 @@ export default function RouteOptimizationPage() {
     } finally {
       setApplying(false);
     }
-  }, [analysis, selected, targets, date, threshold, runAnalysis]);
+  }, [analysis, selected, targets, date, threshold, horizon, peak, to, runAnalysis]);
+
+  const applyMerge = useCallback(
+    async (merge: MergeSuggestion, applyMode: 'today_booking' | 'permanent') => {
+      setApplyingMerge(true);
+      try {
+        const moves = merge.relocations.map((r) => ({
+          learnerId: r.learnerId,
+          fromRouteId: merge.mergedRouteId,
+          toRouteId: merge.survivorRouteId,
+        }));
+        if (moves.length === 0) {
+          toast.error('Nothing to merge');
+          return;
+        }
+        const useDate = horizon === 'planning' ? peak?.date ?? to : date;
+        const res = await fetch('/api/admin/route-optimization/execute-transfers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: useDate, threshold, mode: applyMode, moves }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to merge');
+        const r = json.result;
+        toast.success(
+          `Merged ${r.applied} passenger(s)${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`
+        );
+        setMergeConfirm(null);
+        await runAnalysis();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to merge');
+      } finally {
+        setApplyingMerge(false);
+      }
+    },
+    [date, threshold, horizon, peak, to, runAnalysis]
+  );
+
+  const applyRightsize = useCallback(
+    async (sg: RightsizeSuggestion) => {
+      if (!sg.recommendedVehicleId) return;
+      setApplyingRs(true);
+      try {
+        const useDate = horizon === 'planning' ? peak?.date ?? to : date;
+        const res = await fetch('/api/admin/route-optimization/apply-vehicle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: useDate, swaps: [{ routeId: sg.routeId, toVehicleId: sg.recommendedVehicleId }] }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to change vehicle');
+        const r = json.result;
+        toast.success(r.applied > 0 ? 'Vehicle reassigned' : r.skipped?.[0]?.reason || 'No change applied');
+        setRsConfirm(null);
+        await runAnalysis();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to change vehicle');
+      } finally {
+        setApplyingRs(false);
+      }
+    },
+    [date, horizon, peak, to, runAnalysis]
+  );
+
+  const runGeocode = useCallback(async () => {
+    setGeocoding(true);
+    setGeoMsg('Starting…');
+    try {
+      let total = 0;
+      // Loop batches until none remain (or a batch makes no progress).
+      for (let i = 0; i < 100; i++) {
+        const res = await fetch('/api/admin/route-optimization/geocode-stops', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 40 }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Geocoding failed');
+        total += json.result.geocoded;
+        setGeoMsg(`Geocoded ${total}, ${json.result.remaining} remaining…`);
+        if (json.result.remaining === 0 || json.result.geocoded === 0) break;
+      }
+      setGeoMsg(`Done — ${total} stop(s) geocoded. Re-analyze to use proximity matching.`);
+      toast.success(`Geocoded ${total} stop(s)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Geocoding failed');
+      setGeoMsg(null);
+    } finally {
+      setGeocoding(false);
+    }
+  }, []);
 
   const undoRun = useCallback(
     async (runId: string) => {
@@ -385,20 +501,50 @@ export default function RouteOptimizationPage() {
       </div>
 
       {/* Controls */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="inline-flex rounded-lg border border-gray-300 p-0.5">
+          {(['daily', 'planning'] as const).map((h) => (
+            <button
+              key={h}
+              type="button"
+              onClick={() => {
+                setHorizon(h);
+                if (h === 'planning') setMode('permanent');
+              }}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                horizon === h ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {h === 'daily' ? 'Daily' : 'Planning'}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="opt-date" className="text-sm font-medium text-gray-700">
-              Travel date
-            </label>
-            <input
-              id="opt-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className={inputCls}
-            />
-          </div>
+          {horizon === 'daily' ? (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="opt-date" className="text-sm font-medium text-gray-700">
+                Travel date
+              </label>
+              <input
+                id="opt-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="opt-from" className="text-sm font-medium text-gray-700">From</label>
+                <input id="opt-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="opt-to" className="text-sm font-medium text-gray-700">To</label>
+                <input id="opt-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+              </div>
+            </>
+          )}
           <div className="flex flex-col gap-1">
             <label htmlFor="opt-threshold" className="text-sm font-medium text-gray-700">
               Under-utilized at ≤ (% of capacity)
@@ -422,6 +568,17 @@ export default function RouteOptimizationPage() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             {loading ? 'Analyzing…' : 'Analyze'}
           </button>
+          <button
+            type="button"
+            onClick={runGeocode}
+            disabled={geocoding}
+            title="Fill in stop coordinates so transfers can also match nearby stops"
+            className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+          >
+            {geocoding ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+            {geocoding ? 'Geocoding…' : 'Geocode stops'}
+          </button>
+          {geoMsg && <span className="text-xs text-gray-500">{geoMsg}</span>}
         </div>
       </div>
 
@@ -440,6 +597,22 @@ export default function RouteOptimizationPage() {
 
       {analysis && s && (
         <div className="space-y-6">
+          {horizon === 'planning' && (
+            <div className="flex items-start gap-2 rounded-xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-800 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-300">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Planning view — sized to the busiest day in {from} → {to}
+                {peak ? (
+                  <>
+                    : <strong>{peak.date}</strong> ({peak.totalBookings} booking(s) across {peak.daysWithBookings} active day(s)).
+                  </>
+                ) : (
+                  ' (no bookings found in this range).'
+                )}{' '}
+                Applying changes defaults to a permanent allocation.
+              </span>
+            </div>
+          )}
           {s.totalBookings === 0 && (
             <div className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -526,6 +699,105 @@ export default function RouteOptimizationPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </section>
+          )}
+
+          {/* Combine buses (whole-route merges) */}
+          {analysis.merges.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-900">Combine buses</h2>
+                <span className="text-sm text-gray-500">
+                  {analysis.merges.length} bus(es) can be freed by merging whole routes
+                </span>
+              </div>
+              <div className="space-y-3">
+                {analysis.merges.map((m) => (
+                  <div key={m.mergedRouteId} className="rounded-xl border border-gray-200 bg-white p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-start gap-2">
+                        <Bus className="mt-0.5 h-5 w-5 shrink-0 text-rose-500" />
+                        <div>
+                          <p className="font-semibold text-gray-900">
+                            {m.mergedRouteName}
+                            {m.mergedRouteNumber && <span className="text-gray-500"> #{m.mergedRouteNumber}</span>}
+                            <ArrowRight className="mx-2 inline h-4 w-4 text-gray-400" />
+                            {m.survivorRouteName}
+                            {m.survivorRouteNumber && <span className="text-gray-500"> #{m.survivorRouteNumber}</span>}
+                          </p>
+                          <p className="mt-0.5 text-sm text-gray-600">
+                            {m.relocations.length} passenger(s) · survivor {m.combinedPassengers}/{m.survivorCapacity} after merge · {m.overlapStops} shared stop(s)
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {m.estimatedSavings > 0 && (
+                          <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                            ~{inr(m.estimatedSavings)}/day
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setMergeConfirm(m)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-700"
+                        >
+                          Merge
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Right-size vehicles */}
+          {analysis.rightsize.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-900">Right-size vehicles</h2>
+                <span className="text-sm text-gray-500">Match each bus to its demand</span>
+              </div>
+              <div className="space-y-3">
+                {analysis.rightsize.map((rs) => {
+                  const tone =
+                    rs.kind === 'upsize' ? 'text-amber-600' : rs.kind === 'no_fit' ? 'text-red-600' : 'text-blue-600';
+                  const badge =
+                    rs.kind === 'downsize'
+                      ? { label: 'Downsize', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' }
+                      : rs.kind === 'upsize'
+                        ? { label: 'Upsize', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' }
+                        : { label: 'No fit', cls: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300' };
+                  return (
+                    <div key={rs.routeId} className="rounded-xl border border-gray-200 bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-start gap-2">
+                          <Bus className={`mt-0.5 h-5 w-5 shrink-0 ${tone}`} />
+                          <div>
+                            <p className="font-semibold text-gray-900">
+                              {rs.routeName}
+                              {rs.routeNumber && <span className="text-gray-500"> #{rs.routeNumber}</span>}
+                            </p>
+                            <p className="mt-0.5 text-sm text-gray-600">{rs.reason}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge label={badge.label} cls={badge.cls} />
+                          {rs.recommendedVehicleId && (
+                            <button
+                              type="button"
+                              onClick={() => setRsConfirm(rs)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                            >
+                              Change vehicle
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -677,6 +949,84 @@ export default function RouteOptimizationPage() {
               >
                 {applying && <Loader2 className="h-4 w-4 animate-spin" />}
                 {applying ? 'Applying…' : 'Confirm & apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge confirm modal */}
+      {mergeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Combine these buses?</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Move <strong>{mergeConfirm.relocations.length}</strong> passenger(s) from{' '}
+              <strong>{mergeConfirm.mergedRouteName}</strong> onto{' '}
+              <strong>{mergeConfirm.survivorRouteName}</strong> for <strong>{date}</strong>, freeing
+              1 bus. You can undo this run afterwards from the Applied runs list.
+            </p>
+            <fieldset className="mt-4 space-y-2">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="radio" name="merge-mode" checked={mode === 'today_booking'} onChange={() => setMode('today_booking')} />
+                Today only — move this date&apos;s bookings
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="radio" name="merge-mode" checked={mode === 'permanent'} onChange={() => setMode('permanent')} />
+                Permanent — change the learners&apos; standing route
+              </label>
+            </fieldset>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setMergeConfirm(null)}
+                disabled={applyingMerge}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => applyMerge(mergeConfirm, mode)}
+                disabled={applyingMerge}
+                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+              >
+                {applyingMerge && <Loader2 className="h-4 w-4 animate-spin" />}
+                {applyingMerge ? 'Merging…' : 'Confirm & merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Right-size confirm modal */}
+      {rsConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Change this route&apos;s vehicle?</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Reassign <strong>{rsConfirm.routeName}</strong> to a{' '}
+              <strong>{rsConfirm.recommendedCapacity}-seat</strong> bus
+              {rsConfirm.recommendedLabel ? ` (${rsConfirm.recommendedLabel})` : ''}. This is a standing
+              fleet change you can undo from the Applied runs list.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRsConfirm(null)}
+                disabled={applyingRs}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => applyRightsize(rsConfirm)}
+                disabled={applyingRs}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              >
+                {applyingRs && <Loader2 className="h-4 w-4 animate-spin" />}
+                {applyingRs ? 'Changing…' : 'Confirm & change'}
               </button>
             </div>
           </div>
