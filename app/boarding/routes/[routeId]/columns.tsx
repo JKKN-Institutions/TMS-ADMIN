@@ -15,6 +15,18 @@ export interface RosterStudent {
   onward_status: RosterStatus;
   return_status: RosterStatus;
   last_scanned_at: string | null;
+  // Academic detail (shown in the click-through dialog). Optional so older
+  // callers/payloads still type-check; resolved names or null.
+  register_number?: string | null;
+  institution?: string | null;
+  degree?: string | null;
+  department?: string | null;
+  program?: string | null;
+  semester?: string | null;
+  section?: string | null;
+  academic_year?: string | null;
+  transport_year?: string | null;
+  stop?: string | null;
 }
 
 function StatusPill({ status }: { status: RosterStatus }) {
@@ -45,16 +57,18 @@ function MarkControl({ status, disabled, onMark }: { status: RosterStatus; disab
 }
 
 /**
- * Roster columns factory. Takes the page's permission flag + saving state + the
- * mark callback (a roster row marks attendance instead of view/edit/delete).
- * The onward/return columns are filterable (id + accessorFn + filterFn) so the
- * page's `filters` can target them, and render a live mark control when the
- * staffer can manage, else a read-only pill.
+ * Roster columns factory. Takes an `editable` flag (staff can manage AND the
+ * roster is for today) + saving state + the mark callback (a roster row marks
+ * attendance instead of view/edit/delete). The onward/return columns are
+ * filterable (id + accessorFn + filterFn) so the page's `filters` can target
+ * them, and render a live mark control when editable, else a read-only pill —
+ * which is also how advance-booking (future-date) rosters display.
  */
 export function getRosterColumns(
-  canManage: boolean,
+  editable: boolean,
   saving: boolean,
-  onMark: (learnerId: string, direction: RosterDirection, status: 'present' | 'absent') => void
+  onMark: (learnerId: string, direction: RosterDirection, status: 'present' | 'absent') => void,
+  onSelect: (student: RosterStudent) => void
 ): ColumnDef<RosterStudent>[] {
   const selectColumn: ColumnDef<RosterStudent> = {
     id: 'select',
@@ -74,11 +88,20 @@ export function getRosterColumns(
   };
 
   return [
-    ...(canManage ? [selectColumn] : []),
+    ...(editable ? [selectColumn] : []),
     {
       accessorKey: 'name',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Learner" />,
-      cell: ({ row }) => <span className="font-medium text-gray-900 dark:text-gray-100">{row.original.name}</span>,
+      cell: ({ row }) => (
+        <button
+          type="button"
+          onClick={() => onSelect(row.original)}
+          className="cursor-pointer text-left font-medium text-blue-700 underline-offset-2 transition-colors hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300"
+          title="View learner details"
+        >
+          {row.original.name}
+        </button>
+      ),
     },
     {
       accessorKey: 'roll_number',
@@ -93,7 +116,7 @@ export function getRosterColumns(
       enableSorting: false,
       cell: ({ row }) => {
         const s = row.original;
-        return canManage
+        return editable
           ? <MarkControl status={s.onward_status} disabled={saving} onMark={(st) => onMark(s.id, 'onward', st)} />
           : <StatusPill status={s.onward_status} />;
       },
@@ -106,7 +129,7 @@ export function getRosterColumns(
       enableSorting: false,
       cell: ({ row }) => {
         const s = row.original;
-        return canManage
+        return editable
           ? <MarkControl status={s.return_status} disabled={saving} onMark={(st) => onMark(s.id, 'return', st)} />
           : <StatusPill status={s.return_status} />;
       },
