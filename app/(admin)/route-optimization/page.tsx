@@ -18,6 +18,10 @@ import {
   Undo2,
   History,
   MapPin,
+  HelpCircle,
+  X,
+  GitMerge,
+  Gauge,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
@@ -127,6 +131,39 @@ function Badge({ label, cls }: { label: string; cls: string }) {
     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
       {label}
     </span>
+  );
+}
+
+function GuideStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+        {n}
+      </span>
+      <div>
+        <p className="text-sm font-medium text-gray-900">{title}</p>
+        <p className="text-sm leading-relaxed text-gray-600">{children}</p>
+      </div>
+    </li>
+  );
+}
+
+function GuideFeature({
+  icon, tone, title, children,
+}: {
+  icon: React.ReactNode;
+  tone: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-3 rounded-lg border border-gray-100 bg-gray-50/50 p-3">
+      <span className={`mt-0.5 shrink-0 ${tone}`}>{icon}</span>
+      <div>
+        <p className="text-sm font-medium text-gray-900">{title}</p>
+        <p className="text-sm leading-relaxed text-gray-600">{children}</p>
+      </div>
+    </div>
   );
 }
 
@@ -274,6 +311,7 @@ export default function RouteOptimizationPage() {
   const [applyingRs, setApplyingRs] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -486,18 +524,29 @@ export default function RouteOptimizationPage() {
   const s = analysis?.summary;
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-start gap-3">
-        <span className="rounded-xl bg-blue-50 p-2 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">
-          <Zap className="h-6 w-6" />
-        </span>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Route Optimization</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Analyze daily bookings to find under-used buses whose passengers can be consolidated
-            onto routes that already serve their boarding stops — then apply (and undo) the moves.
-          </p>
+    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="shrink-0 rounded-xl bg-blue-50 p-2 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">
+            <Zap className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">Route Optimization</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Analyze daily bookings to find under-used buses whose passengers can be consolidated
+              onto routes that already serve their boarding stops — then apply (and undo) the moves.
+            </p>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setGuideOpen(true)}
+          aria-label="How route optimization works"
+          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <HelpCircle className="h-4 w-4 text-blue-600" />
+          <span className="hidden sm:inline">How it works</span>
+        </button>
       </div>
 
       {/* Controls */}
@@ -640,8 +689,8 @@ export default function RouteOptimizationPage() {
               <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
                 <History className="h-5 w-5 text-gray-400" /> Applied runs for {analysis.date}
               </h2>
-              <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+                <table className="w-full min-w-[680px] text-sm">
                   <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                     <tr>
                       <th className="px-4 py-2.5 font-medium">Applied</th>
@@ -834,8 +883,8 @@ export default function RouteOptimizationPage() {
           {/* Occupancy table */}
           <section className="space-y-3">
             <h2 className="text-lg font-semibold text-gray-900">Route occupancy</h2>
-            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                   <tr>
                     <th className="px-4 py-2.5 font-medium">Route</th>
@@ -888,7 +937,7 @@ export default function RouteOptimizationPage() {
 
       {/* Sticky apply bar */}
       {selected.size > 0 && (
-        <div className="sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-xl border border-blue-200 bg-white p-4 shadow-lg dark:border-blue-500/30">
+        <div className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border border-blue-200 bg-white p-4 shadow-lg sm:flex-row sm:items-center sm:justify-between dark:border-blue-500/30">
           <span className="text-sm text-gray-700">
             <strong>{selected.size}</strong> route(s) selected ·{' '}
             <strong>{selectedMoves}</strong> passenger move(s)
@@ -897,14 +946,14 @@ export default function RouteOptimizationPage() {
             <button
               type="button"
               onClick={() => setSelected(new Set())}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              className="flex-1 cursor-pointer rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 sm:flex-none sm:py-1.5"
             >
               Clear
             </button>
             <button
               type="button"
               onClick={() => setConfirmOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 sm:flex-none sm:py-1.5"
             >
               Apply selected
             </button>
@@ -1027,6 +1076,96 @@ export default function RouteOptimizationPage() {
               >
                 {applyingRs && <Loader2 className="h-4 w-4 animate-spin" />}
                 {applyingRs ? 'Changing…' : 'Confirm & change'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* "How it works" guide */}
+      {guideOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setGuideOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="guide-title"
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-xl sm:p-6"
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg bg-blue-50 p-1.5 text-blue-600">
+                  <HelpCircle className="h-5 w-5" />
+                </span>
+                <h2 id="guide-title" className="text-lg font-semibold text-gray-900">
+                  How route optimization works
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuideOpen(false)}
+                aria-label="Close"
+                className="cursor-pointer rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <ol className="space-y-3">
+              <GuideStep n={1} title="Reads real bookings">
+                Occupancy is the live count of actual bookings for the selected day — never sample data.
+              </GuideStep>
+              <GuideStep n={2} title="Classifies each route">
+                Empty (0 booked), Under-utilized (≤ your threshold % of capacity), or Healthy. Capacity comes from the route&apos;s assigned vehicle.
+              </GuideStep>
+              <GuideStep n={3} title="Matches stops">
+                A passenger can move to another route only if it serves their stop by name + pickup time (±15 min) — or a nearby stop once coordinates are geocoded.
+              </GuideStep>
+              <GuideStep n={4} title="You apply, and can undo">
+                Nothing changes until you confirm. Every applied run is recorded and reversible from “Applied runs”.
+              </GuideStep>
+            </ol>
+
+            <h3 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Features enabled
+            </h3>
+            <div className="space-y-2.5">
+              <GuideFeature icon={<GitMerge className="h-5 w-5" />} tone="text-rose-600" title="Combine buses (merge)">
+                Folds an under-used route entirely into a survivor route that has room and serves all its stops — freeing a whole bus.
+              </GuideFeature>
+              <GuideFeature icon={<Users className="h-5 w-5" />} tone="text-emerald-600" title="Consolidation">
+                Moves individual passengers off an under-used bus onto compatible routes that still have free seats.
+              </GuideFeature>
+              <GuideFeature icon={<Gauge className="h-5 w-5" />} tone="text-blue-600" title="Right-size vehicles">
+                Suggests swapping a route to a better-fitting spare bus (downsize or upsize) based on its actual demand.
+              </GuideFeature>
+              <GuideFeature icon={<History className="h-5 w-5" />} tone="text-purple-600" title="Daily & Planning horizons">
+                Daily optimizes a single date; Planning sizes decisions to the busiest day across a date range.
+              </GuideFeature>
+              <GuideFeature icon={<MapPin className="h-5 w-5" />} tone="text-amber-600" title="Geocoding">
+                Fills in stop coordinates so transfers can also match nearby, differently-named stops.
+              </GuideFeature>
+              <GuideFeature icon={<Undo2 className="h-5 w-5" />} tone="text-gray-600" title="Undo">
+                Any applied run can be rolled back — booking moves and vehicle changes are both restored.
+              </GuideFeature>
+            </div>
+
+            <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-600">
+              <strong className="text-gray-800">Today vs Permanent:</strong> “Today” changes only the
+              selected date&apos;s bookings; “Permanent” changes the learner&apos;s standing route. Savings
+              figures are estimates based on each bus&apos;s daily operating cost.
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setGuideOpen(false)}
+                className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                Got it
               </button>
             </div>
           </div>
