@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Route, QrCode, ClipboardCheck, Receipt,
-  MessageCircle, Bell, MapPin, User, Settings, CalendarCheck,
+  MessageCircle, Bell, MapPin, User, CalendarCheck,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -15,7 +15,7 @@ export interface StudentNavItem {
 }
 
 // Confirmed v1 (pass-based): no per-trip booking/schedules. Boarding Pass replaces
-// per-trip tickets. Only Home/Profile/Settings exist in Phase 1; the rest unlock
+// per-trip tickets. Only Home/Profile exist in Phase 1; the rest unlock
 // in later phases and render disabled until then.
 export const studentNavigation: StudentNavItem[] = [
   { name: 'Home', href: '/student/dashboard', icon: LayoutDashboard },
@@ -28,7 +28,6 @@ export const studentNavigation: StudentNavItem[] = [
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
   { name: 'Live Track', href: '/student/live-track', icon: MapPin },
   { name: 'Profile', href: '/student/profile', icon: User },
-  { name: 'Settings', href: '/student/settings', icon: Settings },
 ];
 
 // Resolve the header title from the current path (mirrors the admin derivePageTitle).
