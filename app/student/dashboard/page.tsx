@@ -1,11 +1,12 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import {
   MapPin, CreditCard, Route as RouteIcon, QrCode, MessageCircle, Bell, AlertTriangle,
 } from 'lucide-react';
 import { useMe } from '@/lib/student/use-me';
+import { useTransportAccess, type TransportAccess } from '@/lib/student/use-transport-access';
 
 const QUICK = [
   { title: 'My Route', desc: 'View your route & stops', icon: RouteIcon, color: 'bg-gradient-to-br from-blue-500 to-indigo-600', href: '/student/routes' },
@@ -19,30 +20,80 @@ function StatCard({
   label,
   value,
   tone,
+  badge,
+  onClick,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
   tone: string;
+  badge?: ReactNode;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 dark:bg-gray-900 dark:border-gray-800">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-gray-500 dark:text-gray-400">{label}</p>
-          <p className="text-xl font-bold text-gray-900 dark:text-white mt-1 truncate">{value}</p>
+  const body = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm text-gray-500 dark:text-gray-400">{label}</p>
+        <div className="mt-1 flex items-center gap-2">
+          <p className="text-xl font-bold text-gray-900 dark:text-white truncate">{value}</p>
+          {badge}
         </div>
-        <div className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center shadow-lg ${tone}`}>
-          <Icon className="w-6 h-6 text-white" />
-        </div>
+      </div>
+      <div className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center shadow-lg ${tone}`}>
+        <Icon className="w-6 h-6 text-white" />
       </div>
     </div>
   );
+
+  const base = 'bg-white rounded-xl shadow-sm border border-gray-200 p-5 dark:bg-gray-900 dark:border-gray-800';
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${base} w-full text-left cursor-pointer transition-all duration-300 hover:shadow-md hover:scale-[1.02]`}
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div className={base}>{body}</div>;
+}
+
+const inr = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+/**
+ * Derives the dashboard's Transport-fee card value + status badge from the
+ * transport-access check (single source of truth). Falls back to the learner's
+ * legacy transport_fee column only when no billed terms exist.
+ */
+function feeSummary(access: TransportAccess | undefined, fallbackFee: number | null) {
+  const terms = access?.terms ?? [];
+  const hasTerms = terms.length > 0;
+
+  let value = '—';
+  if (hasTerms) value = inr(terms.reduce((sum, t) => sum + Number(t.amount || 0), 0));
+  else if (fallbackFee != null) value = inr(fallbackFee);
+
+  let badge: { text: string; cls: string } | null = null;
+  if (hasTerms) {
+    if ((access?.overdue_count ?? 0) > 0) {
+      badge = { text: 'Overdue', cls: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-400' };
+    } else if (terms.every((t) => t.paid)) {
+      badge = { text: 'Paid', cls: 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-400' };
+    } else {
+      badge = { text: 'Due', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400' };
+    }
+  }
+
+  return { value, badge };
 }
 
 export default function StudentDashboardPage() {
   const router = useRouter();
   const { data, isLoading, error } = useMe();
+  const { data: access } = useTransportAccess();
 
   if (isLoading) {
     return (
@@ -72,6 +123,9 @@ export default function StudentDashboardPage() {
 
   const me = data.data;
   const firstName = me.name?.split(' ')[0] ?? '';
+  const fee = feeSummary(access, me.transportFee);
+  const overdueCount = access?.overdue_count ?? 0;
+  const totalOwed = access?.total_owed ?? 0;
 
   return (
     <div className="space-y-8">
@@ -100,10 +154,32 @@ export default function StudentDashboardPage() {
         <StatCard
           icon={CreditCard}
           label="Transport fee"
-          value={me.transportFee != null ? `₹${me.transportFee}` : '—'}
+          value={fee.value}
           tone="bg-gradient-to-br from-orange-500 to-amber-600"
+          badge={
+            fee.badge ? (
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${fee.badge.cls}`}>
+                {fee.badge.text}
+              </span>
+            ) : null
+          }
+          onClick={() => router.push('/student/fees')}
         />
       </div>
+
+      {overdueCount > 0 && (
+        <button
+          type="button"
+          onClick={() => router.push('/student/fees')}
+          className="w-full text-left bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 transition-colors hover:bg-red-100/70 dark:bg-red-950/30 dark:border-red-900 dark:hover:bg-red-950/50"
+        >
+          <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-800 dark:text-red-200">
+            You have <strong>{overdueCount}</strong> overdue transport term{overdueCount === 1 ? '' : 's'}{' '}
+            totalling <strong>{inr(totalOwed)}</strong>. Tap to view and clear your transport fees.
+          </p>
+        </button>
+      )}
 
       {me.busRequired && !me.assigned && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3 dark:bg-amber-950/30 dark:border-amber-900">
