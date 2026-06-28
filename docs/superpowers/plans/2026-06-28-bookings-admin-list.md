@@ -445,24 +445,26 @@ EOF
 
 ---
 
-### Task 4: CSV export helper
+### Task 4: CSV string builder (pure)
 
 **Files:**
-- Create: `app/(admin)/bookings/bookings-export.ts`
-- Test: `app/(admin)/bookings/bookings-export.test.ts`
+- Create: `lib/booking/bookings-csv.ts`
+- Test: `lib/booking/bookings-csv.test.ts`
+
+> Lives in `lib/` because `vitest.config.ts` only discovers `lib/**/*.test.ts` and has no `@/` alias. The browser *download* (Blob/anchor) is NOT here — it inlines into the page (Task 5), keeping `lib/` pure. Test imports are relative.
 
 **Interfaces:**
 - Consumes: `BookingListRow` (Task 1).
-- Produces: `function toBookingsCsv(rows: BookingListRow[]): string` (pure) and `function downloadBookingsCsv(rows: BookingListRow[]): void` (browser Blob download).
+- Produces: `function toBookingsCsv(rows: BookingListRow[]): string` (pure).
 
 - [ ] **Step 1: Write the failing test**
 
-Create `app/(admin)/bookings/bookings-export.test.ts`:
+Create `lib/booking/bookings-csv.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { toBookingsCsv } from './bookings-export';
-import type { BookingListRow } from '@/lib/booking/admin-list';
+import { toBookingsCsv } from './bookings-csv';
+import type { BookingListRow } from './admin-list';
 
 const row: BookingListRow = {
   key: 'L1:2026-07-01', learner_id: 'L1', learner_name: 'Rao, Asha', roll_number: '21CS001',
@@ -489,15 +491,15 @@ describe('toBookingsCsv', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run "app/(admin)/bookings/bookings-export.test.ts"`
-Expected: FAIL — cannot resolve `./bookings-export`.
+Run: `npx vitest run lib/booking/bookings-csv.test.ts`
+Expected: FAIL — cannot resolve `./bookings-csv`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `app/(admin)/bookings/bookings-export.ts`:
+Create `lib/booking/bookings-csv.ts`:
 
 ```ts
-import type { BookingListRow } from '@/lib/booking/admin-list';
+import type { BookingListRow } from './admin-list';
 
 const HEADERS = ['Travel Date', 'Learner', 'Roll', 'Route', 'Stop', 'Booked At', 'Booked By'] as const;
 
@@ -521,29 +523,19 @@ export function toBookingsCsv(rows: BookingListRow[]): string {
   }
   return lines.join('\n');
 }
-
-export function downloadBookingsCsv(rows: BookingListRow[]): void {
-  const blob = new Blob([toBookingsCsv(rows)], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `bookings_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run "app/(admin)/bookings/bookings-export.test.ts"`
+Run: `npx vitest run lib/booking/bookings-csv.test.ts`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add "app/(admin)/bookings/bookings-export.ts" "app/(admin)/bookings/bookings-export.test.ts"
+git add lib/booking/bookings-csv.ts lib/booking/bookings-csv.test.ts
 git commit -m "$(cat <<'EOF'
-feat(bookings): CSV export helper for the admin list
+feat(bookings): pure CSV string builder for the admin list
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -558,7 +550,7 @@ EOF
 - Modify (full replace): `app/(admin)/bookings/page.tsx`
 
 **Interfaces:**
-- Consumes: `getBookingColumns` (Task 3); `downloadBookingsCsv` (Task 4); `BookingListRow`, `BookingDateStatus` (Task 1); `istToday`, `addDays` from `lib/booking/window.ts`; `DataTable` from `@/components/ui/data-table`; `useQuery` from `@tanstack/react-query`.
+- Consumes: `getBookingColumns` (Task 3); `toBookingsCsv` (Task 4, with the Blob download inlined here); `BookingListRow` (Task 1); `istToday`, `addDays` from `lib/booking/window.ts`; `DataTable` from `@/components/ui/data-table`; `useQuery` from `@tanstack/react-query`.
 - Produces: the default-exported `BookingsPage` route component.
 
 - [ ] **Step 1: Replace the file**
@@ -574,7 +566,7 @@ import { CalendarCheck, Download } from 'lucide-react';
 import { DataTable } from '@/components/ui/data-table';
 import { istToday, addDays } from '@/lib/booking/window';
 import { getBookingColumns } from './columns';
-import { downloadBookingsCsv } from './bookings-export';
+import { toBookingsCsv } from '@/lib/booking/bookings-csv';
 import type { BookingListRow } from '@/lib/booking/admin-list';
 
 interface RouteOpt { id: string; label: string }
@@ -602,6 +594,16 @@ async function fetchBookings(from: string, to: string, routeId: string): Promise
 
 const input = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800';
 const outlineBtn = 'inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50';
+
+function exportCsv(rows: BookingListRow[], dateStamp: string) {
+  const blob = new Blob([toBookingsCsv(rows)], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bookings_${dateStamp}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function BookingsPage() {
   const today = istToday();
@@ -681,7 +683,7 @@ export default function BookingsPage() {
             ] },
           ]}
           toolbarActions={() => (
-            <button type="button" className={outlineBtn} onClick={() => downloadBookingsCsv(rows)} disabled={rows.length === 0}>
+            <button type="button" className={outlineBtn} onClick={() => exportCsv(rows, today)} disabled={rows.length === 0}>
               <Download className="h-4 w-4" /> Export CSV
             </button>
           )}
@@ -789,7 +791,7 @@ Ask the user to open `/bookings` in their authenticated browser and confirm: the
 - §5 query params / defaults / chunked `.in()` / 42P01 guard / response shape → Task 2. ✅
 - §6 columns + Today/Upcoming/Past badge → Task 3. ✅
 - §6 page (filters, stats, DataTable, states) → Task 5. ✅
-- §6 CSV export → Task 4 (+ wired in Task 5). ✅
+- §6 CSV export → Task 4 (pure `toBookingsCsv` in `lib/`, tested; Blob download inlined in Task 5). ✅
 - §4 nav entry → Task 6. ✅
 - §7 permissions (no migration) → honored in Task 2 gate + Task 6 `permission`. ✅
 - §8 testing/verification → Tasks 1/4 (vitest), 2/3/5/6 (tsc), 2/7 (probe), 7 (handoff). ✅
@@ -797,4 +799,4 @@ Ask the user to open `/bookings` in their authenticated browser and confirm: the
 
 **Placeholder scan:** No TBD/TODO; every code step shows complete code; every command states expected output.
 
-**Type consistency:** `BookingListRow` / `RawBooking` / `LearnerRef` / `BookingRefs` defined in Task 1 and consumed verbatim in Tasks 2–5. `getBookingColumns(today)` (Task 3) matches its call in Task 5. `bookingDateStatus(date, today)` signature consistent across Tasks 1, 3. `downloadBookingsCsv(rows)` (Task 4) matches its call in Task 5. Column ids `dateStatus` / `booked_by_label` used as filter `columnId`s in Task 5 exist in Task 3. The Task 4 test header literal `Travel Date,Learner,Roll,Route,Stop,Booked At,Booked By` matches `HEADERS.join(',')`. ✅
+**Type consistency:** `BookingListRow` / `RawBooking` / `LearnerRef` / `BookingRefs` defined in Task 1 and consumed verbatim in Tasks 2–5. `getBookingColumns(today)` (Task 3) matches its call in Task 5. `bookingDateStatus(date, today)` signature consistent across Tasks 1, 3. `toBookingsCsv(rows)` (Task 4) matches its call in Task 5's inlined `exportCsv`. Column ids `dateStatus` / `booked_by_label` used as filter `columnId`s in Task 5 exist in Task 3. The Task 4 test header literal `Travel Date,Learner,Roll,Route,Stop,Booked At,Booked By` matches `HEADERS.join(',')`. ✅
