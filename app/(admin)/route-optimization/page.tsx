@@ -22,6 +22,7 @@ import toast from 'react-hot-toast';
 import type {
   ConsolidationClass,
   ConsolidationSuggestion,
+  MergeSuggestion,
   OptimizationAnalysis,
   RouteClassification,
 } from '@/lib/route-optimization/types';
@@ -256,6 +257,8 @@ export default function RouteOptimizationPage() {
   const [rollingBack, setRollingBack] = useState<string | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<'today_booking' | 'permanent'>('today_booking');
+  const [mergeConfirm, setMergeConfirm] = useState<MergeSuggestion | null>(null);
+  const [applyingMerge, setApplyingMerge] = useState(false);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -344,6 +347,41 @@ export default function RouteOptimizationPage() {
       setApplying(false);
     }
   }, [analysis, selected, targets, date, threshold, runAnalysis]);
+
+  const applyMerge = useCallback(
+    async (merge: MergeSuggestion, applyMode: 'today_booking' | 'permanent') => {
+      setApplyingMerge(true);
+      try {
+        const moves = merge.relocations.map((r) => ({
+          learnerId: r.learnerId,
+          fromRouteId: merge.mergedRouteId,
+          toRouteId: merge.survivorRouteId,
+        }));
+        if (moves.length === 0) {
+          toast.error('Nothing to merge');
+          return;
+        }
+        const res = await fetch('/api/admin/route-optimization/execute-transfers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, threshold, mode: applyMode, moves }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to merge');
+        const r = json.result;
+        toast.success(
+          `Merged ${r.applied} passenger(s)${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`
+        );
+        setMergeConfirm(null);
+        await runAnalysis();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to merge');
+      } finally {
+        setApplyingMerge(false);
+      }
+    },
+    [date, threshold, runAnalysis]
+  );
 
   const undoRun = useCallback(
     async (runId: string) => {
@@ -530,6 +568,55 @@ export default function RouteOptimizationPage() {
             </section>
           )}
 
+          {/* Combine buses (whole-route merges) */}
+          {analysis.merges.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-900">Combine buses</h2>
+                <span className="text-sm text-gray-500">
+                  {analysis.merges.length} bus(es) can be freed by merging whole routes
+                </span>
+              </div>
+              <div className="space-y-3">
+                {analysis.merges.map((m) => (
+                  <div key={m.mergedRouteId} className="rounded-xl border border-gray-200 bg-white p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-start gap-2">
+                        <Bus className="mt-0.5 h-5 w-5 shrink-0 text-rose-500" />
+                        <div>
+                          <p className="font-semibold text-gray-900">
+                            {m.mergedRouteName}
+                            {m.mergedRouteNumber && <span className="text-gray-500"> #{m.mergedRouteNumber}</span>}
+                            <ArrowRight className="mx-2 inline h-4 w-4 text-gray-400" />
+                            {m.survivorRouteName}
+                            {m.survivorRouteNumber && <span className="text-gray-500"> #{m.survivorRouteNumber}</span>}
+                          </p>
+                          <p className="mt-0.5 text-sm text-gray-600">
+                            {m.relocations.length} passenger(s) · survivor {m.combinedPassengers}/{m.survivorCapacity} after merge · {m.overlapStops} shared stop(s)
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {m.estimatedSavings > 0 && (
+                          <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                            ~{inr(m.estimatedSavings)}/day
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setMergeConfirm(m)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-700"
+                        >
+                          Merge
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Suggestions */}
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -677,6 +764,50 @@ export default function RouteOptimizationPage() {
               >
                 {applying && <Loader2 className="h-4 w-4 animate-spin" />}
                 {applying ? 'Applying…' : 'Confirm & apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge confirm modal */}
+      {mergeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Combine these buses?</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Move <strong>{mergeConfirm.relocations.length}</strong> passenger(s) from{' '}
+              <strong>{mergeConfirm.mergedRouteName}</strong> onto{' '}
+              <strong>{mergeConfirm.survivorRouteName}</strong> for <strong>{date}</strong>, freeing
+              1 bus. You can undo this run afterwards from the Applied runs list.
+            </p>
+            <fieldset className="mt-4 space-y-2">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="radio" name="merge-mode" checked={mode === 'today_booking'} onChange={() => setMode('today_booking')} />
+                Today only — move this date&apos;s bookings
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="radio" name="merge-mode" checked={mode === 'permanent'} onChange={() => setMode('permanent')} />
+                Permanent — change the learners&apos; standing route
+              </label>
+            </fieldset>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setMergeConfirm(null)}
+                disabled={applyingMerge}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => applyMerge(mergeConfirm, mode)}
+                disabled={applyingMerge}
+                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+              >
+                {applyingMerge && <Loader2 className="h-4 w-4 animate-spin" />}
+                {applyingMerge ? 'Merging…' : 'Confirm & merge'}
               </button>
             </div>
           </div>

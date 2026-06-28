@@ -37,6 +37,7 @@ import type {
   RouteClassification,
 } from './types';
 import { bestStopMatch, normalizeStopName, type MatchStop } from './match';
+import { findMerges, type MergeRouteInput } from './merge';
 
 // Re-export so existing importers (allocate.ts, apply.ts) keep their import path.
 export { normalizeStopName };
@@ -277,6 +278,30 @@ export function analyzeOptimization(
   const relocatablePassengers = suggestions.reduce((sum, s) => sum + s.relocatablePassengers, 0);
   const estimatedSavings = suggestions.reduce((sum, s) => sum + s.estimatedSavings, 0);
 
+  // Whole-route merges ("combine the buses"): fold an under-utilized route
+  // entirely into a survivor that can hold everyone and serves all their stops.
+  const mergeInputs: MergeRouteInput[] = activeRoutes.map((r) => ({
+    routeId: r.id,
+    routeName: displayName(r),
+    routeNumber: r.route_number,
+    capacity: capacityByRoute.get(r.id) ?? options.defaultCapacity,
+    occupancy: countByRoute.get(r.id) ?? 0,
+    classification: classByRoute.get(r.id) ?? 'healthy',
+    dailyCost: estimatedDailyBusCost(r, options),
+    stops: stopsByRoute.get(r.id) ?? [],
+    passengers: (bookingsByRoute.get(r.id) ?? []).map((b) => ({
+      learnerId: b.learner_id,
+      learnerName: b.learner_name?.trim() || 'Unknown learner',
+      learnerRoll: b.learner_roll,
+      stop: b.stop_id ? stopById.get(b.stop_id) ?? null : null,
+    })),
+  }));
+  const merges = findMerges(mergeInputs, {
+    timeWindowMin: options.timeWindowMin,
+    proximityKm: options.proximityKm,
+    minOverlapStops: 1,
+  });
+
   // Most actionable first: cancellable, then most passengers movable.
   suggestions.sort((a, b) => {
     if (a.canCancelBus !== b.canCancelBus) return a.canCancelBus ? -1 : 1;
@@ -300,8 +325,10 @@ export function analyzeOptimization(
       partialTransfers,
       relocatablePassengers,
       estimatedSavings,
+      mergeableBuses: merges.length,
     },
     routes: routeAnalysis,
     suggestions,
+    merges,
   };
 }

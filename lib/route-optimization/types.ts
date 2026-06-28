@@ -110,6 +110,36 @@ export interface ConsolidationSuggestion {
   relocations: PassengerRelocation[];
 }
 
+/** One passenger's planned hop when a whole route is merged into a survivor. */
+export interface MergeRelocation {
+  learnerId: string;
+  learnerName: string;
+  learnerRoll: string | null;
+  fromStopId: string | null;
+  toStopId: string | null;
+  matchedReason: string;
+}
+
+/** A proposal to fold an under-utilized route entirely into a survivor route. */
+export interface MergeSuggestion {
+  survivorRouteId: string;
+  survivorRouteName: string;
+  survivorRouteNumber: string | null;
+  mergedRouteId: string;
+  mergedRouteName: string;
+  mergedRouteNumber: string | null;
+  /** Survivor's load after absorbing this route. */
+  combinedPassengers: number;
+  survivorCapacity: number;
+  /** Distinct survivor stops the merged passengers map onto. */
+  overlapStops: number;
+  relocations: MergeRelocation[];
+  /** Buses taken off the road by this merge (always 1 here). */
+  busesFreed: number;
+  /** Labeled ESTIMATE — the merged route's daily operating cost. */
+  estimatedSavings: number;
+}
+
 export interface RouteAnalysis {
   routeId: string;
   routeName: string;
@@ -137,6 +167,8 @@ export interface OptimizationSummary {
   relocatablePassengers: number;
   /** Labeled ESTIMATE — sum of daily cost of buses that can be cancelled. */
   estimatedSavings: number;
+  /** Count of whole-route merges proposed (buses freed by combining). */
+  mergeableBuses: number;
 }
 
 export interface OptimizationAnalysis {
@@ -145,4 +177,5 @@ export interface OptimizationAnalysis {
   summary: OptimizationSummary;
   routes: RouteAnalysis[];
   suggestions: ConsolidationSuggestion[];
+  merges: MergeSuggestion[];
 }
