@@ -80,7 +80,7 @@ export default function StudentBookingsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4">
+    <div className="mx-auto w-full max-w-full space-y-4">
       <div>
         <h1 className="text-xl font-semibold">Book Bus</h1>
         <p className="text-sm text-muted-foreground">{data?.routeLabel ?? '—'} · Stop: {data?.stopLabel ?? '—'}</p>
