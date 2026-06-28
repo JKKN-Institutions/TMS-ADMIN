@@ -286,7 +286,7 @@ export function FilterSelect({
         <span className="truncate">{selected ? selected.label : `${title}: All`}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[10rem]">
+      <DropdownMenuContent align="start" className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[10rem] overflow-y-auto">
         <DropdownMenuItem onSelect={() => onChange(undefined)}>
           <Check className={value ? 'opacity-0' : 'opacity-100'} /> {title}: All
         </DropdownMenuItem>
