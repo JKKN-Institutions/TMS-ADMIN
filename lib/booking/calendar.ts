@@ -4,11 +4,11 @@
  * The builder is pure + unit-tested; loadExceptions wraps the DB for the API.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { bookableDates, cutoffFor, dayStatus } from './window';
+import { bookableDates, cutoffFor, dayStatus, isSunday } from './window';
 
 export type CalendarStatus =
   | 'open' | 'booked' | 'locked' | 'closed'
-  | 'holiday' | 'no_service' | 'out_of_horizon';
+  | 'holiday' | 'no_service' | 'weekly_off' | 'out_of_horizon';
 
 export interface DayCell {
   date: string; // 'YYYY-MM-DD'
@@ -42,6 +42,7 @@ export function effectiveOpen(
   opts: { window?: WindowOverride; now?: Date }
 ): boolean {
   const now = opts.now ?? new Date();
+  if (isSunday(date)) return false; // weekly holiday — never bookable
   if (opts.window && !opts.window.enabled) return false;
   if (!bookableDates(now).includes(date)) return false;
   const deadlineMs = opts.window?.deadline
@@ -56,6 +57,10 @@ export function cellStatus(
   opts: { hasBooking: boolean; exception?: CalendarException; window?: WindowOverride; now?: Date }
 ): CalendarStatus {
   if (opts.exception) return opts.exception.kind; // 'holiday' | 'no_service'
+  // Sunday is a fixed weekly holiday. A real admin exception (above) still wins
+  // so a named holiday can show its note; otherwise every Sunday reads weekly-off.
+  // A legacy Sunday booking stays visible as 'locked' (non-actionable here).
+  if (isSunday(date)) return opts.hasBooking ? 'locked' : 'weekly_off';
   const now = opts.now ?? new Date();
   if (!bookableDates(now).includes(date)) return opts.hasBooking ? 'locked' : 'out_of_horizon';
   // window-aware open/closed; falls back to the pure dayStatus when no window.

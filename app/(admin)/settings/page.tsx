@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import SchedulingConfigManager, { defaultSchedulingSettings } from '../../../lib/scheduling-config';
+import { AttendanceWindowSettings } from '@/components/admin/attendance-window-settings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('general');
@@ -69,7 +70,7 @@ const SettingsPage = () => {
     // Check URL params to set active tab
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
-    const validTabs = ['general', 'scheduling', 'notifications', 'security', 'system'];
+    const validTabs = ['general', 'scheduling', 'attendance', 'notifications', 'security', 'system'];
     if (tabParam && validTabs.includes(tabParam)) {
       setActiveTab(tabParam);
     }
@@ -131,6 +132,7 @@ const SettingsPage = () => {
   const tabs = [
     { id: 'general', name: 'General', icon: Settings },
     { id: 'scheduling', name: 'Scheduling', icon: Bus },
+    { id: 'attendance', name: 'Attendance', icon: Clock },
     { id: 'notifications', name: 'Notifications', icon: Bell },
     { id: 'security', name: 'Security', icon: Shield },
     { id: 'system', name: 'System', icon: Server }
@@ -881,6 +883,8 @@ const SettingsPage = () => {
         return renderGeneralSettings();
       case 'scheduling':
         return renderSchedulingSettings();
+      case 'attendance':
+        return <AttendanceWindowSettings />;
       case 'notifications':
         return renderNotificationSettings();
       case 'security':

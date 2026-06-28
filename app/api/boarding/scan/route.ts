@@ -7,6 +7,7 @@ import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
+import { loadAttendanceWindows, isDirectionOpen, activeDirection, formatHM } from '@/lib/boarding/attendance-window';
 
 /**
  * POST a scanned boarding-pass token → mark the learner present for today.
@@ -45,6 +46,21 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const direction = body.direction === 'return' ? 'return' : 'onward';
 
     const svc = createServiceRoleClient();
+
+    // Time-window gate: onward only inside the morning window, return only inside
+    // the evening window (admin-configurable). This is what stops an evening onward
+    // re-scan from silently overwriting the morning record and dropping the return leg.
+    const windows = await loadAttendanceWindows(svc);
+    if (!isDirectionOpen(windows[direction])) {
+      const w = windows[direction];
+      return NextResponse.json({
+        ok: false,
+        reason: 'window_closed',
+        error: `${direction === 'onward' ? 'Onward (morning)' : 'Return (evening)'} scanning is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+        activeDirection: activeDirection(windows),
+      }, { status: 409 });
+    }
+
     const { data } = await svc
       .from('learners_profiles')
       .select('id, first_name, last_name, roll_number, transport_route_id, transport_stop_id')
