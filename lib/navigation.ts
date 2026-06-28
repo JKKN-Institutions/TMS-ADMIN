@@ -14,7 +14,6 @@ import {
   FileText,
   Navigation,
   Zap,
-  Bug,
   ClipboardCheck,
   GraduationCap,
   CalendarRange,
@@ -62,7 +61,6 @@ export const allNavigation: NavItem[] = [
   { name: 'Transport Years', href: '/transport-years', icon: CalendarRange, permission: TMS_PERMISSIONS.TRANSPORT_YEARS_VIEW, group: 'transport' },
   { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
-  { name: 'My Grievances', href: '/my-grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_SUBMIT, group: 'services' },
   { name: 'Fees', href: '/fees', icon: Receipt, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
   { name: 'Bill Management', href: '/bill-management', icon: Wallet, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
   {
@@ -76,7 +74,6 @@ export const allNavigation: NavItem[] = [
       { name: 'Push Notifications', href: '/notifications/push', icon: Bell },
     ],
   },
-  { name: 'Bug Management', href: '/bug-management', icon: Bug, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'services' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
   { name: 'Activity Log', href: '/activity-log', icon: History, permission: TMS_PERMISSIONS.ACTIVITY_VIEW, group: 'system' },
 ];
