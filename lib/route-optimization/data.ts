@@ -14,6 +14,32 @@ import type { OptimizationAnalysis, RawBooking, RawRoute, RawStop } from './type
 
 const CHUNK = 150; // keep .in() lists under the API gateway limit
 
+/**
+ * The busiest travel date (most bookings) within [from,to] — the basis for the
+ * Planning horizon, so merges/right-sizing are sized to the peak day. Returns
+ * null when the range has no bookings.
+ */
+export async function peakBookingDate(
+  supabase: SupabaseClient,
+  from: string,
+  to: string
+): Promise<{ date: string; totalBookings: number; daysWithBookings: number } | null> {
+  const { data, error } = await supabase
+    .from('tms_booking')
+    .select('travel_date')
+    .gte('travel_date', from)
+    .lte('travel_date', to);
+  if (error || !data || data.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const b of data as { travel_date: string }[]) {
+    counts.set(b.travel_date, (counts.get(b.travel_date) ?? 0) + 1);
+  }
+  let date: string | null = null;
+  let max = -1;
+  for (const [d, n] of counts) if (n > max) { date = d; max = n; }
+  return date ? { date, totalBookings: max, daysWithBookings: counts.size } : null;
+}
+
 export async function loadOptimizationAnalysis(
   supabase: SupabaseClient,
   date: string,

@@ -81,6 +81,11 @@ function inr(n: number): string {
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 function fmtTime(d: string): string {
   return new Date(d).toLocaleString(undefined, {
     day: '2-digit',
@@ -246,7 +251,11 @@ function SuggestionRow({
 }
 
 export default function RouteOptimizationPage() {
+  const [horizon, setHorizon] = useState<'daily' | 'planning'>('daily');
   const [date, setDate] = useState(todayIso());
+  const [from, setFrom] = useState(todayIso());
+  const [to, setTo] = useState(() => addDaysIso(todayIso(), 13));
+  const [peak, setPeak] = useState<{ date: string; totalBookings: number; daysWithBookings: number } | null>(null);
   const [threshold, setThreshold] = useState(50);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -268,12 +277,19 @@ export default function RouteOptimizationPage() {
     setError(null);
     setSelected(new Set());
     try {
-      const qs = new URLSearchParams({ date, threshold: String(threshold) });
+      const qs = new URLSearchParams({ threshold: String(threshold) });
+      if (horizon === 'planning') {
+        qs.set('from', from);
+        qs.set('to', to);
+      } else {
+        qs.set('date', date);
+      }
       const res = await fetch(`/api/admin/route-optimization?${qs.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to analyze');
       setAnalysis(json.data as OptimizationAnalysis);
       setAppliedRuns((json.appliedRuns as AppliedRun[]) ?? []);
+      setPeak((json.peak as { date: string; totalBookings: number; daysWithBookings: number } | null) ?? null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to analyze';
       setError(msg);
@@ -281,7 +297,7 @@ export default function RouteOptimizationPage() {
     } finally {
       setLoading(false);
     }
-  }, [date, threshold]);
+  }, [date, threshold, horizon, from, to]);
 
   useEffect(() => {
     runAnalysis();
@@ -334,9 +350,10 @@ export default function RouteOptimizationPage() {
           if (to) moves.push({ learnerId: r.learnerId, fromRouteId: s.routeId, toRouteId: to });
         }
       if (moves.length === 0) { toast.error('No targets chosen for the selected routes'); return; }
+      const useDate = horizon === 'planning' ? peak?.date ?? to : date;
       const res = await fetch('/api/admin/route-optimization/execute-transfers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, threshold, mode: applyMode, moves }),
+        body: JSON.stringify({ date: useDate, threshold, mode: applyMode, moves }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to apply');
@@ -349,7 +366,7 @@ export default function RouteOptimizationPage() {
     } finally {
       setApplying(false);
     }
-  }, [analysis, selected, targets, date, threshold, runAnalysis]);
+  }, [analysis, selected, targets, date, threshold, horizon, peak, to, runAnalysis]);
 
   const applyMerge = useCallback(
     async (merge: MergeSuggestion, applyMode: 'today_booking' | 'permanent') => {
@@ -364,10 +381,11 @@ export default function RouteOptimizationPage() {
           toast.error('Nothing to merge');
           return;
         }
+        const useDate = horizon === 'planning' ? peak?.date ?? to : date;
         const res = await fetch('/api/admin/route-optimization/execute-transfers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, threshold, mode: applyMode, moves }),
+          body: JSON.stringify({ date: useDate, threshold, mode: applyMode, moves }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Failed to merge');
@@ -383,7 +401,7 @@ export default function RouteOptimizationPage() {
         setApplyingMerge(false);
       }
     },
-    [date, threshold, runAnalysis]
+    [date, threshold, horizon, peak, to, runAnalysis]
   );
 
   const applyRightsize = useCallback(
@@ -391,10 +409,11 @@ export default function RouteOptimizationPage() {
       if (!sg.recommendedVehicleId) return;
       setApplyingRs(true);
       try {
+        const useDate = horizon === 'planning' ? peak?.date ?? to : date;
         const res = await fetch('/api/admin/route-optimization/apply-vehicle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, swaps: [{ routeId: sg.routeId, toVehicleId: sg.recommendedVehicleId }] }),
+          body: JSON.stringify({ date: useDate, swaps: [{ routeId: sg.routeId, toVehicleId: sg.recommendedVehicleId }] }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Failed to change vehicle');
@@ -408,7 +427,7 @@ export default function RouteOptimizationPage() {
         setApplyingRs(false);
       }
     },
-    [date, runAnalysis]
+    [date, horizon, peak, to, runAnalysis]
   );
 
   const undoRun = useCallback(
@@ -451,20 +470,50 @@ export default function RouteOptimizationPage() {
       </div>
 
       {/* Controls */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="inline-flex rounded-lg border border-gray-300 p-0.5">
+          {(['daily', 'planning'] as const).map((h) => (
+            <button
+              key={h}
+              type="button"
+              onClick={() => {
+                setHorizon(h);
+                if (h === 'planning') setMode('permanent');
+              }}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                horizon === h ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {h === 'daily' ? 'Daily' : 'Planning'}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="opt-date" className="text-sm font-medium text-gray-700">
-              Travel date
-            </label>
-            <input
-              id="opt-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className={inputCls}
-            />
-          </div>
+          {horizon === 'daily' ? (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="opt-date" className="text-sm font-medium text-gray-700">
+                Travel date
+              </label>
+              <input
+                id="opt-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="opt-from" className="text-sm font-medium text-gray-700">From</label>
+                <input id="opt-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="opt-to" className="text-sm font-medium text-gray-700">To</label>
+                <input id="opt-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+              </div>
+            </>
+          )}
           <div className="flex flex-col gap-1">
             <label htmlFor="opt-threshold" className="text-sm font-medium text-gray-700">
               Under-utilized at ≤ (% of capacity)
@@ -506,6 +555,22 @@ export default function RouteOptimizationPage() {
 
       {analysis && s && (
         <div className="space-y-6">
+          {horizon === 'planning' && (
+            <div className="flex items-start gap-2 rounded-xl border border-purple-200 bg-purple-50 p-4 text-sm text-purple-800 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-300">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Planning view — sized to the busiest day in {from} → {to}
+                {peak ? (
+                  <>
+                    : <strong>{peak.date}</strong> ({peak.totalBookings} booking(s) across {peak.daysWithBookings} active day(s)).
+                  </>
+                ) : (
+                  ' (no bookings found in this range).'
+                )}{' '}
+                Applying changes defaults to a permanent allocation.
+              </span>
+            </div>
+          )}
           {s.totalBookings === 0 && (
             <div className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />

@@ -3,7 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { DEFAULT_OPTIONS } from '@/lib/route-optimization/engine';
-import { loadOptimizationAnalysis } from '@/lib/route-optimization/data';
+import { loadOptimizationAnalysis, peakBookingDate } from '@/lib/route-optimization/data';
 
 /**
  * GET /api/admin/route-optimization?date=YYYY-MM-DD&threshold=50
@@ -34,8 +34,7 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
   }
 
   const params = request.nextUrl.searchParams;
-  const dateRaw = params.get('date');
-  const date = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : todayIso();
+  const isYmd = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
   const thresholdRaw = Number(params.get('threshold'));
   const threshold =
@@ -43,8 +42,23 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
       ? Math.round(thresholdRaw)
       : DEFAULT_OPTIONS.underUtilizedMaxPercent;
 
+  // Planning horizon: ?from&to → analyze the busiest day in the range.
+  // Daily horizon (default): ?date (or today).
+  const from = params.get('from');
+  const to = params.get('to');
+  const planning = isYmd(from) && isYmd(to);
+
   try {
     const supabase = createServiceRoleClient();
+
+    let date: string;
+    let peakInfo: { date: string; totalBookings: number; daysWithBookings: number } | null = null;
+    if (planning) {
+      peakInfo = await peakBookingDate(supabase, from, to);
+      date = peakInfo?.date ?? to;
+    } else {
+      date = isYmd(params.get('date')) ? (params.get('date') as string) : todayIso();
+    }
 
     const analysis = await loadOptimizationAnalysis(supabase, date, threshold);
 
@@ -59,7 +73,14 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
       console.error('route-optimization: runs query failed', runsErr);
     }
 
-    return NextResponse.json({ success: true, data: analysis, appliedRuns: appliedRuns ?? [] });
+    return NextResponse.json({
+      success: true,
+      data: analysis,
+      appliedRuns: appliedRuns ?? [],
+      horizon: planning ? 'planning' : 'daily',
+      range: planning ? { from, to } : null,
+      peak: peakInfo,
+    });
   } catch (error) {
     console.error('route-optimization: analyze failed', error);
     return NextResponse.json({ error: 'Failed to analyze route optimization' }, { status: 500 });
