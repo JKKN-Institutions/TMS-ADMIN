@@ -17,6 +17,7 @@ import {
   Info,
   Undo2,
   History,
+  MapPin,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
@@ -271,6 +272,8 @@ export default function RouteOptimizationPage() {
   const [applyingMerge, setApplyingMerge] = useState(false);
   const [rsConfirm, setRsConfirm] = useState<RightsizeSuggestion | null>(null);
   const [applyingRs, setApplyingRs] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geoMsg, setGeoMsg] = useState<string | null>(null);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -430,6 +433,34 @@ export default function RouteOptimizationPage() {
     [date, horizon, peak, to, runAnalysis]
   );
 
+  const runGeocode = useCallback(async () => {
+    setGeocoding(true);
+    setGeoMsg('Starting…');
+    try {
+      let total = 0;
+      // Loop batches until none remain (or a batch makes no progress).
+      for (let i = 0; i < 100; i++) {
+        const res = await fetch('/api/admin/route-optimization/geocode-stops', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 40 }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Geocoding failed');
+        total += json.result.geocoded;
+        setGeoMsg(`Geocoded ${total}, ${json.result.remaining} remaining…`);
+        if (json.result.remaining === 0 || json.result.geocoded === 0) break;
+      }
+      setGeoMsg(`Done — ${total} stop(s) geocoded. Re-analyze to use proximity matching.`);
+      toast.success(`Geocoded ${total} stop(s)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Geocoding failed');
+      setGeoMsg(null);
+    } finally {
+      setGeocoding(false);
+    }
+  }, []);
+
   const undoRun = useCallback(
     async (runId: string) => {
       setRollingBack(runId);
@@ -537,6 +568,17 @@ export default function RouteOptimizationPage() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             {loading ? 'Analyzing…' : 'Analyze'}
           </button>
+          <button
+            type="button"
+            onClick={runGeocode}
+            disabled={geocoding}
+            title="Fill in stop coordinates so transfers can also match nearby stops"
+            className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+          >
+            {geocoding ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+            {geocoding ? 'Geocoding…' : 'Geocode stops'}
+          </button>
+          {geoMsg && <span className="text-xs text-gray-500">{geoMsg}</span>}
         </div>
       </div>
 
