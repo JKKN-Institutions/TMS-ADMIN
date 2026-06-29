@@ -200,7 +200,7 @@ export async function rollbackRun(
 
   const { data: itemRows, error: itemErr } = await supabase
     .from('tms_route_optimization_item')
-    .select('learner_id, travel_date, from_route_id, from_stop_id, to_route_id')
+    .select('kind, learner_id, travel_date, from_route_id, from_stop_id, to_route_id, from_vehicle_id, to_vehicle_id')
     .eq('optimization_id', runId);
   if (itemErr) throw new Error(`items: ${itemErr.message}`);
 
@@ -209,7 +209,14 @@ export async function rollbackRun(
   for (const it of itemRows ?? []) {
     if (!it.from_route_id) { skipped++; continue; }
     let ok = false;
-    if (mode === 'today_booking') {
+    if (it.kind === 'vehicle_swap') {
+      // Restore the route's vehicle, only if it still holds the swapped-to vehicle.
+      const { data, error } = await supabase
+        .from('tms_route').update({ vehicle_id: it.from_vehicle_id })
+        .eq('id', it.from_route_id).eq('vehicle_id', it.to_vehicle_id)
+        .select('id');
+      ok = !error && !!data && data.length > 0;
+    } else if (mode === 'today_booking') {
       const { data, error } = await supabase
         .from('tms_booking').update({ route_id: it.from_route_id, stop_id: it.from_stop_id })
         .eq('learner_id', it.learner_id).eq('travel_date', it.travel_date).eq('route_id', it.to_route_id)
@@ -417,4 +424,86 @@ export async function applyManualMoves(
     .eq('id', runId);
 
   return { runId, mode, date, applied, skipped: [...plan.skipped, ...extraSkips], routesCancelled, estimatedSavings };
+}
+
+export interface VehicleSwap { routeId: string; toVehicleId: string }
+export interface VehicleSwapResult {
+  runId: string;
+  applied: number;
+  skipped: { routeId: string; reason: string }[];
+}
+
+/**
+ * Reassign routes' vehicles (right-sizing). Validates each target is still spare
+ * and the route is still on its expected vehicle, snapshots a reversible
+ * vehicle_swap item, and records one run (mode 'permanent' — a standing change).
+ */
+export async function applyVehicleSwaps(
+  supabase: SupabaseClient,
+  { date, swaps, actorId }: { date: string; swaps: VehicleSwap[]; actorId: string | null }
+): Promise<VehicleSwapResult> {
+  const { data: routeRows, error: routeErr } = await supabase
+    .from('tms_route').select('id, route_number, route_name, status, vehicle_id');
+  if (routeErr) throw new Error(`routes: ${routeErr.message}`);
+  const routeList = routeRows ?? [];
+  const routeById = new Map(routeList.map((r) => [r.id, r]));
+  const assigned = new Set(
+    routeList.filter((r) => (r.status ?? 'active') === 'active' && r.vehicle_id).map((r) => r.vehicle_id as string)
+  );
+
+  const targetIds = Array.from(new Set(swaps.map((s) => s.toVehicleId)));
+  const regById = new Map<string, string | null>();
+  for (let i = 0; i < targetIds.length; i += CHUNK) {
+    const { data: vrows, error } = await supabase
+      .from('tms_vehicle').select('id, registration_number').in('id', targetIds.slice(i, i + CHUNK));
+    if (error) throw new Error(`vehicles: ${error.message}`);
+    for (const v of vrows ?? []) regById.set(v.id, v.registration_number ?? null);
+  }
+
+  const { data: run, error: runErr } = await supabase
+    .from('tms_route_optimization')
+    .insert({
+      travel_date: date, mode: 'permanent', threshold_percent: 0,
+      total_moves: 0, routes_cancelled: 0, estimated_savings: 0,
+      summary: { kind: 'vehicle_swap', requested: swaps.length }, status: 'applied', created_by: actorId,
+    })
+    .select('id').single();
+  if (runErr || !run) throw new Error(`create run: ${runErr?.message ?? 'no row'}`);
+  const runId = run.id as string;
+
+  let applied = 0;
+  const skipped: { routeId: string; reason: string }[] = [];
+  const usedTargets = new Set<string>();
+  const items: Record<string, unknown>[] = [];
+
+  for (const s of swaps) {
+    const route = routeById.get(s.routeId);
+    if (!route) { skipped.push({ routeId: s.routeId, reason: 'Route not found' }); continue; }
+    const fromVehicle = route.vehicle_id ?? null;
+    if (fromVehicle === s.toVehicleId) { skipped.push({ routeId: s.routeId, reason: 'Already on this vehicle' }); continue; }
+    if (usedTargets.has(s.toVehicleId) || assigned.has(s.toVehicleId)) {
+      skipped.push({ routeId: s.routeId, reason: 'Target vehicle is no longer spare' }); continue;
+    }
+    let q = supabase.from('tms_route').update({ vehicle_id: s.toVehicleId }).eq('id', s.routeId);
+    q = fromVehicle ? q.eq('vehicle_id', fromVehicle) : q.is('vehicle_id', null);
+    const { data: upd, error: updErr } = await q.select('id');
+    if (updErr || !upd || upd.length === 0) { skipped.push({ routeId: s.routeId, reason: 'Changed during apply' }); continue; }
+    usedTargets.add(s.toVehicleId);
+    applied++;
+    const label = route.route_name?.trim() || (route.route_number ? `Route ${route.route_number}` : s.routeId);
+    items.push({
+      optimization_id: runId, kind: 'vehicle_swap',
+      from_route_id: s.routeId, from_route_label: label,
+      from_vehicle_id: fromVehicle, to_vehicle_id: s.toVehicleId,
+      learner_label: `Vehicle → ${regById.get(s.toVehicleId) ?? 'reassigned'}`,
+    });
+  }
+
+  if (items.length) {
+    const { error: itemErr } = await supabase.from('tms_route_optimization_item').insert(items);
+    if (itemErr) throw new Error(`insert items: ${itemErr.message}`);
+  }
+  await supabase.from('tms_route_optimization').update({ total_moves: applied }).eq('id', runId);
+
+  return { runId, applied, skipped };
 }

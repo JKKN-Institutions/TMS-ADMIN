@@ -5,6 +5,8 @@ import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { bookedCount, routeCapacity } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
+import { loadPassengerRefs } from '@/lib/passengers/refs';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Roster for one route TODAY: learners who booked today UNION walk-ups (learners
@@ -17,15 +19,56 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
   return !!data;
 }
 
-interface LearnerLite { id: string; first_name: string | null; last_name: string | null; roll_number: string | null }
+interface LearnerLite {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  roll_number: string | null;
+  register_number: string | null;
+  institution_id: string | null;
+  degree_id: string | null;
+  department_id: string | null;
+  program_id: string | null;
+  semester_id: string | null;
+  section_id: string | null;
+  academic_year_id: string | null;
+  transport_stop_id: string | null;
+}
 interface AttRow { learner_id: string; direction: string | null; status: string | null; scanned_at: string | null }
 
-async function getRoster(auth: AuthContext, routeId: string) {
+/** Batch id→name lookup for a simple reference table (used for the detail panel). */
+async function nameMap(
+  svc: SupabaseClient, table: string, nameCol: string, ids: (string | null)[]
+): Promise<Map<string, string>> {
+  const uniq = Array.from(new Set(ids.filter((v): v is string => !!v)));
+  if (uniq.length === 0) return new Map();
+  const { data } = await svc.from(table).select(`id, ${nameCol}`).in('id', uniq);
+  return new Map(((data ?? []) as unknown as Record<string, string>[]).map((r) => [r.id, r[nameCol]]));
+}
+
+/** The single current transport year name (tms_transport_year.is_current) — global, not per-learner. */
+async function currentTransportYear(svc: SupabaseClient): Promise<string | null> {
+  const { data } = await svc.from('tms_transport_year').select('name').eq('is_current', true).maybeSingle();
+  return (data?.name as string) ?? null;
+}
+
+async function getRoster(auth: AuthContext, routeId: string, dateParam: string | null) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     if (!routeId) return NextResponse.json({ error: 'Route id is required' }, { status: 400 });
+
+    // Which day's roster? Defaults to today; a valid date lets staff preview
+    // advance bookings (future) or review history (past). Marking stays today-only.
+    const today = istToday();
+    let date = today;
+    if (dateParam) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+        return NextResponse.json({ error: 'date must be YYYY-MM-DD' }, { status: 400 });
+      }
+      date = dateParam;
+    }
 
     // Authority: staff may only view rosters for routes they're assigned to.
     if (!auth.isSuperAdmin) {
@@ -41,14 +84,12 @@ async function getRoster(auth: AuthContext, routeId: string) {
       .from('tms_route').select('id, route_number, route_name').eq('id', routeId).maybeSingle();
     if (!route) return NextResponse.json({ error: 'Route not found' }, { status: 404 });
 
-    const today = istToday();
-
-    // Roster = learners who BOOKED today ∪ learners with attendance today (walk-ups).
+    // Roster = learners who BOOKED this date ∪ learners with attendance this date (walk-ups).
     const { data: bookings } = await svc
       .from('tms_booking')
       .select('learner_id')
       .eq('route_id', routeId)
-      .eq('travel_date', today);
+      .eq('travel_date', date);
     const rosterIds = new Set<string>(((bookings ?? []) as { learner_id: string }[]).map((b) => b.learner_id));
 
     // Today's attendance for this route, keyed by learner + direction.
@@ -56,7 +97,7 @@ async function getRoster(auth: AuthContext, routeId: string) {
     const { data: att, error } = await svc
       .from('tms_attendance')
       .select('learner_id, direction, status, scanned_at')
-      .eq('trip_date', today)
+      .eq('trip_date', date)
       .eq('route_id', routeId);
     if (!error && att) {
       for (const a of att as AttRow[]) {
@@ -71,10 +112,29 @@ async function getRoster(auth: AuthContext, routeId: string) {
     const { data: studs } = idList.length
       ? await svc
           .from('learners_profiles')
-          .select('id, first_name, last_name, roll_number')
+          .select('id, first_name, last_name, roll_number, register_number, institution_id, degree_id, department_id, program_id, semester_id, section_id, academic_year_id, transport_stop_id')
           .in('id', idList)
       : { data: [] as LearnerLite[] };
     const students = (studs ?? []) as LearnerLite[];
+
+    // Resolve reference ids → names for the click-through detail panel. Reuse the
+    // Passenger module's loader for the four it covers; add degree/section/academic
+    // year here, plus the single current transport year (global).
+    const [refs, degrees, sections, academicYears, transportYear] = await Promise.all([
+      loadPassengerRefs(svc, {
+        institutionIds: students.map((s) => s.institution_id),
+        departmentIds: students.map((s) => s.department_id),
+        routeIds: [routeId],
+        stopIds: students.map((s) => s.transport_stop_id),
+        programIds: students.map((s) => s.program_id),
+        semesterIds: students.map((s) => s.semester_id),
+      }),
+      nameMap(svc, 'degrees', 'degree_name', students.map((s) => s.degree_id)),
+      nameMap(svc, 'sections', 'section_name', students.map((s) => s.section_id)),
+      nameMap(svc, 'academic_years', 'academic_year_name', students.map((s) => s.academic_year_id)),
+      currentTransportYear(svc),
+    ]);
+    const pick = (m: Map<string, string>, id: string | null) => (id ? m.get(id) ?? null : null);
 
     let presentOnward = 0, presentReturn = 0;
     const rows = students
@@ -89,12 +149,23 @@ async function getRoster(auth: AuthContext, routeId: string) {
           onward_status: att.onward,
           return_status: att.return,
           last_scanned_at: att.last,
+          // Detail panel fields (resolved names; null → shown as "—" in the UI)
+          register_number: s.register_number,
+          institution: pick(refs.institutions, s.institution_id),
+          degree: pick(degrees, s.degree_id),
+          department: pick(refs.departments, s.department_id),
+          program: pick(refs.programs, s.program_id),
+          semester: pick(refs.semesters, s.semester_id),
+          section: pick(sections, s.section_id),
+          academic_year: pick(academicYears, s.academic_year_id),
+          transport_year: transportYear,
+          stop: pick(refs.stops, s.transport_stop_id),
         };
       })
       .sort((a, b) => (a.roll_number ?? a.name).localeCompare(b.roll_number ?? b.name));
 
     const [booked, capacity] = await Promise.all([
-      bookedCount(svc, routeId, today),
+      bookedCount(svc, routeId, date),
       routeCapacity(svc, routeId),
     ]);
 
@@ -102,6 +173,8 @@ async function getRoster(auth: AuthContext, routeId: string) {
       success: true,
       data: {
         route: { id: route.id, route_number: route.route_number, route_name: route.route_name },
+        date,
+        isToday: date === today,
         counts: {
           total: students.length,
           booked,
@@ -120,7 +193,8 @@ async function getRoster(auth: AuthContext, routeId: string) {
 
 export const GET = withAuth((req: NextRequest, auth) => {
   // Extract [routeId] from the path: /api/boarding/routes/<routeId>/roster
-  const parts = new URL(req.url).pathname.split('/').filter(Boolean);
+  const url = new URL(req.url);
+  const parts = url.pathname.split('/').filter(Boolean);
   const routeId = decodeURIComponent(parts[parts.indexOf('routes') + 1] ?? '');
-  return getRoster(auth, routeId);
+  return getRoster(auth, routeId, url.searchParams.get('date'));
 });

@@ -36,21 +36,20 @@ import type {
   RouteAnalysis,
   RouteClassification,
 } from './types';
+import { bestStopMatch, normalizeStopName, type MatchStop } from './match';
+import { findMerges, type MergeRouteInput } from './merge';
+
+// Re-export so existing importers (allocate.ts, apply.ts) keep their import path.
+export { normalizeStopName };
 
 export const DEFAULT_OPTIONS: AnalysisOptions = {
   underUtilizedMaxPercent: 50,
   defaultCapacity: 60,
   defaultDailyBusCost: 2500,
+  timeWindowMin: 15,
+  proximityKm: 1.5,
+  allowUnderUtilizedTargets: false,
 };
-
-/** Lowercase, strip punctuation, collapse whitespace — for stop-name equality. */
-export function normalizeStopName(name: string | null | undefined): string {
-  return (name ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /** vehicle capacity → route total_capacity → default. */
 export function resolveCapacity(route: RawRoute, opts: AnalysisOptions): number {
@@ -102,18 +101,15 @@ export function analyzeOptimization(
     else bookingsByRoute.set(b.route_id, [b]);
   }
 
-  // Per-route map of normalized stop-name → stop id. Used both to test whether a
-  // target route serves a stop AND to know which stop the booking moves to.
-  const stopMapByRoute = new Map<string, Map<string, string>>();
+  // Per-route stop lists + an id→stop index for match.ts (name + time + geo).
+  const stopById = new Map<string, MatchStop>();
+  const stopsByRoute = new Map<string, MatchStop[]>();
   for (const s of stops) {
-    const key = normalizeStopName(s.stop_name);
-    if (!key) continue;
-    let m = stopMapByRoute.get(s.route_id);
-    if (!m) {
-      m = new Map();
-      stopMapByRoute.set(s.route_id, m);
-    }
-    if (!m.has(key)) m.set(key, s.id); // first stop with this name wins
+    const ms: MatchStop = { id: s.id, name: s.stop_name, stopTime: s.stop_time, lat: s.lat, long: s.long };
+    stopById.set(s.id, ms);
+    const list = stopsByRoute.get(s.route_id);
+    if (list) list.push(ms);
+    else stopsByRoute.set(s.route_id, [ms]);
   }
 
   // Per-route capacity + occupancy + classification.
@@ -153,8 +149,13 @@ export function analyzeOptimization(
     );
   }
 
-  // Candidate targets: HEALTHY routes only (see header note).
-  const healthyTargets = activeRoutes.filter((r) => classByRoute.get(r.id) === 'healthy');
+  // Candidate targets: HEALTHY routes, optionally also under-utilized ones with
+  // spare (off by default — route-to-route merging is handled by merge.ts).
+  const targetRoutes = activeRoutes.filter((r) => {
+    const c = classByRoute.get(r.id);
+    if (c === 'healthy') return true;
+    return options.allowUnderUtilizedTargets && c === 'under_utilized';
+  });
 
   // Sources: empty or under-utilized, processed smallest-first so the easiest
   // buses to empty claim target seats before the harder ones.
@@ -174,24 +175,29 @@ export function analyzeOptimization(
     let relocatable = 0;
 
     for (const p of passengers) {
-      const stopKey = normalizeStopName(p.stop_name);
       const name = p.learner_name?.trim() || 'Unknown learner';
+      const sourceStop = p.stop_id ? stopById.get(p.stop_id) ?? null : null;
 
-      // Best healthy target that serves this stop and still has a free seat.
+      // Best target that serves a name/time/geo-compatible stop with a free seat.
       let best: RawRoute | null = null;
-      let bestSpare = 0;
       let bestStopId: string | null = null;
-      if (stopKey) {
-        for (const target of healthyTargets) {
+      let bestScore = -Infinity;
+      let bestSpare = 0;
+      if (sourceStop) {
+        for (const target of targetRoutes) {
           if (target.id === source.id) continue;
           const spare = spareByRoute.get(target.id) ?? 0;
           if (spare <= 0) continue;
-          const targetStopId = stopMapByRoute.get(target.id)?.get(stopKey);
-          if (!targetStopId) continue;
-          if (spare > bestSpare) {
+          const match = bestStopMatch(sourceStop, stopsByRoute.get(target.id) ?? [], {
+            timeWindowMin: options.timeWindowMin,
+            proximityKm: options.proximityKm,
+          });
+          if (!match) continue;
+          if (match.score > bestScore || (match.score === bestScore && spare > bestSpare)) {
             best = target;
+            bestStopId = match.stopId;
+            bestScore = match.score;
             bestSpare = spare;
-            bestStopId = targetStopId;
           }
         }
       }
@@ -226,8 +232,8 @@ export function analyzeOptimization(
           targetRouteNumber: null,
           toStopId: null,
           matchedStop: null,
-          reason: stopKey
-            ? 'No healthy route serves this boarding stop with a free seat'
+          reason: sourceStop
+            ? 'No route serves this boarding stop at a compatible time with a free seat'
             : 'Booking has no boarding stop recorded',
         });
       }
@@ -272,6 +278,30 @@ export function analyzeOptimization(
   const relocatablePassengers = suggestions.reduce((sum, s) => sum + s.relocatablePassengers, 0);
   const estimatedSavings = suggestions.reduce((sum, s) => sum + s.estimatedSavings, 0);
 
+  // Whole-route merges ("combine the buses"): fold an under-utilized route
+  // entirely into a survivor that can hold everyone and serves all their stops.
+  const mergeInputs: MergeRouteInput[] = activeRoutes.map((r) => ({
+    routeId: r.id,
+    routeName: displayName(r),
+    routeNumber: r.route_number,
+    capacity: capacityByRoute.get(r.id) ?? options.defaultCapacity,
+    occupancy: countByRoute.get(r.id) ?? 0,
+    classification: classByRoute.get(r.id) ?? 'healthy',
+    dailyCost: estimatedDailyBusCost(r, options),
+    stops: stopsByRoute.get(r.id) ?? [],
+    passengers: (bookingsByRoute.get(r.id) ?? []).map((b) => ({
+      learnerId: b.learner_id,
+      learnerName: b.learner_name?.trim() || 'Unknown learner',
+      learnerRoll: b.learner_roll,
+      stop: b.stop_id ? stopById.get(b.stop_id) ?? null : null,
+    })),
+  }));
+  const merges = findMerges(mergeInputs, {
+    timeWindowMin: options.timeWindowMin,
+    proximityKm: options.proximityKm,
+    minOverlapStops: 1,
+  });
+
   // Most actionable first: cancellable, then most passengers movable.
   suggestions.sort((a, b) => {
     if (a.canCancelBus !== b.canCancelBus) return a.canCancelBus ? -1 : 1;
@@ -295,8 +325,12 @@ export function analyzeOptimization(
       partialTransfers,
       relocatablePassengers,
       estimatedSavings,
+      mergeableBuses: merges.length,
     },
     routes: routeAnalysis,
     suggestions,
+    merges,
+    // Right-sizing needs the vehicle fleet (a DB concern) — data.ts fills this in.
+    rightsize: [],
   };
 }
