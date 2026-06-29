@@ -43,7 +43,7 @@ export default function StudentNotificationsPage() {
               <CardContent className="py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    {n.title && <p className="font-medium">{n.title}</p>}
+                    {n.title && <p className="font-medium break-words">{n.title}</p>}
                     {n.body && (
                       <p className="text-sm text-muted-foreground break-words">{n.body}</p>
                     )}
