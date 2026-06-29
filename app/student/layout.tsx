@@ -58,7 +58,7 @@ function ProfileMenu() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden dark:border-gray-700 dark:bg-gray-900">
+          <div className="absolute right-0 top-12 z-50 w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden dark:border-gray-700 dark:bg-gray-900">
             <div className="flex items-center gap-3 p-4 border-b border-gray-100 dark:border-gray-800">
               <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-medium">
                 {getInitials(displayName)}

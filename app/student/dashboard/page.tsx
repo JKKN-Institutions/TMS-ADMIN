@@ -34,7 +34,7 @@ function StatCard({
     <div className="flex items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="text-sm text-gray-500 dark:text-gray-400">{label}</p>
-        <div className="mt-1 flex items-center gap-2">
+        <div className="mt-1 flex min-w-0 items-center gap-2">
           <p className="text-xl font-bold text-gray-900 dark:text-white truncate">{value}</p>
           {badge}
         </div>
@@ -202,7 +202,7 @@ export default function StudentDashboardPage() {
             >
               <div className="flex items-center space-x-4">
                 <div
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300 ${a.color}`}
+                  className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300 ${a.color}`}
                 >
                   <a.icon className="w-6 h-6 text-white" />
                 </div>

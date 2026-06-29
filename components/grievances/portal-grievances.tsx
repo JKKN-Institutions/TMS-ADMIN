@@ -246,7 +246,7 @@ export function PortalGrievances({ apiBase }: { apiBase: string }) {
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">Grievances</h1>
           <p className="text-sm text-muted-foreground">Raise a transport issue and track its progress.</p>
         </div>

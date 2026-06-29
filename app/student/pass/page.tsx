@@ -63,8 +63,8 @@ export default function StudentPassPage() {
       <h1 className="text-center text-xl font-semibold">Boarding Pass</h1>
       <Card>
         <CardContent className="flex flex-col items-center gap-3 py-6">
-          <div className="bg-white p-3 rounded-lg">
-            <QRCodeSVG value={p.token!} size={200} />
+          <div className="w-full max-w-[224px] rounded-lg bg-white p-3">
+            <QRCodeSVG value={p.token!} size={200} className="h-auto w-full" />
           </div>
           <div className="text-center">
             <p className="font-medium">{p.name}</p>

@@ -786,12 +786,29 @@ html {
 
   .main-content {
     margin-left: 0;
+    /* Defensive: as a (potential) flex/grid item the content column must be
+       allowed to shrink below its intrinsic content width, otherwise a single
+       wide child pushes the whole shell past the viewport and gets clipped. */
+    min-width: 0;
   }
 
   /* Clear the fixed bottom navbar (~4rem + safe area) so page content and any
      sticky action bars aren't hidden behind it. */
   .content-body {
     padding-bottom: 6rem;
+    /* Keep page content boxed inside the viewport so a stray wide child can
+       never bleed past the right edge on small screens. */
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* Phones: trade the 24px desktop gutter for a 16px one so cards, timelines and
+   tables have ~16px more room before they start to overflow on a 320px screen. */
+@media (max-width: 640px) {
+  .content-body {
+    padding-left: 1rem;
+    padding-right: 1rem;
   }
 }
 

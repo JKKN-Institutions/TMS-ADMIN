@@ -299,7 +299,7 @@ export default function StudentRoutesPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ---- stops timeline: spans 2/3 on desktop ---- */}
         <section className="order-2 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:order-1 lg:col-span-2">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-6 py-4 dark:border-gray-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-6">
           <div className="flex items-center gap-2">
             <Navigation className="h-5 w-5 text-green-600 dark:text-green-400" />
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">Route Stops</h2>
@@ -320,7 +320,7 @@ export default function StudentRoutesPage() {
           </div>
         </div>
 
-        <div className="px-6 py-5">
+        <div className="px-4 py-5 sm:px-6">
           {stops.length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">No stops listed for this route.</p>
           ) : (
@@ -330,7 +330,7 @@ export default function StudentRoutesPage() {
                 const isFirst = i === 0;
                 const isLast = i === stops.length - 1;
                 return (
-                  <li key={s.id} className="relative flex gap-4 pb-7 last:pb-0">
+                  <li key={s.id} className="relative flex gap-3 pb-7 last:pb-0 sm:gap-4">
                     {/* connector line */}
                     {!isLast && (
                       <span className="absolute left-4 top-8 bottom-0 w-0.5 -translate-x-1/2 bg-gray-200 dark:bg-gray-700" />
@@ -355,7 +355,7 @@ export default function StudentRoutesPage() {
                         long stop name can never get squeezed/clipped on a narrow phone. */}
                     <div
                       className={cn(
-                        '-mt-0.5 flex flex-1 flex-col gap-1.5 rounded-lg px-3 py-2 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3',
+                        '-mt-0.5 flex min-w-0 flex-1 flex-col gap-1.5 rounded-lg px-2 py-2 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-3',
                         isBoarding
                           ? 'bg-green-50 dark:bg-green-950/30'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
@@ -381,7 +381,7 @@ export default function StudentRoutesPage() {
                           {s.isMajor && !isFirst && !isLast && !isBoarding && <Tag tone="gray">Major</Tag>}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-4 text-sm tabular-nums sm:flex-col sm:items-end sm:gap-0.5 sm:text-right">
+                      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-0.5 text-sm tabular-nums sm:flex-col sm:flex-nowrap sm:items-end sm:gap-0.5 sm:text-right">
                         <div className="flex items-baseline gap-1 text-gray-700 dark:text-gray-300">
                           <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
                             Morning

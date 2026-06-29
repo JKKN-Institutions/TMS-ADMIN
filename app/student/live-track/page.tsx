@@ -144,20 +144,20 @@ export default function StudentLiveTrackPage() {
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-6 py-4 dark:border-gray-800">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-5 w-5 text-green-600 dark:text-green-400" />
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">{route.label}</h2>
+        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <MapPin className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" />
+            <h2 className="truncate text-base font-semibold text-gray-900 dark:text-white">{route.label}</h2>
           </div>
           {v && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
               <Bus className="h-3.5 w-3.5" />
               {v.registrationNumber ?? '—'}
             </span>
           )}
         </div>
 
-        <div className="px-6 py-5">
+        <div className="px-4 py-5 sm:px-6">
           {v && v.hasFix && v.status !== 'offline' ? (
             <div className="space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1 text-sm font-medium text-green-700 ring-1 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50">

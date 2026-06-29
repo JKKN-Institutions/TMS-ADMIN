@@ -67,22 +67,22 @@ export default function StudentFeesPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-600">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-600">
             <Receipt className="h-5 w-5 text-white" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Transport Fees</h1>
             {data.transport_year_name && (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{data.transport_year_name}</p>
+              <p className="truncate text-sm text-gray-500 dark:text-gray-400">{data.transport_year_name}</p>
             )}
           </div>
         </div>
         <button
           type="button"
           onClick={() => refetch()}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
         >
           {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
