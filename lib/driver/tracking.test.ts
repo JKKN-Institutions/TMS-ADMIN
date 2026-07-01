@@ -45,7 +45,12 @@ describe('normalizeCapturedAt — the monotonic-guard timestamp', () => {
     expect(normalizeCapturedAt('not-a-date', fallback, nowMs)).toBe(fallback);
   });
 
-  it('falls back on an absurd far-future time (bad device clock cannot win the guard forever)', () => {
+  it('clamps a near-future capture time to server-now (fast device clock cannot poison the guard)', () => {
+    // 30s ahead of server-now must NOT pass through — it clamps to the fallback (server-now).
+    expect(normalizeCapturedAt('2026-07-01T04:04:30.000Z', fallback, nowMs)).toBe(fallback);
+  });
+
+  it('clamps an absurd far-future time to server-now', () => {
     expect(normalizeCapturedAt('2027-01-01T00:00:00.000Z', fallback, nowMs)).toBe(fallback);
   });
 });

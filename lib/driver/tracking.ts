@@ -16,9 +16,6 @@
 /** How long a fix may go un-refreshed before the client stops broadcasting it. */
 export const STALE_FIX_MS = 30_000;
 
-/** Reject a client capture time this far in the future (bad device clock). */
-const FUTURE_SKEW_MS = 60_000;
-
 /**
  * True when a fix captured at `fixTsMs` is older than `thresholdMs` relative to
  * `nowMs` — i.e. `watchPosition` has stopped delivering and the position is no
@@ -33,14 +30,16 @@ export function isFixStale(fixTsMs: number, nowMs: number, thresholdMs = STALE_F
  * guard. Returns the fix's own ISO time when it's a sane, parseable value;
  * otherwise `fallbackIso` (the server receive time) so old client bundles that
  * don't send one keep working. An OLDER time is deliberately preserved — that's
- * exactly how a frozen re-send gets rejected downstream — but an absurd
- * far-future time is dropped so a skewed clock can't win the guard forever.
+ * exactly how a frozen re-send gets rejected downstream — but any future device
+ * time is clamped to now so a skewed clock can't poison the ordering baseline.
  */
 export function normalizeCapturedAt(value: unknown, fallbackIso: string, nowMs: number): string {
   if (typeof value !== 'string') return fallbackIso;
   const t = Date.parse(value);
   if (Number.isNaN(t)) return fallbackIso;
-  if (t > nowMs + FUTURE_SKEW_MS) return fallbackIso;
+  // Clamp any future device time to server-now: a phone clock running fast must not
+  // stamp the ordering baseline into the future and lock out subsequent real fixes.
+  if (t >= nowMs) return fallbackIso;
   return new Date(t).toISOString();
 }
 
