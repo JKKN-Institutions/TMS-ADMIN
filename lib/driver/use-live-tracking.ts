@@ -8,6 +8,7 @@ import {
   type TrackingBanner,
   type TrackingStatus,
 } from './tracking-controller';
+import { isFixStale } from './tracking';
 
 /** Post the latest fix this often (send-latest, not per-callback — saves battery + data). */
 const SEND_INTERVAL_MS = 6000;
@@ -73,6 +74,7 @@ export function useLiveTracking(routeId: string | null) {
     const pos = latestFixRef.current;
     const rid = routeIdRef.current;
     if (!pos || !rid) return;
+    if (isFixStale(pos.timestamp, Date.now())) return; // watchPosition frozen — don't re-send a stale fix
     const signal = abortRef.current?.signal;
     const body = JSON.stringify({
       routeId: rid,
@@ -116,6 +118,11 @@ export function useLiveTracking(routeId: string | null) {
   // status/banner, so callers can tear down while KEEPING a terminal banner (e.g.
   // permission-denied) visible to the driver.
   const teardown = useCallback(async (notifyServer: boolean) => {
+    // Claim the started/starting latches synchronously before any await, so two concurrent
+    // teardown triggers (permission-denied effect + unmount) can't both fire the DELETE.
+    const started = startedRef.current;
+    startingRef.current = false;
+    startedRef.current = false;
     if (watchIdRef.current !== null && typeof navigator !== 'undefined') {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
@@ -135,9 +142,6 @@ export function useLiveTracking(routeId: string | null) {
       wakeLockRef.current = null;
     }
     latestFixRef.current = null;
-    const started = startedRef.current;
-    startingRef.current = false;
-    startedRef.current = false;
     if (notifyServer && started) {
       try {
         await fetch('/api/driver/location', { method: 'DELETE', credentials: 'same-origin', keepalive: true });
