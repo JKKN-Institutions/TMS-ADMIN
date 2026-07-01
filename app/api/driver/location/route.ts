@@ -137,16 +137,18 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
     const capturedIso = normalizeCapturedAt(body?.capturedAt, nowIso, nowMs);
 
     // Monotonic guard: only advance the vehicle's live position when THIS fix was
-    // captured later than the one already stored. A frozen/duplicate session
-    // re-sending an old fix (watchPosition stopped, send-interval alive) is rejected
-    // here, so it can't drag every reader's marker back to a stale point under
-    // tms_vehicle last-write-wins.
+    // captured later than the one already stored. Ordering keys off the DEVICE
+    // capture time (last_capture_at); a frozen/duplicate session re-sending an old
+    // fix (watchPosition stopped, send-interval alive) is rejected here, so it can't
+    // drag every reader's marker back to a stale point under tms_vehicle
+    // last-write-wins. last_gps_update is stamped separately with server-receipt
+    // time so freshness reads aren't at the mercy of a skewed phone clock.
     const { data: veh } = await svc
       .from('tms_vehicle')
-      .select('last_gps_update')
+      .select('last_capture_at')
       .eq('id', route.vehicleId)
       .maybeSingle();
-    const advanced = isNewerCapture((veh?.last_gps_update as string | null) ?? null, capturedIso);
+    const advanced = isNewerCapture((veh?.last_capture_at as string | null) ?? null, capturedIso);
 
     if (advanced) {
       await svc
@@ -157,7 +159,8 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
           gps_speed: speed,
           gps_heading: heading,
           gps_accuracy: accuracy,
-          last_gps_update: capturedIso,
+          last_gps_update: nowIso,        // server-receipt time → drives reader freshness
+          last_capture_at: capturedIso,   // device capture time → ordering baseline
           live_tracking_enabled: true,
           gps_provider: 'driver_app',
         })
