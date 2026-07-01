@@ -38,6 +38,17 @@ export function useLiveTracking(routeId: string | null) {
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLock>(null);
+  // Cancels an in-flight POST (and its retry/backoff) the instant the session stops,
+  // so a straggling ping can't resolve after DELETE and re-flip the server to "sharing".
+  const abortRef = useRef<AbortController | null>(null);
+  // Synchronous re-entrancy latch: claimed at the top of start() before any await, so a
+  // double-tap during the async permission check can't spin up a second watch/interval set.
+  const startingRef = useRef(false);
+  // True only once the watch is actually running → gates the DELETE, so a pre-check
+  // denial or a mere visit-and-leave of the page can't fire a false off-duty write + audit.
+  const startedRef = useRef(false);
+  // Prevents overlapping sendPing invocations when a slow retry outlasts the 6s tick.
+  const sendingRef = useRef(false);
 
   useEffect(() => {
     routeIdRef.current = routeId;
@@ -58,9 +69,11 @@ export function useLiveTracking(routeId: string | null) {
   }, []);
 
   const sendPing = useCallback(async () => {
+    if (sendingRef.current) return;
     const pos = latestFixRef.current;
     const rid = routeIdRef.current;
     if (!pos || !rid) return;
+    const signal = abortRef.current?.signal;
     const body = JSON.stringify({
       routeId: rid,
       latitude: pos.coords.latitude,
@@ -70,26 +83,39 @@ export function useLiveTracking(routeId: string | null) {
       heading: pos.coords.heading ?? null,
       capturedAt: new Date(pos.timestamp).toISOString(),
     });
-    for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt++) {
-      try {
-        const res = await fetch('/api/driver/location', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body,
-        });
-        if (res.ok) {
-          setLastSentAt(Date.now());
-          return;
+    sendingRef.current = true;
+    try {
+      for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt++) {
+        if (signal?.aborted) return;
+        try {
+          const res = await fetch('/api/driver/location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body,
+            signal,
+          });
+          if (signal?.aborted) return;
+          if (res.ok) {
+            setLastSentAt(Date.now());
+            return;
+          }
+        } catch {
+          if (signal?.aborted) return;
+          /* network hiccup — retry */
         }
-      } catch {
-        /* network hiccup — retry */
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
       }
-      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    } finally {
+      sendingRef.current = false;
     }
   }, []);
 
-  const stop = useCallback(async (notifyServer = true) => {
+  // Release all capture resources (watch, timers, wake lock, in-flight POST) and, when a
+  // session actually ran, tell the server we stopped. Does NOT touch the controller
+  // status/banner, so callers can tear down while KEEPING a terminal banner (e.g.
+  // permission-denied) visible to the driver.
+  const teardown = useCallback(async (notifyServer: boolean) => {
     if (watchIdRef.current !== null && typeof navigator !== 'undefined') {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
@@ -98,6 +124,8 @@ export function useLiveTracking(routeId: string | null) {
     if (tickTimerRef.current) clearInterval(tickTimerRef.current);
     sendTimerRef.current = null;
     tickTimerRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (wakeLockRef.current) {
       try {
         await wakeLockRef.current.release();
@@ -107,10 +135,10 @@ export function useLiveTracking(routeId: string | null) {
       wakeLockRef.current = null;
     }
     latestFixRef.current = null;
-    setFix(null);
-    setLastSentAt(null);
-    dispatch({ type: 'stop' });
-    if (notifyServer) {
+    const started = startedRef.current;
+    startingRef.current = false;
+    startedRef.current = false;
+    if (notifyServer && started) {
       try {
         await fetch('/api/driver/location', { method: 'DELETE', credentials: 'same-origin', keepalive: true });
       } catch {
@@ -119,12 +147,25 @@ export function useLiveTracking(routeId: string | null) {
     }
   }, []);
 
+  const stop = useCallback(
+    async (notifyServer = true) => {
+      await teardown(notifyServer);
+      setFix(null);
+      setLastSentAt(null);
+      dispatch({ type: 'stop' });
+    },
+    [teardown]
+  );
+
   const start = useCallback(async () => {
+    if (startingRef.current || watchIdRef.current !== null) return; // ignore re-entrant taps
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      dispatch({ type: 'start' });
       dispatch({ type: 'geoError', code: 2 });
       return;
     }
     if (!routeIdRef.current) return;
+    startingRef.current = true;
     dispatch({ type: 'start' });
 
     // Pre-check permission so a hard "denied" is surfaced immediately.
@@ -133,13 +174,14 @@ export function useLiveTracking(routeId: string | null) {
         permissions?: { query: (d: { name: 'geolocation' }) => Promise<{ state: string }> };
       }).permissions?.query({ name: 'geolocation' });
       if (perm?.state === 'denied') {
-        dispatch({ type: 'geoError', code: 1 });
+        dispatch({ type: 'geoError', code: 1 }); // → permission_denied effect tears down (resets latches)
         return;
       }
     } catch {
       /* Permissions API unsupported — fall through to the live prompt */
     }
 
+    abortRef.current = new AbortController();
     await acquireWakeLock();
 
     const onPos = (pos: GeolocationPosition) => {
@@ -166,6 +208,7 @@ export function useLiveTracking(routeId: string | null) {
     watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
     sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
     tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
+    startedRef.current = true;
   }, [acquireWakeLock, sendPing]);
 
   // Re-acquire the wake lock and tell the controller when the tab returns/hides.
@@ -180,10 +223,16 @@ export function useLiveTracking(routeId: string | null) {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [state.status, acquireWakeLock]);
 
-  // Stop + notify server if the page unmounts while sharing.
+  // Permission denied is terminal: release resources and clear server state, but leave the
+  // status/banner as permission_denied so the driver still sees how to re-enable location.
+  useEffect(() => {
+    if (state.status === 'permission_denied') void teardown(true);
+  }, [state.status, teardown]);
+
+  // Stop + notify the server if the page unmounts while a session is actually running.
   useEffect(() => {
     return () => {
-      void stop(true);
+      if (startedRef.current) void stop(true);
     };
   }, [stop]);
 
