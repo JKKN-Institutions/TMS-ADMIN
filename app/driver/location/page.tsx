@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { geoErrorOutcome } from '@/lib/driver/geo';
+import { isFixStale } from '@/lib/driver/tracking';
 import { cn } from '@/lib/utils';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
@@ -101,6 +102,10 @@ export default function DriverLocationPage() {
     const pos = latestFixRef.current;
     const routeId = selectedRouteRef.current;
     if (!pos || !routeId) return;
+    // Don't broadcast a frozen fix: if watchPosition has stopped refreshing
+    // (backgrounded, GPS lost) the position is stale, and re-sending it would drag
+    // every reader's marker back to this point. Go quiet until a fresh fix arrives.
+    if (isFixStale(pos.timestamp, Date.now())) return;
     try {
       const res = await fetch('/api/driver/location', {
         method: 'POST',
@@ -113,6 +118,9 @@ export default function DriverLocationPage() {
           accuracy: pos.coords.accuracy ?? null,
           speed: pos.coords.speed ?? null,
           heading: pos.coords.heading ?? null,
+          // Capture time of THIS fix, so the server can reject a stale/duplicate
+          // re-send under its monotonic guard (never regress the live position).
+          capturedAt: new Date(pos.timestamp).toISOString(),
         }),
       });
       if (res.ok) setLastSentAt(Date.now());

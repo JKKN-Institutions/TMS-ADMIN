@@ -5,6 +5,7 @@ import { getDriverForUser } from '@/lib/driver/identity';
 import { getDriverRoutes } from '@/lib/driver/routes';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
+import { normalizeCapturedAt, isNewerCapture } from '@/lib/driver/tracking';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -85,6 +86,7 @@ interface PingBody {
   speed?: unknown;
   heading?: unknown;
   accuracy?: unknown;
+  capturedAt?: unknown;
 }
 
 function num(v: unknown): number | null {
@@ -128,32 +130,52 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'No vehicle assigned to this route' }, { status: 422 });
     }
 
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    // Capture time of this fix (client-supplied, validated). Drives the monotonic
+    // guard below; falls back to server-now for old client bundles.
+    const capturedIso = normalizeCapturedAt(body?.capturedAt, nowIso, nowMs);
 
-    await svc
+    // Monotonic guard: only advance the vehicle's live position when THIS fix was
+    // captured later than the one already stored. A frozen/duplicate session
+    // re-sending an old fix (watchPosition stopped, send-interval alive) is rejected
+    // here, so it can't drag every reader's marker back to a stale point under
+    // tms_vehicle last-write-wins.
+    const { data: veh } = await svc
       .from('tms_vehicle')
-      .update({
-        current_latitude: latitude,
-        current_longitude: longitude,
-        gps_speed: speed,
-        gps_heading: heading,
-        gps_accuracy: accuracy,
-        last_gps_update: nowIso,
-        live_tracking_enabled: true,
-        gps_provider: 'driver_app',
-      })
-      .eq('id', route.vehicleId);
+      .select('last_gps_update')
+      .eq('id', route.vehicleId)
+      .maybeSingle();
+    const advanced = isNewerCapture((veh?.last_gps_update as string | null) ?? null, capturedIso);
 
-    await svc.from('gps_location_history').insert({
-      vehicle_id: route.vehicleId,
-      latitude,
-      longitude,
-      speed,
-      heading,
-      accuracy,
-      source: 'driver_app',
-      timestamp: nowIso,
-    });
+    if (advanced) {
+      await svc
+        .from('tms_vehicle')
+        .update({
+          current_latitude: latitude,
+          current_longitude: longitude,
+          gps_speed: speed,
+          gps_heading: heading,
+          gps_accuracy: accuracy,
+          last_gps_update: capturedIso,
+          live_tracking_enabled: true,
+          gps_provider: 'driver_app',
+        })
+        .eq('id', route.vehicleId);
+
+      // Log only fixes that actually moved the position forward — keeps the ping
+      // history free of the frozen-re-send duplicates that were polluting it.
+      await svc.from('gps_location_history').insert({
+        vehicle_id: route.vehicleId,
+        latitude,
+        longitude,
+        speed,
+        heading,
+        accuracy,
+        source: 'driver_app',
+        timestamp: capturedIso,
+      });
+    }
 
     await svc
       .from('tms_driver')
@@ -181,7 +203,7 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
       });
     }
 
-    return NextResponse.json({ success: true, data: { accepted: true } });
+    return NextResponse.json({ success: true, data: { accepted: true, advanced } });
   } catch (e) {
     console.error('driver/location POST error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
