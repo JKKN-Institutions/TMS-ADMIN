@@ -135,6 +135,7 @@ export async function GET() {
       const lng = veh?.current_longitude ?? null;
       const fresh = gpsFreshness(veh?.last_gps_update ?? null);
       const hasFix = lat != null && lng != null;
+      const isLive = !!d.location_sharing_enabled && fresh.status === 'online';
 
       return {
         id: d.id,
@@ -145,7 +146,9 @@ export async function GET() {
         location_timestamp: veh?.last_gps_update ?? null,
         last_location_update: veh?.last_gps_update ?? null,
         location_sharing_enabled: !!d.location_sharing_enabled,
-        location_tracking_status: d.location_sharing_enabled ? 'active' : 'inactive',
+        is_live: isLive,
+        // Honest tri-state: sharing + fresh = active; sharing but stale = paused; off = inactive.
+        location_tracking_status: !d.location_sharing_enabled ? 'inactive' : isLive ? 'active' : 'paused',
         route_id: route.id,
         route_number: route.route_number,
         route_name: route.route_name,
@@ -158,12 +161,17 @@ export async function GET() {
       };
     });
 
+    const timestamps = result
+      .map((d) => d.last_location_update)
+      .filter((t): t is string => !!t)
+      .sort();
     return NextResponse.json({
       success: true,
       drivers: result,
       total: result.length,
-      active_tracking: result.filter((d) => d.location_sharing_enabled).length,
+      active_tracking: result.filter((d) => d.is_live).length,
       online_drivers: result.filter((d) => d.gps_status === 'online').length,
+      freshest_update: timestamps.length ? timestamps[timestamps.length - 1] : null,
       last_updated: new Date().toISOString(),
     });
   } catch (error) {

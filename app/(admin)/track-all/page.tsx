@@ -27,6 +27,7 @@ interface DriverLocation {
   location_timestamp: string;
   last_location_update: string;
   location_sharing_enabled: boolean;
+  is_live?: boolean;
   location_tracking_status: string;
   route_id: string | null;
   route_number: string | null;
@@ -45,6 +46,7 @@ export default function TrackAllPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [filterEnabled, setFilterEnabled] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [freshestUpdate, setFreshestUpdate] = useState<string | null>(null);
 
   const fetchDriverLocations = async () => {
     try {
@@ -59,6 +61,7 @@ export default function TrackAllPage() {
       
       if (data.success) {
         setDriverLocations(data.drivers);
+        setFreshestUpdate(data.freshest_update ?? null);
         setLastUpdate(new Date());
       } else {
         throw new Error(data.error || 'Failed to fetch driver locations');
@@ -93,6 +96,7 @@ export default function TrackAllPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'text-green-600 bg-green-50 border-green-200';
+      case 'paused': return 'text-amber-600 bg-amber-50 border-amber-200';
       case 'inactive': return 'text-red-600 bg-red-50 border-red-200';
       default: return 'text-gray-600 bg-gray-50 border-gray-200';
     }
@@ -101,6 +105,7 @@ export default function TrackAllPage() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'active': return <Activity className="w-4 h-4" />;
+      case 'paused': return <Clock className="w-4 h-4" />;
       case 'inactive': return <Clock className="w-4 h-4" />;
       default: return <Clock className="w-4 h-4" />;
     }
@@ -211,7 +216,7 @@ export default function TrackAllPage() {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Active Tracking</p>
               <p className="text-2xl font-bold text-gray-900">
-                {driverLocations.filter(d => d.location_sharing_enabled).length}
+                {driverLocations.filter(d => d.is_live).length}
               </p>
             </div>
           </div>
@@ -239,7 +244,7 @@ export default function TrackAllPage() {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Last Update</p>
               <p className="text-sm font-bold text-gray-900">
-                {lastUpdate ? formatTimeSince(lastUpdate.toISOString()) : 'Never'}
+                {freshestUpdate ? formatTimeSince(freshestUpdate) : 'No live fixes'}
               </p>
             </div>
           </div>
