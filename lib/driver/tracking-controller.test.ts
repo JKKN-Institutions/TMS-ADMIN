@@ -71,6 +71,25 @@ describe('reduceTracking — OS location OFF detection', () => {
     ]);
     expect(s.status).toBe('live');
   });
+
+  it('fewer than OS_OFF_STREAK POSITION_UNAVAILABLE (no fix yet) stays starting, not os_location_off', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'geoError', code: GEO_POSITION_UNAVAILABLE },
+      { type: 'geoError', code: GEO_POSITION_UNAVAILABLE },
+    ]);
+    expect(s.unavailableStreak).toBe(2);
+    expect(s.status).toBe('starting');
+  });
+
+  it('a terminal permission_denied absorbs a stray later fix (stays terminal)', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'geoError', code: GEO_PERMISSION_DENIED },
+      { type: 'fix', atMs: 5000 },
+    ]);
+    expect(s.status).toBe('permission_denied');
+  });
 });
 
 describe('reduceTracking — permission denied is terminal', () => {

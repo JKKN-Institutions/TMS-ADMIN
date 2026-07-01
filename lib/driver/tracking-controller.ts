@@ -83,13 +83,18 @@ const pausedBanner = (reason: string): TrackingBanner => ({
 const isTerminal = (s: TrackingStatus) => s === 'permission_denied' || s === 'stopped' || s === 'idle';
 
 export function reduceTracking(state: TrackingState, event: TrackingEvent): TrackingState {
+  // start/stop are always honoured, even from a terminal state.
+  if (event.type === 'start') {
+    return { status: 'starting', lastFixAt: null, everFixed: false, unavailableStreak: 0, banner: ACQUIRING };
+  }
+  if (event.type === 'stop') {
+    return { ...initialTrackingState, status: 'stopped' };
+  }
+  // Terminal states (permission_denied / stopped / idle) absorb every other event —
+  // no stray fix/geoError/tick/visibility can resurrect a denied or ended session.
+  if (isTerminal(state.status)) return state;
+
   switch (event.type) {
-    case 'start':
-      return { status: 'starting', lastFixAt: null, everFixed: false, unavailableStreak: 0, banner: ACQUIRING };
-
-    case 'stop':
-      return { ...initialTrackingState, status: 'stopped' };
-
     case 'fix':
       return { status: 'live', lastFixAt: event.atMs, everFixed: true, unavailableStreak: 0, banner: null };
 
@@ -112,7 +117,6 @@ export function reduceTracking(state: TrackingState, event: TrackingEvent): Trac
     }
 
     case 'visibility':
-      if (isTerminal(state.status)) return state;
       if (!event.visible) {
         return { ...state, status: 'paused', banner: pausedBanner('The screen went to the background.') };
       }
