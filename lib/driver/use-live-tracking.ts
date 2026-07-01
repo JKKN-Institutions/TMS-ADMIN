@@ -1,0 +1,199 @@
+'use client';
+
+import { useCallback, useReducer, useRef, useState, useEffect } from 'react';
+import {
+  reduceTracking,
+  initialTrackingState,
+  isSharing,
+  type TrackingBanner,
+  type TrackingStatus,
+} from './tracking-controller';
+
+/** Post the latest fix this often (send-latest, not per-callback — saves battery + data). */
+const SEND_INTERVAL_MS = 6000;
+/** Heartbeat cadence feeding the controller's stall watchdog. */
+const TICK_INTERVAL_MS = 5000;
+/** Basic retry: attempts per send before giving up until the next tick. */
+const SEND_ATTEMPTS = 3;
+
+type WakeLock =
+  | { release: () => Promise<void>; addEventListener?: (t: 'release', cb: () => void) => void }
+  | null;
+
+export interface DriverFix {
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+  speed: number | null;
+}
+
+export function useLiveTracking(routeId: string | null) {
+  const [state, dispatch] = useReducer(reduceTracking, initialTrackingState);
+  const [fix, setFix] = useState<DriverFix | null>(null);
+  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
+
+  const routeIdRef = useRef(routeId);
+  const latestFixRef = useRef<GeolocationPosition | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wakeLockRef = useRef<WakeLock>(null);
+
+  useEffect(() => {
+    routeIdRef.current = routeId;
+  }, [routeId]);
+
+  const acquireWakeLock = useCallback(async () => {
+    if (wakeLockRef.current || typeof navigator === 'undefined') return;
+    try {
+      const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLock> } };
+      const sentinel = (await nav.wakeLock?.request('screen')) ?? null;
+      wakeLockRef.current = sentinel;
+      sentinel?.addEventListener?.('release', () => {
+        wakeLockRef.current = null;
+      });
+    } catch {
+      /* unsupported/denied — capture still works while visible */
+    }
+  }, []);
+
+  const sendPing = useCallback(async () => {
+    const pos = latestFixRef.current;
+    const rid = routeIdRef.current;
+    if (!pos || !rid) return;
+    const body = JSON.stringify({
+      routeId: rid,
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+      accuracy: pos.coords.accuracy ?? null,
+      speed: pos.coords.speed ?? null,
+      heading: pos.coords.heading ?? null,
+      capturedAt: new Date(pos.timestamp).toISOString(),
+    });
+    for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetch('/api/driver/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body,
+        });
+        if (res.ok) {
+          setLastSentAt(Date.now());
+          return;
+        }
+      } catch {
+        /* network hiccup — retry */
+      }
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }, []);
+
+  const stop = useCallback(async (notifyServer = true) => {
+    if (watchIdRef.current !== null && typeof navigator !== 'undefined') {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    if (sendTimerRef.current) clearInterval(sendTimerRef.current);
+    if (tickTimerRef.current) clearInterval(tickTimerRef.current);
+    sendTimerRef.current = null;
+    tickTimerRef.current = null;
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+      } catch {
+        /* ignore */
+      }
+      wakeLockRef.current = null;
+    }
+    latestFixRef.current = null;
+    setFix(null);
+    setLastSentAt(null);
+    dispatch({ type: 'stop' });
+    if (notifyServer) {
+      try {
+        await fetch('/api/driver/location', { method: 'DELETE', credentials: 'same-origin', keepalive: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const start = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      dispatch({ type: 'geoError', code: 2 });
+      return;
+    }
+    if (!routeIdRef.current) return;
+    dispatch({ type: 'start' });
+
+    // Pre-check permission so a hard "denied" is surfaced immediately.
+    try {
+      const perm = await (navigator as Navigator & {
+        permissions?: { query: (d: { name: 'geolocation' }) => Promise<{ state: string }> };
+      }).permissions?.query({ name: 'geolocation' });
+      if (perm?.state === 'denied') {
+        dispatch({ type: 'geoError', code: 1 });
+        return;
+      }
+    } catch {
+      /* Permissions API unsupported — fall through to the live prompt */
+    }
+
+    await acquireWakeLock();
+
+    const onPos = (pos: GeolocationPosition) => {
+      latestFixRef.current = pos;
+      dispatch({ type: 'fix', atMs: Date.now() });
+      setFix({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy ?? null,
+        speed: pos.coords.speed ?? null,
+      });
+    };
+    const onErr = (err: GeolocationPositionError) => dispatch({ type: 'geoError', code: err.code });
+
+    const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 };
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        onPos(pos);
+        void sendPing();
+      },
+      onErr,
+      opts
+    );
+    watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
+    sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
+    tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
+  }, [acquireWakeLock, sendPing]);
+
+  // Re-acquire the wake lock and tell the controller when the tab returns/hides.
+  useEffect(() => {
+    if (!isSharing(state.status) || typeof document === 'undefined') return;
+    const onVisible = () => {
+      const visible = document.visibilityState === 'visible';
+      dispatch({ type: 'visibility', visible });
+      if (visible) void acquireWakeLock();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [state.status, acquireWakeLock]);
+
+  // Stop + notify server if the page unmounts while sharing.
+  useEffect(() => {
+    return () => {
+      void stop(true);
+    };
+  }, [stop]);
+
+  return {
+    status: state.status as TrackingStatus,
+    banner: state.banner as TrackingBanner | null,
+    onDuty: isSharing(state.status),
+    fix,
+    lastSentAt,
+    start,
+    stop,
+  };
+}
