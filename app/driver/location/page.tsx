@@ -7,6 +7,7 @@ import {
   MapPin, Navigation, AlertTriangle, Gauge, Clock, Bus, Radio, Crosshair,
 } from 'lucide-react';
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
+import { geoErrorOutcome } from '@/lib/driver/geo';
 import { cn } from '@/lib/utils';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
@@ -52,7 +53,9 @@ function formatUpdated(ts: string | null): string {
 const SEND_INTERVAL_MS = 12000;
 
 // Loose WakeLock typing (not in older TS DOM libs).
-type WakeLock = { release: () => Promise<void> } | null;
+type WakeLock =
+  | { release: () => Promise<void>; addEventListener?: (type: 'release', cb: () => void) => void }
+  | null;
 
 function LiveStat({ icon: Icon, label, value }: { icon: typeof Gauge; label: string; value: string }) {
   return (
@@ -148,6 +151,23 @@ export default function DriverLocationPage() {
     }
   }, []);
 
+  // Best-effort screen Wake Lock. The browser auto-releases it whenever the page is
+  // hidden (tab switch / screen lock), so we null the ref on release and re-acquire it
+  // on return — otherwise the screen is free to sleep again and freeze the broadcast.
+  const acquireWakeLock = useCallback(async () => {
+    if (wakeLockRef.current || typeof navigator === 'undefined') return;
+    try {
+      const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLock> } };
+      const sentinel = (await nav.wakeLock?.request('screen')) ?? null;
+      wakeLockRef.current = sentinel;
+      sentinel?.addEventListener?.('release', () => {
+        wakeLockRef.current = null;
+      });
+    } catch {
+      /* unsupported or denied — fine, capture still works while visible */
+    }
+  }, []);
+
   const startSharing = useCallback(async () => {
     setGeoError(null);
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
@@ -159,16 +179,11 @@ export default function DriverLocationPage() {
       return;
     }
 
-    // Best-effort screen wake lock (silently ignored where unsupported).
-    try {
-      const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLock> } };
-      wakeLockRef.current = (await nav.wakeLock?.request('screen')) ?? null;
-    } catch {
-      /* unsupported or denied — fine, capture still works while visible */
-    }
+    await acquireWakeLock();
 
     const onPos = (pos: GeolocationPosition) => {
       latestFixRef.current = pos;
+      setGeoError(null); // a fresh fix clears any transient "reacquiring GPS" warning
       setFix({
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
@@ -177,12 +192,15 @@ export default function DriverLocationPage() {
       });
     };
     const onErr = (err: GeolocationPositionError) => {
-      setGeoError(
-        err.code === err.PERMISSION_DENIED
-          ? 'Location permission denied. Enable it for this site in your browser settings, then try again.'
-          : 'Could not read your location. Make sure GPS/location is turned on.'
-      );
-      void stopSharing(false);
+      // Only PERMISSION_DENIED is terminal — nothing will ever arrive, so stop.
+      // Transient TIMEOUT / POSITION_UNAVAILABLE errors (routine on a moving bus:
+      // tunnels, buildings, GPS re-acquisition) must NOT tear down the session:
+      // the 12s interval keeps re-sending the last good fix and watchPosition
+      // recovers on its own. Killing the watch here was the bug that froze the
+      // admin map at the driver's start point while the DB still said "Active".
+      const outcome = geoErrorOutcome(err.code);
+      setGeoError(outcome.message);
+      if (outcome.stopSharing) void stopSharing(false);
     };
 
     const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 };
@@ -200,7 +218,7 @@ export default function DriverLocationPage() {
       void sendPing();
     }, SEND_INTERVAL_MS);
     setOnDuty(true);
-  }, [sendPing, stopSharing]);
+  }, [sendPing, stopSharing, acquireWakeLock]);
 
   // Stop + notify server if the page unmounts while on duty.
   useEffect(() => {
@@ -208,6 +226,18 @@ export default function DriverLocationPage() {
       void stopSharing(true);
     };
   }, [stopSharing]);
+
+  // Re-acquire the Wake Lock when the driver returns to the tab while on duty
+  // (the browser releases it on hide). Keeps the screen awake so the ~12s ping
+  // interval and watchPosition keep running instead of freezing at the last fix.
+  useEffect(() => {
+    if (!onDuty || typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void acquireWakeLock();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [onDuty, acquireWakeLock]);
 
   if (isLoading) return <Spinner />;
   if (error) {
