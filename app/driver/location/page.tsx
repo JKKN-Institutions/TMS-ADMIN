@@ -1,14 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import {
   MapPin, Navigation, AlertTriangle, Gauge, Clock, Bus, Radio, Crosshair,
 } from 'lucide-react';
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
-import { geoErrorOutcome } from '@/lib/driver/geo';
-import { isFixStale } from '@/lib/driver/tracking';
+import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
@@ -51,13 +50,6 @@ function formatUpdated(ts: string | null): string {
   return d.toLocaleString();
 }
 
-const SEND_INTERVAL_MS = 12000;
-
-// Loose WakeLock typing (not in older TS DOM libs).
-type WakeLock =
-  | { release: () => Promise<void>; addEventListener?: (type: 'release', cb: () => void) => void }
-  | null;
-
 function LiveStat({ icon: Icon, label, value }: { icon: typeof Gauge; label: string; value: string }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800/40">
@@ -78,174 +70,12 @@ export default function DriverLocationPage() {
   });
   const routes = data?.data?.routes ?? [];
 
-  const [onDuty, setOnDuty] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
-  const [fix, setFix] = useState<{ lat: number; lng: number; accuracy: number | null; speed: number | null } | null>(null);
-  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
-
-  const watchIdRef = useRef<number | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const latestFixRef = useRef<GeolocationPosition | null>(null);
-  const wakeLockRef = useRef<WakeLock>(null);
-  const selectedRouteRef = useRef<string | null>(null);
-
-  // Default the active route to the first one once routes load.
   useEffect(() => {
     if (!selectedRouteId && routes.length > 0) setSelectedRouteId(routes[0].id);
   }, [routes, selectedRouteId]);
-  useEffect(() => {
-    selectedRouteRef.current = selectedRouteId;
-  }, [selectedRouteId]);
 
-  const sendPing = useCallback(async () => {
-    const pos = latestFixRef.current;
-    const routeId = selectedRouteRef.current;
-    if (!pos || !routeId) return;
-    // Don't broadcast a frozen fix: if watchPosition has stopped refreshing
-    // (backgrounded, GPS lost) the position is stale, and re-sending it would drag
-    // every reader's marker back to this point. Go quiet until a fresh fix arrives.
-    if (isFixStale(pos.timestamp, Date.now())) return;
-    try {
-      const res = await fetch('/api/driver/location', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          routeId,
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy ?? null,
-          speed: pos.coords.speed ?? null,
-          heading: pos.coords.heading ?? null,
-          // Capture time of THIS fix, so the server can reject a stale/duplicate
-          // re-send under its monotonic guard (never regress the live position).
-          capturedAt: new Date(pos.timestamp).toISOString(),
-        }),
-      });
-      if (res.ok) setLastSentAt(Date.now());
-    } catch {
-      /* transient network error — the next tick retries */
-    }
-  }, []);
-
-  const stopSharing = useCallback(async (notifyServer: boolean) => {
-    if (watchIdRef.current !== null && typeof navigator !== 'undefined') {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    if (wakeLockRef.current) {
-      try {
-        await wakeLockRef.current.release();
-      } catch {
-        /* ignore */
-      }
-      wakeLockRef.current = null;
-    }
-    latestFixRef.current = null;
-    setOnDuty(false);
-    setFix(null);
-    setLastSentAt(null);
-    if (notifyServer) {
-      try {
-        await fetch('/api/driver/location', { method: 'DELETE', credentials: 'same-origin', keepalive: true });
-      } catch {
-        /* ignore */
-      }
-    }
-  }, []);
-
-  // Best-effort screen Wake Lock. The browser auto-releases it whenever the page is
-  // hidden (tab switch / screen lock), so we null the ref on release and re-acquire it
-  // on return — otherwise the screen is free to sleep again and freeze the broadcast.
-  const acquireWakeLock = useCallback(async () => {
-    if (wakeLockRef.current || typeof navigator === 'undefined') return;
-    try {
-      const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLock> } };
-      const sentinel = (await nav.wakeLock?.request('screen')) ?? null;
-      wakeLockRef.current = sentinel;
-      sentinel?.addEventListener?.('release', () => {
-        wakeLockRef.current = null;
-      });
-    } catch {
-      /* unsupported or denied — fine, capture still works while visible */
-    }
-  }, []);
-
-  const startSharing = useCallback(async () => {
-    setGeoError(null);
-    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-      setGeoError('Geolocation is not available on this device or browser.');
-      return;
-    }
-    if (!selectedRouteRef.current) {
-      setGeoError('Select the route you are driving first.');
-      return;
-    }
-
-    await acquireWakeLock();
-
-    const onPos = (pos: GeolocationPosition) => {
-      latestFixRef.current = pos;
-      setGeoError(null); // a fresh fix clears any transient "reacquiring GPS" warning
-      setFix({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? null,
-        speed: pos.coords.speed ?? null,
-      });
-    };
-    const onErr = (err: GeolocationPositionError) => {
-      // Only PERMISSION_DENIED is terminal — nothing will ever arrive, so stop.
-      // Transient TIMEOUT / POSITION_UNAVAILABLE errors (routine on a moving bus:
-      // tunnels, buildings, GPS re-acquisition) must NOT tear down the session:
-      // the 12s interval keeps re-sending the last good fix and watchPosition
-      // recovers on its own. Killing the watch here was the bug that froze the
-      // admin map at the driver's start point while the DB still said "Active".
-      const outcome = geoErrorOutcome(err.code);
-      setGeoError(outcome.message);
-      if (outcome.stopSharing) void stopSharing(false);
-    };
-
-    const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 };
-    // Immediate fix (prompts permission) + send right away, then stream.
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        onPos(pos);
-        void sendPing();
-      },
-      onErr,
-      opts
-    );
-    watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
-    intervalRef.current = setInterval(() => {
-      void sendPing();
-    }, SEND_INTERVAL_MS);
-    setOnDuty(true);
-  }, [sendPing, stopSharing, acquireWakeLock]);
-
-  // Stop + notify server if the page unmounts while on duty.
-  useEffect(() => {
-    return () => {
-      void stopSharing(true);
-    };
-  }, [stopSharing]);
-
-  // Re-acquire the Wake Lock when the driver returns to the tab while on duty
-  // (the browser releases it on hide). Keeps the screen awake so the ~12s ping
-  // interval and watchPosition keep running instead of freezing at the last fix.
-  useEffect(() => {
-    if (!onDuty || typeof document === 'undefined') return;
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void acquireWakeLock();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [onDuty, acquireWakeLock]);
+  const { status, banner, onDuty, fix, lastSentAt, start, stop } = useLiveTracking(selectedRouteId);
 
   if (isLoading) return <Spinner />;
   if (error) {
@@ -312,16 +142,25 @@ export default function DriverLocationPage() {
             </label>
           )}
 
-          {geoError && (
-            <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50">
+          {banner && (
+            <div
+              className={cn(
+                'flex items-start gap-2 rounded-lg px-3 py-2 text-sm ring-1',
+                banner.tone === 'error' && 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50',
+                banner.tone === 'warn' && 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50',
+                banner.tone === 'info' && 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900/50'
+              )}
+            >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{geoError}</span>
+              <span>
+                <span className="font-semibold">{banner.title}</span> {banner.body}
+              </span>
             </div>
           )}
 
           <button
             type="button"
-            onClick={() => (onDuty ? void stopSharing(true) : void startSharing())}
+            onClick={() => (onDuty ? void stop(true) : void start())}
             className={cn(
               'inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 sm:w-auto',
               onDuty ? 'bg-gradient-to-br from-red-600 to-rose-600' : 'bg-gradient-to-br from-green-600 to-emerald-600'
@@ -333,13 +172,26 @@ export default function DriverLocationPage() {
 
           {onDuty && (
             <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1 text-sm font-medium text-green-700 ring-1 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-600" />
-                </span>
-                Sharing live
-              </div>
+              {(() => {
+                const live = status === 'live';
+                const paused = status === 'paused' || status === 'starting';
+                const label = live ? 'Sharing live' : paused ? 'Paused — no fresh GPS' : 'Not sharing';
+                const dot = live ? 'bg-green-600' : paused ? 'bg-amber-500' : 'bg-gray-400';
+                const wrap = live
+                  ? 'bg-green-50 text-green-700 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50'
+                  : paused
+                    ? 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50'
+                    : 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-800 dark:text-gray-300';
+                return (
+                  <div className={cn('inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ring-1', wrap)}>
+                    <span className="relative flex h-2 w-2">
+                      {live && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />}
+                      <span className={cn('relative inline-flex h-2 w-2 rounded-full', dot)} />
+                    </span>
+                    {label}
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <LiveStat
