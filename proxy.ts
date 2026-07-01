@@ -21,7 +21,9 @@ const PUBLIC_PATH_PREFIXES = [
   '/favicon',
   '/manifest',
   '/sw.',
+  '/sw-driver.js', // driver PWA service worker — registerable before auth
   '/icons/',
+  '/driver.webmanifest', // driver PWA manifest — exact; NOT '/driver.' so the '/driver/' portal stays gated
 ];
 
 export async function proxy(request: NextRequest) {
