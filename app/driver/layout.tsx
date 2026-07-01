@@ -9,6 +9,7 @@ import { driverNavigation, deriveDriverPageTitle } from '@/lib/driver/navigation
 import { Toaster } from 'react-hot-toast';
 import { ThemeToggle, ProfileMenu } from '@/components/portal-user-menu';
 import DriverBottomNav from '@/components/driver-bottom-nav';
+import DriverPwa from '@/components/driver/pwa';
 
 export default function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
@@ -145,6 +146,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
 
       {/* Mobile-only bottom navigation (replaces the sidebar on < lg). */}
       <DriverBottomNav />
+      <DriverPwa />
 
       <Toaster
         position="top-right"
