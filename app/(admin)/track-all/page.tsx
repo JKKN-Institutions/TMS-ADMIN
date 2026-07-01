@@ -49,7 +49,7 @@ export default function TrackAllPage() {
   const fetchDriverLocations = async () => {
     try {
       setRefreshing(true);
-      const response = await fetch('/api/admin/track-all/drivers');
+      const response = await fetch('/api/admin/track-all/drivers', { cache: 'no-store' });
       
       if (!response.ok) {
         throw new Error('Failed to fetch driver locations');
@@ -74,10 +74,10 @@ export default function TrackAllPage() {
 
   useEffect(() => {
     fetchDriverLocations();
-    
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchDriverLocations, 30000);
-    
+
+    // Auto-refresh every 5 seconds (the map glides the marker between polls).
+    const interval = setInterval(fetchDriverLocations, 5000);
+
     return () => clearInterval(interval);
   }, []);
 

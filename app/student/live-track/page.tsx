@@ -89,7 +89,7 @@ export default function StudentLiveTrackPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['student-live-track'],
     queryFn: fetchBus,
-    refetchInterval: 15000,
+    refetchInterval: 5000,
   });
 
   if (isLoading) {
