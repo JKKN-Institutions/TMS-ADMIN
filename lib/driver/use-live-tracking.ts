@@ -174,7 +174,7 @@ export function useLiveTracking(routeId: string | null) {
 
   const start = useCallback(async () => {
     if (startingRef.current || watchIdRef.current !== null) return; // ignore re-entrant taps
-    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+    if (!isNativeApp() && (typeof navigator === 'undefined' || !('geolocation' in navigator))) {
       dispatch({ type: 'start' });
       dispatch({ type: 'geoError', code: 2 });
       return;
@@ -183,17 +183,22 @@ export function useLiveTracking(routeId: string | null) {
     startingRef.current = true;
     dispatch({ type: 'start' });
 
-    // Pre-check permission so a hard "denied" is surfaced immediately.
-    try {
-      const perm = await (navigator as Navigator & {
-        permissions?: { query: (d: { name: 'geolocation' }) => Promise<{ state: string }> };
-      }).permissions?.query({ name: 'geolocation' });
-      if (perm?.state === 'denied') {
-        dispatch({ type: 'geoError', code: 1 }); // → permission_denied effect tears down (resets latches)
-        return;
+    // Web only: pre-check permission so a hard "denied" is surfaced immediately. On native the
+    // WebView Permissions API is separate from the OS location grant the plugin requests, so a
+    // false "denied" here must NOT block the native watcher — the plugin's requestPermissions
+    // (and NOT_AUTHORIZED → code 1) handles native permissions instead.
+    if (!isNativeApp()) {
+      try {
+        const perm = await (navigator as Navigator & {
+          permissions?: { query: (d: { name: 'geolocation' }) => Promise<{ state: string }> };
+        }).permissions?.query({ name: 'geolocation' });
+        if (perm?.state === 'denied') {
+          dispatch({ type: 'geoError', code: 1 }); // → permission_denied effect tears down (resets latches)
+          return;
+        }
+      } catch {
+        /* Permissions API unsupported — fall through to the live prompt */
       }
-    } catch {
-      /* Permissions API unsupported — fall through to the live prompt */
     }
 
     abortRef.current = new AbortController();
