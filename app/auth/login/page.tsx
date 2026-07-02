@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Bus, GraduationCap, Loader2, MapPin, Route } from 'lucide-react';
 import { createClientSupabaseClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import { isNativeApp } from '@/lib/native/platform';
+import { nativeGoogleSignIn } from '@/lib/native/google-auth';
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_tms_access:
@@ -61,6 +63,23 @@ function LoginContent() {
     setIsLoading(true);
     try {
       const supabase = createClientSupabaseClient();
+
+      if (isNativeApp()) {
+        // Native app: system Google Sign-In → exchange the ID token for a Supabase session.
+        // The @supabase/ssr browser client writes the session to cookies, so proxy.ts / withAuth
+        // authenticate the driver exactly like the web flow.
+        const { idToken } = await nativeGoogleSignIn();
+        const { error } = await supabase.auth.signInWithIdToken({ provider: 'google', token: idToken });
+        if (error) {
+          console.error('Native sign-in error:', error.message);
+          setIsLoading(false);
+          return;
+        }
+        router.replace(redirect);
+        return;
+      }
+
+      // Web: unchanged OAuth redirect flow.
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

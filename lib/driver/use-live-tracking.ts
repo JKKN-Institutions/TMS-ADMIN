@@ -9,6 +9,8 @@ import {
   type TrackingStatus,
 } from './tracking-controller';
 import { isFixStale } from './tracking';
+import { isNativeApp } from '@/lib/native/platform';
+import { startBackgroundWatch, stopBackgroundWatch, type NativeFix } from '@/lib/native/background-location';
 
 /** Post the latest fix this often (send-latest, not per-callback — saves battery + data). */
 const SEND_INTERVAL_MS = 6000;
@@ -36,6 +38,7 @@ export function useLiveTracking(routeId: string | null) {
   const routeIdRef = useRef(routeId);
   const latestFixRef = useRef<GeolocationPosition | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const nativeWatchIdRef = useRef<string | null>(null);
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLock>(null);
@@ -127,6 +130,14 @@ export function useLiveTracking(routeId: string | null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    if (nativeWatchIdRef.current) {
+      try {
+        await stopBackgroundWatch(nativeWatchIdRef.current);
+      } catch {
+        /* ignore */
+      }
+      nativeWatchIdRef.current = null;
+    }
     if (sendTimerRef.current) clearInterval(sendTimerRef.current);
     if (tickTimerRef.current) clearInterval(tickTimerRef.current);
     sendTimerRef.current = null;
@@ -163,7 +174,7 @@ export function useLiveTracking(routeId: string | null) {
 
   const start = useCallback(async () => {
     if (startingRef.current || watchIdRef.current !== null) return; // ignore re-entrant taps
-    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+    if (!isNativeApp() && (typeof navigator === 'undefined' || !('geolocation' in navigator))) {
       dispatch({ type: 'start' });
       dispatch({ type: 'geoError', code: 2 });
       return;
@@ -172,60 +183,104 @@ export function useLiveTracking(routeId: string | null) {
     startingRef.current = true;
     dispatch({ type: 'start' });
 
-    // Pre-check permission so a hard "denied" is surfaced immediately.
-    try {
-      const perm = await (navigator as Navigator & {
-        permissions?: { query: (d: { name: 'geolocation' }) => Promise<{ state: string }> };
-      }).permissions?.query({ name: 'geolocation' });
-      if (perm?.state === 'denied') {
-        dispatch({ type: 'geoError', code: 1 }); // → permission_denied effect tears down (resets latches)
-        return;
+    // Web only: pre-check permission so a hard "denied" is surfaced immediately. On native the
+    // WebView Permissions API is separate from the OS location grant the plugin requests, so a
+    // false "denied" here must NOT block the native watcher — the plugin's requestPermissions
+    // (and NOT_AUTHORIZED → code 1) handles native permissions instead.
+    if (!isNativeApp()) {
+      try {
+        const perm = await (navigator as Navigator & {
+          permissions?: { query: (d: { name: 'geolocation' }) => Promise<{ state: string }> };
+        }).permissions?.query({ name: 'geolocation' });
+        if (perm?.state === 'denied') {
+          dispatch({ type: 'geoError', code: 1 }); // → permission_denied effect tears down (resets latches)
+          return;
+        }
+      } catch {
+        /* Permissions API unsupported — fall through to the live prompt */
       }
-    } catch {
-      /* Permissions API unsupported — fall through to the live prompt */
     }
 
     abortRef.current = new AbortController();
     await acquireWakeLock();
 
-    const onPos = (pos: GeolocationPosition) => {
-      latestFixRef.current = pos;
-      dispatch({ type: 'fix', atMs: Date.now() });
-      setFix({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? null,
-        speed: pos.coords.speed ?? null,
-      });
-    };
-    const onErr = (err: GeolocationPositionError) => dispatch({ type: 'geoError', code: err.code });
-
-    const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 };
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        onPos(pos);
+    if (isNativeApp()) {
+      // Native background watcher: keeps firing with the screen off / app backgrounded.
+      // Feeds the SAME latestFixRef + sendPing pipeline the web path uses; the 6s send
+      // timer is kept so an idling bus stays fresh exactly like the web path.
+      const applyNativeFix = (nf: NativeFix) => {
+        latestFixRef.current = {
+          coords: {
+            latitude: nf.lat,
+            longitude: nf.lng,
+            accuracy: nf.accuracy ?? 0,
+            speed: nf.speed,
+            heading: nf.heading,
+            altitude: null,
+            altitudeAccuracy: null,
+          },
+          timestamp: nf.timestamp,
+        } as unknown as GeolocationPosition;
+        dispatch({ type: 'fix', atMs: Date.now() });
+        setFix({ lat: nf.lat, lng: nf.lng, accuracy: nf.accuracy, speed: nf.speed });
         void sendPing();
-      },
-      onErr,
-      opts
-    );
-    watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
-    sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
-    tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
-    startedRef.current = true;
+      };
+      nativeWatchIdRef.current = await startBackgroundWatch(applyNativeFix, (err) =>
+        dispatch({ type: 'geoError', code: err.code === 'NOT_AUTHORIZED' ? 1 : 2 })
+      );
+      sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
+      tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
+      startedRef.current = true;
+    } else {
+      const onPos = (pos: GeolocationPosition) => {
+        latestFixRef.current = pos;
+        dispatch({ type: 'fix', atMs: Date.now() });
+        setFix({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? null,
+          speed: pos.coords.speed ?? null,
+        });
+      };
+      const onErr = (err: GeolocationPositionError) => dispatch({ type: 'geoError', code: err.code });
+
+      const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 };
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          onPos(pos);
+          void sendPing();
+        },
+        onErr,
+        opts
+      );
+      watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
+      sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
+      tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
+      startedRef.current = true;
+    }
   }, [acquireWakeLock, sendPing]);
 
-  // Re-acquire the wake lock and tell the controller when the tab returns/hides.
+  // Re-acquire the wake lock and tell the controller when the tab returns/hides. On native,
+  // also restart the background watcher if the OS reclaimed it while we were away but the
+  // React state survived (sharing + visible + no live native watcher id). NOTE: this does
+  // NOT cover a full process kill+relaunch (state resets to not-sharing, so this effect is
+  // inactive) — that would need persisted on-duty state, deferred until device testing shows
+  // it's needed.
   useEffect(() => {
     if (!isSharing(state.status) || typeof document === 'undefined') return;
     const onVisible = () => {
       const visible = document.visibilityState === 'visible';
       dispatch({ type: 'visibility', visible });
-      if (visible) void acquireWakeLock();
+      if (visible) {
+        void acquireWakeLock();
+        if (isNativeApp() && !nativeWatchIdRef.current && !startingRef.current) {
+          void start(); // watcher was reclaimed in the background — bring it back
+        }
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [state.status, acquireWakeLock]);
+  }, [state.status, acquireWakeLock, start]);
 
   // Permission denied is terminal: release resources and clear server state, but leave the
   // status/banner as permission_denied so the driver still sees how to re-enable location.
