@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { withAuth } from '@/lib/api/with-auth';
+import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 
 async function getDashboard() {
   try {
@@ -28,14 +29,17 @@ async function getDashboard() {
       openGrievances
     ] = await Promise.all([
       // "Students" on the TMS dashboard = transport learners, counted EXACTLY like
-      // the Passengers > Learners page: bus_required = true AND lifecycle_status =
-      // 'active' (current learners only — excludes enquiry/reserved/account prospects).
-      // The legacy `students` table is dropped (would always count 0).
+      // the Passengers > Learners page: bus_required = true AND an active lifecycle
+      // status. Uses the SAME shared ACTIVE_LIFECYCLE_STATUSES allow-list as
+      // app/api/admin/passengers/learners/route.ts so the two counts never drift
+      // (previously this hardcoded 'active' only, undercounting by the admitted/
+      // account learners the Learners page includes). The legacy `students` table
+      // is dropped (would always count 0).
       supabase
         .from('learners_profiles')
         .select('*', { count: 'exact', head: true })
         .eq('bus_required', true)
-        .eq('lifecycle_status', 'active'),
+        .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES]),
       // Drivers live in MyJKKN `staff` (role_key='driver') — same source as the
       // /drivers page. The legacy `drivers` table is empty/absent (would count 0).
       supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role_key', 'driver'),
