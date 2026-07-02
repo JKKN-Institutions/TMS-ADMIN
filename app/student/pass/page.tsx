@@ -8,6 +8,7 @@ interface Pass {
   hasPass: boolean;
   reason?: 'no_route' | 'not_booked';
   token?: string;
+  code?: string;
   name?: string;
   rollNumber?: string | null;
   routeLabel?: string | null;
@@ -75,10 +76,17 @@ export default function StudentPassPage() {
           <p className="text-[11px] text-muted-foreground text-center">
             Show this to boarding staff to mark your attendance.
           </p>
-          <details className="text-center w-full">
-            <summary className="text-[11px] text-muted-foreground cursor-pointer">Pass code (manual entry)</summary>
-            <p className="text-[10px] font-mono break-all select-all mt-1 text-muted-foreground px-2">{p.token}</p>
-          </details>
+          {p.code && (
+            <div className="w-full border-t pt-3 text-center">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Pass code</p>
+              <p className="mt-1 select-all font-mono text-2xl font-semibold tracking-[0.3em]">
+                {p.code.slice(0, 3)} {p.code.slice(3)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Valid today only — read this out if the camera can&apos;t scan the QR.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

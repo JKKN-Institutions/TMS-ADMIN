@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getLearnerRowForUser } from '@/lib/student/identity';
 import { mapLearner } from '@/lib/passengers/types';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
-import { signPass } from '@/lib/boarding/pass';
+import { signPass, passCodeFor } from '@/lib/boarding/pass';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
@@ -53,6 +53,7 @@ async function getPass(_request: NextRequest, auth: AuthContext) {
       data: {
         hasPass: true,
         token: signPass(learner.id),
+        code: passCodeFor(learner.id, istToday()),
         name: dto.name,
         rollNumber: dto.rollNumber,
         routeLabel: dto.routeLabel,

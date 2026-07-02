@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import { verifyPass } from '@/lib/boarding/pass';
+import { verifyPass, matchPassCode } from '@/lib/boarding/pass';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
@@ -32,6 +32,49 @@ interface LearnerLite {
   transport_stop_id: string | null;
 }
 
+/**
+ * Resolve the learner behind a scan input. Two shapes are accepted:
+ *  - the signed QR / long token, whose identity is embedded → verified directly;
+ *  - a typed 6-digit daily code, which carries no identity → reverse-looked-up
+ *    among the learners this staff may scan (their assigned routes; super admins
+ *    fall back to all route-allocated learners). The candidate set is therefore
+ *    already authority-scoped, and matchPassCode flags collisions (>1 match).
+ */
+async function resolveLearnerId(
+  raw: string,
+  auth: AuthContext,
+  svc: ReturnType<typeof createServiceRoleClient>
+): Promise<{ learnerId: string } | { error: string; status: number }> {
+  const verified = verifyPass(raw);
+  if (verified) return { learnerId: verified };
+
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 6) {
+    let query = svc.from('learners_profiles').select('id').not('transport_route_id', 'is', null);
+    if (!auth.isSuperAdmin) {
+      const routeIds = await getAssignedRouteIdsForUser(auth);
+      if (routeIds.length === 0) {
+        return { error: 'You are not assigned to any route', status: 403 };
+      }
+      query = query.in('transport_route_id', routeIds);
+    }
+    const { data, error } = await query;
+    if (error) {
+      console.error('boarding scan code lookup error:', error);
+      return { error: 'Could not resolve pass code', status: 500 };
+    }
+    const candidateIds = ((data ?? []) as { id: string }[]).map((r) => r.id);
+    const matches = matchPassCode(digits, candidateIds, istToday());
+    if (matches.length === 1) return { learnerId: matches[0] };
+    if (matches.length > 1) {
+      return { error: 'Code matches multiple learners — please scan the QR code', status: 409 };
+    }
+    return { error: 'Code not recognised', status: 400 };
+  }
+
+  return { error: 'Invalid or unrecognised pass', status: 400 };
+}
+
 async function scan(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN))) {
@@ -39,13 +82,16 @@ async function scan(request: NextRequest, auth: AuthContext) {
     }
 
     const body = (await request.json().catch(() => ({}))) as { token?: string; direction?: string; walkUp?: boolean };
-    const learnerId = verifyPass(String(body.token ?? ''));
-    if (!learnerId) {
-      return NextResponse.json({ ok: false, error: 'Invalid or unrecognised pass' }, { status: 400 });
-    }
     const direction = body.direction === 'return' ? 'return' : 'onward';
 
     const svc = createServiceRoleClient();
+
+    // Identify the learner from the QR token or a typed 6-digit code.
+    const resolved = await resolveLearnerId(String(body.token ?? ''), auth, svc);
+    if ('error' in resolved) {
+      return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+    }
+    const learnerId = resolved.learnerId;
 
     // Time-window gate: onward only inside the morning window, return only inside
     // the evening window (admin-configurable). This is what stops an evening onward

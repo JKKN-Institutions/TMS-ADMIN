@@ -232,9 +232,16 @@ export default function BoardingScanPage() {
 
       <Card>
         <CardContent className="p-3 space-y-2">
-          <p className="text-xs text-muted-foreground">Or enter the pass code manually:</p>
+          <p className="text-xs text-muted-foreground">Or enter the 6-digit code manually:</p>
           <div className="flex gap-2">
-            <Input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="Pass code" disabled={!canScan} />
+            <Input
+              value={manual}
+              onChange={(e) => setManual(e.target.value)}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="6-digit code"
+              disabled={!canScan}
+            />
             <Button onClick={() => submit(manual)} disabled={!manual || !canScan}>
               Mark
             </Button>

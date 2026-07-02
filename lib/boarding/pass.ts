@@ -35,3 +35,31 @@ export function verifyPass(token: string): string | null {
   }
   return learnerId;
 }
+
+/**
+ * Daily-rotating 6-digit boarding code = HMAC(`${learnerId}:${dateStr}`) reduced
+ * to 6 decimal digits. `dateStr` is an IST 'YYYY-MM-DD', so the code changes each
+ * day and a leaked code expires at midnight.
+ *
+ * This is an identity HINT for manual entry, NOT a standalone credential: unlike
+ * the long token it does not carry the learnerId, so the scanner must reverse it
+ * (see matchPassCode) and still enforces staff auth, route assignment and the
+ * booking gate. The QR token remains the strong, unforgeable path.
+ */
+export function passCodeFor(learnerId: string, dateStr: string): string {
+  const h = crypto.createHmac('sha256', secret()).update(`${learnerId}:${dateStr}`).digest();
+  return (h.readUInt32BE(0) % 1_000_000).toString().padStart(6, '0');
+}
+
+/**
+ * Given a typed 6-digit `code` and a (route-scoped) list of candidate learnerIds,
+ * return every candidate whose daily code matches. Pure — the caller supplies the
+ * candidate set and interprets the result: zero = unknown, one = resolved, more
+ * than one = ambiguous collision (fall back to the QR). Non-digits are stripped so
+ * a code displayed as "429 173" still matches when typed with the space.
+ */
+export function matchPassCode(code: string, candidateIds: string[], dateStr: string): string[] {
+  const norm = (code ?? '').replace(/\D/g, '');
+  if (norm.length !== 6) return [];
+  return candidateIds.filter((id) => passCodeFor(id, dateStr) === norm);
+}
