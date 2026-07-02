@@ -9,6 +9,7 @@ import {
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
+import { isNativeApp } from '@/lib/native/platform';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -216,8 +217,9 @@ export default function DriverLocationPage() {
           )}
 
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Keep this page open with the screen on while driving. Sharing pauses if you switch apps or the screen
-            locks — that&apos;s a limitation of web browsers.
+            {isNativeApp()
+              ? 'Location keeps sharing in the background while you are On Duty — you can lock the phone or switch apps. A notification shows while sharing.'
+              : 'Keep this page open with the screen on while driving. Sharing pauses if you switch apps or the screen locks — that’s a limitation of web browsers.'}
           </p>
         </div>
       </section>

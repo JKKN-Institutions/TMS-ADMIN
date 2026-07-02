@@ -9,6 +9,8 @@ import {
   type TrackingStatus,
 } from './tracking-controller';
 import { isFixStale } from './tracking';
+import { isNativeApp } from '@/lib/native/platform';
+import { startBackgroundWatch, stopBackgroundWatch, type NativeFix } from '@/lib/native/background-location';
 
 /** Post the latest fix this often (send-latest, not per-callback — saves battery + data). */
 const SEND_INTERVAL_MS = 6000;
@@ -36,6 +38,7 @@ export function useLiveTracking(routeId: string | null) {
   const routeIdRef = useRef(routeId);
   const latestFixRef = useRef<GeolocationPosition | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const nativeWatchIdRef = useRef<string | null>(null);
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLock>(null);
@@ -127,6 +130,14 @@ export function useLiveTracking(routeId: string | null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    if (nativeWatchIdRef.current) {
+      try {
+        await stopBackgroundWatch(nativeWatchIdRef.current);
+      } catch {
+        /* ignore */
+      }
+      nativeWatchIdRef.current = null;
+    }
     if (sendTimerRef.current) clearInterval(sendTimerRef.current);
     if (tickTimerRef.current) clearInterval(tickTimerRef.current);
     sendTimerRef.current = null;
@@ -188,31 +199,60 @@ export function useLiveTracking(routeId: string | null) {
     abortRef.current = new AbortController();
     await acquireWakeLock();
 
-    const onPos = (pos: GeolocationPosition) => {
-      latestFixRef.current = pos;
-      dispatch({ type: 'fix', atMs: Date.now() });
-      setFix({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? null,
-        speed: pos.coords.speed ?? null,
-      });
-    };
-    const onErr = (err: GeolocationPositionError) => dispatch({ type: 'geoError', code: err.code });
-
-    const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 };
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        onPos(pos);
+    if (isNativeApp()) {
+      // Native background watcher: keeps firing with the screen off / app backgrounded.
+      // Feeds the SAME latestFixRef + sendPing pipeline the web path uses; the 6s send
+      // timer is kept so an idling bus stays fresh exactly like the web path.
+      const applyNativeFix = (nf: NativeFix) => {
+        latestFixRef.current = {
+          coords: {
+            latitude: nf.lat,
+            longitude: nf.lng,
+            accuracy: nf.accuracy ?? 0,
+            speed: nf.speed,
+            heading: nf.heading,
+            altitude: null,
+            altitudeAccuracy: null,
+          },
+          timestamp: nf.timestamp,
+        } as unknown as GeolocationPosition;
+        dispatch({ type: 'fix', atMs: Date.now() });
+        setFix({ lat: nf.lat, lng: nf.lng, accuracy: nf.accuracy, speed: nf.speed });
         void sendPing();
-      },
-      onErr,
-      opts
-    );
-    watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
-    sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
-    tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
-    startedRef.current = true;
+      };
+      nativeWatchIdRef.current = await startBackgroundWatch(applyNativeFix, (err) =>
+        dispatch({ type: 'geoError', code: err.code === 'NOT_AUTHORIZED' ? 1 : 2 })
+      );
+      sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
+      tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
+      startedRef.current = true;
+    } else {
+      const onPos = (pos: GeolocationPosition) => {
+        latestFixRef.current = pos;
+        dispatch({ type: 'fix', atMs: Date.now() });
+        setFix({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? null,
+          speed: pos.coords.speed ?? null,
+        });
+      };
+      const onErr = (err: GeolocationPositionError) => dispatch({ type: 'geoError', code: err.code });
+
+      const opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 };
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          onPos(pos);
+          void sendPing();
+        },
+        onErr,
+        opts
+      );
+      watchIdRef.current = navigator.geolocation.watchPosition(onPos, onErr, opts);
+      sendTimerRef.current = setInterval(() => void sendPing(), SEND_INTERVAL_MS);
+      tickTimerRef.current = setInterval(() => dispatch({ type: 'tick', nowMs: Date.now() }), TICK_INTERVAL_MS);
+      startedRef.current = true;
+    }
   }, [acquireWakeLock, sendPing]);
 
   // Re-acquire the wake lock and tell the controller when the tab returns/hides.
