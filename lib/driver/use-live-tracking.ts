@@ -260,17 +260,27 @@ export function useLiveTracking(routeId: string | null) {
     }
   }, [acquireWakeLock, sendPing]);
 
-  // Re-acquire the wake lock and tell the controller when the tab returns/hides.
+  // Re-acquire the wake lock and tell the controller when the tab returns/hides. On native,
+  // also restart the background watcher if the OS reclaimed it while we were away but the
+  // React state survived (sharing + visible + no live native watcher id). NOTE: this does
+  // NOT cover a full process kill+relaunch (state resets to not-sharing, so this effect is
+  // inactive) — that would need persisted on-duty state, deferred until device testing shows
+  // it's needed.
   useEffect(() => {
     if (!isSharing(state.status) || typeof document === 'undefined') return;
     const onVisible = () => {
       const visible = document.visibilityState === 'visible';
       dispatch({ type: 'visibility', visible });
-      if (visible) void acquireWakeLock();
+      if (visible) {
+        void acquireWakeLock();
+        if (isNativeApp() && !nativeWatchIdRef.current && !startingRef.current) {
+          void start(); // watcher was reclaimed in the background — bring it back
+        }
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [state.status, acquireWakeLock]);
+  }, [state.status, acquireWakeLock, start]);
 
   // Permission denied is terminal: release resources and clear server state, but leave the
   // status/banner as permission_denied so the driver still sees how to re-enable location.
