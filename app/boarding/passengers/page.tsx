@@ -2,24 +2,18 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Users, AlertTriangle, Copy } from 'lucide-react';
+import { AlertTriangle, Users, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { NoticeCard, PageHeader } from '@/components/driver/ui';
+import { RouteNotice } from '@/components/routes/route-ticket';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import { getPassengerColumns, type PassengerRow } from '@/components/passengers/roster-columns';
 
-interface RouteGroup {
-  id: string;
-  label: string;
-  passengers: PassengerRow[];
-}
-type Resp = { data?: { totalPassengers: number; routes: RouteGroup[] }; notFound?: boolean };
+type Resp = { totalPassengers: number; passengers: PassengerRow[] };
 
 async function fetchPassengers(): Promise<Resp> {
-  const res = await fetch('/api/driver/passengers', { cache: 'no-store', credentials: 'same-origin' });
-  if (res.status === 404) return { notFound: true };
+  const res = await fetch('/api/boarding/passengers', { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load passengers');
-  return { data: (await res.json()).data as { totalPassengers: number; routes: RouteGroup[] } };
+  return (await res.json()).data as Resp;
 }
 
 /** Distinct non-empty labels → filter options. */
@@ -29,18 +23,14 @@ function optionsOf(values: (string | null)[]): { label: string; value: string }[
     .map((v) => ({ label: v, value: v }));
 }
 
-export default function DriverPassengersPage() {
+export default function BoardingPassengersPage() {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['driver-passengers'],
+    queryKey: ['boarding-passengers'],
     queryFn: fetchPassengers,
   });
 
   const columns = useMemo(() => getPassengerColumns(), []);
-
-  const routes = data?.data?.routes ?? [];
-  // Flatten the per-route roster into one table; each passenger already carries its
-  // routeLabel + stopLabel, so route/stop become sortable, filterable columns.
-  const passengers = useMemo(() => routes.flatMap((rt) => rt.passengers), [routes]);
+  const passengers = useMemo(() => data?.passengers ?? [], [data]);
 
   const filters = useMemo<DataTableFilter[]>(() => {
     const f: DataTableFilter[] = [];
@@ -66,7 +56,7 @@ export default function DriverPassengersPage() {
 
   if (error) {
     return (
-      <NoticeCard
+      <RouteNotice
         tone="red"
         icon={AlertTriangle}
         title="Couldn't load passengers"
@@ -74,23 +64,15 @@ export default function DriverPassengersPage() {
       />
     );
   }
-  if (data?.notFound) {
-    return (
-      <NoticeCard
-        tone="amber"
-        icon={AlertTriangle}
-        title="Driver profile not found"
-        body="We couldn't find a driver record linked to your account. Please contact the transport office."
-      />
-    );
-  }
 
-  const total = data?.data?.totalPassengers ?? passengers.length;
-  const routeCount = routes.filter((rt) => rt.passengers.length > 0).length;
+  const total = data?.totalPassengers ?? passengers.length;
+  const learnerCount = passengers.filter((p) => p.type === 'learner').length;
+  const staffCount = passengers.filter((p) => p.type === 'staff').length;
+  const routeCount = new Set(passengers.map((p) => p.routeLabel).filter(Boolean)).size;
 
   if (!isLoading && total === 0) {
     return (
-      <NoticeCard
+      <RouteNotice
         tone="amber"
         icon={Users}
         title="No passengers"
@@ -101,14 +83,16 @@ export default function DriverPassengersPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Passengers"
-        subtitle={
-          isLoading
+      <div>
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">Passengers</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {isLoading
             ? 'Loading your roster…'
-            : `${total} ${total === 1 ? 'rider' : 'riders'} across ${routeCount} ${routeCount === 1 ? 'route' : 'routes'}.`
-        }
-      />
+            : `${total} ${total === 1 ? 'rider' : 'riders'} (${learnerCount} learner${
+                learnerCount === 1 ? '' : 's'
+              } · ${staffCount} staff) across ${routeCount} ${routeCount === 1 ? 'route' : 'routes'}.`}
+        </p>
+      </div>
 
       <DataTable
         columns={columns}

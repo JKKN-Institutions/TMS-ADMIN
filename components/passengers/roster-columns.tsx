@@ -5,12 +5,17 @@ import { Phone } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 
-// One passenger row, flattened across the driver's route(s).
+// One passenger row, flattened across a portal's assigned route(s). A passenger
+// is either a learner or a bus-required staff member; `type` distinguishes them
+// and `designation` carries the staff member's role (null for learners). Shared
+// by the driver and boarding portal Passengers tables so both read identically.
 export interface PassengerRow {
   id: string;
+  type: 'learner' | 'staff';
   name: string;
   rollNumber: string | null;
   registerNumber: string | null;
+  designation: string | null;
   email: string | null;
   mobile: string | null;
   routeLabel: string | null;
@@ -23,9 +28,10 @@ function initials(name: string): string {
 }
 
 /**
- * Read-only roster columns for the driver Passengers table. No actions/selection —
- * a driver can view their riders but not edit them. `route` and `stop` carry explicit
- * ids + accessorFn + filterFn so the toolbar dropdown filters resolve to them.
+ * Read-only roster columns for a portal Passengers table. No edit actions — a
+ * driver / boarding staffer can view their riders but not change them. `type`,
+ * `route` and `stop` carry explicit ids + accessorFn + filterFn so the toolbar
+ * dropdown filters resolve to them.
  */
 export function getPassengerColumns(): ColumnDef<PassengerRow>[] {
   return [
@@ -57,8 +63,8 @@ export function getPassengerColumns(): ColumnDef<PassengerRow>[] {
     },
     {
       id: 'name',
-      // Combined accessor so global search matches name OR roll/register; sorts by
-      // name (it leads the string). The cell still renders just the clean name + id.
+      // Combined accessor so global search matches name OR roll/register/staff id;
+      // sorts by name (it leads the string). The cell renders the clean name + id.
       accessorFn: (p) => `${p.name} ${p.rollNumber ?? ''} ${p.registerNumber ?? ''}`.trim(),
       header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
       cell: ({ row }) => {
@@ -73,6 +79,33 @@ export function getPassengerColumns(): ColumnDef<PassengerRow>[] {
               <p className="truncate font-medium text-gray-900 dark:text-white">{p.name}</p>
               {id && <p className="truncate text-xs text-gray-500 dark:text-gray-400">{id}</p>}
             </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: 'type',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Type" />,
+      accessorFn: (p) => (p.type === 'staff' ? 'Staff' : 'Learner'),
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      size: 130,
+      cell: ({ row }) => {
+        const p = row.original;
+        const isStaff = p.type === 'staff';
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span
+              className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                isStaff
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400'
+                  : 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400'
+              }`}
+            >
+              {isStaff ? 'Staff' : 'Learner'}
+            </span>
+            {isStaff && p.designation && (
+              <span className="truncate text-xs text-gray-500 dark:text-gray-400">{p.designation}</span>
+            )}
           </div>
         );
       },

@@ -41,18 +41,21 @@ interface RouteDetail {
   _vehicleReg?: string | null;
   _vehicleCapacity?: number | null;
   _passengerCount?: number;
+  _staffCount?: number;
 }
 
 const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '—');
 
-// Occupancy "{riders} / {seats}". Seats come from the assigned vehicle (tms_route's
-// total_capacity is 0 for most routes); riders are counted live by the API.
+// Occupancy "{riders} / {seats}". Riders = passengers = learners + staff (both
+// occupy a seat), counted live by the API. Seats come from the assigned vehicle
+// (tms_route's total_capacity is 0 for most routes).
 function capacityLabel(route: RouteDetail): string {
+  const riders = (route._passengerCount ?? 0) + (route._staffCount ?? 0);
   const seats =
     route._vehicleCapacity ??
     (route.total_capacity && route.total_capacity > 0 ? route.total_capacity : null);
-  if (seats != null) return `${route._passengerCount ?? 0} / ${seats}`;
-  return route._passengerCount != null ? `${route._passengerCount} riders` : '—';
+  if (seats != null) return `${riders} / ${seats}`;
+  return `${riders} rider${riders === 1 ? '' : 's'}`;
 }
 
 async function fetchRouteDetail(id: string): Promise<RouteDetail> {
@@ -185,15 +188,15 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
           <Field label="Duration" value={route.duration} />
           <Field label="Fare" value={route.fare ? `₹${route.fare}` : ''} />
           <Field
-            label="Capacity"
+            label="Passengers"
             value={
               <Link
-                href={`/routes/${route.id}/learners`}
+                href={`/routes/${route.id}/passengers`}
                 className="inline-flex items-center gap-1.5 text-green-700 hover:underline dark:text-green-400"
               >
                 <Users className="h-4 w-4" />
                 {capacityLabel(route)}
-                <span className="text-xs font-normal text-gray-400">· view learners</span>
+                <span className="text-xs font-normal text-gray-400">· view learners &amp; staff</span>
               </Link>
             }
           />

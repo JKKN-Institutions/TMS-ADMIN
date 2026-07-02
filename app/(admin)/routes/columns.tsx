@@ -28,6 +28,7 @@ export interface RouteRow {
   total_capacity?: number;
   current_passengers?: number;
   _learnerCount?: number;
+  _staffCount?: number;
   fare?: number | string;
   status?: string;
   route_stops?: unknown[];
@@ -133,20 +134,25 @@ export function getRouteColumns(
       cell: ({ row }) => <span className="tabular-nums">{row.original.route_stops?.length ?? 0}</span>,
     },
     {
-      id: 'learners',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Learners" />,
-      accessorFn: (r) => r._learnerCount ?? 0,
-      size: 100,
-      cell: ({ row }) => (
-        <Link
-          href={`/routes/${row.original.id}/learners`}
-          className="inline-flex items-center gap-1.5 tabular-nums font-medium text-gray-900 hover:text-green-600 hover:underline dark:text-gray-100"
-          title="View learners on this route"
-        >
-          <Users className="h-3.5 w-3.5 text-gray-400" />
-          {row.original._learnerCount ?? 0}
-        </Link>
-      ),
+      id: 'passengers',
+      // Combined count = learners + staff. Clicking it opens the combined roster
+      // (both lists) at /routes/[id]/passengers.
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Passengers" />,
+      accessorFn: (r) => (r._learnerCount ?? 0) + (r._staffCount ?? 0),
+      size: 110,
+      cell: ({ row }) => {
+        const total = (row.original._learnerCount ?? 0) + (row.original._staffCount ?? 0);
+        return (
+          <Link
+            href={`/routes/${row.original.id}/passengers`}
+            className="inline-flex items-center gap-1.5 tabular-nums font-medium text-gray-900 hover:text-green-600 hover:underline dark:text-gray-100"
+            title="View passengers (learners + staff) on this route"
+          >
+            <Users className="h-3.5 w-3.5 text-gray-400" />
+            {total}
+          </Link>
+        );
+      },
     },
     {
       id: 'status',

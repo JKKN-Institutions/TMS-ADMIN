@@ -1,4 +1,4 @@
-import { LayoutDashboard, Route as RouteIcon, ListChecks, ScanLine, MapPin, MessageCircle, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Route as RouteIcon, Users, ListChecks, ScanLine, MapPin, MessageCircle, type LucideIcon } from 'lucide-react';
 
 export interface BoardingNavItem {
   name: string;
@@ -11,6 +11,7 @@ export interface BoardingNavItem {
 export const boardingNavigation: BoardingNavItem[] = [
   { name: 'Dashboard', href: '/boarding/dashboard', icon: LayoutDashboard },
   { name: 'My Route', shortName: 'Route', href: '/boarding/routes', icon: RouteIcon },
+  { name: 'Passengers', shortName: 'Riders', href: '/boarding/passengers', icon: Users },
   { name: 'Live Location', shortName: 'Live', href: '/boarding/live-track', icon: MapPin },
   { name: 'Attendance', href: '/boarding/attendance', icon: ListChecks },
   { name: 'Scan', href: '/boarding/scan', icon: ScanLine },
@@ -20,6 +21,7 @@ export const boardingNavigation: BoardingNavItem[] = [
 const TITLES: Record<string, string> = {
   '/boarding/dashboard': 'Dashboard',
   '/boarding/routes': 'My Route',
+  '/boarding/passengers': 'Passengers',
   '/boarding/live-track': 'Live Location',
   '/boarding/attendance': 'Attendance',
   '/boarding/scan': 'Scan Boarding Pass',

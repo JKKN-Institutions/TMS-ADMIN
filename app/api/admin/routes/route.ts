@@ -35,22 +35,47 @@ async function getRoutes() {
       );
     }
 
-    // Active learner count per route (same filter the route detail's Capacity uses:
-    // bus_required + ACTIVE_LIFECYCLE_STATUSES) so the list count, the detail
-    // Capacity figure and the learners drill-down all agree.
-    const { data: assigns } = await supabase
-      .from('learners_profiles')
-      .select('transport_route_id')
-      .eq('bus_required', true)
-      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
-      .not('transport_route_id', 'is', null)
-      .limit(20000);
+    // Active learner + staff counts per route. Each uses the SAME filter its
+    // drill-down roster uses, so the list count, the detail figure and the
+    // roster length always agree:
+    //   learners → bus_required + lifecycle_status IN ACTIVE_LIFECYCLE_STATUSES
+    //   staff    → bus_required + is_active = true
+    // Both are fetched in parallel; the staff table may not exist in every
+    // environment (42P01), so a staff error degrades to zero counts rather than
+    // failing the whole routes list.
+    const [{ data: assigns }, { data: staffAssigns, error: staffErr }] = await Promise.all([
+      supabase
+        .from('learners_profiles')
+        .select('transport_route_id')
+        .eq('bus_required', true)
+        .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
+        .not('transport_route_id', 'is', null)
+        .limit(20000),
+      supabase
+        .from('staff')
+        .select('transport_route_id')
+        .eq('bus_required', true)
+        .eq('is_active', true)
+        .not('transport_route_id', 'is', null)
+        .limit(20000),
+    ]);
+    if (staffErr && staffErr.code !== '42P01') {
+      console.error('Routes staff count error:', staffErr);
+    }
 
     const learnerCounts: Record<string, number> = {};
     for (const a of (assigns ?? []) as { transport_route_id: string }[]) {
       learnerCounts[a.transport_route_id] = (learnerCounts[a.transport_route_id] ?? 0) + 1;
     }
-    const data = (routes ?? []).map((r) => ({ ...r, _learnerCount: learnerCounts[r.id] ?? 0 }));
+    const staffCounts: Record<string, number> = {};
+    for (const a of (staffAssigns ?? []) as { transport_route_id: string }[]) {
+      staffCounts[a.transport_route_id] = (staffCounts[a.transport_route_id] ?? 0) + 1;
+    }
+    const data = (routes ?? []).map((r) => ({
+      ...r,
+      _learnerCount: learnerCounts[r.id] ?? 0,
+      _staffCount: staffCounts[r.id] ?? 0,
+    }));
 
     return NextResponse.json({
       success: true,

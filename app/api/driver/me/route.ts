@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getDriverForUser } from '@/lib/driver/identity';
 import { getDriverRoutes } from '@/lib/driver/routes';
+import { getRouteStaffRows } from '@/lib/passengers/route-roster';
 import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -30,19 +31,22 @@ async function getMe(_request: NextRequest, auth: AuthContext) {
     const routes = await getDriverRoutes(drv.staff_id, drv.assigned_route_id);
     const primary = routes[0] ?? null;
 
-    // Total riders across the driver's route(s) — same roster definition as
-    // /api/driver/passengers (bus-required, actively-enrolled learners).
+    // Total riders across the driver's route(s) = LEARNERS + STAFF — same roster
+    // definition as /api/driver/passengers (bus-required, active).
     const routeIds = routes.map((r) => r.id);
     let passengerCount = 0;
     if (routeIds.length > 0) {
       const svc = createServiceRoleClient();
-      const { count } = await svc
-        .from('learners_profiles')
-        .select('id', { count: 'exact', head: true })
-        .in('transport_route_id', routeIds)
-        .eq('bus_required', true)
-        .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES]);
-      passengerCount = count ?? 0;
+      const [{ count }, staffRows] = await Promise.all([
+        svc
+          .from('learners_profiles')
+          .select('id', { count: 'exact', head: true })
+          .in('transport_route_id', routeIds)
+          .eq('bus_required', true)
+          .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES]),
+        getRouteStaffRows(svc, routeIds),
+      ]);
+      passengerCount = (count ?? 0) + staffRows.length;
     }
 
     return NextResponse.json({

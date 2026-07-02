@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
-import { DatabaseService } from '@/lib/database';
 import { RouteImportDialog } from './route-import-dialog';
 import { getRouteColumns, type RouteRow } from './columns';
 
@@ -42,6 +41,8 @@ const RoutesPage = () => {
         ...route,
         route_stops: route.route_stops || [],
         total_capacity: route.total_capacity || route.capacity || 0,
+        _learnerCount: route._learnerCount ?? 0,
+        _staffCount: route._staffCount ?? 0,
       }));
 
       setRoutes(routesData);
@@ -54,19 +55,29 @@ const RoutesPage = () => {
     }
   };
 
+  // Deletes go through the service-role API (with a tms.routes.delete permission
+  // check) — the old DatabaseService path used the anon key and was silently
+  // filtered by RLS, so routes appeared to delete but never actually did.
+  const deleteRouteById = async (id: string): Promise<{ ok: boolean; message?: string; error?: string }> => {
+    const res = await fetch(`/api/admin/routes/${id}`, { method: 'DELETE' });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok && !!body.success, message: body.message, error: body.error };
+  };
+
   const handleDeleteRoute = async (route: RouteRow) => {
     if (
-      confirm(
+      !confirm(
         `Are you sure you want to delete route ${route.route_number}?\n\nThis cannot be undone and will also delete all associated stops.`
       )
-    ) {
-      try {
-        const result = await DatabaseService.deleteRoute(route.id);
-        toast.success(result.message);
-        await fetchRoutes();
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Failed to delete route');
-      }
+    )
+      return;
+    try {
+      const result = await deleteRouteById(route.id);
+      if (!result.ok) throw new Error(result.error || 'Failed to delete route');
+      toast.success(result.message || 'Route deleted');
+      await fetchRoutes();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete route');
     }
   };
 
@@ -78,10 +89,19 @@ const RoutesPage = () => {
     )
       return;
     try {
-      await Promise.all(rows.map((r) => DatabaseService.deleteRoute(r.id)));
-      toast.success(`Deleted ${rows.length} route(s)`);
+      const results = await Promise.all(rows.map((r) => deleteRouteById(r.id)));
+      const failed = results.filter((r) => !r.ok);
       reset();
       await fetchRoutes();
+      if (failed.length === 0) {
+        toast.success(`Deleted ${rows.length} route(s)`);
+      } else {
+        const succeeded = rows.length - failed.length;
+        toast.error(
+          `Deleted ${succeeded}/${rows.length}. ${failed.length} could not be deleted` +
+            (failed[0]?.error ? `: ${failed[0].error}` : '')
+        );
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete selected routes');
       await fetchRoutes();
@@ -110,14 +130,15 @@ const RoutesPage = () => {
 
   const total = routes.length;
   const active = routes.filter((r) => r.status === 'active').length;
-  // tms_route.total_capacity is stale (0 for all routes); the meaningful figure is
-  // assigned learners, summed from the per-route counts the list API now returns.
-  const totalLearners = routes.reduce((s, r) => s + (r._learnerCount || 0), 0);
+  // tms_route.total_capacity is stale (0 for all routes); the meaningful figure
+  // is assigned passengers — learners + staff — summed from the per-route counts
+  // the list API now returns.
+  const totalPassengers = routes.reduce((s, r) => s + (r._learnerCount || 0) + (r._staffCount || 0), 0);
   const gpsEnabled = routes.filter((r) => r.start_latitude && r.start_longitude).length;
   const stats = [
     { label: 'Total Routes', value: total, icon: RouteIcon },
     { label: 'Active', value: active, icon: Activity },
-    { label: 'Learners', value: totalLearners, icon: Users },
+    { label: 'Passengers', value: totalPassengers, icon: Users },
     { label: 'GPS Enabled', value: gpsEnabled, icon: Navigation },
   ];
 
