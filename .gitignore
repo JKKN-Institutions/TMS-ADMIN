@@ -63,4 +63,6 @@ mcp.json
 /android/app/debug/
 *.keystore
 *.jks
+keystore.properties
+android/keystore.properties
 android/app/google-services.json
