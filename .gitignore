@@ -54,3 +54,13 @@ mcp.json
 
 # Subagent-driven-development scratch (ledger, briefs, reports)
 .superpowers/
+
+# Capacitor / Android build artifacts
+/android/app/build/
+/android/build/
+/android/.gradle/
+/android/app/release/
+/android/app/debug/
+*.keystore
+*.jks
+android/app/google-services.json

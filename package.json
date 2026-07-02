@@ -16,9 +16,15 @@
     "db:seed": "node scripts/seed-database.mjs",
     "db:reset": "node scripts/reset-database.mjs",
     "db:status": "node test-db-status.mjs",
-    "deploy:vercel": "vercel --prod"
+    "deploy:vercel": "vercel --prod",
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android",
+    "cap:run": "cap run android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/core": "^8.4.1",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -53,6 +59,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4.1.12",
     "@types/node": "^20",
