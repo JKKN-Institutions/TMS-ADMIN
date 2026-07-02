@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">JKKN TMS Driver</string>
+    <string name="title_activity_main">JKKN TMS Driver</string>
+    <string name="package_name">in.ac.jkkn.tms.driver</string>
+    <string name="custom_url_scheme">in.ac.jkkn.tms.driver</string>
+</resources>

@@ -10,6 +10,19 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
     cleartext: false,
   },
+  plugins: {
+    // We only use Google sign-in. Disabling the other providers keeps their native
+    // SDKs (and the Facebook app-id / config they'd demand at build time) out of the APK.
+    SocialLogin: {
+      providers: {
+        google: true,
+        facebook: false,
+        apple: false,
+        twitter: false,
+      },
+      logLevel: 1,
+    },
+  },
 };
 
 export default config;
