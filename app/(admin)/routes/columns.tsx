@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Eye, MapPin, MoreHorizontal, Navigation, Pencil, Trash2 } from 'lucide-react';
+import { Eye, MapPin, MoreHorizontal, Navigation, Pencil, Trash2, Users } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import {
@@ -27,6 +27,7 @@ export interface RouteRow {
   duration?: string;
   total_capacity?: number;
   current_passengers?: number;
+  _learnerCount?: number;
   fare?: number | string;
   status?: string;
   route_stops?: unknown[];
@@ -130,6 +131,22 @@ export function getRouteColumns(
       accessorFn: (r) => r.route_stops?.length ?? 0,
       size: 80,
       cell: ({ row }) => <span className="tabular-nums">{row.original.route_stops?.length ?? 0}</span>,
+    },
+    {
+      id: 'learners',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Learners" />,
+      accessorFn: (r) => r._learnerCount ?? 0,
+      size: 100,
+      cell: ({ row }) => (
+        <Link
+          href={`/routes/${row.original.id}/learners`}
+          className="inline-flex items-center gap-1.5 tabular-nums font-medium text-gray-900 hover:text-green-600 hover:underline dark:text-gray-100"
+          title="View learners on this route"
+        >
+          <Users className="h-3.5 w-3.5 text-gray-400" />
+          {row.original._learnerCount ?? 0}
+        </Link>
+      ),
     },
     {
       id: 'status',

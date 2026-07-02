@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { logActivity } from '@/lib/activity/log';
+import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 
 async function getRoutes() {
   try {
@@ -34,10 +35,27 @@ async function getRoutes() {
       );
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      data: routes || [],
-      count: routes?.length || 0
+    // Active learner count per route (same filter the route detail's Capacity uses:
+    // bus_required + ACTIVE_LIFECYCLE_STATUSES) so the list count, the detail
+    // Capacity figure and the learners drill-down all agree.
+    const { data: assigns } = await supabase
+      .from('learners_profiles')
+      .select('transport_route_id')
+      .eq('bus_required', true)
+      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
+      .not('transport_route_id', 'is', null)
+      .limit(20000);
+
+    const learnerCounts: Record<string, number> = {};
+    for (const a of (assigns ?? []) as { transport_route_id: string }[]) {
+      learnerCounts[a.transport_route_id] = (learnerCounts[a.transport_route_id] ?? 0) + 1;
+    }
+    const data = (routes ?? []).map((r) => ({ ...r, _learnerCount: learnerCounts[r.id] ?? 0 }));
+
+    return NextResponse.json({
+      success: true,
+      data,
+      count: data.length,
     });
 
   } catch (error) {

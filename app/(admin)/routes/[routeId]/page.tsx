@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MapPin, Navigation, Pencil } from 'lucide-react';
+import { MapPin, Navigation, Pencil, Users } from 'lucide-react';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
 
 interface RouteStop {
@@ -184,7 +184,19 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
           <Field label="Distance" value={route.distance ? `${route.distance} km` : ''} />
           <Field label="Duration" value={route.duration} />
           <Field label="Fare" value={route.fare ? `₹${route.fare}` : ''} />
-          <Field label="Capacity" value={capacityLabel(route)} />
+          <Field
+            label="Capacity"
+            value={
+              <Link
+                href={`/routes/${route.id}/learners`}
+                className="inline-flex items-center gap-1.5 text-green-700 hover:underline dark:text-green-400"
+              >
+                <Users className="h-4 w-4" />
+                {capacityLabel(route)}
+                <span className="text-xs font-normal text-gray-400">· view learners</span>
+              </Link>
+            }
+          />
           <Field label="Status" value={<StatusBadge status={route.status} />} />
         </div>
       </SectionCard>

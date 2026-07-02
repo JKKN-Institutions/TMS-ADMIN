@@ -110,12 +110,14 @@ const RoutesPage = () => {
 
   const total = routes.length;
   const active = routes.filter((r) => r.status === 'active').length;
-  const totalCapacity = routes.reduce((s, r) => s + (r.total_capacity || 0), 0);
+  // tms_route.total_capacity is stale (0 for all routes); the meaningful figure is
+  // assigned learners, summed from the per-route counts the list API now returns.
+  const totalLearners = routes.reduce((s, r) => s + (r._learnerCount || 0), 0);
   const gpsEnabled = routes.filter((r) => r.start_latitude && r.start_longitude).length;
   const stats = [
     { label: 'Total Routes', value: total, icon: RouteIcon },
     { label: 'Active', value: active, icon: Activity },
-    { label: 'Total Capacity', value: totalCapacity, icon: Users },
+    { label: 'Learners', value: totalLearners, icon: Users },
     { label: 'GPS Enabled', value: gpsEnabled, icon: Navigation },
   ];
 
