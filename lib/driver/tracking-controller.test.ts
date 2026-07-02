@@ -5,6 +5,7 @@ import {
   isSharing,
   PAUSE_AFTER_MS,
   OS_OFF_STREAK,
+  AUTO_STOP_AFTER_MS,
   type TrackingState,
 } from './tracking-controller';
 import { GEO_PERMISSION_DENIED, GEO_POSITION_UNAVAILABLE, GEO_TIMEOUT } from './geo';
@@ -122,10 +123,12 @@ describe('reduceTracking — heartbeat + visibility', () => {
   });
 
   it('hidden while live → paused; a later fix → live again', () => {
-    const hidden = run([{ type: 'start' }, { type: 'fix', atMs: 1000 }, { type: 'visibility', visible: false }]);
+    const hidden = run([{ type: 'start' }, { type: 'fix', atMs: 1000 }, { type: 'visibility', visible: false, atMs: 2000 }]);
     expect(hidden.status).toBe('paused');
-    const back = run([{ type: 'visibility', visible: true }, { type: 'fix', atMs: 9000 }], hidden);
+    expect(hidden.pausedSince).toBe(2000);
+    const back = run([{ type: 'visibility', visible: true, atMs: 3000 }, { type: 'fix', atMs: 9000 }], hidden);
     expect(back.status).toBe('live');
+    expect(back.pausedSince).toBeNull();
   });
 
   it('TIMEOUT while starting stays starting (still acquiring), not os_location_off', () => {
@@ -137,9 +140,71 @@ describe('reduceTracking — heartbeat + visibility', () => {
     const s = run([
       { type: 'start' },
       { type: 'geoError', code: GEO_PERMISSION_DENIED },
-      { type: 'visibility', visible: true },
+      { type: 'visibility', visible: true, atMs: 5000 },
       { type: 'tick', nowMs: 999999 },
     ]);
     expect(s.status).toBe('permission_denied');
+  });
+});
+
+describe('reduceTracking — 2h background auto-stop', () => {
+  it('screen off then a tick past the 2h window → stopped (warn banner)', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'visibility', visible: false, atMs: 2000 }, // screen off → paused @2000
+      { type: 'tick', nowMs: 2000 + AUTO_STOP_AFTER_MS }, // 2h later
+    ]);
+    expect(s.status).toBe('stopped');
+    expect(s.banner?.tone).toBe('warn');
+    expect(isSharing(s.status)).toBe(false);
+  });
+
+  it('screen returns after 2h paused → stopped even if no tick fired meanwhile', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'visibility', visible: false, atMs: 2000 }, // locked/pocketed → paused @2000
+      { type: 'visibility', visible: true, atMs: 2000 + AUTO_STOP_AFTER_MS + 1 }, // unlock 2h+ later
+    ]);
+    expect(s.status).toBe('stopped');
+  });
+
+  it('a paused stretch shorter than 2h stays paused and can resume', () => {
+    const paused = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'visibility', visible: false, atMs: 2000 },
+      { type: 'tick', nowMs: 2000 + AUTO_STOP_AFTER_MS - 1 }, // just under 2h
+    ]);
+    expect(paused.status).toBe('paused');
+    const live = run([{ type: 'fix', atMs: 2000 + AUTO_STOP_AFTER_MS }], paused);
+    expect(live.status).toBe('live');
+  });
+
+  it('re-hiding does not reset the paused clock (2h measured from first pause)', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'visibility', visible: false, atMs: 2000 }, // paused @2000
+      { type: 'visibility', visible: true, atMs: 100_000 }, // brief peek (well under 2h)
+      { type: 'visibility', visible: false, atMs: 100_500 }, // hidden again — clock NOT reset
+      { type: 'tick', nowMs: 2000 + AUTO_STOP_AFTER_MS }, // 2h from the ORIGINAL pause
+    ]);
+    expect(s.status).toBe('stopped');
+  });
+
+  it('signal-loss pause (no visibility event) also auto-stops after 2h via ticks', () => {
+    // Enter paused via the heartbeat stall, not a visibility change; pausedSince is
+    // stamped by the first tick of the paused stretch.
+    const paused = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'tick', nowMs: 1000 + PAUSE_AFTER_MS + 1 }, // stall → paused, pausedSince stamped
+    ]);
+    expect(paused.status).toBe('paused');
+    expect(paused.pausedSince).toBe(1000 + PAUSE_AFTER_MS + 1);
+    const stopped = run([{ type: 'tick', nowMs: paused.pausedSince! + AUTO_STOP_AFTER_MS }], paused);
+    expect(stopped.status).toBe('stopped');
   });
 });

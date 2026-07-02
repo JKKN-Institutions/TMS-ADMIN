@@ -30,6 +30,9 @@ export interface TrackingState {
   everFixed: boolean;
   /** Consecutive POSITION_UNAVAILABLE errors (reset by any fix). */
   unavailableStreak: number;
+  /** ms epoch when the CURRENT continuous paused stretch began (null unless paused).
+   *  Drives the 2-hour background auto-stop. Reset to null the moment we go live. */
+  pausedSince: number | null;
   banner: TrackingBanner | null;
 }
 
@@ -38,19 +41,30 @@ export type TrackingEvent =
   | { type: 'stop' }
   | { type: 'fix'; atMs: number }
   | { type: 'geoError'; code: number }
-  | { type: 'visibility'; visible: boolean }
+  | { type: 'visibility'; visible: boolean; atMs: number }
   | { type: 'tick'; nowMs: number };
 
 /** No fresh fix for this long while sharing → paused + loud banner. */
 export const PAUSE_AFTER_MS = 25_000;
 /** POSITION_UNAVAILABLE this many times with no fix ever → device location is likely OFF. */
 export const OS_OFF_STREAK = 3;
+/**
+ * A session left PAUSED (screen off / app backgrounded, so watchPosition is
+ * suspended) continuously for this long auto-stops. On the foreground-only web
+ * path a phone that's locked and pocketed would otherwise sit "paused" forever;
+ * after 2 hours we end the session so it doesn't linger as a stale broadcaster.
+ * Evaluated whenever a heartbeat tick fires OR the screen returns (both carry a
+ * real wall-clock time, so the window is measured correctly even though no timer
+ * runs while the screen is off).
+ */
+export const AUTO_STOP_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 export const initialTrackingState: TrackingState = {
   status: 'idle',
   lastFixAt: null,
   everFixed: false,
   unavailableStreak: 0,
+  pausedSince: null,
   banner: null,
 };
 
@@ -79,13 +93,18 @@ const pausedBanner = (reason: string): TrackingBanner => ({
   title: 'Tracking paused',
   body: `${reason} Keep this screen on and don't lock the phone while driving.`,
 });
+const AUTO_STOPPED: TrackingBanner = {
+  tone: 'warn',
+  title: 'Sharing stopped',
+  body: 'Location sharing was paused for 2 hours (screen off or app in the background), so it was turned off automatically. Tap Go On Duty to start sharing again.',
+};
 
 const isTerminal = (s: TrackingStatus) => s === 'permission_denied' || s === 'stopped' || s === 'idle';
 
 export function reduceTracking(state: TrackingState, event: TrackingEvent): TrackingState {
   // start/stop are always honoured, even from a terminal state.
   if (event.type === 'start') {
-    return { status: 'starting', lastFixAt: null, everFixed: false, unavailableStreak: 0, banner: ACQUIRING };
+    return { status: 'starting', lastFixAt: null, everFixed: false, unavailableStreak: 0, pausedSince: null, banner: ACQUIRING };
   }
   if (event.type === 'stop') {
     return { ...initialTrackingState, status: 'stopped' };
@@ -96,7 +115,8 @@ export function reduceTracking(state: TrackingState, event: TrackingEvent): Trac
 
   switch (event.type) {
     case 'fix':
-      return { status: 'live', lastFixAt: event.atMs, everFixed: true, unavailableStreak: 0, banner: null };
+      // A fresh fix means we're live again — clear the paused-since clock.
+      return { status: 'live', lastFixAt: event.atMs, everFixed: true, unavailableStreak: 0, pausedSince: null, banner: null };
 
     case 'geoError': {
       if (event.code === GEO_PERMISSION_DENIED) {
@@ -118,17 +138,39 @@ export function reduceTracking(state: TrackingState, event: TrackingEvent): Trac
 
     case 'visibility':
       if (!event.visible) {
-        return { ...state, status: 'paused', banner: pausedBanner('The screen went to the background.') };
+        // Screen off / app backgrounded → pause, and stamp WHEN the pause began
+        // (preserving an existing stamp so a re-hide doesn't reset the 2h clock)
+        // so the session can auto-stop if it stays backgrounded too long.
+        return {
+          ...state,
+          status: 'paused',
+          pausedSince: state.status === 'paused' ? state.pausedSince ?? event.atMs : event.atMs,
+          banner: pausedBanner('The screen went to the background.'),
+        };
       }
-      // Back to foreground: hold paused until the next fix flips us live.
+      // Back to foreground. If it was paused past the auto-stop window, end it now
+      // (this catches the phone-locked case where no tick could fire meanwhile).
+      if (state.status === 'paused' && state.pausedSince !== null && event.atMs - state.pausedSince >= AUTO_STOP_AFTER_MS) {
+        return { ...initialTrackingState, status: 'stopped', banner: AUTO_STOPPED };
+      }
+      // Otherwise hold paused until the next fix flips us live.
       return state.status === 'paused'
         ? { ...state, banner: { tone: 'info', title: 'Resuming…', body: 'Re-acquiring your location.' } }
         : state;
 
     case 'tick':
+      // A session paused (screen off / backgrounded) beyond the window auto-stops.
+      if (state.status === 'paused') {
+        const since = state.pausedSince ?? event.nowMs;
+        if (event.nowMs - since >= AUTO_STOP_AFTER_MS) {
+          return { ...initialTrackingState, status: 'stopped', banner: AUTO_STOPPED };
+        }
+        // First tick of a paused stretch (e.g. entered via signal-loss) stamps it.
+        return state.pausedSince === null ? { ...state, pausedSince: since } : state;
+      }
       if (state.status !== 'live') return state;
       if (state.lastFixAt !== null && event.nowMs - state.lastFixAt > PAUSE_AFTER_MS) {
-        return { ...state, status: 'paused', banner: pausedBanner('No GPS update recently.') };
+        return { ...state, status: 'paused', pausedSince: event.nowMs, banner: pausedBanner('No GPS update recently.') };
       }
       return state;
 

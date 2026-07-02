@@ -226,7 +226,7 @@ export default function DriverLocationPage() {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {isNativeApp()
               ? 'Location keeps sharing in the background while you are On Duty — you can lock the phone or switch apps. A notification shows while sharing.'
-              : 'Keep this page open with the screen on while driving. Sharing pauses if you switch apps or the screen locks — that’s a limitation of web browsers.'}
+              : 'Keep this page open with the screen on while driving. Sharing pauses if you switch apps or the screen locks — that’s a limitation of web browsers — and turns off automatically if it stays paused for 2 hours.'}
           </p>
         </div>
       </section>

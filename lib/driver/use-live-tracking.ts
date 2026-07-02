@@ -270,7 +270,9 @@ export function useLiveTracking(routeId: string | null) {
     if (!isSharing(state.status) || typeof document === 'undefined') return;
     const onVisible = () => {
       const visible = document.visibilityState === 'visible';
-      dispatch({ type: 'visibility', visible });
+      // atMs stamps WHEN the screen went off / came back, so the controller can
+      // measure the 2h background auto-stop window against real wall-clock time.
+      dispatch({ type: 'visibility', visible, atMs: Date.now() });
       if (visible) {
         void acquireWakeLock();
         if (isNativeApp() && !nativeWatchIdRef.current && !startingRef.current) {
@@ -286,6 +288,20 @@ export function useLiveTracking(routeId: string | null) {
   // status/banner as permission_denied so the driver still sees how to re-enable location.
   useEffect(() => {
     if (state.status === 'permission_denied') void teardown(true);
+  }, [state.status, teardown]);
+
+  // The controller can reach 'stopped' on its OWN — the 2h paused-in-background
+  // auto-stop — not just via the stop() callback. When it does, release capture
+  // resources + notify the server, mirroring stop(). teardown() leaves the banner
+  // untouched, so the "Sharing stopped" explanation stays on screen. (An explicit
+  // stop() already ran teardown before dispatching 'stop', clearing startedRef, so
+  // this guard makes the effect a no-op in that case — no double DELETE.)
+  useEffect(() => {
+    if (state.status === 'stopped' && startedRef.current) {
+      void teardown(true);
+      setFix(null);
+      setLastSentAt(null);
+    }
   }, [state.status, teardown]);
 
   // Stop + notify the server if the page unmounts while a session is actually running.
