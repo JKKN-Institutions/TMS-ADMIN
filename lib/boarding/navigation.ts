@@ -1,4 +1,4 @@
-import { LayoutDashboard, Route as RouteIcon, Users, ListChecks, ScanLine, MapPin, MessageCircle, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Route as RouteIcon, Users, ListChecks, ScanLine, MapPin, MessageCircle, Bell, type LucideIcon } from 'lucide-react';
 
 export interface BoardingNavItem {
   name: string;
@@ -16,6 +16,7 @@ export const boardingNavigation: BoardingNavItem[] = [
   { name: 'Attendance', href: '/boarding/attendance', icon: ListChecks },
   { name: 'Scan', href: '/boarding/scan', icon: ScanLine },
   { name: 'Grievances', href: '/boarding/grievances', icon: MessageCircle },
+  { name: 'Notifications', shortName: 'Alerts', href: '/boarding/notifications', icon: Bell },
 ];
 
 const TITLES: Record<string, string> = {
@@ -26,6 +27,7 @@ const TITLES: Record<string, string> = {
   '/boarding/attendance': 'Attendance',
   '/boarding/scan': 'Scan Boarding Pass',
   '/boarding/grievances': 'Grievances',
+  '/boarding/notifications': 'Notifications',
 };
 
 /** Page title for the header — handles the dynamic roster route too. */

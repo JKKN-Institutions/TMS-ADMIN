@@ -10,6 +10,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import { studentNavigation, deriveStudentPageTitle } from '@/lib/student/navigation';
 import StudentBottomNav from '@/components/student-bottom-nav';
+import NotificationBell from '@/components/notifications/notification-bell';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -240,6 +241,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
             >
               <Bell className="w-5 h-5" />
             </a>
+            <NotificationBell viewAllHref="/student/notifications" />
             <ThemeToggle />
             <ProfileMenu />
           </div>

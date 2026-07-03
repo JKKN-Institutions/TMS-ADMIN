@@ -1,25 +1,33 @@
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { dispatchNotification } from '@/lib/notifications/dispatch';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
 /**
- * Create an in-app notification targeted at a single auth profile. Best-effort —
- * never throws into the caller. Targeting uses profiles.id (the id the in-app
- * Notifications inbox filters on), so this works for any user: learner, driver,
- * boarding staff or admin.
+ * Thin best-effort wrappers over the TMS notification dispatch primitive, kept at
+ * their original signatures so existing automated writers (enrollment-requests,
+ * transport-grievances, bookings/send-reminders) need no change. They now target
+ * the TMS-owned tms_notification plane instead of MyJKKN's shared `notifications`
+ * table. Never throw into the caller.
+ */
+
+/**
+ * Create an in-app notification targeted at a single auth profile. Works for any
+ * user (learner, driver, boarding staff or admin) — targeting is by profiles.id,
+ * the id the in-app inbox filters on.
  */
 export async function notifyProfile(
   svc: Svc,
-  opts: { profileId: string; actorId: string; title: string; body: string; category?: string; url?: string }
+  opts: { profileId: string; actorId: string; title: string; body: string; category?: string; url?: string },
 ): Promise<void> {
   try {
-    await svc.from('notifications').insert({
+    await dispatchNotification(svc, {
       title: opts.title,
       body: opts.body,
-      created_by: opts.actorId,
-      category: opts.category ?? 'transport',
+      category: opts.category ?? 'general',
       url: opts.url ?? null,
-      targeting: { type: 'user', user_id: opts.profileId },
+      createdBy: opts.actorId,
+      targeting: { type: 'users', user_ids: [opts.profileId] },
     });
   } catch (e) {
     console.error('notifyProfile (non-fatal):', e);
@@ -33,7 +41,7 @@ export async function notifyProfile(
  */
 export async function notifyLearner(
   svc: Svc,
-  opts: { learnerId: string; actorId: string; title: string; body: string; category?: string; url?: string }
+  opts: { learnerId: string; actorId: string; title: string; body: string; category?: string; url?: string },
 ): Promise<void> {
   try {
     const { data: lp } = await svc

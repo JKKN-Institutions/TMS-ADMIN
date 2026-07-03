@@ -9,6 +9,7 @@ import { useAuth } from '@/providers/auth-provider';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import { boardingNavigation, deriveBoardingPageTitle } from '@/lib/boarding/navigation';
 import BoardingBottomNav from '@/components/boarding-bottom-nav';
+import NotificationBell from '@/components/notifications/notification-bell';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -262,6 +263,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            <NotificationBell viewAllHref="/boarding/notifications" />
             <ThemeToggle />
             <ProfileMenu />
           </div>

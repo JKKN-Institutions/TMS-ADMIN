@@ -1,4 +1,4 @@
-import { LayoutDashboard, Route, Users, MapPin, MessageCircle, User } from 'lucide-react';
+import { LayoutDashboard, Route, Users, MapPin, MessageCircle, User, Bell } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 export interface DriverNavItem {
@@ -18,6 +18,7 @@ export const driverNavigation: DriverNavItem[] = [
   { name: 'Passengers', shortName: 'Riders', href: '/driver/passengers', icon: Users },
   { name: 'Live Location', shortName: 'Live', href: '/driver/location', icon: MapPin },
   { name: 'Grievances', href: '/driver/grievances', icon: MessageCircle },
+  { name: 'Notifications', shortName: 'Alerts', href: '/driver/notifications', icon: Bell },
   { name: 'Profile', href: '/driver/profile', icon: User },
 ];
 

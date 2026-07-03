@@ -2,6 +2,6 @@
 
 import NotificationInbox from '@/components/notifications/notification-inbox';
 
-export default function StudentNotificationsPage() {
+export default function DriverNotificationsPage() {
   return <NotificationInbox />;
 }

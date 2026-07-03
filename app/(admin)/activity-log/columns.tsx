@@ -60,6 +60,7 @@ const MODULE_LABEL: Record<string, string> = {
   'grievances': 'Grievances',
   'settings': 'Settings',
   'fees': 'Fees',
+  'notifications': 'Notifications',
 };
 
 // Filter dropdown options for the DataTable — derived from the maps above so

@@ -76,6 +76,13 @@ export const TMS_PERMISSIONS = {
   FEES_EDIT: 'tms.fees.edit',
   FEES_DELETE: 'tms.fees.delete',
   FEES_GENERATE: 'tms.fees.generate',
+
+  // Transport notifications module. View = admin list/detail; Send = compose &
+  // broadcast; Manage = delete/expire. Consumers read their OWN inbox with no
+  // extra permission (own-row RLS on tms_notification_recipient).
+  NOTIFICATIONS_VIEW: 'tms.notifications.view',
+  NOTIFICATIONS_SEND: 'tms.notifications.send',
+  NOTIFICATIONS_MANAGE: 'tms.notifications.manage',
 } as const;
 
 export type TmsPermissionKey =

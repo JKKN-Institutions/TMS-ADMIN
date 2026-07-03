@@ -103,8 +103,17 @@ export async function proxy(request: NextRequest) {
   // 5. Area-based access gate (super admins bypass all areas). Each area (admin /
   //    student / driver / boarding) requires its own permission; a user lacking it
   //    is sent to their OWN area's home rather than a dead-end 403.
+  //
+  //    Exception: the shared notification inbox/bell APIs are cross-portal — every
+  //    portal (admin/student/driver/boarding) fetches the SAME /api/notifications
+  //    endpoints, which return only the caller's OWN rows (withAuth + user_id filter
+  //    + own-row RLS). resolveArea() would classify them as `admin` and 403 every
+  //    non-admin, so any authenticated TMS user may call them regardless of area.
+  const AREA_EXEMPT_APIS = ['/api/notifications'];
+  const areaExempt = AREA_EXEMPT_APIS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+
   const area = resolveArea(pathname);
-  if (!profile.is_super_admin) {
+  if (!profile.is_super_admin && !areaExempt) {
     const { data: hasAccess } = await supabase.rpc('user_has_permission', {
       permission_name: AREA_PERMISSION[area],
     });

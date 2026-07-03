@@ -10,6 +10,7 @@ import { Toaster } from 'react-hot-toast';
 import { ThemeToggle, ProfileMenu } from '@/components/portal-user-menu';
 import DriverBottomNav from '@/components/driver-bottom-nav';
 import DriverPwa from '@/components/driver/pwa';
+import NotificationBell from '@/components/notifications/notification-bell';
 
 export default function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
@@ -136,6 +137,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            <NotificationBell viewAllHref="/driver/notifications" />
             <ThemeToggle />
             <ProfileMenu />
           </div>

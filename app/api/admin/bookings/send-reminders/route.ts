@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { bookableDates } from '@/lib/booking/window';
+import { dispatchNotification } from '@/lib/notifications/dispatch';
 
 /**
  * Insert an in-app reminder for every transport learner who has NO booking for
@@ -44,38 +45,44 @@ async function sendReminders(_request: NextRequest, auth: AuthContext) {
       .eq('travel_date', date);
     const bookedIds = new Set<string>(((booked ?? []) as { learner_id: string }[]).map((b) => b.learner_id));
 
-    // Who already got tomorrow's reminder (avoid dupes).
-    const { data: existing } = await svc
-      .from('notifications')
-      .select('targeting')
-      .eq('category', 'transport_booking')
+    // Who already got tomorrow's reminder (avoid dupes) — recipients of this date's
+    // reminder notification(s) on the TMS notification plane.
+    const { data: priorNotifs } = await svc
+      .from('tms_notification')
+      .select('id')
+      .eq('category', 'booking')
       .eq('url', urlMarker);
-    const notifiedProfiles = new Set<string>(
-      ((existing ?? []) as { targeting: { user_id?: string } | null }[])
-        .map((n) => n.targeting?.user_id)
-        .filter((v): v is string => !!v)
-    );
+    const priorIds = ((priorNotifs ?? []) as { id: string }[]).map((n) => n.id);
+    const notifiedProfiles = new Set<string>();
+    if (priorIds.length) {
+      const { data: recs } = await svc
+        .from('tms_notification_recipient')
+        .select('user_id')
+        .in('notification_id', priorIds);
+      for (const r of (recs ?? []) as { user_id: string }[]) notifiedProfiles.add(r.user_id);
+    }
 
-    const toInsert = all
+    const targetProfiles = all
       .filter((l) => !bookedIds.has(l.id) && l.profile_id && !notifiedProfiles.has(l.profile_id))
-      .map((l) => ({
-        title: 'Book tomorrow\'s bus',
+      .map((l) => l.profile_id as string);
+
+    if (targetProfiles.length === 0) return NextResponse.json({ success: true, data: { date, reminded: 0 } });
+
+    try {
+      const dispatched = await dispatchNotification(svc, {
+        title: "Book tomorrow's bus",
         body: `Booking for ${date} closes at 6 PM today. Tap to reserve your seat.`,
-        category: 'transport_booking',
+        category: 'booking',
         priority: 'normal',
         url: urlMarker,
-        targeting: { type: 'user', user_id: l.profile_id },
-        created_by: auth.userId,
-      }));
-
-    if (toInsert.length === 0) return NextResponse.json({ success: true, data: { date, reminded: 0 } });
-
-    const ins = await svc.from('notifications').insert(toInsert);
-    if (ins.error) {
-      console.error('admin/bookings/send-reminders insert error:', ins.error);
+        createdBy: auth.userId,
+        targeting: { type: 'users', user_ids: targetProfiles },
+      });
+      return NextResponse.json({ success: true, data: { date, reminded: dispatched.recipientCount } });
+    } catch (e) {
+      console.error('admin/bookings/send-reminders dispatch error:', e);
       return NextResponse.json({ error: 'Failed to insert reminders' }, { status: 500 });
     }
-    return NextResponse.json({ success: true, data: { date, reminded: toInsert.length } });
   } catch (e) {
     console.error('admin/bookings/send-reminders error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

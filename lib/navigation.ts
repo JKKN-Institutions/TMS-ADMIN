@@ -63,17 +63,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
   { name: 'Fees', href: '/fees', icon: Receipt, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
   { name: 'Bill Management', href: '/bill-management', icon: Wallet, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
-  {
-    name: 'Notifications',
-    href: '/notifications',
-    icon: Bell,
-    permission: TMS_PERMISSIONS.SETTINGS_VIEW,
-    group: 'services',
-    subItems: [
-      { name: 'All Notifications', href: '/notifications', icon: Bell },
-      { name: 'Push Notifications', href: '/notifications/push', icon: Bell },
-    ],
-  },
+  { name: 'Notifications', href: '/notifications', icon: Bell, permission: TMS_PERMISSIONS.NOTIFICATIONS_VIEW, group: 'services' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
   { name: 'Activity Log', href: '/activity-log', icon: History, permission: TMS_PERMISSIONS.ACTIVITY_VIEW, group: 'system' },
 ];

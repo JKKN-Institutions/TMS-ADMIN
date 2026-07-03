@@ -13,7 +13,7 @@ import {
 import toast from 'react-hot-toast';
 import { useAuth } from '@/providers/auth-provider';
 import { useTheme, type Theme } from '@/components/theme-provider';
-import NotificationCenter from '@/components/notification-center';
+import NotificationBell from '@/components/notifications/notification-bell';
 
 interface AdminHeaderProps {
   title: string;
@@ -187,7 +187,7 @@ export default function AdminHeader({ title, collapsed, onToggleCollapse }: Admi
       </div>
 
       <div className="flex items-center gap-1 sm:gap-2">
-        <NotificationCenter />
+        <NotificationBell />
         <ThemeToggle />
         <ProfileMenu />
       </div>
