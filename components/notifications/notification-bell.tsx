@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, CheckCheck } from 'lucide-react';
 import { useTmsNotifications, type TmsNotificationItem } from '@/hooks/use-tms-notifications';
+import PushToggle from '@/components/pwa/push-toggle';
 
 /**
  * Portal-agnostic notification bell for the TMS notification module. Shows an unread
@@ -117,6 +118,8 @@ export default function NotificationBell({ viewAllHref }: { viewAllHref?: string
               ))
             )}
           </div>
+
+          <PushToggle variant="bell" />
 
           {viewAllHref && (
             <a

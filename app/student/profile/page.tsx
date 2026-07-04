@@ -4,6 +4,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { Mail, GraduationCap, Hash, Bus, CircleCheck, AlertTriangle } from 'lucide-react';
 import { useMe } from '@/lib/student/use-me';
 import { cn } from '@/lib/utils';
+import PushToggle from '@/components/pwa/push-toggle';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2) || '?';
@@ -145,6 +146,9 @@ export default function StudentProfilePage() {
             <Field label="Mobile" value={me.mobile ?? '—'} />
             <Field label="Roll number" value={me.rollNumber ?? '—'} />
             <Field label="Register number" value={me.registerNumber ?? '—'} />
+          </div>
+          <div className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800">
+            <PushToggle />
           </div>
         </InfoCard>
 

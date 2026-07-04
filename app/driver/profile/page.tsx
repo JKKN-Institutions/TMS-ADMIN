@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Mail, Phone, MapPin, Route as RouteIcon } from 'lucide-react';
 import { Spinner, NoticeCard, Section } from '@/components/driver/ui';
+import PushToggle from '@/components/pwa/push-toggle';
 
 interface DriverProfile {
   name: string | null;
@@ -110,6 +111,9 @@ export default function DriverProfilePage() {
           <Field label="Rating" value={me.rating != null ? String(me.rating) : '—'} />
           <Field label="Total trips" value={me.totalTrips != null ? String(me.totalTrips) : '—'} />
           <Field label="Address" value={me.address ?? '—'} />
+        </div>
+        <div className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800">
+          <PushToggle />
         </div>
       </Section>
 
