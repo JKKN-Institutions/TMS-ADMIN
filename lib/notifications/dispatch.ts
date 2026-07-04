@@ -1,5 +1,7 @@
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { resolveTargeting, type Targeting } from '@/lib/notifications/audience';
+import { after } from 'next/server';
+import { sendPushToUsers } from '@/lib/notifications/push';
 
 /**
  * The single fan-out primitive for the TMS notification module. Used by BOTH the
@@ -81,6 +83,23 @@ export async function dispatchNotification(svc: Svc, input: DispatchInput): Prom
       .from('tms_notification_recipient')
       .upsert(rows, { onConflict: 'notification_id,user_id', ignoreDuplicates: true });
     if (fanErr) throw new Error(`dispatch: fan-out failed: ${fanErr.message}`);
+  }
+
+  // Best-effort device push AFTER the HTTP response (never blocks the send). If we're
+  // somehow outside a request scope (after() throws), fall back to fire-and-forget.
+  const push = () =>
+    sendPushToUsers(svc, userIds, {
+      title: input.title,
+      body: input.body,
+      url: input.url ?? '/',
+      icon: input.icon ?? '/icons/icon-192.png',
+      tag: notificationId,
+      priority: input.priority ?? 'normal',
+    });
+  try {
+    after(push);
+  } catch {
+    void push();
   }
 
   return { id: notificationId, recipientCount: userIds.length };
