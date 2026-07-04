@@ -104,3 +104,40 @@ async function staleWhileRevalidate(request) {
     .catch(() => undefined);
   return cached || (await network) || Response.error();
 }
+
+// ── Web push (Phase 2) ───────────────────────────────────────────────────────
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let data = {};
+  try {
+    data = event.data.json();
+  } catch {
+    data = { title: 'JKKN TMS', body: event.data.text() };
+  }
+  const title = data.title || 'JKKN TMS';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || '',
+      icon: data.icon || '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: data.tag || undefined,
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          if ('navigate' in client) client.navigate(url).catch(() => {});
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
+});
