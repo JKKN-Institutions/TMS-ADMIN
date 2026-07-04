@@ -42,12 +42,21 @@ export async function subscribeToPush(): Promise<PushState> {
     }));
 
   const json = sub.toJSON();
-  await fetch('/api/notifications/push/subscribe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ endpoint: sub.endpoint, keys: json.keys, userAgent: navigator.userAgent }),
-  });
+  try {
+    const res = await fetch('/api/notifications/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ endpoint: sub.endpoint, keys: json.keys, userAgent: navigator.userAgent }),
+    });
+    if (!res.ok) throw new Error(`subscribe persist failed: HTTP ${res.status}`);
+  } catch (e) {
+    // Server didn't persist — roll back the browser subscription we just created so
+    // the UI state stays honest (neither browser nor server has it; retry re-creates both).
+    console.error('subscribeToPush: persist failed, rolling back', e);
+    if (!existing) await sub.unsubscribe().catch(() => undefined);
+    return Notification.permission === 'denied' ? 'denied' : 'default';
+  }
   return 'subscribed';
 }
 
@@ -58,12 +67,16 @@ export async function unsubscribeFromPush(): Promise<PushState> {
   if (sub) {
     const endpoint = sub.endpoint;
     await sub.unsubscribe().catch(() => undefined);
-    await fetch('/api/notifications/push/unsubscribe', {
+    const res = await fetch('/api/notifications/push/unsubscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify({ endpoint }),
     });
+    if (!res.ok) {
+      // Stale server row will be pruned on the next 410 from a push send attempt; not fatal.
+      console.error(`unsubscribeFromPush: persist failed, HTTP ${res.status}`);
+    }
   }
   return Notification.permission === 'denied' ? 'denied' : 'default';
 }
