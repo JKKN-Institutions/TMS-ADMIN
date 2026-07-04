@@ -19,11 +19,10 @@ const PUBLIC_PATH_PREFIXES = [
   '/_next/',
   '/api/auth/',
   '/favicon',
-  '/manifest',
-  '/sw.',
-  '/sw-driver.js', // driver PWA service worker — registerable before auth
+  '/manifest', // covers /manifest.webmanifest (unified PWA manifest)
+  '/sw.', // covers /sw.js (unified service worker)
   '/icons/',
-  '/driver.webmanifest', // driver PWA manifest — exact; NOT '/driver.' so the '/driver/' portal stays gated
+  '/offline.html', // PWA offline fallback — fetchable before auth
 ];
 
 export async function proxy(request: NextRequest) {

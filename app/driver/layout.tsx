@@ -9,7 +9,6 @@ import { driverNavigation, deriveDriverPageTitle } from '@/lib/driver/navigation
 import { Toaster } from 'react-hot-toast';
 import { ThemeToggle, ProfileMenu } from '@/components/portal-user-menu';
 import DriverBottomNav from '@/components/driver-bottom-nav';
-import DriverPwa from '@/components/driver/pwa';
 import NotificationBell from '@/components/notifications/notification-bell';
 
 export default function DriverLayout({ children }: { children: React.ReactNode }) {
@@ -148,7 +147,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
 
       {/* Mobile-only bottom navigation (replaces the sidebar on < lg). */}
       <DriverBottomNav />
-      <DriverPwa />
+      {/* PWA install/SW registration is now unified at the root layout (PwaProvider). */}
 
       <Toaster
         position="top-right"

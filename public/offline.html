@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#16a34a" />
+    <title>You're offline — JKKN TMS</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        display: flex; align-items: center; justify-content: center;
+        padding: 24px; text-align: center;
+        background: #f3f4f6; color: #111827;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0b0f0a; color: #e5e7eb; }
+        .card { background: #111827; border-color: #1f2937; }
+        .muted { color: #9ca3af; }
+      }
+      .card {
+        max-width: 22rem; width: 100%;
+        background: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px;
+        padding: 32px 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      }
+      .logo {
+        width: 56px; height: 56px; margin: 0 auto 16px;
+        background: #16a34a; border-radius: 14px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .logo svg { width: 32px; height: 32px; color: #fff; }
+      h1 { font-size: 1.25rem; margin: 0 0 8px; }
+      .muted { color: #6b7280; font-size: 0.95rem; line-height: 1.5; margin: 0 0 24px; }
+      button {
+        appearance: none; border: 0; cursor: pointer;
+        background: #16a34a; color: #fff;
+        font-size: 0.95rem; font-weight: 600;
+        padding: 12px 20px; border-radius: 10px; width: 100%;
+      }
+      button:hover { background: #15803d; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">
+        <!-- Simple bus glyph -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 6v6M15 6v6M2 12h19.6M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3" />
+          <circle cx="7" cy="18" r="2" /><path d="M9 18h5" /><circle cx="16" cy="18" r="2" />
+        </svg>
+      </div>
+      <h1>You're offline</h1>
+      <p class="muted">JKKN TMS can't reach the network right now. Check your connection and try again.</p>
+      <button type="button" onclick="location.reload()">Retry</button>
+    </div>
+  </body>
+</html>
