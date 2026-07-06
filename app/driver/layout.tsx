@@ -10,6 +10,7 @@ import { Toaster } from 'react-hot-toast';
 import { ThemeToggle, ProfileMenu } from '@/components/portal-user-menu';
 import DriverBottomNav from '@/components/driver-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
+import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
 
 export default function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
@@ -56,6 +57,7 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
   const pageTitle = deriveDriverPageTitle(pathname);
 
   return (
+    <BugReporterWrapper>
     <div className="min-h-screen bg-gray-100 overflow-x-hidden">
       <div className={`sidebar-modern ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
@@ -159,5 +161,6 @@ export default function DriverLayout({ children }: { children: React.ReactNode }
         }}
       />
     </div>
+    </BugReporterWrapper>
   );
 }

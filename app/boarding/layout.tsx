@@ -10,6 +10,7 @@ import { useTheme, type Theme } from '@/components/theme-provider';
 import { boardingNavigation, deriveBoardingPageTitle } from '@/lib/boarding/navigation';
 import BoardingBottomNav from '@/components/boarding-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
+import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -191,6 +192,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   const pageTitle = deriveBoardingPageTitle(pathname);
 
   return (
+    <BugReporterWrapper>
     <div className="min-h-screen bg-gray-100 overflow-x-hidden">
       {/* Sidebar (desktop; hidden < lg, where the bottom nav takes over) */}
       <div className={`sidebar-modern ${collapsed ? 'collapsed' : ''}`}>
@@ -275,5 +277,6 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
       {/* Mobile-only bottom navigation (replaces the sidebar < lg). */}
       <BoardingBottomNav />
     </div>
+    </BugReporterWrapper>
   );
 }

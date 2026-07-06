@@ -11,6 +11,7 @@ import { useTheme, type Theme } from '@/components/theme-provider';
 import { studentNavigation, deriveStudentPageTitle } from '@/lib/student/navigation';
 import StudentBottomNav from '@/components/student-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
+import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -151,6 +152,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const pageTitle = deriveStudentPageTitle(pathname);
 
   return (
+    <BugReporterWrapper>
     <div className="min-h-screen bg-gray-100 overflow-x-hidden">
       <div className={`sidebar-modern ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
@@ -253,5 +255,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       {/* Mobile-only bottom navigation (replaces the slide-in drawer on < lg). */}
       <StudentBottomNav />
     </div>
+    </BugReporterWrapper>
   );
 }

@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { X, Bus, Search, Power } from 'lucide-react';
+import { X, Bus, Search, Power, Bug } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
 import AdminHeader from '@/components/admin-header';
 import BottomNav from '@/components/bottom-nav';
+import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
 import {
   Tooltip,
   TooltipTrigger,
@@ -86,6 +87,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const pageTitle = derivePageTitle(pathname);
 
   return (
+    <BugReporterWrapper>
     <ErrorBoundary>
       <TooltipProvider delayDuration={0}>
       <div className="min-h-screen bg-gray-100">
@@ -192,6 +194,18 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           </div>
 
           <div className="sidebar-user">
+            {process.env.NEXT_PUBLIC_BUG_REPORTER_API_URL && (
+              <a
+                href={process.env.NEXT_PUBLIC_BUG_REPORTER_API_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary w-full mb-2"
+                title="Open the Bug Reports dashboard (new tab)"
+              >
+                <Bug className="w-4 h-4 mr-2" />
+                <span className="sidebar-label">Bug Reports</span>
+              </a>
+            )}
             <button
               onClick={handleLogout}
               className="btn-secondary w-full text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -248,6 +262,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       />
       </TooltipProvider>
     </ErrorBoundary>
+    </BugReporterWrapper>
   );
 };
 
