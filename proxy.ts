@@ -108,7 +108,12 @@ export async function proxy(request: NextRequest) {
   //    endpoints, which return only the caller's OWN rows (withAuth + user_id filter
   //    + own-row RLS). resolveArea() would classify them as `admin` and 403 every
   //    non-admin, so any authenticated TMS user may call them regardless of area.
-  const AREA_EXEMPT_APIS = ['/api/notifications'];
+  // '/api/v1/public' is the same-origin relay the in-app Bug Reporter widget
+  // POSTs to from EVERY portal; it forwards to the external platform server-side
+  // (avoiding the platform's CORS). Like the notification APIs it is cross-portal,
+  // so exempt it from the area gate — it still requires an authenticated, active
+  // user (steps 1–4 above), so it isn't open to anonymous callers.
+  const AREA_EXEMPT_APIS = ['/api/notifications', '/api/v1/public'];
   const areaExempt = AREA_EXEMPT_APIS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
   const area = resolveArea(pathname);

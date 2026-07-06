@@ -1,30 +1,32 @@
 'use client';
 
 import { BugReporterProvider } from '@boobalan_jkkn/bug-reporter-sdk';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/providers/auth-provider';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JKKN Bug Reporter (Bug Boundary) wrapper.
 //
 // Rendered inside each portal layout's AUTHENTICATED return (admin/student/
-// driver/boarding), so the floating widget only mounts for signed-in users —
-// never on /auth/login. One provider per portal is safe: the four layouts are
-// mutually exclusive by route, so a user is only ever inside one at a time.
+// driver/boarding), so the floating widget only mounts for signed-in users.
 //
-// User context is fed from the app's existing AuthProvider (useAuth) rather than
-// a second supabase.auth subscription — the auth-provider deliberately keeps a
-// single auth-state listener to avoid cross-tab auth-lock contention, so we reuse
-// its source of truth instead of opening a competing one.
+// CORS: the SDK POSTs bug reports straight from the BROWSER. Pointed at the
+// external platform that would be a cross-origin request, which the platform's
+// CORS blocks. So we point the SDK's apiUrl at OUR OWN origin — its calls to
+// /api/v1/public/* then stay same-origin and hit our relay
+// (app/api/v1/public/[...path]/route.ts), which forwards to the real platform
+// server-side (no CORS between servers). window is client-only, so we resolve
+// the origin after mount.
 //
-// Self-disabling: if the env keys aren't configured it renders children only, so
-// a missing key can never break a portal.
+// User context comes from the app's existing AuthProvider (useAuth), not a second
+// supabase.auth subscription — the auth-provider keeps a single auth-state
+// listener to avoid cross-tab auth-lock contention.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// The SDK's network capture (on by default in v1.3+) buffers recent requests and
-// ships them WITH each bug report to the external platform. Requests to Supabase
-// carry the signed-in user's live JWT in the Authorization header, so we exclude
-// the Supabase host from capture to keep auth tokens out of bug reports. App-owned
-// /api/* calls stay captured (same-origin, useful for triage, stay inside JKKN).
+// The SDK's network capture (on by default in v1.3+) ships recent requests WITH
+// each report. Requests to Supabase carry the user's live JWT in the
+// Authorization header, so exclude the Supabase host from capture. App /api/*
+// calls stay captured (same-origin, useful, stay inside JKKN).
 const supabaseHost = (() => {
   try {
     return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').host || null;
@@ -37,19 +39,27 @@ const NETWORK_EXCLUDE: RegExp[] | undefined = supabaseHost
   ? [new RegExp(supabaseHost.replace(/[.]/g, '\\.'), 'i')]
   : undefined;
 
+const API_KEY = process.env.NEXT_PUBLIC_BUG_REPORTER_API_KEY;
+const PLATFORM_URL = process.env.NEXT_PUBLIC_BUG_REPORTER_API_URL;
+
+// The platform is "configured" only once the real URL is set (not missing and not
+// the shipped placeholder). Until then we render nothing rather than a widget that
+// would fail on submit.
+const CONFIGURED = !!API_KEY && !!PLATFORM_URL && !PLATFORM_URL.includes('your-platform.com');
+
 export function BugReporterWrapper({ children }: { children: React.ReactNode }) {
   const { user, profile } = useAuth();
 
-  const apiKey = process.env.NEXT_PUBLIC_BUG_REPORTER_API_KEY;
-  const apiUrl = process.env.NEXT_PUBLIC_BUG_REPORTER_API_URL;
+  // Point the SDK at our own origin so its browser calls hit the same-origin relay.
+  const [origin, setOrigin] = useState<string | null>(null);
+  useEffect(() => setOrigin(window.location.origin), []);
 
-  // Not configured → transparent passthrough (no floating button, no crash).
-  if (!apiKey || !apiUrl) return <>{children}</>;
+  if (!CONFIGURED || !origin) return <>{children}</>;
 
   return (
     <BugReporterProvider
-      apiKey={apiKey}
-      apiUrl={apiUrl}
+      apiKey={API_KEY as string}
+      apiUrl={origin}
       enabled
       debug={process.env.NODE_ENV === 'development'}
       networkExcludePatterns={NETWORK_EXCLUDE}

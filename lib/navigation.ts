@@ -20,6 +20,7 @@ import {
   History,
   Receipt,
   Wallet,
+  Bug,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -66,6 +67,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Notifications', href: '/notifications', icon: Bell, permission: TMS_PERMISSIONS.NOTIFICATIONS_VIEW, group: 'services' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
   { name: 'Activity Log', href: '/activity-log', icon: History, permission: TMS_PERMISSIONS.ACTIVITY_VIEW, group: 'system' },
+  { name: 'Bug Reports', href: '/bug-reports', icon: Bug, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },
 ];
 
 export const GROUP_TITLES: Record<NavGroup, string> = {
