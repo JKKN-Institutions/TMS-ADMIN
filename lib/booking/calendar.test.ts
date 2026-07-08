@@ -54,7 +54,7 @@ describe('booking-window overrides', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, window: { enabled: false, deadline: null, capacityOverride: null }, now: NOW2 })).toBe('closed');
   });
   it('an earlier custom deadline can close a date before the default cutoff', () => {
-    // default cutoff for 06-23 is 18:00 IST on 06-22; a deadline already in the past => closed
+    // default cutoff for 06-23 is 20:00 IST on 06-22; a deadline already in the past => closed
     expect(effectiveOpen('2026-06-23', { window: { enabled: true, deadline: '2026-06-22T00:00:00Z', capacityOverride: null }, now: NOW2 })).toBe(false);
   });
   it('a later custom deadline keeps a date open past the default', () => {

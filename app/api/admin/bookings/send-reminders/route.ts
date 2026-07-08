@@ -8,7 +8,7 @@ import { dispatchNotification } from '@/lib/notifications/dispatch';
 /**
  * Insert an in-app reminder for every transport learner who has NO booking for
  * tomorrow yet. Callable manually now; wire to a scheduler / pg_cron later so it
- * fires before the 18:00 IST cutoff. Idempotent per (learner, date) via the url
+ * fires before the 20:00 IST cutoff. Idempotent per (learner, date) via the url
  * marker so re-running the same day doesn't duplicate.
  */
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -71,7 +71,7 @@ async function sendReminders(_request: NextRequest, auth: AuthContext) {
     try {
       const dispatched = await dispatchNotification(svc, {
         title: "Book tomorrow's bus",
-        body: `Booking for ${date} closes at 6 PM today. Tap to reserve your seat.`,
+        body: `Booking for ${date} closes at 8 PM today. Tap to reserve your seat.`,
         category: 'booking',
         priority: 'normal',
         url: urlMarker,

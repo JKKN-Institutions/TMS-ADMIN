@@ -124,7 +124,7 @@ export default function StudentBookingsPage() {
 
           <div className="space-y-2.5 rounded-2xl border border-gray-200 bg-white p-4 text-xs text-muted-foreground shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <Hint icon={<Clock className="h-4 w-4 text-blue-500" />}>
-              Booking closes at <span className="font-medium text-foreground">6 PM the day before</span> travel.
+              Booking closes at <span className="font-medium text-foreground">8 PM the day before</span> travel.
             </Hint>
             <Hint icon={<CalendarOff className="h-4 w-4 text-slate-400" />}>
               <span className="font-medium text-foreground">Sundays are a weekly holiday</span> — no bus service, so they can&apos;t be booked.
@@ -162,7 +162,7 @@ export default function StudentBookingsPage() {
         description={
           confirm
             ? confirm.action === 'cancel'
-              ? (<>Release your seat for <strong>{formatLong(confirm.date)}</strong>? You can rebook before 6&nbsp;PM the day before travel.</>)
+              ? (<>Release your seat for <strong>{formatLong(confirm.date)}</strong>? You can rebook before 8&nbsp;PM the day before travel.</>)
               : (<>Reserve a seat for <strong>{formatLong(confirm.date)}</strong>? This covers both trips that day{data?.routeLabel ? <> on <strong>{data.routeLabel}</strong></> : null}.</>)
             : null
         }
@@ -216,7 +216,7 @@ function CalendarSkeleton() {
       </div>
       <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
         {Array.from({ length: 42 }).map((_, i) => (
-          <div key={i} className="aspect-square min-h-[44px] animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />
+          <div key={i} className="aspect-square min-h-[44px] min-w-0 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />
         ))}
       </div>
     </div>

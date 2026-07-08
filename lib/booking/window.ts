@@ -4,7 +4,7 @@
  * timezone library, fully unit-testable. All `travelDate` values are 'YYYY-MM-DD'.
  */
 const IST_OFFSET_MIN = 5 * 60 + 30; // +05:30
-const CUTOFF_HOUR_IST = 18; // 18:00 IST on the prior day
+const CUTOFF_HOUR_IST = 20; // 20:00 IST on the prior day
 export const MAX_BOOKING_HORIZON_DAYS = 92; // tomorrow .. +92 (current month + ~2 ahead)
 
 export type DayStatus = 'not_booked' | 'booked' | 'locked' | 'closed';
@@ -21,8 +21,8 @@ export function addDays(dateStr: string, days: number): string {
 }
 
 /**
- * The booking cutoff instant for a travel date = 18:00 IST on the prior day.
- * travelDate 00:00 IST in UTC = Date.UTC(...) - 5:30h; minus 6h => prior 18:00 IST.
+ * The booking cutoff instant for a travel date = 20:00 IST on the prior day.
+ * travelDate 00:00 IST in UTC = Date.UTC(...) - 5:30h; minus 4h => prior 20:00 IST.
  */
 export function cutoffFor(travelDate: string): Date {
   const [y, m, d] = travelDate.split('-').map(Number);
@@ -48,7 +48,7 @@ export function isSunday(travelDate: string): boolean {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 0;
 }
 
-/** Within the rolling horizon AND before the 18:00-prior cutoff (ignores the weekly-off rule). */
+/** Within the rolling horizon AND before the 20:00-prior cutoff (ignores the weekly-off rule). */
 function withinBookingWindow(travelDate: string, now: Date): boolean {
   if (!bookableDates(now).includes(travelDate)) return false;
   return now.getTime() < cutoffFor(travelDate).getTime();

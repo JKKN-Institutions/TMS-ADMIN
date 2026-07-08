@@ -30,8 +30,8 @@ describe('addDays', () => {
 });
 
 describe('cutoffFor', () => {
-  it('is 18:00 IST on the prior day (== 12:30 UTC)', () => {
-    expect(cutoffFor('2026-06-22').toISOString()).toBe('2026-06-21T12:30:00.000Z');
+  it('is 20:00 IST on the prior day (== 14:30 UTC)', () => {
+    expect(cutoffFor('2026-06-22').toISOString()).toBe('2026-06-21T14:30:00.000Z');
   });
 });
 
@@ -46,10 +46,10 @@ describe('bookableDates', () => {
 
 describe('isBookingOpen', () => {
   it('is open just before the cutoff', () => {
-    expect(isBookingOpen('2026-06-22', new Date('2026-06-21T12:29:00Z'))).toBe(true);
+    expect(isBookingOpen('2026-06-22', new Date('2026-06-21T14:29:00Z'))).toBe(true);
   });
   it('is closed just after the cutoff', () => {
-    expect(isBookingOpen('2026-06-22', new Date('2026-06-21T12:31:00Z'))).toBe(false);
+    expect(isBookingOpen('2026-06-22', new Date('2026-06-21T14:31:00Z'))).toBe(false);
   });
   it('allows a date later this month (no longer capped at 7 days)', () => {
     // 2026-06-29 is a Monday (weekdays only — see the Sunday tests below)
@@ -80,8 +80,8 @@ describe('isSunday', () => {
 
 describe('isCancelable', () => {
   it('mirrors the booking window on weekdays', () => {
-    expect(isCancelable('2026-06-22', new Date('2026-06-21T12:29:00Z'))).toBe(true);
-    expect(isCancelable('2026-06-22', new Date('2026-06-21T12:31:00Z'))).toBe(false);
+    expect(isCancelable('2026-06-22', new Date('2026-06-21T14:29:00Z'))).toBe(true);
+    expect(isCancelable('2026-06-22', new Date('2026-06-21T14:31:00Z'))).toBe(false);
   });
   it('still allows cancelling a Sunday (legacy bookings) within the window', () => {
     // booking is blocked on Sundays, but a pre-existing one must remain cancelable
@@ -91,8 +91,8 @@ describe('isCancelable', () => {
 });
 
 describe('dayStatus', () => {
-  const before = new Date('2026-06-21T12:29:00Z'); // before 2026-06-22 cutoff
-  const after = new Date('2026-06-21T12:31:00Z');  // after  2026-06-22 cutoff
+  const before = new Date('2026-06-21T14:29:00Z'); // before 2026-06-22 cutoff
+  const after = new Date('2026-06-21T14:31:00Z');  // after  2026-06-22 cutoff
   it('booked + open => booked', () => expect(dayStatus(true, '2026-06-22', before)).toBe('booked'));
   it('booked + closed => locked', () => expect(dayStatus(true, '2026-06-22', after)).toBe('locked'));
   it('no booking + open => not_booked', () => expect(dayStatus(false, '2026-06-22', before)).toBe('not_booked'));

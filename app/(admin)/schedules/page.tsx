@@ -181,7 +181,7 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
       </div>
       {routeId && (
         <div className={card}>
-          {(data ?? []).length === 0 ? <p className="text-sm text-gray-500">No overrides for this route — the default 6 PM-day-before rule applies.</p> : (
+          {(data ?? []).length === 0 ? <p className="text-sm text-gray-500">No overrides for this route — the default 8 PM-day-before rule applies.</p> : (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800">
               {(data ?? []).map((w) => (
                 <li key={w.id} className="flex items-center justify-between py-2 text-sm">
