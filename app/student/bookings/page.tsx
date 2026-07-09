@@ -3,11 +3,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Bus, MapPin, CalendarCheck, Clock, CalendarOff, AlertCircle } from 'lucide-react';
+import { Bus, MapPin, CalendarCheck, Clock, CalendarOff, CalendarRange, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BookingCalendar, type DayCell } from '@/components/booking/booking-calendar';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { addMonth, istMonth } from '@/lib/booking/month';
+import { bookableDates } from '@/lib/booking/window';
 
 interface MonthResp {
   routeLabel: string | null;
@@ -66,6 +67,13 @@ export default function StudentBookingsPage() {
     return m;
   }, [data]);
 
+  // Booking is limited to the current service week, so the calendar's Next arrow
+  // stops once the furthest bookable month is in view.
+  const maxMonth = useMemo(() => {
+    const ds = bookableDates();
+    return (ds.length ? ds[ds.length - 1] : istMonth()).slice(0, 7);
+  }, []);
+
   const bookedThisMonth = useMemo(
     () => (data?.cells ?? []).filter((c) => c.status === 'booked' || c.status === 'locked').length,
     [data]
@@ -123,6 +131,9 @@ export default function StudentBookingsPage() {
           </div>
 
           <div className="space-y-2.5 rounded-2xl border border-gray-200 bg-white p-4 text-xs text-muted-foreground shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <Hint icon={<CalendarRange className="h-4 w-4 text-blue-500" />}>
+              You can book <span className="font-medium text-foreground">this week&apos;s days, up to Saturday</span>. Next week opens on Saturday.
+            </Hint>
             <Hint icon={<Clock className="h-4 w-4 text-blue-500" />}>
               Booking closes at <span className="font-medium text-foreground">8 PM the day before</span> travel.
             </Hint>
@@ -146,6 +157,7 @@ export default function StudentBookingsPage() {
               onBook={(date) => setConfirm({ date, action: 'book' })}
               onCancel={(date) => setConfirm({ date, action: 'cancel' })}
               pendingDate={pendingDate}
+              maxMonth={maxMonth}
             />
           )}
         </section>

@@ -36,11 +36,21 @@ describe('cutoffFor', () => {
 });
 
 describe('bookableDates', () => {
-  it('returns the next 92 dates starting tomorrow (IST)', () => {
-    const dates = bookableDates(new Date('2026-06-20T06:00:00Z')); // istToday == 2026-06-20
-    expect(dates).toHaveLength(92);
-    expect(dates[0]).toBe('2026-06-21');
-    expect(dates[91]).toBe(addDays('2026-06-20', 92));
+  it('returns this week Tue..Sat when today is Monday (IST)', () => {
+    // 2026-06-22 is a Monday; the service week closes on Saturday 2026-06-27
+    const dates = bookableDates(new Date('2026-06-22T03:00:00Z')); // istToday == 2026-06-22
+    expect(dates).toEqual(['2026-06-23', '2026-06-24', '2026-06-25', '2026-06-26', '2026-06-27']);
+  });
+  it('rolls to next week once today is Saturday', () => {
+    // 2026-06-27 is a Saturday — nothing bookable left this week, so open Sun..next Sat
+    const dates = bookableDates(new Date('2026-06-27T03:00:00Z')); // istToday == 2026-06-27
+    expect(dates[0]).toBe('2026-06-28');                 // the (non-bookable) Sunday
+    expect(dates[dates.length - 1]).toBe('2026-07-04');  // next Saturday closes the window
+  });
+  it('shows the coming week on Sunday (no service today)', () => {
+    // 2026-06-28 is a Sunday; the window is the next Mon..Sat
+    const dates = bookableDates(new Date('2026-06-28T03:00:00Z')); // istToday == 2026-06-28
+    expect(dates).toEqual(['2026-06-29', '2026-06-30', '2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04']);
   });
 });
 
@@ -51,19 +61,21 @@ describe('isBookingOpen', () => {
   it('is closed just after the cutoff', () => {
     expect(isBookingOpen('2026-06-22', new Date('2026-06-21T14:31:00Z'))).toBe(false);
   });
-  it('allows a date later this month (no longer capped at 7 days)', () => {
-    // 2026-06-29 is a Monday (weekdays only — see the Sunday tests below)
-    expect(isBookingOpen('2026-06-29', new Date('2026-06-20T06:00:00Z'))).toBe(true);
+  it('opens next week from Saturday (Monday reservable across the weekend)', () => {
+    // 2026-06-20 is a Saturday; 2026-06-22 is the coming Monday, before its Sun-20:00 cutoff
+    expect(isBookingOpen('2026-06-22', new Date('2026-06-20T06:00:00Z'))).toBe(true);
   });
-  it('rejects a date beyond the 92-day horizon', () => {
-    expect(isBookingOpen(addDays('2026-06-20', 100), new Date('2026-06-20T06:00:00Z'))).toBe(false);
+  it('rejects a date beyond the current week window', () => {
+    // From Saturday 2026-06-20 the window is Sun..Sat 06-27; 06-29 (next Monday) is out
+    expect(isBookingOpen('2026-06-29', new Date('2026-06-20T06:00:00Z'))).toBe(false);
   });
   it('rejects today and past dates', () => {
     expect(isBookingOpen('2026-06-20', new Date('2026-06-20T06:00:00Z'))).toBe(false);
   });
   it('rejects a Sunday even when it is otherwise within the open window', () => {
-    // 2026-06-28 is a Sunday; well before its cutoff, but the weekly holiday wins
-    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(false);
+    // 2026-06-27 is a Saturday → window 06-28..07-04, so the Sunday 06-28 is inside the
+    // window yet still blocked by the weekly-holiday rule.
+    expect(isBookingOpen('2026-06-28', new Date('2026-06-27T06:00:00Z'))).toBe(false);
   });
 });
 
@@ -84,9 +96,10 @@ describe('isCancelable', () => {
     expect(isCancelable('2026-06-22', new Date('2026-06-21T14:31:00Z'))).toBe(false);
   });
   it('still allows cancelling a Sunday (legacy bookings) within the window', () => {
-    // booking is blocked on Sundays, but a pre-existing one must remain cancelable
-    expect(isBookingOpen('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(false);
-    expect(isCancelable('2026-06-28', new Date('2026-06-20T06:00:00Z'))).toBe(true);
+    // booking is blocked on Sundays, but a pre-existing one must remain cancelable.
+    // 2026-06-27 is a Saturday → window 06-28..07-04 includes the Sunday 06-28.
+    expect(isBookingOpen('2026-06-28', new Date('2026-06-27T06:00:00Z'))).toBe(false);
+    expect(isCancelable('2026-06-28', new Date('2026-06-27T06:00:00Z'))).toBe(true);
   });
 });
 

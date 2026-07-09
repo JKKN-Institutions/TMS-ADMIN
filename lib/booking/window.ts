@@ -5,7 +5,6 @@
  */
 const IST_OFFSET_MIN = 5 * 60 + 30; // +05:30
 const CUTOFF_HOUR_IST = 20; // 20:00 IST on the prior day
-export const MAX_BOOKING_HORIZON_DAYS = 92; // tomorrow .. +92 (current month + ~2 ahead)
 
 export type DayStatus = 'not_booked' | 'booked' | 'locked' | 'closed';
 
@@ -30,10 +29,32 @@ export function cutoffFor(travelDate: string): Date {
   return new Date(ms);
 }
 
-/** The ascending bookable dates (tomorrow .. +MAX_BOOKING_HORIZON_DAYS) relative to IST today. */
+/**
+ * The Saturday that closes the current bookable service week. India's transport
+ * week runs Mon–Sat (Sunday is a compulsory holiday), so the last bookable day of
+ * a week is its Saturday. Once today IS that Saturday — nothing left to book this
+ * week — the window rolls to the NEXT Saturday, so the weekend can always book the
+ * coming Monday before its Sunday-20:00 cutoff. Pure UTC integer math on the
+ * 'YYYY-MM-DD' string (timezone-agnostic), so no offset is applied here.
+ */
+export function bookingWeekEnd(today: string): string {
+  const [y, m, d] = today.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+  const daysUntilSat = (6 - dow + 7) % 7;                  // 0 when today is Saturday
+  return addDays(today, daysUntilSat === 0 ? 7 : daysUntilSat); // Saturday → next Saturday
+}
+
+/**
+ * The ascending bookable dates for the current service week: tomorrow through
+ * `bookingWeekEnd(today)`, inclusive. A Sunday that lands inside the range stays
+ * in the list but remains non-bookable via `isSunday` — callers already gate on it.
+ */
 export function bookableDates(now: Date = new Date()): string[] {
   const today = istToday(now);
-  return Array.from({ length: MAX_BOOKING_HORIZON_DAYS }, (_, i) => addDays(today, i + 1));
+  const end = bookingWeekEnd(today);
+  const out: string[] = [];
+  for (let d = addDays(today, 1); d <= end; d = addDays(d, 1)) out.push(d);
+  return out;
 }
 
 /**

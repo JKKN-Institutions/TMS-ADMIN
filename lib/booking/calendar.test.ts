@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { monthDays, cellStatus, buildMonthCells, effectiveOpen } from './calendar';
 
-// Frozen clock: now + 5:30 IST => IST today = 2026-06-22, so bookable = 06-23..06-29.
+// Frozen clock: now + 5:30 IST => IST today = 2026-06-22 (Monday), so the service
+// week closes on Saturday 06-27 and bookable = 06-23..06-27.
 const NOW = new Date('2026-06-22T03:00:00Z');
 
 describe('monthDays', () => {
@@ -25,10 +26,12 @@ describe('cellStatus', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, now: NOW })).toBe('open');
     expect(cellStatus('2026-06-23', { hasBooking: true, now: NOW })).toBe('booked');
   });
-  it('in-month future is open now (horizon widened); far future is out_of_horizon', () => {
-    expect(cellStatus('2026-06-30', { hasBooking: false, now: NOW })).toBe('open');
-    expect(cellStatus('2026-12-01', { hasBooking: false, now: NOW })).toBe('out_of_horizon');
-    expect(cellStatus('2026-06-10', { hasBooking: true, now: NOW })).toBe('locked'); // past booking
+  it('a date within this week is open; beyond the week is out_of_horizon', () => {
+    // NOW is Monday 2026-06-22; the week window is 06-23..06-27 (Sat)
+    expect(cellStatus('2026-06-26', { hasBooking: false, now: NOW })).toBe('open');          // in-week (Fri)
+    expect(cellStatus('2026-06-30', { hasBooking: false, now: NOW })).toBe('out_of_horizon'); // next week
+    expect(cellStatus('2026-12-01', { hasBooking: false, now: NOW })).toBe('out_of_horizon'); // far future
+    expect(cellStatus('2026-06-10', { hasBooking: true, now: NOW })).toBe('locked');          // past booking
   });
 });
 
@@ -49,7 +52,7 @@ describe('buildMonthCells', () => {
 });
 
 describe('booking-window overrides', () => {
-  const NOW2 = new Date('2026-06-22T03:00:00Z'); // IST today 2026-06-22 => bookable 06-23..29
+  const NOW2 = new Date('2026-06-22T03:00:00Z'); // IST today 2026-06-22 (Mon) => bookable 06-23..27
   it('a disabled window closes an otherwise-open date', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, window: { enabled: false, deadline: null, capacityOverride: null }, now: NOW2 })).toBe('closed');
   });

@@ -74,7 +74,7 @@ const STYLE: Record<CellStatus, { cls: string; dot: string; label: string; actio
 const LEGEND: CellStatus[] = ['open', 'booked', 'locked', 'holiday', 'weekly_off', 'closed'];
 
 export function BookingCalendar({
-  month, cells, onPrev, onNext, onToday, onBook, onCancel, pendingDate,
+  month, cells, onPrev, onNext, onToday, onBook, onCancel, pendingDate, minMonth, maxMonth,
 }: {
   month: string;
   cells: Map<string, DayCell>;
@@ -84,9 +84,23 @@ export function BookingCalendar({
   onBook: (date: string) => void;
   onCancel: (date: string) => void;
   pendingDate: string | null;
+  /** 'YYYY-MM' bounds; when set, the Prev/Next arrows disable at the edge so the
+   *  learner can't page past the bookable range (nothing is bookable there). */
+  minMonth?: string;
+  maxMonth?: string;
 }) {
   const weeks = monthGrid(month);
   const today = istToday();
+  // 'YYYY-MM' strings compare lexicographically, so plain <=/>= is a valid month check.
+  const atMin = minMonth ? month <= minMonth : false;
+  const atMax = maxMonth ? month >= maxMonth : false;
+  const navBtn = (enabled: boolean) =>
+    [
+      'inline-flex h-10 w-10 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+      enabled
+        ? 'cursor-pointer border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
+        : 'cursor-not-allowed border-gray-200 text-gray-300 opacity-50 dark:border-gray-800 dark:text-gray-600',
+    ].join(' ');
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -94,8 +108,8 @@ export function BookingCalendar({
         {/* Month navigation */}
         <div className="mb-3 flex items-center justify-between gap-2">
           <button
-            type="button" onClick={onPrev} aria-label="Previous month"
-            className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-gray-300 text-gray-600 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            type="button" onClick={onPrev} disabled={atMin} aria-disabled={atMin} aria-label="Previous month"
+            className={navBtn(!atMin)}
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -113,8 +127,8 @@ export function BookingCalendar({
           </div>
 
           <button
-            type="button" onClick={onNext} aria-label="Next month"
-            className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-gray-300 text-gray-600 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            type="button" onClick={onNext} disabled={atMax} aria-disabled={atMax} aria-label="Next month"
+            className={navBtn(!atMax)}
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -132,7 +146,7 @@ export function BookingCalendar({
           {weeks.map((week, wi) => (
             <div key={wi} className="grid grid-cols-7 gap-1 sm:gap-1.5">
               {week.map((date, di) => {
-                if (!date) return <div key={di} className="aspect-square min-h-[44px]" />;
+                if (!date) return <div key={di} className="aspect-square min-h-[44px] min-w-0" />;
                 const cell = cells.get(date) ?? { date, status: 'out_of_horizon' as CellStatus };
                 return (
                   <DayButton
@@ -199,7 +213,7 @@ function DayButton({
             else if (s.action === 'cancel') onCancel(cell.date);
           }}
           className={[
-            'relative flex aspect-square min-h-[44px] flex-col items-center justify-center rounded-xl border text-sm transition-all duration-150',
+            'relative flex aspect-square min-h-[44px] min-w-0 flex-col items-center justify-center rounded-xl border text-sm transition-all duration-150',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1',
             clickable ? 'cursor-pointer motion-safe:active:scale-95' : 'cursor-default',
             isToday ? 'ring-2 ring-blue-400 ring-offset-1 dark:ring-offset-gray-900' : '',
