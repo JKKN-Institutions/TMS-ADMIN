@@ -20,7 +20,7 @@ type ScanResult = {
   learner?: { name: string; rollNumber: string | null };
   direction?: string;
   walkUp?: boolean;
-  reason?: 'not_booked' | 'bus_full' | 'window_closed';
+  reason?: 'not_booked' | 'window_closed';
   seatsRemaining?: number;
   overCapacity?: boolean;
   error?: string;
