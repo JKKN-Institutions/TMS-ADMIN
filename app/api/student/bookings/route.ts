@@ -6,6 +6,7 @@ import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { bookableDates, cutoffFor, dayStatus, isCancelable, isSunday } from '@/lib/booking/window';
 import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
+import { isOverCapacity } from '@/lib/booking/capacity';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
 
 /**
@@ -171,13 +172,17 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       if (blocking.has(travelDate)) {
         return NextResponse.json({ error: 'That date is a holiday / no-service day' }, { status: 409 });
       }
-      // capacity gate — only blocks when the learner is taking a NEW seat
+      // Capacity is advisory: an over-capacity booking is ALLOWED and only flagged
+      // (warning), never blocked. Overflow is intentional. Compute the flag only
+      // when the learner takes a NEW seat — a rebooking never counts as over capacity.
+      let overCapacity = false;
+      let bookedNow = 0;
+      let cap = 0;
       const holdsSeat = await hasBookingForDate(svc, learner.id, travelDate);
       if (!holdsSeat) {
-        const cap = winMap.get(travelDate)?.capacityOverride ?? (await routeCapacity(svc, learner.transport_route_id));
-        if (cap > 0 && (await bookedCount(svc, learner.transport_route_id, travelDate)) >= cap) {
-          return NextResponse.json({ error: 'This bus is fully booked for that date' }, { status: 409 });
-        }
+        cap = winMap.get(travelDate)?.capacityOverride ?? (await routeCapacity(svc, learner.transport_route_id));
+        bookedNow = await bookedCount(svc, learner.transport_route_id, travelDate);
+        overCapacity = isOverCapacity(bookedNow, cap);
       }
 
       const upErr = (await svc
@@ -197,7 +202,17 @@ async function mutate(request: NextRequest, auth: AuthContext) {
         console.error('student/bookings book error:', upErr);
         return NextResponse.json({ error: 'Failed to book' }, { status: 500 });
       }
-      return NextResponse.json({ success: true, data: { travel_date: travelDate, status: 'booked' } });
+      return NextResponse.json({
+        success: true,
+        data: {
+          travel_date: travelDate,
+          status: 'booked',
+          overCapacity,
+          // this learner is the (bookedNow + 1)th seat; only sent when over capacity
+          booked: overCapacity ? bookedNow + 1 : undefined,
+          capacity: overCapacity ? cap : undefined,
+        },
+      });
     }
 
     // cancel

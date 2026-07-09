@@ -22,6 +22,7 @@ type ScanResult = {
   walkUp?: boolean;
   reason?: 'not_booked' | 'bus_full' | 'window_closed';
   seatsRemaining?: number;
+  overCapacity?: boolean;
   error?: string;
 };
 
@@ -261,6 +262,11 @@ export default function BoardingScanPage() {
                   {result.learner?.name}
                   {result.learner?.rollNumber ? ` · ${result.learner.rollNumber}` : ''}
                 </p>
+                {result.overCapacity && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    ⚠ Bus is over capacity — boarded as overflow.
+                  </p>
+                )}
               </div>
             ) : result.reason === 'not_booked' ? (
               <div className="space-y-2">
@@ -272,10 +278,9 @@ export default function BoardingScanPage() {
                 </p>
                 <Button
                   className="w-full"
-                  disabled={(result.seatsRemaining ?? 0) <= 0}
                   onClick={() => submit(lastTokenRef.current, true)}
                 >
-                  {(result.seatsRemaining ?? 0) > 0 ? 'Add as walk-up' : 'Bus full'}
+                  {(result.seatsRemaining ?? 0) > 0 ? 'Add as walk-up' : 'Add as walk-up (over capacity)'}
                 </Button>
               </div>
             ) : (

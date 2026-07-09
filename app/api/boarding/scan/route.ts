@@ -135,12 +135,14 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
 
     // Booking gate: a learner must have booked today, unless staff explicitly add
-    // them as a walk-up (seats permitting).
+    // them as a walk-up. Over-capacity walk-ups are ALLOWED (warning-only) — the
+    // seat count is advisory, not a hard block. Booked learners skip this entirely.
     const booked = await hasBookingForDate(svc, learner.id, today);
     let isWalkUp = false;
+    let overCapacity = false;
     if (!booked) {
+      const seats = await seatsRemaining(svc, learner.transport_route_id, today);
       if (!body.walkUp) {
-        const seats = await seatsRemaining(svc, learner.transport_route_id, today);
         return NextResponse.json({
           ok: false,
           reason: 'not_booked',
@@ -148,11 +150,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
           learner: { name, rollNumber: learner.roll_number },
         });
       }
-      const seats = await seatsRemaining(svc, learner.transport_route_id, today);
-      if (seats <= 0) {
-        return NextResponse.json({ ok: false, reason: 'bus_full', error: 'Bus is full' }, { status: 409 });
-      }
       isWalkUp = true;
+      overCapacity = seats <= 0;
     }
 
     const up = await svc
@@ -194,6 +193,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       learner: { name, rollNumber: learner.roll_number },
       direction,
       walkUp: isWalkUp,
+      overCapacity: overCapacity || undefined,
     });
   } catch (e) {
     console.error('boarding scan error:', e);

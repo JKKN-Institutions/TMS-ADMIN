@@ -33,7 +33,7 @@ async function mutateBooking(input: { travel_date: string; action: 'book' | 'can
   });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.error || 'Action failed');
-  return json.data as { travel_date: string; status: string };
+  return json.data as { travel_date: string; status: string; overCapacity?: boolean; booked?: number; capacity?: number };
 }
 
 export default function StudentBookingsPage() {
@@ -53,7 +53,15 @@ export default function StudentBookingsPage() {
     onMutate: (v) => setPendingDate(v.travel_date),
     onSuccess: (d) => {
       setConfirm(null); // close the dialog; on error it stays open so the user can retry
-      toast.success(d.status === 'booked' ? 'Bus booked' : 'Booking cancelled');
+      if (d.status === 'booked' && d.overCapacity) {
+        const count = d.booked && d.capacity ? ` (${d.booked}/${d.capacity})` : '';
+        toast(`Booked — bus is over capacity${count}. Your seat is confirmed on board.`, {
+          icon: '⚠️',
+          style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' },
+        });
+      } else {
+        toast.success(d.status === 'booked' ? 'Bus booked' : 'Booking cancelled');
+      }
       qc.invalidateQueries({ queryKey: ['student-bookings'] });
       qc.invalidateQueries({ queryKey: ['student-pass'] });
     },
