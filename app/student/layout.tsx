@@ -12,6 +12,7 @@ import { studentNavigation, deriveStudentPageTitle } from '@/lib/student/navigat
 import StudentBottomNav from '@/components/student-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
+import BookBusFab from '@/components/booking/book-bus-fab';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -254,6 +255,9 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
       {/* Mobile-only bottom navigation (replaces the slide-in drawer on < lg). */}
       <StudentBottomNav />
+
+      {/* Floating shortcut to the booking board; stacks above the bug widget, hides on /student/bookings. */}
+      <BookBusFab />
     </div>
     </BugReporterWrapper>
   );
