@@ -111,6 +111,11 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
+      accuracyRef.current = null;
+      campusRef.current = null;
+      viewerRef.current = null;
+      stopsRef.current = null;
+      hasFitRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
