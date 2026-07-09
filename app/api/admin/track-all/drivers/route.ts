@@ -143,6 +143,7 @@ export async function GET() {
         current_latitude: lat,
         current_longitude: lng,
         location_accuracy: veh?.gps_accuracy ?? null,
+        heading: veh?.gps_heading ?? null,
         location_timestamp: veh?.last_gps_update ?? null,
         last_location_update: veh?.last_gps_update ?? null,
         location_sharing_enabled: !!d.location_sharing_enabled,

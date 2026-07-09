@@ -43,6 +43,8 @@ async function getStudentLocation(_request: NextRequest, auth: AuthContext) {
       latitude: number | null;
       longitude: number | null;
       speed: number | null;
+      heading: number | null;
+      accuracyM: number | null;
       lastUpdate: string | null;
       liveTrackingEnabled: boolean;
       hasFix: boolean;
@@ -54,7 +56,7 @@ async function getStudentLocation(_request: NextRequest, auth: AuthContext) {
       const { data: v } = await svc
         .from('tms_vehicle')
         .select(
-          'id, registration_number, model, current_latitude, current_longitude, gps_speed, last_gps_update, live_tracking_enabled'
+          'id, registration_number, model, current_latitude, current_longitude, gps_speed, gps_heading, gps_accuracy, last_gps_update, live_tracking_enabled'
         )
         .eq('id', route.vehicle_id)
         .maybeSingle();
@@ -66,6 +68,8 @@ async function getStudentLocation(_request: NextRequest, auth: AuthContext) {
           latitude: v.current_latitude,
           longitude: v.current_longitude,
           speed: v.gps_speed,
+          heading: v.gps_heading,
+          accuracyM: v.gps_accuracy,
           lastUpdate: v.last_gps_update,
           liveTrackingEnabled: !!v.live_tracking_enabled,
           hasFix: v.current_latitude != null && v.current_longitude != null,

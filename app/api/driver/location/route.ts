@@ -36,6 +36,8 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
       current_latitude: number | null;
       current_longitude: number | null;
       gps_speed: number | null;
+      gps_heading: number | null;
+      gps_accuracy: number | null;
       last_gps_update: string | null;
       live_tracking_enabled: boolean | null;
     };
@@ -45,7 +47,7 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
       const vres = await svc
         .from('tms_vehicle')
         .select(
-          'id, registration_number, model, current_latitude, current_longitude, gps_speed, last_gps_update, live_tracking_enabled'
+          'id, registration_number, model, current_latitude, current_longitude, gps_speed, gps_heading, gps_accuracy, last_gps_update, live_tracking_enabled'
         )
         .in('id', vehicleIds);
       for (const v of (vres.data ?? []) as VehicleRow[]) vmap.set(v.id, v);
@@ -64,6 +66,8 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
               latitude: v.current_latitude,
               longitude: v.current_longitude,
               speed: v.gps_speed,
+              heading: v.gps_heading,
+              accuracyM: v.gps_accuracy,
               lastUpdate: v.last_gps_update,
               liveTrackingEnabled: !!v.live_tracking_enabled,
               hasFix,
