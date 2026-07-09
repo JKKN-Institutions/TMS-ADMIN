@@ -1,5 +1,8 @@
-import * as XLSX from 'xlsx';
 import type { VehicleRow } from './columns';
+
+// xlsx is ~400KB. Load it lazily (dynamic import) so it stays OUT of the Vehicles
+// list page's first-load JS and only downloads when the user actually exports or
+// downloads a template. Every list page shares this pattern.
 
 // Import/export helpers for the Vehicles module. Template columns match the
 // import endpoint's accepted keys so export → edit in Excel → re-import round-trips.
@@ -23,7 +26,8 @@ const EXPORT_COLUMNS: (keyof VehicleRow)[] = [
   'chassis_number', 'engine_number', 'remarks',
 ];
 
-export function downloadVehicleTemplate() {
+export async function downloadVehicleTemplate() {
+  const XLSX = await import('xlsx');
   const example: Record<string, unknown> = {
     registration_number: 'TN01AB1234', vehicle_type: 'bus', manufacturer: 'Tata', model: 'Starbus',
     model_year: 2022, color: 'White', capacity: 40, gross_vehicle_weight: 16200,
@@ -46,7 +50,8 @@ export function downloadVehicleTemplate() {
 }
 
 // Export the current fleet to Excel using the same columns as the template.
-export function exportVehicles(rows: VehicleRow[]) {
+export async function exportVehicles(rows: VehicleRow[]) {
+  const XLSX = await import('xlsx');
   const data = rows.map((v) => {
     const o: Record<string, unknown> = {};
     for (const c of EXPORT_COLUMNS) o[c] = v[c] ?? '';

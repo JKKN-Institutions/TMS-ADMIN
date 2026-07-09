@@ -1,4 +1,5 @@
-import * as XLSX from 'xlsx';
+// xlsx (~400KB) is dynamically imported inside the handler so it stays out of the
+// Routes list page's first-load JS — it downloads only when a template is requested.
 
 /**
  * Downloads a starter workbook in the JKKN route layout that
@@ -6,7 +7,8 @@ import * as XLSX from 'xlsx';
  * title row, a header row, then stops ending in COLLEGE. Two example routes are
  * included so the multi-sheet shape is obvious.
  */
-export function downloadRouteTemplate() {
+export async function downloadRouteTemplate() {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   const makeSheet = (routeName: string, routeNo: number, stops: [string, string, string][]) => {

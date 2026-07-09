@@ -75,7 +75,13 @@ export default function NotificationBell({ viewAllHref }: { viewAllHref?: string
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] rounded-xl border border-gray-200 bg-white shadow-lg z-50 dark:border-gray-700 dark:bg-gray-900">
+        // Mobile (< sm): anchor to the VIEWPORT — `fixed`, full-width with 8px
+        // gutters, just below the 4rem fixed header. This escapes the shell's
+        // `overflow-x-hidden` (the header has no transform, so `fixed` resolves
+        // against the viewport) and can't bleed off the left edge the way
+        // `absolute right-0` did when the bell isn't the right-most header item.
+        // sm:+ restores the original bell-anchored dropdown.
+        <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-1rem)] flex flex-col max-h-[calc(100dvh-9rem)] sm:max-h-none overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg z-50 dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
             <span className="text-sm font-semibold text-gray-900 dark:text-white">Notifications</span>
             {unreadCount > 0 && (
@@ -89,7 +95,7 @@ export default function NotificationBell({ viewAllHref }: { viewAllHref?: string
             )}
           </div>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto sm:flex-none sm:max-h-96">
             {isLoading ? (
               <div className="px-4 py-8 text-center text-sm text-gray-500">Loading…</div>
             ) : recent.length === 0 ? (

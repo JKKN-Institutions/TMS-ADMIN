@@ -1,5 +1,7 @@
-import * as XLSX from 'xlsx';
 import type { DriverListItem } from '@/types';
+
+// xlsx (~400KB) is dynamically imported only in the branches that build a workbook,
+// keeping it out of the Drivers list page's first-load JS (JSON export needs none).
 
 export type ExportFormat = 'csv' | 'xlsx' | 'json';
 
@@ -47,7 +49,7 @@ function triggerDownload(filename: string, content: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
-export function exportDrivers(drivers: DriverListItem[], format: ExportFormat) {
+export async function exportDrivers(drivers: DriverListItem[], format: ExportFormat) {
   const rows = drivers.map(driverToRow);
   const filename = `drivers-export-${today()}`;
 
@@ -56,6 +58,7 @@ export function exportDrivers(drivers: DriverListItem[], format: ExportFormat) {
     return;
   }
 
+  const XLSX = await import('xlsx');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Drivers');
@@ -63,7 +66,8 @@ export function exportDrivers(drivers: DriverListItem[], format: ExportFormat) {
 }
 
 // A starter spreadsheet showing the expected columns + one example row.
-export function downloadDriverTemplate() {
+export async function downloadDriverTemplate() {
+  const XLSX = await import('xlsx');
   const example = {
     staffId: '(existing driver staff id — or leave blank and fill email)',
     email: 'driver@example.com',

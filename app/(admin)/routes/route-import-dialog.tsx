@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { Download, FileUp, Loader2, UploadCloud, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import {
@@ -54,9 +53,11 @@ export function RouteImportDialog({
 
   const handleFile = async (file: File) => {
     try {
+      // Lazy-load xlsx (~400KB) only when a workbook is actually chosen.
+      const XLSX = await import('xlsx');
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
-      const res = parseRouteWorkbook(wb);
+      const res = await parseRouteWorkbook(wb);
       setParsed(res);
       setFileName(file.name);
       setResult(null);

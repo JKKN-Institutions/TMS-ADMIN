@@ -31,6 +31,23 @@ async function relay(request: NextRequest, path: string[]): Promise<Response> {
 
   const search = new URL(request.url).search;
   const target = `${PLATFORM_URL}/api/v1/public/${path.join('/')}${search}`;
+
+  // Loop guard: the relay's UPSTREAM must be the EXTERNAL reporter platform, never
+  // this app's own origin. If NEXT_PUBLIC_BUG_REPORTER_API_URL is (mis)set to this
+  // app's domain, forwarding would hit THIS same route recursively — an infinite
+  // server-side loop that floods the browser console and can break the widget.
+  // Fail fast with a clear diagnostic instead of forwarding.
+  const reqHost = request.headers.get('host');
+  let targetHost: string | null = null;
+  try { targetHost = new URL(target).host; } catch { /* malformed URL → handled below */ }
+  if (reqHost && targetHost && reqHost.toLowerCase() === targetHost.toLowerCase()) {
+    console.error('bug-reporter relay misconfigured — upstream points at this app (loop):', PLATFORM_URL);
+    return NextResponse.json(
+      { success: false, error: { message: 'Bug Reporter relay is misconfigured: NEXT_PUBLIC_BUG_REPORTER_API_URL points at this app instead of the reporter platform.' } },
+      { status: 500 }
+    );
+  }
+
   const method = request.method.toUpperCase();
   const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text();
 

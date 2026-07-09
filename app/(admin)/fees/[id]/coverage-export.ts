@@ -1,15 +1,16 @@
-import * as XLSX from 'xlsx';
 import type { CoveragePerson } from '../fee-api';
 
 // Export coverage rows (the selected ones, or all when none are selected) to an
 // .xlsx workbook. Mirrors the module export helpers (e.g. vehicle-export.ts):
 // client-side json_to_sheet → writeFile, human-readable column headers.
+// xlsx (~400KB) is dynamically imported so it stays out of the page's first-load JS.
 
 function today() {
   return new Date().toISOString().split('T')[0];
 }
 
-export function exportCoverage(rows: CoveragePerson[], feeName?: string) {
+export async function exportCoverage(rows: CoveragePerson[], feeName?: string) {
+  const XLSX = await import('xlsx');
   const data = rows.map((p) => ({
     Name: p.name,
     Code: p.code ?? '',

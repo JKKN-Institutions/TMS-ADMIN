@@ -74,12 +74,48 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 4. Fetch profile + active status.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, email, role, is_super_admin, is_active, institution_id')
-    .eq('id', user.id)
-    .single();
+  // 4. Fetch the profile row AND run both authorization checks CONCURRENTLY.
+  //    getUser() above already validated the JWT; the three reads below are mutually
+  //    independent and all scoped to this same authenticated user, so firing them in
+  //    parallel collapses what used to be 2–3 SERIAL Supabase round trips — paid on
+  //    every page load AND every API call — into a single batch (getUser + this).
+  //
+  //    The two RPCs are fired SPECULATIVELY; whether we ACT on them is decided below
+  //    from the profile (super admins bypass both and simply ignore the extra reads).
+  //    profiles.id == auth.users.id by contract (OAuth callback + client guards), so
+  //    the student RPC can key on user.id without first awaiting the profile row.
+  //
+  //    Area gate exemptions: the shared notification inbox/bell APIs and the
+  //    '/api/v1/public' Bug Reporter relay are cross-portal — every portal calls the
+  //    SAME endpoints, which already scope to the caller's own rows — so they skip
+  //    the area gate. They still require an authenticated, active user.
+  const AREA_EXEMPT_APIS = ['/api/notifications', '/api/v1/public'];
+  const areaExempt = AREA_EXEMPT_APIS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+
+  const area = resolveArea(pathname);
+
+  // Transport-payment gate scope (student area, off the always-allowed paths) — both
+  // knowable before any I/O, so we can decide up front whether to fire its RPC.
+  const STUDENT_EXEMPT_WHEN_BLOCKED = ['/student/fees', '/student/grievances', '/api/student/transport-access'];
+  const studentGateApplies =
+    area === 'student' &&
+    !STUDENT_EXEMPT_WHEN_BLOCKED.some((p) => pathname === p || pathname.startsWith(p + '/'));
+
+  const [profileRes, areaPermRes, studentAccessRes] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, email, role, is_super_admin, is_active, institution_id')
+      .eq('id', user.id)
+      .single(),
+    areaExempt
+      ? Promise.resolve({ data: null })
+      : supabase.rpc('user_has_permission', { permission_name: AREA_PERMISSION[area] }),
+    studentGateApplies
+      ? supabase.rpc('tms_student_transport_access', { p_profile_id: user.id })
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const profile = profileRes.data;
 
   if (!profile) {
     if (isApi) {
@@ -101,26 +137,10 @@ export async function proxy(request: NextRequest) {
 
   // 5. Area-based access gate (super admins bypass all areas). Each area (admin /
   //    student / driver / boarding) requires its own permission; a user lacking it
-  //    is sent to their OWN area's home rather than a dead-end 403.
-  //
-  //    Exception: the shared notification inbox/bell APIs are cross-portal — every
-  //    portal (admin/student/driver/boarding) fetches the SAME /api/notifications
-  //    endpoints, which return only the caller's OWN rows (withAuth + user_id filter
-  //    + own-row RLS). resolveArea() would classify them as `admin` and 403 every
-  //    non-admin, so any authenticated TMS user may call them regardless of area.
-  // '/api/v1/public' is the same-origin relay the in-app Bug Reporter widget
-  // POSTs to from EVERY portal; it forwards to the external platform server-side
-  // (avoiding the platform's CORS). Like the notification APIs it is cross-portal,
-  // so exempt it from the area gate — it still requires an authenticated, active
-  // user (steps 1–4 above), so it isn't open to anonymous callers.
-  const AREA_EXEMPT_APIS = ['/api/notifications', '/api/v1/public'];
-  const areaExempt = AREA_EXEMPT_APIS.some((p) => pathname === p || pathname.startsWith(p + '/'));
-
-  const area = resolveArea(pathname);
+  //    is sent to their OWN area's home rather than a dead-end 403. Uses the
+  //    area-permission result fetched above.
   if (!profile.is_super_admin && !areaExempt) {
-    const { data: hasAccess } = await supabase.rpc('user_has_permission', {
-      permission_name: AREA_PERMISSION[area],
-    });
+    const hasAccess = areaPermRes.data;
 
     if (!hasAccess) {
       if (isApi) {
@@ -129,7 +149,8 @@ export async function proxy(request: NextRequest) {
       let home = resolveHomeForRole(profile.role, profile.is_super_admin);
       if (home === '/dashboard' && !profile.is_super_admin) {
         // Boarding scanners are permission-identified (transport_boarding role via
-        // user_roles), not role-identified — route them to /boarding.
+        // user_roles), not role-identified — route them to /boarding. This extra RPC
+        // only runs on the (rare) area-gate-denied redirect path, never the hot path.
         const { data: canScan } = await supabase.rpc('user_has_permission', {
           permission_name: 'tms.attendance.scan',
         });
@@ -148,23 +169,17 @@ export async function proxy(request: NextRequest) {
   //     "behind" — a term past its due date is unpaid for the current transport
   //     year — is confined to the fees page + grievances + sign-out until cleared.
   //     Evaluated by the SECURITY DEFINER RPC (user-scoped client can't read the
-  //     RLS-deny billing/fee tables, same reason step 5 uses user_has_permission).
-  if (!profile.is_super_admin && area === 'student') {
-    const EXEMPT_WHEN_BLOCKED = ['/student/fees', '/student/grievances', '/api/student/transport-access'];
-    const exempt = EXEMPT_WHEN_BLOCKED.some((p) => pathname === p || pathname.startsWith(p + '/'));
-    if (!exempt) {
-      const { data: access } = await supabase.rpc('tms_student_transport_access', {
-        p_profile_id: profile.id,
-      });
-      if (access && access.allowed === false) {
-        if (isApi) {
-          return NextResponse.json(
-            { error: 'Transport fees overdue', reason: 'fees_overdue' },
-            { status: 402 }
-          );
-        }
-        return NextResponse.redirect(new URL('/student/fees', request.url));
+  //     RLS-deny billing/fee tables), fetched above alongside the profile.
+  if (!profile.is_super_admin && studentGateApplies) {
+    const access = studentAccessRes.data as { allowed?: boolean } | null;
+    if (access && access.allowed === false) {
+      if (isApi) {
+        return NextResponse.json(
+          { error: 'Transport fees overdue', reason: 'fees_overdue' },
+          { status: 402 }
+        );
       }
+      return NextResponse.redirect(new URL('/student/fees', request.url));
     }
   }
 

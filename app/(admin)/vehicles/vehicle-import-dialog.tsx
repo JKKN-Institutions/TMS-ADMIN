@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import * as XLSX from 'xlsx';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Download, FileUp, Loader2, UploadCloud } from 'lucide-react';
@@ -52,6 +51,8 @@ export function VehicleImportDialog({
 
   const handleFile = async (file: File) => {
     try {
+      // Lazy-load xlsx (~400KB) only when a file is actually chosen.
+      const XLSX = await import('xlsx');
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];

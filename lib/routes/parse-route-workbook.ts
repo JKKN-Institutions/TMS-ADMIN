@@ -1,4 +1,8 @@
-import * as XLSX from 'xlsx';
+// Type-only import is ERASED at build time, so it does NOT pull the ~400KB xlsx
+// runtime into any bundle that imports this module. The runtime `utils` are
+// dynamically imported inside parseRouteWorkbook() (already cached by the caller,
+// which read the workbook with xlsx first).
+import type { WorkBook } from 'xlsx';
 import { normalizeTime, computeDuration } from './normalize-time';
 
 /**
@@ -110,7 +114,8 @@ function cell(row: Row | undefined, idx: number): string {
   return String(row[idx] ?? '').trim();
 }
 
-export function parseRouteWorkbook(wb: XLSX.WorkBook): ParseResult {
+export async function parseRouteWorkbook(wb: WorkBook): Promise<ParseResult> {
+  const XLSX = await import('xlsx');
   const routes: ParsedRoute[] = [];
   const warnings: ParseWarning[] = [];
   const skippedSheets: string[] = [];

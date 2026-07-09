@@ -1,8 +1,8 @@
-import * as XLSX from 'xlsx';
 import type { TransportBillRow } from '@/lib/fees/bills';
 
 // Export transport bill rows (selected, or all when none selected) to .xlsx.
 // Mirrors the module export helpers (vehicle-export.ts / coverage-export.ts).
+// xlsx (~400KB) is dynamically imported so it stays out of the page's first-load JS.
 
 function today() {
   return new Date().toISOString().split('T')[0];
@@ -10,7 +10,8 @@ function today() {
 
 const fmtDate = (d?: string | null) => (d ? new Date(d).toISOString().split('T')[0] : '');
 
-export function exportBills(rows: TransportBillRow[], yearLabel?: string) {
+export async function exportBills(rows: TransportBillRow[], yearLabel?: string) {
+  const XLSX = await import('xlsx');
   const data = rows.map((r) => ({
     Person: r.person_name,
     Code: r.code ?? '',

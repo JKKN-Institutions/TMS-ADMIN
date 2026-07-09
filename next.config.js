@@ -7,6 +7,16 @@ const nextConfig = {
   output: 'standalone',
   compress: true,
 
+  // Strip console.* from the production client bundle (keep error/warn for real
+  // diagnostics). Removes dozens of debug logs from shipped JS — smaller bundles,
+  // no leaked internals. Dev keeps every log.
+  compiler: {
+    removeConsole:
+      process.env.NODE_ENV === 'production'
+        ? { exclude: ['error', 'warn'] }
+        : false,
+  },
+
   images: {
     formats: ['image/webp', 'image/avif'],
     dangerouslyAllowSVG: true,
@@ -15,6 +25,17 @@ const nextConfig = {
 
   experimental: {
     turbopackFileSystemCacheForDev: true,
+    // Tree-shake barrel imports so a single `import { Icon } from 'lucide-react'`
+    // (etc.) pulls only what's used instead of the whole package into shared JS.
+    optimizePackageImports: [
+      'lucide-react',
+      'recharts',
+      'framer-motion',
+      'date-fns',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-tooltip',
+    ],
   },
 
   async headers() {
