@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
+import { grantBoardingRole, maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 
 // Service-role client bypasses RLS, so writes are gated by an explicit
 // tms.drivers.assign check here (defense-in-depth; super admins bypass).
@@ -11,48 +12,6 @@ async function requireAssign(auth: AuthContext): Promise<boolean> {
     permission_name: 'tms.drivers.assign',
   });
   return !!data;
-}
-
-type Svc = ReturnType<typeof createServiceRoleClient>;
-
-// Boarding scanners are designated by route assignment: assigning a staff grants
-// them the dedicated `transport_boarding` role (via user_roles), so the proxy
-// /boarding gate + client can() pass. Best-effort — never fails the assignment.
-async function grantBoardingRole(supabase: Svc, staffEmail: string, assignedBy: string) {
-  try {
-    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', staffEmail).maybeSingle();
-    const profileId = (prof as { id: string } | null)?.id;
-    if (!profileId) return;
-    const { data: role } = await supabase.from('custom_roles').select('id').eq('role_key', 'transport_boarding').maybeSingle();
-    const roleId = (role as { id: string } | null)?.id;
-    if (!roleId) return;
-    const { data: existing } = await supabase.from('user_roles').select('id').eq('user_id', profileId).eq('role_id', roleId).maybeSingle();
-    if (existing) return;
-    await supabase.from('user_roles').insert({ user_id: profileId, role_id: roleId, is_primary: false, assigned_by: assignedBy });
-  } catch (e) {
-    console.error('grantBoardingRole (non-fatal):', e);
-  }
-}
-
-// Revoke the boarding role only if the staff has NO remaining active assignments.
-async function maybeRevokeBoardingRole(supabase: Svc, assignmentId: string) {
-  try {
-    const { data: a } = await supabase.from('tms_staff_route_assignment').select('staff_email').eq('id', assignmentId).maybeSingle();
-    const email = (a as { staff_email: string } | null)?.staff_email;
-    if (!email) return;
-    const { data: remaining } = await supabase
-      .from('tms_staff_route_assignment').select('id').eq('staff_email', email).eq('is_active', true).limit(1).maybeSingle();
-    if (remaining) return;
-    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', email).maybeSingle();
-    const profileId = (prof as { id: string } | null)?.id;
-    if (!profileId) return;
-    const { data: role } = await supabase.from('custom_roles').select('id').eq('role_key', 'transport_boarding').maybeSingle();
-    const roleId = (role as { id: string } | null)?.id;
-    if (!roleId) return;
-    await supabase.from('user_roles').delete().eq('user_id', profileId).eq('role_id', roleId);
-  } catch (e) {
-    console.error('maybeRevokeBoardingRole (non-fatal):', e);
-  }
 }
 
 // Columns of tms_route we surface alongside each assignment (joined in JS).
@@ -147,7 +106,7 @@ async function postAssignment(request: NextRequest, auth: AuthContext) {
 
     const { data: assignment, error } = await supabase
       .from('tms_staff_route_assignment')
-      .insert({ staff_email: staffEmail, route_id: routeId, assigned_by: auth.userId, notes, is_active: true })
+      .insert({ staff_email: staffEmail, route_id: routeId, assigned_by: auth.userId, notes, is_active: true, source: 'admin' })
       .select('*')
       .single();
     if (error) {
