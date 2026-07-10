@@ -30,7 +30,11 @@ async function getAccess(auth: AuthContext) {
     const routeIds = hasScan ? await getAssignedRouteIdsForUser(auth) : [];
     return NextResponse.json({
       success: true,
-      data: { allowed: routeIds.length > 0, assignedRouteCount: routeIds.length, eligible: elig.eligible },
+      // assignedRouteCount comes from the RPC (the true active count), NOT routeIds.length
+      // which is scan-gated and would under-report in the rare assigned-but-role-grant-failed
+      // state, wrongly unlocking the picker. `allowed` still requires scan permission AND an
+      // assignment, so it stays the authoritative "open the full portal" signal.
+      data: { allowed: routeIds.length > 0, assignedRouteCount: elig.assignedRouteCount, eligible: elig.eligible },
     });
   } catch (e) {
     console.error('boarding access check error:', e);
