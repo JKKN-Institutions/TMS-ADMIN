@@ -9,6 +9,7 @@ import {
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
+import { CAMPUS } from '@/lib/gps/campus';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -209,7 +210,13 @@ export default function DriverLocationPage() {
 
               {fix && (
                 <div className="h-80 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-                  <LivePositionMap latitude={fix.lat} longitude={fix.lng} label="You are here" />
+                  <LivePositionMap
+                    latitude={fix.lat}
+                    longitude={fix.lng}
+                    label="You are here"
+                    accuracyM={fix.accuracy}
+                    destination={CAMPUS}
+                  />
                 </div>
               )}
             </div>
