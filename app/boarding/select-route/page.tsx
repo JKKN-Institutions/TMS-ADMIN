@@ -67,7 +67,12 @@ export default function SelectRoutePage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to select route');
       toast.success('You are now the in-charge of this bus');
-      router.replace('/boarding/scan');
+      // Hard nav: the boarding layout caches its 'access' decision in state
+      // keyed off [loading, user, profile], so a soft router.replace() here
+      // would hit the layout's stale access==='select' redirect and bounce
+      // back to this (now-locked) screen. A full page load forces the
+      // layout to remount and recompute access fresh.
+      window.location.assign('/boarding/scan');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to select route');
       setSaving(false);
