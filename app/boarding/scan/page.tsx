@@ -34,6 +34,38 @@ export default function BoardingScanPage() {
   const [manual, setManual] = useState('');
   const [, setTick] = useState(0); // forces a re-evaluate of open/closed on an interval
 
+  const [preselect, setPreselect] = useState<
+    { learner: string; route: string; name: string; roll: string | null; stop: string | null } | null
+  >(null);
+
+  // Read a deep-linked learner from the URL (from the dashboard's Today's Bookings
+  // list). Client-only (window.location) so the page needs no Suspense boundary.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const learner = p.get('learner');
+    const route = p.get('route');
+    if (learner && route) {
+      setPreselect({ learner, route, name: p.get('name') ?? 'Learner', roll: p.get('roll'), stop: p.get('stop') });
+    }
+  }, []);
+
+  async function markPreselected(dir: AttDirection) {
+    if (!preselect) return;
+    try {
+      const res = await fetch('/api/boarding/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ routeId: preselect.route, direction: dir, marks: [{ learnerId: preselect.learner, status: 'present' }] }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark present');
+      setResult({ ok: true, learner: { name: preselect.name, rollNumber: preselect.roll }, direction: dir });
+    } catch (e) {
+      setResult({ ok: false, error: e instanceof Error ? e.message : 'Failed to mark present' });
+    }
+  }
+
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const busyRef = useRef(false);
   const directionRef = useRef(direction);
@@ -174,6 +206,31 @@ export default function BoardingScanPage() {
   return (
     <div className="max-w-md mx-auto space-y-4">
       <h1 className="text-xl font-semibold">Scan Boarding Pass</h1>
+
+      {preselect && (
+        <Card className="border-green-400">
+          <CardContent className="space-y-3 py-4">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Selected learner</p>
+              <p className="text-base font-semibold">
+                {preselect.name}{preselect.roll ? ` · ${preselect.roll}` : ''}
+              </p>
+              {preselect.stop && <p className="text-xs text-gray-500">Stop: {preselect.stop}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={() => markPreselected('onward')} disabled={!onwardOpen}>
+                Mark present · Onward
+              </Button>
+              <Button onClick={() => markPreselected('return')} disabled={!returnOpen}>
+                Mark present · Return
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Or scan the learner&apos;s QR pass below to verify identity.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Direction toggle — the active leg auto-selects by time; the closed leg is disabled */}
       <div className="grid grid-cols-2 gap-2">
