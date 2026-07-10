@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getLearnerRowForUser } from '@/lib/student/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
 
 /**
  * GET the signed-in learner's allocated route (with ordered stops, driver name,
@@ -105,6 +106,8 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
       if (sr) driverName = `${sr.first_name ?? ''} ${sr.last_name ?? ''}`.trim() || null;
     }
 
+    const boardingStaff = await getBoardingStaffForRoute(svc, route.id);
+
     return NextResponse.json({
       success: true,
       data: {
@@ -123,6 +126,7 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
           fare: route.fare,
           status: route.status,
           driverName,
+          boardingStaff,
           vehicle,
           stops: stops.map((s) => ({
             id: s.id,

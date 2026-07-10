@@ -29,6 +29,7 @@ interface RouteData {
   fare: number | null;
   status: string | null;
   driverName: string | null;
+  boardingStaff: { name: string; email: string }[];
   vehicle: { registrationNumber: string; model: string | null; capacity: number | null } | null;
   stops: Stop[];
 }
@@ -432,6 +433,28 @@ export default function StudentRoutesPage() {
               <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
                 {route.driverName ?? 'Not assigned'}
               </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-violet-600 text-white shadow-lg">
+              <Users className="h-6 w-6" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                Boarding staff
+              </p>
+              {route.boardingStaff && route.boardingStaff.length > 0 ? (
+                <ul className="mt-0.5 space-y-0.5">
+                  {route.boardingStaff.map((s) => (
+                    <li key={s.email} className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                      {s.name}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-base font-semibold text-gray-900 dark:text-white">Not assigned</p>
+              )}
             </div>
           </div>
 
