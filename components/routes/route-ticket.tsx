@@ -21,17 +21,12 @@ function fmtTime(t: string | null): string {
   return `${h12}:${minute} ${ampm}`;
 }
 
-function fmtDuration(mins: number | null): string {
-  if (mins == null) return '—';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h && m) return `${h}h ${m}m`;
-  if (h) return `${h}h`;
-  return `${m}m`;
+function fmtDuration(d: string | null): string {
+  return d?.trim() || '—';
 }
 
 function fmtDistance(km: number | null): string {
-  return km == null ? '—' : `${km} km`;
+  return km == null || km <= 0 ? '—' : `${km} km`;
 }
 
 function cap(s: string | null): string {
@@ -164,7 +159,7 @@ export function RouteTicket({
 
         {/* stat strip */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-gray-100 dark:bg-gray-800">
-          <Stat icon={IndianRupee} label="Fare" value={route.fare != null ? `₹${route.fare}` : '—'} tone="bg-gradient-to-br from-orange-500 to-amber-600" />
+          <Stat icon={IndianRupee} label="Fare" value={route.fare != null && route.fare > 0 ? `₹${route.fare}` : '—'} tone="bg-gradient-to-br from-orange-500 to-amber-600" />
           <Stat icon={Milestone} label="Distance" value={fmtDistance(route.distance)} tone="bg-gradient-to-br from-blue-500 to-indigo-600" />
           <Stat icon={Clock} label="Travel time" value={fmtDuration(route.duration)} tone="bg-gradient-to-br from-purple-500 to-violet-600" />
           <Stat icon={CircleDot} label="Total stops" value={String(stops.length)} tone="bg-gradient-to-br from-green-500 to-emerald-600" />

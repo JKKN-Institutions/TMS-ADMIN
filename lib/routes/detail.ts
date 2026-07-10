@@ -33,7 +33,7 @@ export interface RouteDetail {
   departureTime: string | null;
   arrivalTime: string | null;
   distance: number | null;
-  duration: number | null;
+  duration: string | null;
   fare: number | null;
   status: string | null;
   driverName: string | null;
@@ -50,7 +50,7 @@ interface RouteRow {
   departure_time: string | null;
   arrival_time: string | null;
   distance: number | null;
-  duration: number | null;
+  duration: string | null;
   fare: number | null;
   status: string | null;
   driver_id: string | null;

@@ -120,8 +120,8 @@ export function RouteHero({ route }: { route: DriverRouteDTO }) {
       </div>
 
       <div className="grid grid-cols-2 gap-px bg-gray-100 dark:bg-gray-800 lg:grid-cols-4">
-        <Stat icon={IndianRupee} label="Fare" value={route.fare != null ? `₹${route.fare}` : '—'} tone="orange" />
-        <Stat icon={Milestone} label="Distance" value={route.distance != null ? `${route.distance} km` : '—'} tone="blue" />
+        <Stat icon={IndianRupee} label="Fare" value={route.fare != null && route.fare > 0 ? `₹${route.fare}` : '—'} tone="orange" />
+        <Stat icon={Milestone} label="Distance" value={route.distance != null && route.distance > 0 ? `${route.distance} km` : '—'} tone="blue" />
         <Stat icon={Clock} label="Travel time" value={route.duration ?? '—'} tone="purple" />
         <Stat icon={CircleDot} label="Total stops" value={String(route.stops.length)} tone="green" />
       </div>
