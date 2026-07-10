@@ -34,6 +34,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@types/leaflet": "^1.9.19",
     "@types/uuid": "^10.0.0",
+    "@yudiel/react-qr-scanner": "^2.6.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
     "date-fns": "^2.30.0",
