@@ -117,7 +117,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   const [collapsed, setCollapsed] = useState(false);
   // Portal access requires an ACTUAL route assignment, not just the permission.
   // Authoritative check is server-side (/api/boarding/access). Super admins pass.
-  const [access, setAccess] = useState<'checking' | 'allowed' | 'denied'>('checking');
+  const [access, setAccess] = useState<'checking' | 'allowed' | 'select' | 'denied'>('checking');
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('tms-boarding-sidebar-collapsed') === '1');
@@ -145,13 +145,24 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
       try {
         const res = await fetch('/api/boarding/access', { cache: 'no-store', credentials: 'same-origin' });
         const json = await res.json().catch(() => ({}));
-        if (!cancelled) setAccess(res.ok && json?.data?.allowed ? 'allowed' : 'denied');
+        const d = json?.data ?? {};
+        if (cancelled) return;
+        if (res.ok && d.allowed) setAccess('allowed');
+        else if (res.ok && d.eligible) setAccess('select');
+        else setAccess('denied');
       } catch {
         if (!cancelled) setAccess('denied');
       }
     })();
     return () => { cancelled = true; };
   }, [loading, user, profile]);
+
+  // Keep an unassigned-but-eligible staffer on the route picker.
+  useEffect(() => {
+    if (access === 'select' && pathname !== '/boarding/select-route') {
+      router.replace('/boarding/select-route');
+    }
+  }, [access, pathname, router]);
 
   if (loading || !profile || access === 'checking') {
     return (
@@ -163,6 +174,31 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
           <p className="text-gray-600">Loading JKKN Boarding…</p>
         </div>
       </div>
+    );
+  }
+
+  if (access === 'select') {
+    return (
+      <BugReporterWrapper>
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+          <header className="app-header">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-green-600 rounded-lg flex items-center justify-center">
+                <Bus className="w-5 h-5 text-white" />
+              </div>
+              <h1 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">JKKN Boarding</h1>
+            </div>
+            <button
+              onClick={() => signOut()}
+              className="p-2 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800"
+              title="Sign out"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </header>
+          <div className="content-body fade-in">{children}</div>
+        </div>
+      </BugReporterWrapper>
     );
   }
 
