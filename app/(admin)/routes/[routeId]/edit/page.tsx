@@ -3,11 +3,79 @@
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { Clock, Loader2, MapPin, Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
 import { SelectMenu } from '@/components/ui/select-menu';
 import PossibleStopsManager from '@/components/possible-stops-manager';
+
+interface RouteDetail {
+  route_number: string;
+  route_name: string;
+  start_location: string;
+  end_location: string;
+  start_latitude: number | string | null;
+  start_longitude: number | string | null;
+  end_latitude: number | string | null;
+  end_longitude: number | string | null;
+  departure_time: string;
+  arrival_time: string;
+  distance: number | string | null;
+  duration: string | null;
+  total_capacity: number | string | null;
+  fare: number | string | null;
+  driver_id: string | null;
+  vehicle_id: string | null;
+  status: string;
+  route_stops?: Stop[];
+}
+
+interface RouteDriverOption {
+  id: string;
+  name: string;
+}
+
+interface RouteVehicleOption {
+  id: string;
+  label: string;
+}
+
+async function fetchRoute(routeId: string): Promise<RouteDetail> {
+  const res = await fetch(`/api/admin/routes/${routeId}`);
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load route');
+  return json.data as RouteDetail;
+}
+
+// Assignment dropdown options (best-effort): failures are swallowed so the
+// optional driver/vehicle pickers just fall back to "Unassigned".
+async function fetchRouteDrivers(): Promise<RouteDriverOption[]> {
+  try {
+    const res = await fetch('/api/admin/drivers');
+    const json = await res.json();
+    if (!json.success) return [];
+    return (json.data || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchRouteVehicles(): Promise<RouteVehicleOption[]> {
+  try {
+    const res = await fetch('/api/admin/vehicles');
+    const json = await res.json();
+    if (!json.success) return [];
+    return (json.data || []).map(
+      (x: { id: string; registration_number?: string; vehicle_number?: string; model?: string }) => ({
+        id: x.id,
+        label: `${x.registration_number || x.vehicle_number || x.id}${x.model ? ` — ${x.model}` : ''}`,
+      })
+    );
+  } catch {
+    return [];
+  }
+}
 
 interface Stop {
   id?: string;
@@ -58,14 +126,9 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
   const router = useRouter();
 
   const [form, setForm] = useState<FormState>(EMPTY);
-  const [routeNumber, setRouteNumber] = useState('');
-  const [drivers, setDrivers] = useState<{ id: string; name: string }[]>([]);
-  const [vehicles, setVehicles] = useState<{ id: string; label: string }[]>([]);
   const [stops, setStops] = useState<Stop[]>([]);
   const [newStop, setNewStop] = useState({ stop_name: '', stop_time: '', is_major_stop: false });
   const [insertAfter, setInsertAfter] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [stopBusy, setStopBusy] = useState(false);
 
@@ -81,64 +144,46 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
     setStops(json.success ? json.data : []);
   };
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/admin/routes/${routeId}`);
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load route');
-        const r = json.data;
-        if (!active) return;
-        setRouteNumber(r.route_number);
-        setForm({
-          route_number: r.route_number ?? '',
-          route_name: r.route_name ?? '',
-          start_location: r.start_location ?? '',
-          end_location: r.end_location ?? '',
-          start_latitude: r.start_latitude?.toString() ?? '',
-          start_longitude: r.start_longitude?.toString() ?? '',
-          end_latitude: r.end_latitude?.toString() ?? '',
-          end_longitude: r.end_longitude?.toString() ?? '',
-          departure_time: t5(r.departure_time),
-          arrival_time: t5(r.arrival_time),
-          distance: r.distance?.toString() ?? '',
-          duration: r.duration ?? '',
-          total_capacity: r.total_capacity?.toString() ?? '',
-          fare: r.fare?.toString() ?? '',
-          driver_id: r.driver_id ?? '',
-          vehicle_id: r.vehicle_id ?? '',
-          status: r.status ?? 'active',
-        });
-        setStops((r.route_stops ?? []).map((s: Stop) => ({ ...s, stop_time: t5(s.stop_time) })));
+  // The route record and the (best-effort) driver/vehicle dropdown options are
+  // independent datasets — load them in parallel instead of the old
+  // route -> drivers -> vehicles await chain.
+  const {
+    data: route,
+    isLoading: loading,
+    isError: routeIsError,
+    error: routeError,
+  } = useQuery({ queryKey: ['route', routeId], queryFn: () => fetchRoute(routeId), enabled: !!routeId });
+  const { data: drivers = [] } = useQuery({ queryKey: ['route-drivers'], queryFn: fetchRouteDrivers });
+  const { data: vehicles = [] } = useQuery({ queryKey: ['route-vehicles'], queryFn: fetchRouteVehicles });
 
-        // Assignment dropdown options (best-effort).
-        try {
-          const d = await (await fetch('/api/admin/drivers')).json();
-          if (active && d.success) setDrivers(d.data.map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
-        } catch { /* non-fatal */ }
-        try {
-          const v = await (await fetch('/api/admin/vehicles')).json();
-          if (active && v.success) {
-            setVehicles(
-              v.data.map((x: { id: string; registration_number?: string; vehicle_number?: string; model?: string }) => ({
-                id: x.id,
-                label: `${x.registration_number || x.vehicle_number || x.id}${x.model ? ` — ${x.model}` : ''}`,
-              }))
-            );
-          }
-        } catch { /* non-fatal */ }
-      } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : 'Failed to load route');
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [routeId]);
+  const routeNumber = route?.route_number ?? '';
+  const error = routeIsError ? (routeError instanceof Error ? routeError.message : 'Failed to load route') : null;
+
+  // Seed the form + stops state from the loaded route record — same field
+  // mapping as the old inline setForm/setStops calls, now keyed off query data.
+  useEffect(() => {
+    if (!route) return;
+    setForm({
+      route_number: route.route_number ?? '',
+      route_name: route.route_name ?? '',
+      start_location: route.start_location ?? '',
+      end_location: route.end_location ?? '',
+      start_latitude: route.start_latitude?.toString() ?? '',
+      start_longitude: route.start_longitude?.toString() ?? '',
+      end_latitude: route.end_latitude?.toString() ?? '',
+      end_longitude: route.end_longitude?.toString() ?? '',
+      departure_time: t5(route.departure_time),
+      arrival_time: t5(route.arrival_time),
+      distance: route.distance?.toString() ?? '',
+      duration: route.duration ?? '',
+      total_capacity: route.total_capacity?.toString() ?? '',
+      fare: route.fare?.toString() ?? '',
+      driver_id: route.driver_id ?? '',
+      vehicle_id: route.vehicle_id ?? '',
+      status: route.status ?? 'active',
+    });
+    setStops((route.route_stops ?? []).map((s) => ({ ...s, stop_time: t5(s.stop_time) })));
+  }, [route]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

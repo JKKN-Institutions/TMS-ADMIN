@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useEffect, useMemo, useState } from 'react';
+import { use, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { MapPin, Users, Briefcase, Download, Phone, Clock } from 'lucide-react';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
@@ -137,6 +138,34 @@ const crumbs = (routeId: string, routeNo: string) => [
   { label: 'Passengers' },
 ];
 
+// Full API response shapes for the two rosters — same shape the standalone
+// Learners/Staff pages fetch, so their React Query cache entries (same
+// queryKey) can be shared when the pages are visited back-to-back.
+interface LearnersRosterData {
+  route: RouteInfo;
+  total: number;
+  learners: LearnerApiRow[];
+}
+interface StaffRosterData {
+  route: RouteInfo;
+  total: number;
+  staff: StaffApiRow[];
+}
+
+async function fetchRouteLearners(routeId: string): Promise<LearnersRosterData> {
+  const res = await fetch(`/api/admin/routes/${routeId}/learners`);
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load learners');
+  return json.data as LearnersRosterData;
+}
+
+async function fetchRouteStaff(routeId: string): Promise<StaffRosterData> {
+  const res = await fetch(`/api/admin/routes/${routeId}/staff`);
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load staff');
+  return json.data as StaffRosterData;
+}
+
 // One stop-grouped section (used for both the Learners and the Staff blocks).
 function RosterSection({
   title,
@@ -227,67 +256,66 @@ function RosterSection({
 
 export default function RoutePassengersPage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = use(params);
-  const [route, setRoute] = useState<RouteInfo | null>(null);
-  const [learners, setLearners] = useState<Person[]>([]);
-  const [staff, setStaff] = useState<Person[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(null);
+  // Both rosters are independent — fetch them in parallel, each with its own
+  // cache entry keyed per route. Same queryKey/shape as the standalone
+  // Learners/Staff pages, so navigating between them shares cache.
+  const {
+    data: learnersRoster,
+    isLoading: learnersLoading,
+    isError: learnersIsError,
+    error: learnersErrorObj,
+  } = useQuery({ queryKey: ['route-learners', routeId], queryFn: () => fetchRouteLearners(routeId) });
 
-    // Both rosters are independent — fetch them together. The combined count and
-    // the two sections come from the same endpoints the standalone pages use, so
-    // the totals always agree with the list-page column.
-    Promise.all([
-      fetch(`/api/admin/routes/${routeId}/learners`).then((r) => r.json()),
-      fetch(`/api/admin/routes/${routeId}/staff`).then((r) => r.json()),
-    ])
-      .then(([lJson, sJson]) => {
-        if (!active) return;
-        if (!lJson.success) throw new Error(lJson.error || 'Failed to load learners');
-        if (!sJson.success) throw new Error(sJson.error || 'Failed to load staff');
+  const {
+    data: staffRoster,
+    isLoading: staffLoading,
+    isError: staffIsError,
+    error: staffErrorObj,
+  } = useQuery({ queryKey: ['route-staff', routeId], queryFn: () => fetchRouteStaff(routeId) });
 
-        const info: RouteInfo = lJson.data.route ?? sJson.data.route;
-        setRoute(info);
-        setLearners(
-          (lJson.data.learners as LearnerApiRow[]).map((l) => ({
-            kind: 'learner' as const,
-            name: l.name,
-            idLabel: l.register_number,
-            meta: l.status,
-            mobile: l.mobile,
-            stop_id: l.stop_id,
-            stop_name: l.stop_name,
-            sequence_order: l.sequence_order,
-            pickup: l.pickup,
-            evening: l.evening,
-          }))
-        );
-        setStaff(
-          (sJson.data.staff as StaffApiRow[]).map((s) => ({
-            kind: 'staff' as const,
-            name: s.name,
-            idLabel: s.staff_id,
-            meta: s.designation,
-            mobile: s.mobile,
-            stop_id: s.stop_id,
-            stop_name: s.stop_name,
-            sequence_order: s.sequence_order,
-            pickup: s.pickup,
-            evening: s.evening,
-          }))
-        );
-      })
-      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load passengers'))
-      .finally(() => active && setLoading(false));
+  const loading = learnersLoading || staffLoading;
+  const isError = learnersIsError || staffIsError;
+  const route = learnersRoster?.route ?? staffRoster?.route ?? null;
+  const error = learnersIsError
+    ? (learnersErrorObj instanceof Error ? learnersErrorObj.message : 'Failed to load learners')
+    : staffIsError
+    ? (staffErrorObj instanceof Error ? staffErrorObj.message : 'Failed to load staff')
+    : null;
 
-    return () => {
-      active = false;
-    };
-  }, [routeId]);
+  const learners: Person[] = useMemo(
+    () =>
+      (learnersRoster?.learners ?? []).map((l) => ({
+        kind: 'learner' as const,
+        name: l.name,
+        idLabel: l.register_number,
+        meta: l.status,
+        mobile: l.mobile,
+        stop_id: l.stop_id,
+        stop_name: l.stop_name,
+        sequence_order: l.sequence_order,
+        pickup: l.pickup,
+        evening: l.evening,
+      })),
+    [learnersRoster]
+  );
+
+  const staff: Person[] = useMemo(
+    () =>
+      (staffRoster?.staff ?? []).map((s) => ({
+        kind: 'staff' as const,
+        name: s.name,
+        idLabel: s.staff_id,
+        meta: s.designation,
+        mobile: s.mobile,
+        stop_id: s.stop_id,
+        stop_name: s.stop_name,
+        sequence_order: s.sequence_order,
+        pickup: s.pickup,
+        evening: s.evening,
+      })),
+    [staffRoster]
+  );
 
   const total = learners.length + staff.length;
   const allPeople = useMemo(() => [...learners, ...staff], [learners, staff]);

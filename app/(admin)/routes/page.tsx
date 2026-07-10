@@ -2,11 +2,28 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import { RouteImportDialog } from './route-import-dialog';
 import { getRouteColumns, type RouteRow } from './columns';
+
+// Single request: the API embeds route_stops (ids only) via a nested select,
+// and the table/stats need nothing else — no per-route stop fetches, no
+// driver/vehicle list downloads (the columns never render those).
+async function fetchRoutes(): Promise<RouteRow[]> {
+  const res = await fetch('/api/admin/routes');
+  const result = await res.json();
+  if (!res.ok || !result.success) throw new Error(result.error || 'Failed to fetch routes');
+  return (result.data || []).map((route: any) => ({
+    ...route,
+    route_stops: route.route_stops || [],
+    total_capacity: route.total_capacity || route.capacity || 0,
+    _learnerCount: route._learnerCount ?? 0,
+    _staffCount: route._staffCount ?? 0,
+  })) as RouteRow[];
+}
 
 const outlineBtn =
   'inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50';
@@ -14,8 +31,6 @@ const outlineBtn =
 const RoutesPage = () => {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [routes, setRoutes] = useState<RouteRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isImportOpen, setIsImportOpen] = useState(false);
 
   useEffect(() => {
@@ -23,37 +38,16 @@ const RoutesPage = () => {
     if (userData) setUser(JSON.parse(userData));
   }, []);
 
+  const {
+    data: routes = [],
+    isLoading: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['routes'], queryFn: fetchRoutes });
+
   useEffect(() => {
-    fetchRoutes();
-  }, []);
-
-  // Single request: the API embeds route_stops (ids only) via a nested select,
-  // and the table/stats need nothing else — no per-route stop fetches, no
-  // driver/vehicle list downloads (the columns never render those).
-  const fetchRoutes = async () => {
-    try {
-      setLoading(true);
-      const routesResponse = await fetch('/api/admin/routes');
-      const routesResult = await routesResponse.json();
-      if (!routesResult.success) throw new Error(routesResult.error || 'Failed to fetch routes');
-
-      const routesData: RouteRow[] = (routesResult.data || []).map((route: any) => ({
-        ...route,
-        route_stops: route.route_stops || [],
-        total_capacity: route.total_capacity || route.capacity || 0,
-        _learnerCount: route._learnerCount ?? 0,
-        _staffCount: route._staffCount ?? 0,
-      }));
-
-      setRoutes(routesData);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error occurred';
-      toast.error(`Failed to load routes: ${message}`);
-      setRoutes([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    if (isError) toast.error('Failed to load routes');
+  }, [isError]);
 
   // Deletes go through the service-role API (with a tms.routes.delete permission
   // check) — the old DatabaseService path used the anon key and was silently
@@ -75,7 +69,7 @@ const RoutesPage = () => {
       const result = await deleteRouteById(route.id);
       if (!result.ok) throw new Error(result.error || 'Failed to delete route');
       toast.success(result.message || 'Route deleted');
-      await fetchRoutes();
+      await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete route');
     }
@@ -92,7 +86,7 @@ const RoutesPage = () => {
       const results = await Promise.all(rows.map((r) => deleteRouteById(r.id)));
       const failed = results.filter((r) => !r.ok);
       reset();
-      await fetchRoutes();
+      await refetch();
       if (failed.length === 0) {
         toast.success(`Deleted ${rows.length} route(s)`);
       } else {
@@ -104,7 +98,7 @@ const RoutesPage = () => {
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete selected routes');
-      await fetchRoutes();
+      await refetch();
     }
   };
 
@@ -215,7 +209,7 @@ const RoutesPage = () => {
         }
       />
 
-      <RouteImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={fetchRoutes} />
+      <RouteImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={() => refetch()} />
     </div>
   );
 };

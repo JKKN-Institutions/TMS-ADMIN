@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Plus, Car, CheckCircle, Wrench, AlertTriangle, Trash2, Upload, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -12,11 +13,17 @@ import { getVehicleColumns, type VehicleRow } from './columns';
 import { VehicleImportDialog } from './vehicle-import-dialog';
 import { exportVehicles } from './vehicle-export';
 
+async function fetchVehicles(): Promise<VehicleRow[]> {
+  const response = await fetch('/api/admin/vehicles');
+  const result = await response.json();
+  if (!response.ok || !result.success)
+    throw new Error(result.error || 'Failed to fetch vehicles');
+  return (result.data || []) as VehicleRow[];
+}
+
 const VehiclesPage = () => {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [trackingVehicle, setTrackingVehicle] = useState<any>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -26,25 +33,19 @@ const VehiclesPage = () => {
     if (userData) setUser(JSON.parse(userData));
   }, []);
 
-  useEffect(() => {
-    fetchVehicles();
-  }, []);
+  // Cached via React Query: revisiting Vehicles now serves instantly from cache
+  // and revalidates in the background instead of re-fetching the whole list on
+  // every mount. refetch() replaces the old manual reload after mutations.
+  const {
+    data: vehicles = [],
+    isLoading: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['vehicles'], queryFn: fetchVehicles });
 
-  const fetchVehicles = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/admin/vehicles');
-      const result = await response.json();
-      if (!result.success) throw new Error(result.error || 'Failed to fetch vehicles');
-      setVehicles(result.data || []);
-    } catch (error) {
-      console.error('Error fetching vehicles:', error);
-      toast.error('Failed to load vehicles');
-      setVehicles([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (isError) toast.error('Failed to load vehicles');
+  }, [isError]);
 
   const handleDeleteVehicle = async (vehicle: VehicleRow) => {
     if (!confirm(`Are you sure you want to delete vehicle ${vehicle.registration_number}?`)) return;
@@ -53,7 +54,7 @@ const VehiclesPage = () => {
       const result = await res.json();
       if (!res.ok || !result.success) throw new Error(result.error || 'Failed to delete vehicle');
       toast.success('Vehicle deleted');
-      await fetchVehicles();
+      await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete vehicle');
     }
@@ -65,10 +66,10 @@ const VehiclesPage = () => {
       await Promise.all(rows.map((r) => fetch(`/api/admin/vehicles?id=${r.id}`, { method: 'DELETE' })));
       toast.success(`Deleted ${rows.length} vehicle(s)`);
       reset();
-      await fetchVehicles();
+      await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete selected vehicles');
-      await fetchVehicles();
+      await refetch();
     }
   };
 
@@ -235,7 +236,7 @@ const VehiclesPage = () => {
       />
 
       {/* Bulk upload dialog (creates new vehicles + updates existing, by reg number) */}
-      <VehicleImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={fetchVehicles} />
+      <VehicleImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={() => refetch()} />
 
       {/* Live GPS Tracking Modal */}
       {isTrackingModalOpen && trackingVehicle?.routes && (

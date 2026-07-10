@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, UserCheck, Route as RouteIcon, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
@@ -9,11 +10,16 @@ import UniversalStatCard from '@/components/universal-stat-card';
 import { getAssignmentColumns, type AssignmentRow } from './columns';
 import { AssignmentDeleteDialog } from './assignment-delete-dialog';
 
+async function fetchAssignments(): Promise<AssignmentRow[]> {
+  const res = await fetch('/api/admin/staff-route-assignments');
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load assignments');
+  return (json.assignments || []) as AssignmentRow[];
+}
+
 const StaffRouteAssignmentsPage = () => {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<AssignmentRow | null>(null);
 
   useEffect(() => {
@@ -21,25 +27,16 @@ const StaffRouteAssignmentsPage = () => {
     if (userData) setUser(JSON.parse(userData));
   }, []);
 
-  useEffect(() => {
-    fetchAssignments();
-  }, []);
+  const {
+    data: assignments = [],
+    isLoading: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['staff-route-assignments'], queryFn: fetchAssignments });
 
-  const fetchAssignments = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/admin/staff-route-assignments');
-      const data = await response.json();
-      if (!data.success) throw new Error(data.error || 'Failed to load assignments');
-      setAssignments(data.assignments || []);
-    } catch (error) {
-      console.error('Error fetching assignments:', error);
-      toast.error('Failed to load assignments');
-      setAssignments([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (isError) toast.error('Failed to load assignments');
+  }, [isError]);
 
   const userRole = user?.role;
   const canManage = ['super_admin', 'transport_manager'].includes(userRole);
@@ -118,7 +115,7 @@ const StaffRouteAssignmentsPage = () => {
         assignment={deleting}
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
-        onDeleted={fetchAssignments}
+        onDeleted={() => refetch()}
       />
     </div>
   );

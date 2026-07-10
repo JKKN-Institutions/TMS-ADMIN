@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronDown, Loader2, Mail, Search, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
@@ -30,6 +31,23 @@ interface StaffOption {
   staffId: string | null;
 }
 
+// Active routes for the dropdown (sourced from tms_route via /api/admin/routes).
+async function fetchAssignableRoutes(): Promise<RouteOption[]> {
+  const res = await fetch('/api/admin/routes');
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load routes');
+  return ((json.data as RouteOption[]) || []).filter((r) => r.status === 'active');
+}
+
+// Bus-required staff from the Passenger module, for the name search. Failures
+// are non-fatal — manual email entry still works.
+async function fetchAssignableStaff(): Promise<StaffOption[]> {
+  const res = await fetch('/api/admin/passengers/staff');
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load staff');
+  return (json.data as StaffOption[]) || [];
+}
+
 const crumbs = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Staff Assignments', href: '/staff-route-assignments' },
@@ -42,9 +60,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function AssignRoutePage() {
   const router = useRouter();
-  const [routes, setRoutes] = useState<RouteOption[]>([]);
-  const [staff, setStaff] = useState<StaffOption[]>([]);
-  const [staffLoaded, setStaffLoaded] = useState(false);
   const [staffQuery, setStaffQuery] = useState('');
   const [selectedStaff, setSelectedStaff] = useState<StaffOption | null>(null);
   const [manualMode, setManualMode] = useState(false);
@@ -53,36 +68,21 @@ export default function AssignRoutePage() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Active routes for the dropdown (sourced from tms_route via /api/admin/routes)
-  // and bus-required staff from the Passenger module for the name search.
+  // Active routes for the dropdown and bus-required staff for the name search —
+  // two independent datasets, fetched in parallel via React Query.
+  const { data: routes = [], isError: routesIsError } = useQuery({
+    queryKey: ['assignable-routes'],
+    queryFn: fetchAssignableRoutes,
+  });
+  const { data: staff = [], isLoading: staffLoading } = useQuery({
+    queryKey: ['assignable-staff'],
+    queryFn: fetchAssignableStaff,
+  });
+  const staffLoaded = !staffLoading;
+
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/routes');
-        const json = await res.json();
-        if (active && json.success) {
-          setRoutes((json.data as RouteOption[]).filter((r) => r.status === 'active'));
-        }
-      } catch {
-        if (active) toast.error('Failed to load routes');
-      }
-    })();
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/passengers/staff');
-        const json = await res.json();
-        if (active && json.success) setStaff(json.data as StaffOption[]);
-      } catch {
-        /* non-fatal: manual email entry still works */
-      } finally {
-        if (active) setStaffLoaded(true);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (routesIsError) toast.error('Failed to load routes');
+  }, [routesIsError]);
 
   // Live name search over the passenger staff list (also matches email / staff id).
   const matches = useMemo(() => {

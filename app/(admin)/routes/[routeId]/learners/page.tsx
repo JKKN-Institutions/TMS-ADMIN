@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useEffect, useMemo, useState } from 'react';
+import { use, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { MapPin, Users, Download, Phone, Clock } from 'lucide-react';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
@@ -94,28 +95,25 @@ const crumbs = (routeId: string, routeNo: string) => [
   { label: 'Learners' },
 ];
 
+async function fetchRouteLearners(routeId: string): Promise<RosterData> {
+  const res = await fetch(`/api/admin/routes/${routeId}/learners`);
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load learners');
+  return json.data as RosterData;
+}
+
 export default function RouteLearnersPage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = use(params);
-  const [data, setData] = useState<RosterData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    fetch(`/api/admin/routes/${routeId}/learners`)
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load learners');
-        return json.data as RosterData;
-      })
-      .then((d) => active && setData(d))
-      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load learners'))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [routeId]);
+  // Cached via React Query, keyed per route so switching between routes never
+  // shows stale data. Same key/shape as the combined Passengers page's
+  // learners query, so the two share cache when visited back-to-back.
+  const {
+    data,
+    isLoading: loading,
+    isError,
+    error,
+  } = useQuery({ queryKey: ['route-learners', routeId], queryFn: () => fetchRouteLearners(routeId) });
 
   const groups = useMemo(() => (data ? groupByStop(data.learners) : []), [data]);
 
@@ -128,12 +126,12 @@ export default function RouteLearnersPage({ params }: { params: Promise<{ routeI
     );
   }
 
-  if (error || !data) {
+  if (isError || !data) {
     return (
       <div className="space-y-6">
         <DetailPageHeader crumbs={crumbs(routeId, '—')} backHref={`/routes/${routeId}`} title="Learners" />
         <p className="text-gray-600">
-          {error ?? 'Could not load learners.'}{' '}
+          {(error instanceof Error ? error.message : null) ?? 'Could not load learners.'}{' '}
           <Link href={`/routes/${routeId}`} className="text-green-700 hover:underline">Back to route</Link>
         </p>
       </div>

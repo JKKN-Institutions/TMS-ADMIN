@@ -1,7 +1,8 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { DetailPageHeader } from '@/components/ui/detail-view';
 import VehicleForm from '../../vehicle-form';
 import type { VehicleRow } from '../../columns';
@@ -22,21 +23,12 @@ const crumbs = (label: string, vehicleId: string) => [
 
 export default function VehicleEditPage({ params }: { params: Promise<{ vehicleId: string }> }) {
   const { vehicleId } = use(params);
-  const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    fetchVehicle(vehicleId)
-      .then((v) => active && setVehicle(v))
-      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load vehicle'))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [vehicleId]);
+  const {
+    data: vehicle,
+    isLoading: loading,
+    isError,
+  } = useQuery({ queryKey: ['vehicle', vehicleId], queryFn: () => fetchVehicle(vehicleId), enabled: !!vehicleId });
+  const error = isError ? 'Failed to load vehicle' : null;
 
   if (loading) {
     return (

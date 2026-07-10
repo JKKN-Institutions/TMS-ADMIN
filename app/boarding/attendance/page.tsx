@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ListChecks, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
@@ -10,41 +11,46 @@ interface RouteOpt { id: string; route_number: string | null; route_name: string
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Route filter options come from the dashboard endpoint (already route-scoped).
+// Non-fatal by design — on failure the route filter just stays empty.
+async function fetchBoardingRouteOptions(): Promise<RouteOpt[]> {
+  const res = await fetch('/api/boarding/dashboard', { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load routes');
+  return (json.data?.routes ?? []) as RouteOpt[];
+}
+
+async function fetchAttendance(date: string): Promise<AttendanceRecord[]> {
+  const res = await fetch(`/api/boarding/attendance?date=${date}`, { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load attendance');
+  return json.data.records as AttendanceRecord[];
+}
+
 export default function BoardingAttendancePage() {
-  const [routes, setRoutes] = useState<RouteOpt[]>([]);
   const [date, setDate] = useState(todayStr());
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // Route filter options come from the dashboard endpoint (already route-scoped).
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch('/api/boarding/dashboard', { cache: 'no-store', credentials: 'same-origin' });
-        const json = await res.json();
-        if (res.ok && json.success) setRoutes((json.data?.routes ?? []) as RouteOpt[]);
-      } catch { /* non-fatal — the route filter just stays empty */ }
-    })();
-  }, []);
+  const { data: routes = [] } = useQuery({
+    queryKey: ['boarding-attendance-routes'],
+    queryFn: fetchBoardingRouteOptions,
+  });
 
   // The DAY is the server query; route/direction/status filtering is client-side
   // (the DataTable), so changing those doesn't re-hit the API.
+  const {
+    data: records = [],
+    isLoading: loading,
+    isError,
+    error: attendanceError,
+  } = useQuery({
+    queryKey: ['boarding-attendance', date],
+    queryFn: () => fetchAttendance(date),
+  });
+
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/boarding/attendance?date=${date}`, { cache: 'no-store', credentials: 'same-origin' });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load attendance');
-        setRecords(json.data.records as AttendanceRecord[]);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load attendance');
-        setRecords([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [date]);
+    if (isError) toast.error(attendanceError instanceof Error ? attendanceError.message : 'Failed to load attendance');
+  }, [isError, attendanceError]);
 
   const columns = useMemo(() => getAttendanceColumns(), []);
 

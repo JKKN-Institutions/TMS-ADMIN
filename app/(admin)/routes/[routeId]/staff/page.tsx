@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useEffect, useMemo, useState } from 'react';
+import { use, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { MapPin, Briefcase, Download, Phone, Clock } from 'lucide-react';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
@@ -81,28 +82,25 @@ const crumbs = (routeId: string, routeNo: string) => [
   { label: 'Staff' },
 ];
 
+async function fetchRouteStaff(routeId: string): Promise<RosterData> {
+  const res = await fetch(`/api/admin/routes/${routeId}/staff`);
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load staff');
+  return json.data as RosterData;
+}
+
 export default function RouteStaffPage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = use(params);
-  const [data, setData] = useState<RosterData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    fetch(`/api/admin/routes/${routeId}/staff`)
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load staff');
-        return json.data as RosterData;
-      })
-      .then((d) => active && setData(d))
-      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load staff'))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [routeId]);
+  // Cached via React Query, keyed per route so switching between routes never
+  // shows stale data. Same key/shape as the combined Passengers page's staff
+  // query, so the two share cache when visited back-to-back.
+  const {
+    data,
+    isLoading: loading,
+    isError,
+    error,
+  } = useQuery({ queryKey: ['route-staff', routeId], queryFn: () => fetchRouteStaff(routeId) });
 
   const groups = useMemo(() => (data ? groupByStop(data.staff) : []), [data]);
 
@@ -115,12 +113,12 @@ export default function RouteStaffPage({ params }: { params: Promise<{ routeId: 
     );
   }
 
-  if (error || !data) {
+  if (isError || !data) {
     return (
       <div className="space-y-6">
         <DetailPageHeader crumbs={crumbs(routeId, '—')} backHref={`/routes/${routeId}`} title="Staff" />
         <p className="text-gray-600">
-          {error ?? 'Could not load staff.'}{' '}
+          {(error instanceof Error ? error.message : null) ?? 'Could not load staff.'}{' '}
           <Link href={`/routes/${routeId}`} className="text-green-700 hover:underline">Back to route</Link>
         </p>
       </div>

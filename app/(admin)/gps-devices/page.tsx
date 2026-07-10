@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Navigation, Activity, WifiOff, BatteryLow, Settings, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import UniversalStatCard from '@/components/universal-stat-card';
@@ -20,36 +21,33 @@ const STATUS_FILTER_OPTIONS = [
   { label: 'Error', value: 'error' },
 ];
 
+async function fetchDevices(): Promise<GpsDevice[]> {
+  const res = await fetch('/api/admin/gps/devices', { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch GPS devices');
+  return (json.data ?? []) as GpsDevice[];
+}
+
 export default function GpsDevicesPage() {
   const router = useRouter();
   const { canManage, canDelete } = useGpsRole();
 
-  const [devices, setDevices] = useState<GpsDevice[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isMercydaModalOpen, setIsMercydaModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<GpsDevice | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [bulkTarget, setBulkTarget] = useState<{ rows: GpsDevice[]; reset: () => void } | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const fetchDevices = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/admin/gps/devices', { cache: 'no-store', credentials: 'same-origin' });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch GPS devices');
-      setDevices((json.data ?? []) as GpsDevice[]);
-    } catch (error) {
-      console.error('Error fetching GPS devices:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to load GPS devices');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const {
+    data: devices = [],
+    isLoading: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['gps-devices'], queryFn: fetchDevices });
 
   useEffect(() => {
-    fetchDevices();
-  }, []);
+    if (isError) toast.error('Failed to load GPS devices');
+  }, [isError]);
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -63,7 +61,7 @@ export default function GpsDevicesPage() {
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to delete GPS device');
       toast.success(`Deleted ${deleteTarget.device_name}`);
       setDeleteTarget(null);
-      await fetchDevices();
+      await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete GPS device');
     } finally {
@@ -89,7 +87,7 @@ export default function GpsDevicesPage() {
       else toast.error(`Deleted ${ok}, failed ${failed}`);
       bulkTarget.reset();
       setBulkTarget(null);
-      await fetchDevices();
+      await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Bulk delete failed');
     } finally {

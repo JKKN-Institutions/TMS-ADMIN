@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { 
+import {
   Users, 
   Route as RouteIcon, 
   UserCheck, 
@@ -39,58 +40,40 @@ interface DashboardStats {
   todayRevenue: number;
 }
 
+async function fetchDashboardData(): Promise<DashboardStats> {
+  const response = await fetch('/api/admin/dashboard');
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  const result = await response.json();
+  if (!result.success || !result.data || !result.data.stats) {
+    throw new Error('Invalid response format');
+  }
+  return result.data.stats as DashboardStats;
+}
+
 const DashboardPage = () => {
   const router = useRouter();
   const { profile } = useAuth();
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    // Auth is enforced server-side by proxy.ts; just load data here.
-    fetchDashboardData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Cached via React Query: revisiting the dashboard serves instantly from
+  // cache and revalidates in the background instead of re-fetching on every
+  // mount. Auth is enforced server-side by proxy.ts.
+  const {
+    data: dashboardStats,
+    isFetching: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['dashboard-stats'], queryFn: fetchDashboardData });
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/admin/dashboard');
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      if (result.success && result.data && result.data.stats) {
-        setDashboardStats(result.data.stats);
-      } else {
-        throw new Error('Invalid response format');
-      }
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-      toast.error('Failed to load dashboard data');
-      // Set fallback data
-      setDashboardStats({
-        totalStudents: 0,
-        totalDrivers: 0,
-        totalRoutes: 0,
-        totalVehicles: 0,
-        totalBookings: 0,
-        confirmedBookings: 0,
-        pendingPayments: 0,
-        openGrievances: 0,
-        todayRevenue: 0
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (isError) toast.error('Failed to load dashboard data');
+  }, [isError]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchDashboardData();
+    await refetch();
     setRefreshing(false);
     toast.success('Dashboard refreshed');
   };

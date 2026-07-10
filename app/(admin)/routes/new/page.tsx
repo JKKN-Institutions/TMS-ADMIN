@@ -1,11 +1,51 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Bus, Clock, Loader2, MapPin, Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
 import { SelectMenu } from '@/components/ui/select-menu';
+
+interface RouteDriverOption {
+  id: string;
+  name: string;
+}
+
+interface RouteVehicleOption {
+  id: string;
+  label: string;
+}
+
+// Assignment dropdown options (best-effort, same as the edit page): failures are
+// swallowed so the optional driver/vehicle pickers just fall back to "Unassigned".
+async function fetchRouteDrivers(): Promise<RouteDriverOption[]> {
+  try {
+    const res = await fetch('/api/admin/drivers');
+    const json = await res.json();
+    if (!json.success) return [];
+    return (json.data || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchRouteVehicles(): Promise<RouteVehicleOption[]> {
+  try {
+    const res = await fetch('/api/admin/vehicles');
+    const json = await res.json();
+    if (!json.success) return [];
+    return (json.data || []).map(
+      (x: { id: string; registration_number?: string; vehicle_number?: string; model?: string }) => ({
+        id: x.id,
+        label: `${x.registration_number || x.vehicle_number || x.id}${x.model ? ` — ${x.model}` : ''}`,
+      })
+    );
+  } catch {
+    return [];
+  }
+}
 
 interface NewStop {
   stop_name: string;
@@ -60,38 +100,15 @@ function coordError(lat: string, lng: string, which: string): string | null {
 export default function NewRoutePage() {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(EMPTY);
-  const [drivers, setDrivers] = useState<{ id: string; name: string }[]>([]);
-  const [vehicles, setVehicles] = useState<{ id: string; label: string }[]>([]);
+  // Independent, non-fatal dropdown loads — fetched in parallel via React Query
+  // instead of the old sequential drivers-then-vehicles await chain.
+  const { data: drivers = [] } = useQuery({ queryKey: ['route-drivers'], queryFn: fetchRouteDrivers });
+  const { data: vehicles = [] } = useQuery({ queryKey: ['route-vehicles'], queryFn: fetchRouteVehicles });
   const [stops, setStops] = useState<NewStop[]>([]);
   const [newStop, setNewStop] = useState<NewStop>({ stop_name: '', stop_time: '', is_major_stop: false });
   const [saving, setSaving] = useState(false);
 
   const set = (k: keyof FormState, v: string) => setForm((p) => ({ ...p, [k]: v }));
-
-  // Assignment dropdown options (best-effort, same as the edit page).
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const d = await (await fetch('/api/admin/drivers')).json();
-        if (active && d.success) setDrivers(d.data.map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
-      } catch { /* non-fatal */ }
-      try {
-        const v = await (await fetch('/api/admin/vehicles')).json();
-        if (active && v.success) {
-          setVehicles(
-            v.data.map((x: { id: string; registration_number?: string; vehicle_number?: string; model?: string }) => ({
-              id: x.id,
-              label: `${x.registration_number || x.vehicle_number || x.id}${x.model ? ` — ${x.model}` : ''}`,
-            }))
-          );
-        }
-      } catch { /* non-fatal */ }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const addStop = () => {
     if (!newStop.stop_name.trim() || !newStop.stop_time) {

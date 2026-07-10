@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import {
   QrCode, Route as RouteIcon, Users, ArrowRight, ArrowLeft, CheckCircle2,
   RefreshCw, ChevronRight, Clock, ScanLine, ListChecks, Activity, GraduationCap,
@@ -37,39 +38,31 @@ interface BoardingDashboard {
 const fmtTime = (ts: string | null) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
 
+async function fetchBoardingDashboard(): Promise<BoardingDashboard> {
+  const res = await fetch('/api/boarding/dashboard', { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load dashboard');
+  return json.data as BoardingDashboard;
+}
+
 export default function BoardingDashboardPage() {
   const router = useRouter();
-  const [data, setData] = useState<BoardingDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async (mode: 'initial' | 'refresh' = 'initial') => {
-    try {
-      const res = await fetch('/api/boarding/dashboard', { cache: 'no-store', credentials: 'same-origin' });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load dashboard');
-      setData(json.data as BoardingDashboard);
-    } catch (e) {
-      console.error('boarding dashboard load error:', e);
-      toast.error('Failed to load boarding dashboard');
-      setData({
-        staffName: 'Boarding Staff', assignedRouteCount: 0, studentsTotal: 0,
-        today: { total: 0, onward: 0, return: 0 }, routes: [], recent: [],
-      });
-    } finally {
-      if (mode === 'initial') setLoading(false); else setRefreshing(false);
-    }
-  };
+  const {
+    data,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useQuery({ queryKey: ['boarding-dashboard'], queryFn: fetchBoardingDashboard });
 
   useEffect(() => {
-    fetchData('initial');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (isError) toast.error('Failed to load boarding dashboard');
+  }, [isError]);
 
   const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchData('refresh');
-    toast.success('Dashboard refreshed');
+    const result = await refetch();
+    if (!result.isError) toast.success('Dashboard refreshed');
   };
 
   // Quick actions — gradient-icon cards in the admin style; all link to real pages.
@@ -88,7 +81,7 @@ export default function BoardingDashboardPage() {
 
   const myRoute = data?.routes?.[0] ?? null;
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
@@ -114,11 +107,11 @@ export default function BoardingDashboardPage() {
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:gap-3 sm:shrink-0">
           <button
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={isFetching}
             className="inline-flex flex-1 justify-center sm:flex-none items-center whitespace-nowrap px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Refreshing...' : 'Refresh Data'}
+            <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+            {isFetching ? 'Refreshing...' : 'Refresh Data'}
           </button>
           <button
             onClick={() => router.push('/boarding/scan')}

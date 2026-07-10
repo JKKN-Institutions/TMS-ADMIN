@@ -1,7 +1,8 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { MapPin, Navigation, Pencil, Users } from 'lucide-react';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
 
@@ -37,12 +38,13 @@ interface RouteDetail {
   driver_id?: string | null;
   vehicle_id?: string | null;
   route_stops?: RouteStop[];
-  _driverName?: string | null;
-  _vehicleReg?: string | null;
   _vehicleCapacity?: number | null;
   _passengerCount?: number;
   _staffCount?: number;
 }
+
+interface DriverOption { id: string; name?: string | null }
+interface VehicleOption { id: string; registration_number?: string | null; vehicle_number?: string | null }
 
 const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '—');
 
@@ -62,29 +64,23 @@ async function fetchRouteDetail(id: string): Promise<RouteDetail> {
   const res = await fetch(`/api/admin/routes/${id}`);
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load route');
-  const route: RouteDetail = json.data;
+  return json.data as RouteDetail;
+}
 
-  // Resolve driver / vehicle display names (loose refs, same approach as the old modal).
-  if (route.driver_id) {
-    try {
-      const d = await (await fetch('/api/admin/drivers')).json();
-      if (d.success) route._driverName = d.data.find((x: { id: string }) => x.id === route.driver_id)?.name ?? null;
-    } catch {
-      /* non-fatal */
-    }
-  }
-  if (route.vehicle_id) {
-    try {
-      const v = await (await fetch('/api/admin/vehicles')).json();
-      if (v.success) {
-        const found = v.data.find((x: { id: string }) => x.id === route.vehicle_id);
-        route._vehicleReg = found?.registration_number ?? found?.vehicle_number ?? null;
-      }
-    } catch {
-      /* non-fatal */
-    }
-  }
-  return route;
+// Same queryKey/shape as the Drivers and Vehicles list pages, so this page's
+// parallel lookups can share their cache instead of always re-fetching.
+async function fetchDrivers(): Promise<DriverOption[]> {
+  const res = await fetch('/api/admin/drivers');
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch drivers');
+  return json.data as DriverOption[];
+}
+
+async function fetchVehicles(): Promise<VehicleOption[]> {
+  const res = await fetch('/api/admin/vehicles');
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to fetch vehicles');
+  return (json.data || []) as VehicleOption[];
 }
 
 function StatusBadge({ status }: { status?: string }) {
@@ -110,21 +106,43 @@ const crumbs = (label: string) => [
 
 export default function RouteViewPage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = use(params);
-  const [route, setRoute] = useState<RouteDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    fetchRouteDetail(routeId)
-      .then((r) => active && setRoute(r))
-      .catch((e) => active && setError(e instanceof Error ? e.message : 'Failed to load route'))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [routeId]);
+  // Three independent queries fetched in PARALLEL — previously the route load
+  // waited on a driver lookup, which then waited on a vehicle lookup (a
+  // waterfall). Driver/vehicle names are derived below once all three land.
+  const {
+    data: route,
+    isLoading: routeLoading,
+    isError: routeIsError,
+  } = useQuery({
+    queryKey: ['route', routeId],
+    queryFn: () => fetchRouteDetail(routeId),
+    enabled: !!routeId,
+  });
+
+  const { data: drivers = [], isLoading: driversLoading } = useQuery({
+    queryKey: ['drivers'],
+    queryFn: fetchDrivers,
+  });
+
+  const { data: vehicles = [], isLoading: vehiclesLoading } = useQuery({
+    queryKey: ['vehicles'],
+    queryFn: fetchVehicles,
+  });
+
+  const loading = routeLoading || driversLoading || vehiclesLoading;
+  const error = routeIsError;
+
+  // Resolve driver / vehicle display names (loose refs, same approach as the old modal).
+  const driverName = route?.driver_id
+    ? drivers.find((d) => d.id === route.driver_id)?.name ?? null
+    : null;
+  const vehicleReg = route?.vehicle_id
+    ? (() => {
+        const found = vehicles.find((v) => v.id === route.vehicle_id);
+        return found?.registration_number ?? found?.vehicle_number ?? null;
+      })()
+    : null;
 
   if (loading) {
     return (
@@ -206,8 +224,8 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
 
       <SectionCard title="Assignment">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Driver" value={route._driverName || (route.driver_id ? route.driver_id : 'Unassigned')} />
-          <Field label="Vehicle" value={route._vehicleReg || (route.vehicle_id ? route.vehicle_id : 'Unassigned')} />
+          <Field label="Driver" value={driverName || (route.driver_id ? route.driver_id : 'Unassigned')} />
+          <Field label="Vehicle" value={vehicleReg || (route.vehicle_id ? route.vehicle_id : 'Unassigned')} />
         </div>
       </SectionCard>
 

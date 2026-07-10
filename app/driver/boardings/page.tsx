@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { istToday, addDays } from '@/lib/booking/window';
@@ -12,34 +13,44 @@ interface RouteBlock { id: string; label: string; counts: { booked: number; capa
 const fmtDateLong = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
 
+async function fetchDriverRoster(date: string): Promise<RouteBlock[]> {
+  const res = await fetch(`/api/driver/roster?date=${date}`, { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load boardings');
+  return json.data.routes as RouteBlock[];
+}
+
 export default function DriverBoardingsPage() {
   const today = istToday();
   const [date, setDate] = useState<string>(() => today);
-  const [routes, setRoutes] = useState<RouteBlock[] | null>(null);
   const [activeRoute, setActiveRoute] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // Cached per date via React Query: stepping back/forth between days now serves
+  // instantly from cache and revalidates in the background instead of re-fetching
+  // the whole roster on every date change.
+  const {
+    data: routes,
+    isLoading: loading,
+    isError,
+    error: queryErr,
+  } = useQuery({ queryKey: ['driver-roster', date], queryFn: () => fetchDriverRoster(date) });
+
+  const error = isError
+    ? queryErr instanceof Error
+      ? queryErr.message
+      : 'Failed to load boardings'
+    : null;
 
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/driver/roster?date=${date}`, { cache: 'no-store', credentials: 'same-origin' });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load boardings');
-        const rs = json.data.routes as RouteBlock[];
-        setRoutes(rs);
-        setActiveRoute((prev) => (prev && rs.some((r) => r.id === prev) ? prev : rs[0]?.id ?? null));
-        setError(null);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Failed to load boardings';
-        setError(msg);
-        toast.error(msg);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [date]);
+    if (isError) toast.error(error ?? 'Failed to load boardings');
+  }, [isError, error]);
+
+  // Keep the active-route selection valid as the roster changes: preserve the
+  // driver's current pick if it still exists, else default to the first route.
+  useEffect(() => {
+    if (!routes) return;
+    setActiveRoute((prev) => (prev && routes.some((r) => r.id === prev) ? prev : routes[0]?.id ?? null));
+  }, [routes]);
 
   const isToday = date === today;
   const current = routes?.find((r) => r.id === activeRoute) ?? routes?.[0] ?? null;

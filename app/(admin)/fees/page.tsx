@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Receipt, CheckCircle, IndianRupee, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
@@ -11,11 +12,16 @@ import { getFeeColumns } from './columns';
 import { inr } from './columns';
 import type { FeeStructureRow } from '@/lib/fees/types';
 
+async function fetchRows(): Promise<FeeStructureRow[]> {
+  const res = await fetch('/api/admin/fees', { credentials: 'same-origin' });
+  const result = await res.json();
+  if (!res.ok || !result.success) throw new Error(result.error || 'Failed to fetch fee structures');
+  return (result.data || []) as FeeStructureRow[];
+}
+
 export default function FeesPage() {
   const router = useRouter();
   const [user, setUser] = useState<{ role?: string } | null>(null);
-  const [rows, setRows] = useState<FeeStructureRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<FeeStructureRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [bulkTarget, setBulkTarget] = useState<{ rows: FeeStructureRow[]; reset: () => void } | null>(null);
@@ -26,26 +32,16 @@ export default function FeesPage() {
     if (u) setUser(JSON.parse(u));
   }, []);
 
-  useEffect(() => {
-    fetchRows();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const {
+    data: rows = [],
+    isLoading: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['fee-structures'], queryFn: fetchRows });
 
-  const fetchRows = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/admin/fees', { credentials: 'same-origin' });
-      const result = await res.json();
-      if (!result.success) throw new Error(result.error || 'Failed to fetch fee structures');
-      setRows(result.data || []);
-    } catch (e) {
-      console.error('Error fetching fee structures:', e);
-      toast.error('Failed to load fee structures');
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (isError) toast.error('Failed to load fee structures');
+  }, [isError]);
 
   const handleView = (f: FeeStructureRow) => router.push(`/fees/${f.id}`);
   const handleEdit = (f: FeeStructureRow) => router.push(`/fees/${f.id}/edit`);
@@ -60,7 +56,7 @@ export default function FeesPage() {
       if (!res.ok || !result.success) throw new Error(result.error || 'Failed to delete');
       toast.success(`Deleted ${deleteTarget.name}`);
       setDeleteTarget(null);
-      await fetchRows();
+      await refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete fee structure');
     } finally {
@@ -86,7 +82,7 @@ export default function FeesPage() {
       else toast.error(`Deleted ${ok}, failed ${failed} (some may have generated bills)`);
       bulkTarget.reset();
       setBulkTarget(null);
-      await fetchRows();
+      await refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Bulk delete failed');
     } finally {

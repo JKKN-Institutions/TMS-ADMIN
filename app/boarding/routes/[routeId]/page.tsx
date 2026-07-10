@@ -2,6 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, Users, QrCode, ChevronLeft, ChevronRight, CalendarClock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -13,11 +14,24 @@ import { getRosterColumns, type RosterStudent, type RosterDirection } from './co
 
 interface RouteInfo { id: string; route_number: string | null; route_name: string | null }
 
+interface RosterData {
+  route: RouteInfo;
+  students: RosterStudent[];
+  counts: { booked: number; capacity: number };
+}
+
 const statusKey = (d: RosterDirection): 'onward_status' | 'return_status' =>
   d === 'return' ? 'return_status' : 'onward_status';
 
 const fmtDateLong = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+
+async function fetchRoster(routeId: string, date: string): Promise<RosterData> {
+  const res = await fetch(`/api/boarding/routes/${routeId}/roster?date=${date}`, { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load roster');
+  return json.data as RosterData;
+}
 
 export default function BoardingRosterPage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = use(params);
@@ -32,37 +46,40 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
   const isFuture = date > today;
   const editable = canManage && isToday;
 
+  const {
+    data: rosterData,
+    isLoading: loading,
+    isError,
+    error: queryError,
+  } = useQuery({
+    queryKey: ['boarding-roster', routeId, date],
+    queryFn: () => fetchRoster(routeId, date),
+    enabled: !!routeId,
+  });
+
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [students, setStudents] = useState<RosterStudent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [meta, setMeta] = useState<{ booked: number; capacity: number }>({ booked: 0, capacity: 0 });
   const [selected, setSelected] = useState<RosterStudent | null>(null);
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch(`/api/boarding/routes/${routeId}/roster?date=${date}`, { cache: 'no-store', credentials: 'same-origin' });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load roster');
-      setRoute(json.data.route);
-      setStudents(json.data.students as RosterStudent[]);
-      setMeta({ booked: json.data.counts?.booked ?? 0, capacity: json.data.counts?.capacity ?? 0 });
-      setError(null);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to load roster';
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
+  // Sync the locally-mutable roster from the query whenever a fresh load lands
+  // (route/date change). postMarks() below then mutates `students` directly for
+  // optimistic UI, with a revert-on-failure — that logic is unchanged.
+  useEffect(() => {
+    if (rosterData) {
+      setRoute(rosterData.route);
+      setStudents(rosterData.students);
+      setMeta({ booked: rosterData.counts?.booked ?? 0, capacity: rosterData.counts?.capacity ?? 0 });
     }
-  };
+  }, [rosterData]);
+
+  const error = isError ? (queryError instanceof Error ? queryError.message : 'Failed to load roster') : null;
 
   useEffect(() => {
-    load();
+    if (isError) toast.error(error ?? 'Failed to load roster');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeId, date]);
+  }, [isError]);
 
   const counts = useMemo(() => ({
     total: students.length,

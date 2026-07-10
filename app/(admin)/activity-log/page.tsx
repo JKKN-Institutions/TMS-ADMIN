@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Activity, CalendarClock, ListChecks } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
@@ -8,31 +9,31 @@ import UniversalStatCard from '@/components/universal-stat-card';
 import { ACTION_OPTIONS, MODULE_OPTIONS, getActivityColumns, type ActivityRow } from './columns';
 import { ActivityDetailsDialog } from './activity-details-dialog';
 
+interface ActivityLogData {
+  entries: ActivityRow[];
+  stats: { total: number; today: number; week: number };
+}
+
+async function fetchActivityLog(): Promise<ActivityLogData> {
+  const response = await fetch('/api/admin/activity-log');
+  const data = await response.json();
+  if (!data.success) throw new Error(data.error || 'Failed to load activity log');
+  return { entries: data.data || [], stats: data.stats || { total: 0, today: 0, week: 0 } };
+}
+
 const ActivityLogPage = () => {
-  const [entries, setEntries] = useState<ActivityRow[]>([]);
-  const [stats, setStats] = useState({ total: 0, today: 0, week: 0 });
-  const [loading, setLoading] = useState(true);
   const [viewing, setViewing] = useState<ActivityRow | null>(null);
 
+  const { data, isLoading: loading, isError } = useQuery({
+    queryKey: ['activity-log'],
+    queryFn: fetchActivityLog,
+  });
+  const entries = data?.entries ?? [];
+  const stats = data?.stats ?? { total: 0, today: 0, week: 0 };
+
   useEffect(() => {
-    const fetchLog = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch('/api/admin/activity-log');
-        const data = await response.json();
-        if (!data.success) throw new Error(data.error || 'Failed to load activity log');
-        setEntries(data.data || []);
-        setStats(data.stats || { total: 0, today: 0, week: 0 });
-      } catch (error) {
-        console.error('Error fetching activity log:', error);
-        toast.error('Failed to load activity log');
-        setEntries([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchLog();
-  }, []);
+    if (isError) toast.error('Failed to load activity log');
+  }, [isError]);
 
   const columns = useMemo(() => getActivityColumns(setViewing), []);
 

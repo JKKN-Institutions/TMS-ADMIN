@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Settings,
@@ -28,13 +29,21 @@ import {
   Monitor
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import SchedulingConfigManager, { defaultSchedulingSettings } from '../../../lib/scheduling-config';
+import SchedulingConfigManager, { defaultSchedulingSettings, type SchedulingSettings } from '../../../lib/scheduling-config';
 import { AttendanceWindowSettings } from '@/components/admin/attendance-window-settings';
+
+// Scheduling settings are the only tab backed by a real API call today — the
+// other tabs (general/notifications/security) are still local-only defaults.
+async function fetchSchedulingSettings(): Promise<SchedulingSettings> {
+  const response = await fetch('/api/admin/settings');
+  if (!response.ok) throw new Error('Failed to load settings');
+  const data = await response.json();
+  return data.settings as SchedulingSettings;
+}
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('general');
-  const [loading, setLoading] = useState(false);
-  
+
   // General settings state
   const [generalSettings, setGeneralSettings] = useState({
     systemName: 'TMS Admin Portal',
@@ -62,12 +71,26 @@ const SettingsPage = () => {
     twoFactorAuth: false,
     ipRestriction: false
   });
-  
-  // Load settings from API on component mount
+
+  // Editable scheduling settings form state, seeded from the loaded record below
+  // (same fallback-to-defaults behaviour as the old loadSchedulingSettings).
+  const [schedulingSettings, setSchedulingSettings] = useState(defaultSchedulingSettings);
+  const {
+    data: schedulingData,
+    isLoading: loading,
+    isError: schedulingLoadError,
+  } = useQuery({ queryKey: ['settings', 'scheduling'], queryFn: fetchSchedulingSettings });
+
   React.useEffect(() => {
-    loadAllSettings();
-    
-    // Check URL params to set active tab
+    if (schedulingData) setSchedulingSettings(schedulingData);
+  }, [schedulingData]);
+
+  React.useEffect(() => {
+    if (schedulingLoadError) toast.error('Failed to load settings, using defaults');
+  }, [schedulingLoadError]);
+
+  // Check URL params to set active tab on mount.
+  React.useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
     const validTabs = ['general', 'scheduling', 'attendance', 'notifications', 'security', 'system'];
@@ -75,59 +98,6 @@ const SettingsPage = () => {
       setActiveTab(tabParam);
     }
   }, []);
-
-  const loadAllSettings = async () => {
-    try {
-      setLoading(true);
-      await Promise.all([
-        loadSchedulingSettings(),
-        loadGeneralSettings(),
-        loadNotificationSettings(),
-        loadSecuritySettings()
-      ]);
-    } catch (error) {
-      console.error('Error loading settings:', error);
-      toast.error('Failed to load some settings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadGeneralSettings = async () => {
-    // For now, use default values - in a real app, fetch from API
-    console.log('Loading general settings...');
-  };
-
-  const loadNotificationSettings = async () => {
-    // For now, use default values - in a real app, fetch from API
-    console.log('Loading notification settings...');
-  };
-
-  const loadSecuritySettings = async () => {
-    // For now, use default values - in a real app, fetch from API
-    console.log('Loading security settings...');
-  };
-
-  const loadSchedulingSettings = async () => {
-    try {
-      const response = await fetch('/api/admin/settings');
-      if (response.ok) {
-        const data = await response.json();
-        setSchedulingSettings(data.settings);
-      } else {
-        console.error('Failed to load settings:', response.statusText);
-        // Fall back to default settings
-        setSchedulingSettings(defaultSchedulingSettings);
-        toast.error('Failed to load settings, using defaults');
-      }
-    } catch (error) {
-      console.error('Error loading settings:', error);
-      setSchedulingSettings(defaultSchedulingSettings);
-      toast.error('Failed to load settings, using defaults');
-    }
-  };
-
-  const [schedulingSettings, setSchedulingSettings] = useState(defaultSchedulingSettings);
 
   const tabs = [
     { id: 'general', name: 'General', icon: Settings },

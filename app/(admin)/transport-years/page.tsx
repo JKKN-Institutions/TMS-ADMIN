@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, CalendarRange, CheckCircle, Star, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
@@ -9,11 +10,16 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { getTransportYearColumns, type TransportYearRow } from './columns';
 
+async function fetchYears(): Promise<TransportYearRow[]> {
+  const res = await fetch('/api/admin/transport-years');
+  const result = await res.json();
+  if (!res.ok || !result.success) throw new Error(result.error || 'Failed to fetch transport years');
+  return (result.data || []) as TransportYearRow[];
+}
+
 export default function TransportYearsPage() {
   const router = useRouter();
   const [user, setUser] = useState<{ role?: string } | null>(null);
-  const [years, setYears] = useState<TransportYearRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<TransportYearRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [bulkTarget, setBulkTarget] = useState<{ rows: TransportYearRow[]; reset: () => void } | null>(null);
@@ -24,26 +30,16 @@ export default function TransportYearsPage() {
     if (u) setUser(JSON.parse(u));
   }, []);
 
-  useEffect(() => {
-    fetchYears();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const {
+    data: years = [],
+    isLoading: loading,
+    isError,
+    refetch,
+  } = useQuery({ queryKey: ['transport-years'], queryFn: fetchYears });
 
-  const fetchYears = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/admin/transport-years');
-      const result = await res.json();
-      if (!result.success) throw new Error(result.error || 'Failed to fetch transport years');
-      setYears(result.data || []);
-    } catch (e) {
-      console.error('Error fetching transport years:', e);
-      toast.error('Failed to load transport years');
-      setYears([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (isError) toast.error('Failed to load transport years');
+  }, [isError]);
 
   const handleDelete = (year: TransportYearRow) => setDeleteTarget(year);
 
@@ -59,7 +55,7 @@ export default function TransportYearsPage() {
       if (!res.ok || !result.success) throw new Error(result.error || 'Failed to delete');
       toast.success(`Deleted ${deleteTarget.name}`);
       setDeleteTarget(null);
-      await fetchYears();
+      await refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete transport year');
     } finally {
@@ -87,7 +83,7 @@ export default function TransportYearsPage() {
       else toast.error(`Deleted ${ok}, failed ${failed}`);
       bulkTarget.reset();
       setBulkTarget(null);
-      await fetchYears();
+      await refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Bulk delete failed');
     } finally {
