@@ -3,8 +3,11 @@
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { ComponentType } from 'react';
-import { Bus, MapPin, AlertTriangle, Gauge, Clock, Navigation, Route as RouteIcon } from 'lucide-react';
+import { Bus, MapPin, AlertTriangle, Route as RouteIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { BusContextStrip } from '@/components/live/bus-context-strip';
+import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
+import { CAMPUS } from '@/lib/gps/campus';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -21,6 +24,8 @@ interface Vehicle {
   latitude: number | null;
   longitude: number | null;
   speed: number | null;
+  heading: number | null;
+  accuracyM: number | null;
   lastUpdate: string | null;
   liveTrackingEnabled: boolean;
   hasFix: boolean;
@@ -73,24 +78,13 @@ function NoticeCard({
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: typeof Gauge; label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800/40">
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </div>
-      <p className="mt-1 truncate font-semibold text-gray-900 tabular-nums dark:text-white">{value}</p>
-    </div>
-  );
-}
-
 export default function StudentLiveTrackPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['student-live-track'],
     queryFn: fetchBus,
     refetchInterval: 5000,
   });
+  const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
 
   if (isLoading) {
     return (
@@ -173,14 +167,25 @@ export default function StudentLiveTrackPage() {
                   latitude={v.latitude as number}
                   longitude={v.longitude as number}
                   label={`Bus ${v.registrationNumber ?? ''}`}
+                  heading={v.heading}
+                  accuracyM={v.accuracyM}
+                  destination={CAMPUS}
+                  viewer={viewer}
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <Stat icon={Navigation} label="Coordinates" value={`${v.latitude}, ${v.longitude}`} />
-                <Stat icon={Gauge} label="Speed" value={v.speed != null ? `${v.speed} km/h` : '—'} />
-                <Stat icon={Clock} label="Last update" value={formatUpdated(v.lastUpdate)} />
-              </div>
+              <BusContextStrip
+                position={{ lat: v.latitude as number, lng: v.longitude as number }}
+                heading={v.heading}
+                speedKmh={v.speed != null ? v.speed * 3.6 : null}
+                accuracyM={v.accuracyM}
+                viewer={viewer}
+                viewerStatus={viewerStatus}
+                viewerMessage={viewerMessage}
+                onLocateMe={onLocateMe}
+              />
+
+              <p className="text-xs text-gray-500 dark:text-gray-400">Last update: {formatUpdated(v.lastUpdate)}</p>
             </div>
           ) : (
             <div className="flex items-start gap-3 rounded-xl border border-dashed border-gray-300 p-5 dark:border-gray-700">
