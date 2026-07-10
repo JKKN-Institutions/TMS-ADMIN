@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import dynamic from 'next/dynamic';
+import type { IDetectedBarcode, IScannerError } from '@yudiel/react-qr-scanner';
 import { Clock } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cameraErrorMessage } from '@/lib/boarding/scan-errors';
 import {
   isDirectionOpen,
   activeDirection,
@@ -14,6 +16,13 @@ import {
   type AttendanceWindows,
   type AttDirection,
 } from '@/lib/boarding/attendance-window';
+
+// Loaded only in the browser: the scanner touches camera/WebRTC APIs, and lazy
+// loading keeps its wasm fallback out of the initial route bundle.
+const Scanner = dynamic(
+  () => import('@yudiel/react-qr-scanner').then((m) => m.Scanner),
+  { ssr: false }
+);
 
 type ScanResult = {
   ok: boolean;
@@ -34,7 +43,6 @@ export default function BoardingScanPage() {
   const [manual, setManual] = useState('');
   const [, setTick] = useState(0); // forces a re-evaluate of open/closed on an interval
 
-  const scannerRef = useRef<Html5Qrcode | null>(null);
   const busyRef = useRef(false);
   const directionRef = useRef(direction);
   directionRef.current = direction;
@@ -83,24 +91,9 @@ export default function BoardingScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onwardOpen, returnOpen, windows]);
 
-  async function stopCamera() {
-    const s = scannerRef.current;
-    if (s) {
-      try {
-        await s.stop();
-        await s.clear();
-      } catch {
-        /* ignore */
-      }
-      scannerRef.current = null;
-      setScanning(false);
-    }
-  }
-
-  // Stop the camera if scanning becomes disallowed (window just closed).
+  // Stop scanning if the window just closed (unmounting <Scanner> releases the camera).
   useEffect(() => {
-    if (!canScan && scannerRef.current) void stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!canScan) setScanning(false);
   }, [canScan]);
 
   async function submit(token: string, walkUp = false) {
@@ -137,32 +130,6 @@ export default function BoardingScanPage() {
       }, 1500);
     }
   }
-
-  async function startCamera() {
-    if (scannerRef.current) return;
-    if (!document.getElementById('reader')) return;
-    const scanner = new Html5Qrcode('reader');
-    scannerRef.current = scanner;
-    try {
-      await scanner.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: 250 },
-        (decoded) => submit(decoded),
-        () => {}
-      );
-      setScanning(true);
-    } catch {
-      setResult({ ok: false, error: 'Could not start camera — use manual entry below.' });
-      scannerRef.current = null;
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      void stopCamera();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const winLabel = (d: AttDirection) => {
     const w = windows?.[d];
@@ -216,14 +183,35 @@ export default function BoardingScanPage() {
 
       <Card>
         <CardContent className="p-3">
-          <div id="reader" className="w-full overflow-hidden rounded-md" />
+          {scanning && canScan ? (
+            <div className="w-full overflow-hidden rounded-md">
+              <Scanner
+                formats={['qr_code']}
+                scanDelay={250}
+                allowMultiple={false}
+                sound={true}
+                constraints={{
+                  facingMode: 'environment',
+                  advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+                }}
+                components={{ torch: true, finder: true }}
+                onScan={(codes: IDetectedBarcode[]) => {
+                  const v = codes[0]?.rawValue;
+                  if (v) void submit(v);
+                }}
+                onError={(e: IScannerError) =>
+                  setResult({ ok: false, error: cameraErrorMessage(e?.kind) })
+                }
+              />
+            </div>
+          ) : null}
           <div className="flex gap-2 mt-3">
             {!scanning ? (
-              <Button className="flex-1" onClick={startCamera} disabled={!canScan}>
+              <Button className="flex-1" onClick={() => setScanning(true)} disabled={!canScan}>
                 {canScan ? 'Start camera' : 'Scanning closed'}
               </Button>
             ) : (
-              <Button variant="outline" className="flex-1" onClick={stopCamera}>
+              <Button variant="outline" className="flex-1" onClick={() => setScanning(false)}>
                 Stop
               </Button>
             )}
