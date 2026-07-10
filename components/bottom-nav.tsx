@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { MoreHorizontal, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
   allNavigation,
   GROUP_TITLES,
@@ -82,23 +81,23 @@ export default function BottomNav() {
 
   return (
     <>
-      <AnimatePresence>
-        {moreOpen && (
-          <motion.div
-            key="more"
-            className="fixed inset-0 z-50 lg:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div className="absolute inset-0 bg-black/50" onClick={() => setMoreOpen(false)} />
-            <motion.div
-              className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-hidden rounded-t-3xl border-t border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 32, stiffness: 320 }}
-            >
+      {/* "More" bottom sheet — always mounted, shown/hidden via CSS transitions
+          (replaces framer-motion's AnimatePresence so the lib stays out of the
+          layout's shared first-load JS). */}
+      <div
+        className={`fixed inset-0 z-50 lg:hidden transition-opacity duration-200 ${
+          moreOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        aria-hidden={!moreOpen}
+      >
+        <div className="absolute inset-0 bg-black/50" onClick={() => setMoreOpen(false)} />
+        <div
+          role="dialog"
+          aria-modal="true"
+          className={`absolute inset-x-0 bottom-0 max-h-[80vh] overflow-hidden rounded-t-3xl border-t border-gray-200 bg-white transition-transform duration-300 ease-out dark:border-gray-800 dark:bg-gray-900 ${
+            moreOpen ? 'translate-y-0' : 'translate-y-full'
+          }`}
+        >
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-gray-800">
                 <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">All Menus</h2>
                 <button
@@ -141,10 +140,8 @@ export default function BottomNav() {
                   </div>
                 ))}
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-stretch justify-around">
