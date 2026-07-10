@@ -157,6 +157,45 @@ async function nameMapFor(
   return m;
 }
 
+type BillInfo = {
+  final: number;
+  balance: number;
+  status: string;
+  payment_date: string | null;
+  due_date: string | null;
+  academic_year_id: string | null;
+};
+
+// The LIVE money rows (learner bills) keyed by billing_student_bill_id. Extracted
+// so it can run concurrently with the other ledger lookups in loadTransportBills.
+async function loadBillMap(
+  supabase: SupabaseClient,
+  billIds: string[]
+): Promise<Map<string, BillInfo>> {
+  const billMap = new Map<string, BillInfo>();
+  if (!billIds.length) return billMap;
+  const data = await selectByIds<{
+    id: string;
+    final_amount: number | string | null;
+    balance_amount: number | string | null;
+    status: string | null;
+    payment_date: string | null;
+    due_date: string | null;
+    academic_year_id: string | null;
+  }>(supabase, 'billing_student_bills', 'id, final_amount, balance_amount, status, payment_date, due_date, academic_year_id', billIds);
+  for (const b of data) {
+    billMap.set(b.id, {
+      final: Number(b.final_amount ?? 0),
+      balance: Number(b.balance_amount ?? 0),
+      status: b.status ?? 'unpaid',
+      payment_date: b.payment_date ?? null,
+      due_date: b.due_date ?? null,
+      academic_year_id: b.academic_year_id ?? null,
+    });
+  }
+  return billMap;
+}
+
 /**
  * Compose transport bill rows + KPI summary from the tms_fee_bill ledger.
  * Pass a transportYearId to scope; omit for all years.
@@ -182,40 +221,24 @@ export async function loadTransportBills(
   const structureIds = uniq(raw.map((r) => r.fee_structure_id as string | null));
   const yearIds = uniq(raw.map((r) => r.transport_year_id as string | null));
 
-  const peopleMap = await resolvePeople(supabase, learnerIds, staffIds);
+  // Batch 1: the four lookups that depend only on the ledger, fired in PARALLEL.
+  // These were six sequential awaits — each its own Supabase round trip, paid end
+  // to end on every Bill Management load; the independent ones now overlap.
+  const [peopleMap, billMap, structureMap, yearMap] = await Promise.all([
+    resolvePeople(supabase, learnerIds, staffIds),
+    loadBillMap(supabase, billIds),
+    nameMapFor(supabase, 'tms_fee_structure', 'name', structureIds),
+    nameMapFor(supabase, 'tms_transport_year', 'name', yearIds),
+  ]);
 
-  const billMap = new Map<
-    string,
-    { final: number; balance: number; status: string; payment_date: string | null; due_date: string | null; academic_year_id: string | null }
-  >();
-  if (billIds.length) {
-    const data = await selectByIds<{
-      id: string;
-      final_amount: number | string | null;
-      balance_amount: number | string | null;
-      status: string | null;
-      payment_date: string | null;
-      due_date: string | null;
-      academic_year_id: string | null;
-    }>(supabase, 'billing_student_bills', 'id, final_amount, balance_amount, status, payment_date, due_date, academic_year_id', billIds);
-    for (const b of data) {
-      billMap.set(b.id, {
-        final: Number(b.final_amount ?? 0),
-        balance: Number(b.balance_amount ?? 0),
-        status: b.status ?? 'unpaid',
-        payment_date: b.payment_date ?? null,
-        due_date: b.due_date ?? null,
-        academic_year_id: b.academic_year_id ?? null,
-      });
-    }
-  }
-
-  const structureMap = await nameMapFor(supabase, 'tms_fee_structure', 'name', structureIds);
-  const yearMap = await nameMapFor(supabase, 'tms_transport_year', 'name', yearIds);
+  // Batch 2: the two lookups that need batch-1 results (institution ids come from
+  // the people rows; academic-year ids from the money rows), also in parallel.
   const instIds = uniq([...peopleMap.values()].map((p) => p.institution_id));
-  const instMap = await nameMapFor(supabase, 'institutions', 'name', instIds);
   const acadYearIds = uniq([...billMap.values()].map((b) => b.academic_year_id));
-  const acadYearMap = await nameMapFor(supabase, 'academic_years', 'academic_year_name', acadYearIds);
+  const [instMap, acadYearMap] = await Promise.all([
+    nameMapFor(supabase, 'institutions', 'name', instIds),
+    nameMapFor(supabase, 'academic_years', 'academic_year_name', acadYearIds),
+  ]);
 
   const td = today();
 
