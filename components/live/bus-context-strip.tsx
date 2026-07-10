@@ -53,7 +53,7 @@ export function BusContextStrip({
         <Chip
           icon={Clock}
           label="ETA (approx)"
-          value={eta != null ? `~${eta} min` : approaching ? '—' : 'heading away'}
+          value={eta != null ? `~${eta} min` : heading == null ? '—' : approaching ? '—' : 'heading away'}
         />
         <Chip icon={Gauge} label="Speed" value={speedKmh != null ? `${Math.round(speedKmh)} km/h` : '—'} />
         <Chip icon={Navigation2} label="GPS accuracy" value={accuracyM != null ? `±${Math.round(accuracyM)} m` : '—'} />

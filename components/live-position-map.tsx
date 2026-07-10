@@ -215,6 +215,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       const line: [number, number][] = [];
       for (const s of stops) {
         line.push([s.lat, s.lng]);
+        // TODO (stops phase): stop names are free-text — escape before bindPopup (Leaflet renders raw HTML).
         L.circleMarker([s.lat, s.lng], {
           radius: 5, color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.9, weight: 2,
         }).bindPopup(s.name).addTo(group);
