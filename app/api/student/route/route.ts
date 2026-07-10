@@ -18,7 +18,7 @@ interface RouteRow {
   departure_time: string | null;
   arrival_time: string | null;
   distance: number | null;
-  duration: number | null;
+  duration: string | null;
   fare: number | null;
   status: string | null;
   driver_id: string | null;
@@ -109,6 +109,7 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
       success: true,
       data: {
         boardingStopId,
+        transportFee: learner.transport_fee,
         route: {
           id: route.id,
           routeNumber: route.route_number,

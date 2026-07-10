@@ -25,7 +25,7 @@ interface RouteData {
   departureTime: string | null;
   arrivalTime: string | null;
   distance: number | null;
-  duration: number | null;
+  duration: string | null;
   fare: number | null;
   status: string | null;
   driverName: string | null;
@@ -33,7 +33,7 @@ interface RouteData {
   stops: Stop[];
 }
 type RouteResp = {
-  data?: { route: RouteData | null; boardingStopId: string | null };
+  data?: { route: RouteData | null; boardingStopId: string | null; transportFee: number | null };
   notFound?: boolean;
 };
 
@@ -58,17 +58,12 @@ function fmtTime(t: string | null): string {
   return `${h12}:${minute} ${ampm}`;
 }
 
-function fmtDuration(mins: number | null): string {
-  if (mins == null) return '—';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h && m) return `${h}h ${m}m`;
-  if (h) return `${h}h`;
-  return `${m}m`;
+function fmtDuration(d: string | null): string {
+  return d?.trim() || '—';
 }
 
 function fmtDistance(km: number | null): string {
-  if (km == null) return '—';
+  if (km == null || km <= 0) return '—';
   return `${km} km`;
 }
 
@@ -180,6 +175,7 @@ export default function StudentRoutesPage() {
 
   const route = data?.data?.route ?? null;
   const boardingStopId = data?.data?.boardingStopId ?? null;
+  const transportFee = data?.data?.transportFee ?? null;
 
   if (!route) {
     return (
@@ -271,7 +267,7 @@ export default function StudentRoutesPage() {
           <Stat
             icon={IndianRupee}
             label="Fare"
-            value={route.fare != null ? `₹${route.fare}` : '—'}
+            value={transportFee != null && transportFee > 0 ? `₹${transportFee}` : '—'}
             tone="bg-gradient-to-br from-orange-500 to-amber-600"
           />
           <Stat
