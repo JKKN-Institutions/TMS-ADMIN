@@ -4,6 +4,8 @@ import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { interpolateLatLng, shouldSnap, type LatLng } from '@/lib/gps/interpolate';
+import { CAMPUS } from '@/lib/gps/campus';
+import { haversineKm } from '@/lib/gps/distance';
 
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -30,6 +32,7 @@ interface DriverLocation {
   registration_number: string | null;
   gps_status?: string;
   time_since_update?: number | null;
+  heading?: number | null;
 }
 
 interface LiveTrackingMapProps {
@@ -43,6 +46,7 @@ const DEFAULT_CENTER: [number, number] = [11.4444567, 77.730258]; // Tamil Nadu 
 // Per-driver marker + the segment it is currently animating along.
 interface MarkerState {
   marker: L.Marker;
+  circle: L.Circle | null;
   anim: LatLng;
   from: LatLng;
   to: LatLng;
@@ -56,20 +60,30 @@ const STATUS_COLORS: Record<string, string> = {
   inactive: '#6B7280',
 };
 
-function createCustomIcon(status: string, isActive: boolean, routeNumber: string | null): L.DivIcon {
+function createCustomIcon(
+  status: string, isActive: boolean, routeNumber: string | null, heading: number | null | undefined,
+): L.DivIcon {
   const color = isActive ? STATUS_COLORS[status] || STATUS_COLORS.inactive : STATUS_COLORS.inactive;
   const displayText = routeNumber || '?';
+  const pointer = heading == null || Number.isNaN(heading)
+    ? ''
+    : `<div style="position:absolute;inset:0;transform:rotate(${heading}deg);">
+         <div style="position:absolute;top:-6px;left:50%;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid ${color};"></div>
+       </div>`;
   return L.divIcon({
     className: 'custom-marker',
     html: `
-      <div style="
-        background: ${color}; width: 24px; height: 24px; border-radius: 50%;
-        border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        display: flex; align-items: center; justify-content: center;
-        color: white; font-weight: bold; font-size: 11px; font-family: Arial, sans-serif;
-      ">${displayText}</div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
+      <div style="position:relative;width:30px;height:30px;">
+        ${pointer}
+        <div style="
+          position:absolute;top:3px;left:3px;background:${color};width:24px;height:24px;border-radius:50%;
+          border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);
+          display:flex;align-items:center;justify-content:center;
+          color:white;font-weight:bold;font-size:11px;font-family:Arial,sans-serif;
+        ">${displayText}</div>
+      </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
 }
 
@@ -94,6 +108,11 @@ function buildPopup(driver: DriverLocation): string {
           driver.time_since_update != null ? `${driver.time_since_update} min ago` : 'Never'
         }</div>
         ${driver.location_accuracy ? `<div style="margin-bottom: 6px;"><strong>Accuracy:</strong> ±${Math.round(driver.location_accuracy)}m</div>` : ''}
+        <div style="margin-bottom: 6px;"><strong>To campus:</strong> ${
+          driver.current_latitude != null && driver.current_longitude != null
+            ? `${haversineKm({ lat: driver.current_latitude, lng: driver.current_longitude }, CAMPUS).toFixed(1)} km`
+            : '—'
+        }</div>
         <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #E5E7EB;">
           <div style="font-size: 11px; color: #9CA3AF;">${driver.current_latitude.toFixed(6)}, ${driver.current_longitude.toFixed(6)}</div>
         </div>
@@ -124,6 +143,15 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors',
     }).addTo(map);
+
+    L.marker([CAMPUS.lat, CAMPUS.lng], {
+      icon: L.divIcon({
+        className: 'campus-marker',
+        html: `<div style="width:26px;height:26px;border-radius:6px;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:14px;">🎓</div>`,
+        iconSize: [26, 26], iconAnchor: [13, 13],
+      }),
+    }).addTo(map).bindPopup(CAMPUS.label);
+
     mapInstanceRef.current = map;
 
     const stepAll = () => {
@@ -133,6 +161,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
         const pos = interpolateLatLng(st.from, st.to, t);
         st.anim = pos;
         st.marker.setLatLng([pos.lat, pos.lng]);
+        st.circle?.setLatLng([pos.lat, pos.lng]);
       }
       rafRef.current = requestAnimationFrame(stepAll);
     };
@@ -160,7 +189,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     for (const d of withLoc) {
       seen.add(d.id);
       const target: LatLng = { lat: d.current_latitude, lng: d.current_longitude };
-      const icon = createCustomIcon(d.gps_status || 'offline', d.location_sharing_enabled, d.route_number);
+      const icon = createCustomIcon(d.gps_status || 'offline', d.location_sharing_enabled, d.route_number, d.heading);
       const popup = buildPopup(d);
       const existing = markersRef.current.get(d.id);
 
@@ -169,6 +198,18 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
         const p = existing.marker.getPopup();
         if (p) p.setContent(popup);
         else existing.marker.bindPopup(popup);
+
+        if (d.location_accuracy != null && d.location_accuracy > 0) {
+          if (!existing.circle) {
+            existing.circle = L.circle(target, { radius: d.location_accuracy, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map);
+          } else {
+            existing.circle.setLatLng(target);
+            existing.circle.setRadius(d.location_accuracy);
+          }
+        } else if (existing.circle) {
+          existing.circle.remove();
+          existing.circle = null;
+        }
 
         if (shouldSnap(existing.anim, target)) {
           existing.anim = target;
@@ -183,12 +224,11 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       } else {
         const marker = L.marker([target.lat, target.lng], { icon }).addTo(map);
         marker.bindPopup(popup);
+        const circle = d.location_accuracy != null && d.location_accuracy > 0
+          ? L.circle([target.lat, target.lng], { radius: d.location_accuracy, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
+          : null;
         markersRef.current.set(d.id, {
-          marker,
-          anim: target,
-          from: target,
-          to: target,
-          start: performance.now(),
+          marker, circle, anim: target, from: target, to: target, start: performance.now(),
         });
       }
     }
@@ -196,6 +236,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     for (const [id, st] of markersRef.current) {
       if (!seen.has(id)) {
         st.marker.remove();
+        st.circle?.remove();
         markersRef.current.delete(id);
       }
     }
