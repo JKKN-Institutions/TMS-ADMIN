@@ -35,6 +35,7 @@ export interface AssignmentRow {
   assigned_at: string;
   is_active: boolean;
   notes?: string | null;
+  source?: 'admin' | 'self' | null;
   routes: AssignmentRoute | null;
 }
 
@@ -138,6 +139,25 @@ export function getAssignmentColumns(
           <span className="flex items-center gap-1.5 tabular-nums text-sm text-gray-600 dark:text-gray-300">
             <Users className="h-3.5 w-3.5 shrink-0 text-gray-400" />
             {r.current_passengers ?? 0}/{r.total_capacity ?? 0}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: 'source',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Source" />,
+      size: 120,
+      cell: ({ row }) => {
+        const self = row.original.source === 'self';
+        return (
+          <span
+            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              self
+                ? 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-700/40 dark:text-gray-300'
+            }`}
+          >
+            {self ? 'Self-selected' : 'Admin'}
           </span>
         );
       },
