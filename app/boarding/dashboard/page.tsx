@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import UniversalStatCard from '@/components/universal-stat-card';
-import TodaysBookings from '@/components/boarding/todays-bookings';
 
 interface BoardingRoute {
   id: string;
@@ -289,8 +288,6 @@ export default function BoardingDashboardPage() {
         </div>
       </div>
 
-      {/* Today's bookings → tap a student to open the scanner */}
-      <TodaysBookings />
     </div>
   );
 }

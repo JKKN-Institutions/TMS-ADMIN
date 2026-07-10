@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
-import { loadBookedRoster, groupRosterByStop, type OrderedStop } from '@/lib/booking/roster';
+import { loadBookedRoster, groupRosterByStop, type OrderedStop, type RosterStopGroup, type RosterRider } from '@/lib/booking/roster';
 import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -66,17 +66,31 @@ async function getBookingsToday(request: NextRequest, auth: AuthContext) {
       stopsByRoute.set(s.route_id, arr);
     }
 
+    // Which booked learners are already marked present today → drives the
+    // ✓ / tap-to-mark checklist on the Attendance page. Same route scope as above.
+    const { data: attData } = await svc
+      .from('tms_attendance')
+      .select('learner_id')
+      .in('route_id', routeIds)
+      .eq('trip_date', date)
+      .eq('status', 'present');
+    const presentSet = new Set(((attData ?? []) as { learner_id: string }[]).map((a) => a.learner_id));
+
+    type CheckedStop = Omit<RosterStopGroup, 'riders'> & { riders: Array<RosterRider & { present: boolean }> };
     const out: Array<{
-      id: string; label: string; counts: { booked: number; capacity: number };
-      stops: ReturnType<typeof groupRosterByStop>;
+      id: string; label: string; counts: { booked: number; capacity: number }; stops: CheckedStop[];
     }> = [];
     for (const rt of routes) {
       const { counts, riders } = await loadBookedRoster(svc, rt.id, date);
+      const stops: CheckedStop[] = groupRosterByStop(riders, stopsByRoute.get(rt.id) ?? []).map((g) => ({
+        ...g,
+        riders: g.riders.map((r) => ({ ...r, present: presentSet.has(r.learner_id) })),
+      }));
       out.push({
         id: rt.id,
         label: `${rt.route_number ?? '?'} · ${rt.route_name ?? ''}`.trim(),
         counts,
-        stops: groupRosterByStop(riders, stopsByRoute.get(rt.id) ?? []),
+        stops,
       });
     }
 

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ListChecks, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
+import TodaysBookings from '@/components/boarding/todays-bookings';
 import { getAttendanceColumns, type AttendanceRecord } from './columns';
 
 interface RouteOpt { id: string; route_number: string | null; route_name: string | null }
@@ -91,10 +92,19 @@ export default function BoardingAttendancePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
+        <p className="text-gray-600 mt-1 text-sm">Mark today&apos;s booked students, then review the boarding records below.</p>
+      </div>
+
+      {/* Today's bookings → tap a student to open the scanner and mark them present */}
+      <TodaysBookings />
+
+      {/* Records history — pick a day; filter and search within it */}
+      <div className="flex flex-col gap-4 border-t border-gray-200 pt-6 dark:border-gray-800 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
-          <p className="text-gray-600 mt-1 text-sm">Boarding records across your routes. Pick a day; filter and search within it.</p>
+          <h2 className="text-lg font-semibold text-gray-900">Records</h2>
+          <p className="text-gray-600 mt-1 text-sm">Boarding records across your routes.</p>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Day</label>
