@@ -25,19 +25,39 @@ const PUBLIC_PATH_PREFIXES = [
   '/offline.html', // PWA offline fallback — fetchable before auth
 ];
 
+// Identity headers the proxy stamps on the authenticated request so downstream
+// route handlers (withAuth) and logActivityFromHeaders can attribute the caller
+// WITHOUT re-running getUser()+profiles. They are stripped from every inbound
+// request first (below) so a client can never spoof them.
+const IDENTITY_HEADERS = [
+  'x-user-id',
+  'x-user-email',
+  'x-user-role',
+  'x-user-super',
+  'x-user-institution',
+];
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // API routes get JSON errors; pages get redirects.
   const isApi = pathname.startsWith('/api/');
 
-  // 1. Public paths skip auth.
-  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  // Defense-in-depth: work off a mutable copy of the inbound headers with any
+  // client-supplied identity headers removed. Nothing downstream can trust these
+  // unless THIS proxy re-sets them on the authenticated path below.
+  const requestHeaders = new Headers(request.headers);
+  for (const h of IDENTITY_HEADERS) requestHeaders.delete(h);
+  const forward = () =>
+    NextResponse.next({ request: { headers: requestHeaders } });
+
+  // 1. Public paths skip auth (but still get their spoofed identity stripped).
+  if (PUBLIC_PATHS.has(pathname)) return forward();
   if (PUBLIC_PATH_PREFIXES.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
+    return forward();
   }
 
   // 2. Supabase client with request/response cookie plumbing (refreshes session).
-  let response = NextResponse.next({ request });
+  let response = NextResponse.next({ request: { headers: requestHeaders } });
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -50,7 +70,7 @@ export async function proxy(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
-          response = NextResponse.next({ request });
+          response = NextResponse.next({ request: { headers: requestHeaders } });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
           );
@@ -183,12 +203,25 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // 6. Pass user context downstream (API routes / server components).
-  response.headers.set('x-user-id', profile.id);
-  response.headers.set('x-user-role', profile.role);
-  response.headers.set('x-user-institution', profile.institution_id || '');
+  // 6. Forward the authenticated identity to the route handler on the REQUEST
+  //    headers. withAuth reads these instead of re-running getUser() + a profiles
+  //    select (2 redundant Supabase round trips it used to pay on EVERY API call,
+  //    right after this proxy already validated the same user). Setting them on the
+  //    request — not the response — is what actually reaches the handler; the old
+  //    code set response headers, so logActivityFromHeaders was silently reading
+  //    null. Rebuild the response so the mutated request headers take effect, and
+  //    carry over any auth cookies refreshed above.
+  requestHeaders.set('x-user-id', profile.id);
+  requestHeaders.set('x-user-email', profile.email || '');
+  requestHeaders.set('x-user-role', profile.role || '');
+  requestHeaders.set('x-user-super', profile.is_super_admin ? '1' : '0');
+  requestHeaders.set('x-user-institution', profile.institution_id || '');
 
-  return response;
+  const finalResponse = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+  response.cookies.getAll().forEach((c) => finalResponse.cookies.set(c));
+  return finalResponse;
 }
 
 export const config = {
