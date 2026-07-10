@@ -160,7 +160,18 @@ export async function proxy(request: NextRequest) {
   //    is sent to their OWN area's home rather than a dead-end 403. Uses the
   //    area-permission result fetched above.
   if (!profile.is_super_admin && !areaExempt) {
-    const hasAccess = areaPermRes.data;
+    let hasAccess = areaPermRes.data;
+
+    // Staff self-service: a bus_required staffer WITHOUT tms.attendance.scan may
+    // still enter the boarding area to PICK a route. JIT eligibility, paid only on
+    // the boarding deny path (the brief pre-assignment window; the hot path already
+    // holds the permission and never reaches this RPC).
+    if (!hasAccess && area === 'boarding') {
+      const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
+        p_profile_id: user.id,
+      });
+      if ((elig as { eligible?: boolean } | null)?.eligible) hasAccess = true;
+    }
 
     if (!hasAccess) {
       if (isApi) {
@@ -184,6 +195,11 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL(home, request.url));
     }
   }
+
+  // ── PHASE 2 SEAM (staff fees) ────────────────────────────────────────────────
+  // Symmetric to the learner gate (5b below): an eligible boarding staffer whose
+  // transport fees are NOT cleared will be redirected to /boarding/fees here, via
+  // a tms_staff_transport_access RPC. Not implemented in Phase 1 (no staff bills).
 
   // 5b. Transport-payment gate (student area, non-super-admins). A learner who is
   //     "behind" — a term past its due date is unpaid for the current transport
