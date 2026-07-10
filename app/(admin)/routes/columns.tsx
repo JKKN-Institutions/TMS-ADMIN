@@ -127,6 +127,46 @@ export function getRouteColumns(
       ),
     },
     {
+      id: 'distance',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Distance" />,
+      accessorFn: (r) => Number(r.distance) || 0,
+      size: 100,
+      cell: ({ row }) => {
+        const d = Number(row.original.distance);
+        return (
+          <span className="tabular-nums text-sm text-gray-600 dark:text-gray-300">
+            {d > 0 ? `${d} km` : '—'}
+          </span>
+        );
+      },
+    },
+    {
+      id: 'duration',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Travel time" />,
+      accessorFn: (r) => r.duration ?? '',
+      enableSorting: false,
+      size: 110,
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+          {row.original.duration?.trim() || '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'fare',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Fare" />,
+      accessorFn: (r) => Number(r.fare) || 0,
+      size: 100,
+      cell: ({ row }) => {
+        const f = Number(row.original.fare);
+        return (
+          <span className="tabular-nums text-sm text-gray-600 dark:text-gray-300">
+            {f > 0 ? `₹${f}` : '—'}
+          </span>
+        );
+      },
+    },
+    {
       id: 'stops',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Stops" />,
       accessorFn: (r) => r.route_stops?.length ?? 0,
