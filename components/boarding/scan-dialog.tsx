@@ -44,6 +44,11 @@ export default function ScanDialog({
   const [scanning, setScanning] = useState(false);
   const [manual, setManual] = useState('');
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  // Synchronous re-entry guard: set the instant startCamera() is entered (before any
+  // await), cleared in a finally covering every exit path. Blocks a second startCamera()
+  // call (e.g. the visible "Start camera" button) from racing the auto-start effect's
+  // in-flight scanner.start() before scannerRef.current is assigned.
+  const startingRef = useRef(false);
   const busyRef = useRef(false);
   const lastTokenRef = useRef('');
   // Kept current every render so the long-lived scan callback (registered once by the
@@ -118,33 +123,38 @@ export default function ScanDialog({
   }
 
   async function startCamera() {
-    if (scannerRef.current) return;
+    if (scannerRef.current || startingRef.current) return;
     if (!document.getElementById(READER_ID)) return;
-    // Snapshot the generation before the async start() call. If teardown runs while
-    // start() is still in flight, cameraGenRef will have moved on by the time we get
-    // here — that's our signal to stop the just-started stream instead of adopting it.
-    const gen = cameraGenRef.current;
-    const scanner = new Html5Qrcode(READER_ID);
+    startingRef.current = true;
     try {
-      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, (decoded) => submit(decoded), () => {});
-      if (cameraGenRef.current !== gen) {
-        // Cleanup already ran (dialog closed/unmounted) while start() was pending — this
-        // scanner was never assigned to scannerRef, so nothing else can stop it. Stop it
-        // ourselves so the camera stream isn't leaked.
-        try {
-          await scanner.stop();
-          await scanner.clear();
-        } catch {
-          /* ignore */
+      // Snapshot the generation before the async start() call. If teardown runs while
+      // start() is still in flight, cameraGenRef will have moved on by the time we get
+      // here — that's our signal to stop the just-started stream instead of adopting it.
+      const gen = cameraGenRef.current;
+      const scanner = new Html5Qrcode(READER_ID);
+      try {
+        await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, (decoded) => submit(decoded), () => {});
+        if (cameraGenRef.current !== gen) {
+          // Cleanup already ran (dialog closed/unmounted) while start() was pending — this
+          // scanner was never assigned to scannerRef, so nothing else can stop it. Stop it
+          // ourselves so the camera stream isn't leaked.
+          try {
+            await scanner.stop();
+            await scanner.clear();
+          } catch {
+            /* ignore */
+          }
+          return;
         }
-        return;
+        scannerRef.current = scanner;
+        setScanning(true);
+      } catch {
+        if (cameraGenRef.current === gen) {
+          setResult({ ok: false, error: 'Could not start camera — use manual entry below.' });
+        }
       }
-      scannerRef.current = scanner;
-      setScanning(true);
-    } catch {
-      if (cameraGenRef.current === gen) {
-        setResult({ ok: false, error: 'Could not start camera — use manual entry below.' });
-      }
+    } finally {
+      startingRef.current = false;
     }
   }
 
