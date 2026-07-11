@@ -71,6 +71,10 @@ export async function GET(request: NextRequest) {
   // Gate: the user must have access to at least ONE TMS area. Use the single-arg
   // user_has_permission — it honors the profiles.role -> custom_roles fallback that
   // grants students/drivers their keys (get_user_merged_permissions misses it).
+  // boardingEligible/staffAssignedCount are declared at function scope (not inside the
+  // block below) so the home-computation block further down can also read them.
+  let boardingEligible = false;
+  let staffAssignedCount = 0;
   if (!profile.is_super_admin) {
     const AREA_KEYS = [
       'tms.dashboard.view',
@@ -84,6 +88,20 @@ export async function GET(request: NextRequest) {
       if (data) {
         hasAnyTms = true;
         break;
+      }
+    }
+
+    // Bus_required staff have no area permission until they pick a route. Admit
+    // them via the eligibility oracle so they can reach /boarding/select-route.
+    if (!hasAnyTms) {
+      const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
+        p_profile_id: data.user.id,
+      });
+      const e = elig as { eligible?: boolean; assigned_route_count?: number } | null;
+      if (e?.eligible) {
+        hasAnyTms = true;
+        boardingEligible = true;
+        staffAssignedCount = e.assigned_route_count ?? 0;
       }
     }
 
@@ -104,7 +122,8 @@ export async function GET(request: NextRequest) {
       const { data: canScan } = await supabase.rpc('user_has_permission', {
         permission_name: 'tms.attendance.scan',
       });
-      if (canScan) home = '/boarding/scan';
+      if (canScan) home = '/boarding/attendance';
+      else if (boardingEligible && staffAssignedCount === 0) home = '/boarding/select-route';
     }
     response.headers.set('location', new URL(home, request.url).toString());
   }

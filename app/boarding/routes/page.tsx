@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ListChecks, QrCode, Route as RouteIcon } from 'lucide-react';
+import { AlertTriangle, ListChecks, Route as RouteIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { RouteTicket, RouteNotice } from '@/components/routes/route-ticket';
 import type { RouteDetail } from '@/lib/routes/detail';
@@ -104,10 +104,10 @@ export default function BoardingRoutesPage() {
               <ListChecks className="h-4 w-4" /> Open today's roster
             </Link>
             <Link
-              href="/boarding/scan"
+              href="/boarding/attendance"
               className="inline-flex items-center gap-2 rounded-lg bg-white/20 px-3.5 py-2 text-sm font-semibold text-white ring-1 ring-white/40 backdrop-blur transition-colors hover:bg-white/30"
             >
-              <QrCode className="h-4 w-4" /> Scan
+              <ListChecks className="h-4 w-4" /> Attendance
             </Link>
           </>
         }

@@ -1,41 +1,41 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil } from 'lucide-react';
+import { QrCode, Pencil, Check, Undo2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
-
-// One attendance record as /api/boarding/attendance returns it.
-export interface AttendanceRecord {
-  id: string;
-  learner_name: string;
-  roll_number: string | null;
-  route_number: string | null;
-  direction: string | null;
-  status: string | null;
-  method: string | null;
-  scanned_at: string | null;
-}
+import type { RosterRow } from '@/lib/booking/roster';
 
 const fmtTime = (ts: string | null) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
 
-function StatusBadge({ status }: { status: string | null }) {
+function StatusBadge({ status }: { status: RosterRow['status'] }) {
   if (status === 'present')
-    return <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/15 dark:text-green-300">Present</span>;
-  if (status === 'absent')
-    return <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">Absent</span>;
-  return <span className="text-xs text-gray-400">—</span>;
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/15 dark:text-green-300">
+        <Check className="h-3 w-3" /> Present
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+      Unmarked
+    </span>
+  );
 }
 
 /**
- * Read-only attendance-history columns. Route / Direction / Status are filterable
- * (id + accessorFn + filterFn) so the page's `filters` can target them; "Marked"
- * sorts on the ISO scanned_at (string sort == chronological) and shows a QR vs
- * manual marker.
+ * Booked-students columns for the Attendance page. Route/Status are filterable.
+ * The Action column shows a "Mark present" button for unmarked rows only when
+ * `canMark` (today) — a manual override that POSTs to /api/boarding/attendance.
  */
-export function getAttendanceColumns(): ColumnDef<AttendanceRecord>[] {
-  const selectColumn: ColumnDef<AttendanceRecord> = {
+export function getRosterColumns(opts: {
+  canMark: boolean;
+  canUndo: boolean;
+  busyId: string | null;
+  onMark: (row: RosterRow) => void;
+  onUnmark: (row: RosterRow) => void;
+}): ColumnDef<RosterRow>[] {
+  const selectColumn: ColumnDef<RosterRow> = {
     id: 'select',
     enableSorting: false,
     enableHiding: false,
@@ -55,35 +55,38 @@ export function getAttendanceColumns(): ColumnDef<AttendanceRecord>[] {
   return [
     selectColumn,
     {
-      accessorKey: 'learner_name',
+      accessorKey: 'name',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Learner" />,
-      cell: ({ row }) => <span className="font-medium text-gray-900 dark:text-gray-100">{row.original.learner_name}</span>,
+      cell: ({ row }) => <span className="font-medium text-gray-900 dark:text-gray-100">{row.original.name}</span>,
     },
     {
-      accessorKey: 'roll_number',
+      accessorKey: 'roll',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Roll No." />,
-      cell: ({ row }) => <span className="text-gray-600 dark:text-gray-300">{row.original.roll_number || '—'}</span>,
+      cell: ({ row }) => <span className="text-gray-600 dark:text-gray-300">{row.original.roll || '—'}</span>,
     },
     {
       id: 'route_number',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
       accessorFn: (r) => r.route_number ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
-      size: 100,
+      size: 90,
       cell: ({ row }) => <span className="text-gray-600 dark:text-gray-300">{row.original.route_number || '—'}</span>,
     },
     {
-      id: 'direction',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Direction" />,
-      accessorFn: (r) => r.direction ?? '',
-      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
-      size: 110,
-      cell: ({ row }) => <span className="capitalize text-gray-600 dark:text-gray-300">{row.original.direction || '—'}</span>,
+      id: 'stop',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Stop" />,
+      accessorFn: (r) => r.stop_name,
+      cell: ({ row }) => (
+        <span className="text-gray-600 dark:text-gray-300">
+          {row.original.stop_name}
+          {row.original.stop_time ? <span className="text-gray-400"> · {row.original.stop_time.slice(0, 5)}</span> : null}
+        </span>
+      ),
     },
     {
       id: 'status',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
-      accessorFn: (r) => r.status ?? '',
+      accessorFn: (r) => r.status,
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       size: 120,
       cell: ({ row }) => <StatusBadge status={row.original.status} />,
@@ -91,13 +94,50 @@ export function getAttendanceColumns(): ColumnDef<AttendanceRecord>[] {
     {
       accessorKey: 'scanned_at',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Marked" />,
+      size: 110,
+      cell: ({ row }) =>
+        row.original.status === 'present' ? (
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
+            {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
+            {fmtTime(row.original.scanned_at)}
+          </span>
+        ) : (
+          <span className="text-gray-400">—</span>
+        ),
+    },
+    {
+      id: 'action',
+      enableHiding: false,
+      enableSorting: false,
       size: 120,
-      cell: ({ row }) => (
-        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
-          {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
-          {fmtTime(row.original.scanned_at)}
-        </span>
-      ),
+      header: () => null,
+      cell: ({ row }) => {
+        const busy = opts.busyId === row.original.learner_id;
+        if (row.original.status === 'present') {
+          if (!opts.canUndo) return null;
+          return (
+            <button
+              type="button"
+              onClick={() => opts.onUnmark(row.original)}
+              disabled={busy}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            >
+              <Undo2 className="h-3.5 w-3.5" /> {busy ? 'Undoing…' : 'Undo'}
+            </button>
+          );
+        }
+        if (!opts.canMark) return null;
+        return (
+          <button
+            type="button"
+            onClick={() => opts.onMark(row.original)}
+            disabled={busy}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+          >
+            <Check className="h-3.5 w-3.5" /> {busy ? 'Marking…' : 'Mark present'}
+          </button>
+        );
+      },
     },
   ];
 }

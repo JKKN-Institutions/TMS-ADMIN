@@ -96,11 +96,6 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
   const list = (rows ?? []) as GrvRow[];
 
   const learnerIds = [...new Set(list.map((r) => r.learner_id).filter((x): x is string => !!x))];
-  const { data: learners } = learnerIds.length
-    ? await svc.from('learners_profiles').select('id, first_name, last_name, roll_number').in('id', learnerIds)
-    : { data: [] as LearnerLite[] };
-  const lmap = new Map(((learners ?? []) as LearnerLite[]).map((l) => [l.id, l]));
-
   // Staff (driver/boarding) submitters resolve their display name from profiles.
   const staffProfileIds = [
     ...new Set(
@@ -110,19 +105,27 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
         .filter((x): x is string => !!x)
     ),
   ];
-  const { data: staffProfiles } = staffProfileIds.length
-    ? await svc.from('profiles').select('id, full_name').in('id', staffProfileIds)
-    : { data: [] as { id: string; full_name: string | null }[] };
-  const pmap = new Map(
-    ((staffProfiles ?? []) as { id: string; full_name: string | null }[]).map((p) => [p.id, p.full_name])
-  );
 
-  const refs = await loadPassengerRefs(svc, {
-    institutionIds: [],
-    departmentIds: [],
-    routeIds: list.map((r) => r.route_id),
-    stopIds: [],
-  });
+  // These three lookups are mutually independent (all keyed off `list`), so fire
+  // them concurrently instead of as three serial Supabase round trips.
+  const [learnersRes, staffProfilesRes, refs] = await Promise.all([
+    learnerIds.length
+      ? svc.from('learners_profiles').select('id, first_name, last_name, roll_number').in('id', learnerIds)
+      : Promise.resolve({ data: [] as LearnerLite[] }),
+    staffProfileIds.length
+      ? svc.from('profiles').select('id, full_name').in('id', staffProfileIds)
+      : Promise.resolve({ data: [] as { id: string; full_name: string | null }[] }),
+    loadPassengerRefs(svc, {
+      institutionIds: [],
+      departmentIds: [],
+      routeIds: list.map((r) => r.route_id),
+      stopIds: [],
+    }),
+  ]);
+  const lmap = new Map(((learnersRes.data ?? []) as LearnerLite[]).map((l) => [l.id, l]));
+  const pmap = new Map(
+    ((staffProfilesRes.data ?? []) as { id: string; full_name: string | null }[]).map((p) => [p.id, p.full_name])
+  );
 
   const grievances = list.map((r) => {
     const isLearner = r.submitter_type === 'learner';

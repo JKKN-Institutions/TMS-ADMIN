@@ -5,11 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   QrCode, Route as RouteIcon, Users, ArrowRight, ArrowLeft, CheckCircle2,
-  RefreshCw, ChevronRight, Clock, ScanLine, ListChecks, Activity, GraduationCap,
+  RefreshCw, ChevronRight, Clock, ListChecks, Activity, GraduationCap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import UniversalStatCard from '@/components/universal-stat-card';
-import TodaysBookings from '@/components/boarding/todays-bookings';
 
 interface BoardingRoute {
   id: string;
@@ -67,7 +66,6 @@ export default function BoardingDashboardPage() {
 
   // Quick actions — gradient-icon cards in the admin style; all link to real pages.
   const quickActions = [
-    { title: 'Scan Boarding Pass', desc: "Scan a learner's QR to mark present", icon: ScanLine, color: 'bg-gradient-to-br from-green-500 to-emerald-600', href: '/boarding/scan' },
     { title: 'My Route', desc: 'Open your route roster', icon: RouteIcon, color: 'bg-gradient-to-br from-indigo-500 to-blue-600', href: '/boarding/routes' },
     { title: 'Attendance', desc: "Review today's and past boardings", icon: ListChecks, color: 'bg-gradient-to-br from-purple-500 to-violet-600', href: '/boarding/attendance' },
   ];
@@ -114,12 +112,12 @@ export default function BoardingDashboardPage() {
             {isFetching ? 'Refreshing...' : 'Refresh Data'}
           </button>
           <button
-            onClick={() => router.push('/boarding/scan')}
+            onClick={() => router.push('/boarding/attendance')}
             className="inline-flex flex-1 justify-center sm:flex-none items-center whitespace-nowrap px-4 py-2 border border-transparent rounded-lg shadow-sm bg-green-600 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
           >
             <QrCode className="w-4 h-4 mr-2" />
-            <span className="sm:hidden">Scan</span>
-            <span className="hidden sm:inline">Scan Boarding Pass</span>
+            <span className="sm:hidden">Attendance</span>
+            <span className="hidden sm:inline">Mark Attendance</span>
           </button>
         </div>
       </div>
@@ -289,8 +287,6 @@ export default function BoardingDashboardPage() {
         </div>
       </div>
 
-      {/* Today's bookings → tap a student to open the scanner */}
-      <TodaysBookings />
     </div>
   );
 }

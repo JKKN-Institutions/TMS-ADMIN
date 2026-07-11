@@ -43,6 +43,7 @@ const ACTION_BADGE: Record<string, string> = {
   deactivate: 'bg-gray-100 text-gray-700 dark:bg-gray-500/15 dark:text-gray-400',
   scan: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400',
   mark: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
+  unmark: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400',
   generate: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
 };
 
