@@ -129,7 +129,7 @@ export default function BoardingAttendancePage() {
               <button
                 key={d}
                 type="button"
-                onClick={() => setDirection(d)}
+                onClick={() => { dirSeeded.current = true; setDirection(d); }}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${active ? 'bg-green-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300'}`}
               >
                 {d === 'onward' ? 'Onward' : 'Return'}
