@@ -43,6 +43,15 @@ export default function ScanDialog({
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
   const [manual, setManual] = useState('');
+  // Forces a re-render every 30s while open so legOpen (which reads new Date())
+  // re-evaluates at a scan-window edge, flipping the closed banner and the
+  // camera-lifecycle effect below without waiting on an unrelated re-render.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const i = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(i);
+  }, [open]);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   // Synchronous re-entry guard: set the instant startCamera() is entered (before any
   // await), cleared in a finally covering every exit path. Blocks a second startCamera()

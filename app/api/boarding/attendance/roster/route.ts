@@ -19,8 +19,9 @@ interface AttRow { learner_id: string; status: string | null; method: string | n
 /**
  * GET /api/boarding/attendance/roster?date=&direction= — today's (or any day's)
  * booked students across the staff's assigned routes, each joined to their
- * attendance for the selected leg. Route-scoped like bookings-today. Counts are
- * derived from the produced rows so Marked + Unmarked === Total always holds.
+ * attendance for the selected leg. Route-scoped to the staff's assigned routes
+ * (super admins see all). Counts are derived from the produced rows so
+ * Marked + Unmarked === Total always holds.
  */
 async function getRoster(request: NextRequest, auth: AuthContext) {
   try {

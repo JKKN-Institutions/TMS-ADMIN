@@ -40,6 +40,13 @@ export default function BoardingAttendancePage() {
   const [scanOpen, setScanOpen] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const dirSeeded = useRef(false);
+  // Forces a re-render every 30s so the amber closed-window hint (isToday && !legOpen)
+  // appears/disappears at a scan-window edge instead of lagging until an unrelated re-render.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(i);
+  }, []);
 
   const isToday = date === todayStr();
 
