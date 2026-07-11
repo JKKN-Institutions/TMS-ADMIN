@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { loadAttendanceWindows, isDirectionOpen, formatHM } from '@/lib/boarding/attendance-window';
 
 /**
  * Manually mark attendance (present/absent) for one or many learners on a route,
@@ -46,6 +47,16 @@ async function mark(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
+
+    // Time-window gate: manual marking follows the same leg window as the scanner.
+    const windows = await loadAttendanceWindows(svc);
+    if (!isDirectionOpen(windows[direction])) {
+      const w = windows[direction];
+      return NextResponse.json({
+        error: `${direction === 'onward' ? 'Onward (morning)' : 'Return (evening)'} marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+        reason: 'window_closed',
+      }, { status: 409 });
+    }
 
     // Verify each learner actually belongs to this route; grab their stop id.
     const learnerIds = [...new Set(marks.map((m) => m.learnerId).filter(Boolean))];

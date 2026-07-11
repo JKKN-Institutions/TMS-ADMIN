@@ -71,6 +71,9 @@ export default function BoardingAttendancePage() {
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { total: 0, marked: 0, unmarked: 0 };
 
+  const legOpen = isDirectionOpen(windows[direction]);
+  const canMark = isToday && legOpen;
+
   const markPresent = useCallback(
     async (row: RosterRow) => {
       setBusyId(row.learner_id);
@@ -118,8 +121,8 @@ export default function BoardingAttendancePage() {
   );
 
   const columns = useMemo(
-    () => getRosterColumns({ canMark: isToday, busyId, onMark: markPresent, onUnmark: unmarkPresent }),
-    [isToday, busyId, markPresent, unmarkPresent]
+    () => getRosterColumns({ canMark, canUndo: isToday, busyId, onMark: markPresent, onUnmark: unmarkPresent }),
+    [canMark, isToday, busyId, markPresent, unmarkPresent]
   );
 
   const filters: DataTableFilter[] = [
@@ -141,8 +144,6 @@ export default function BoardingAttendancePage() {
     a.click();
     URL.revokeObjectURL(url);
   };
-
-  const legOpen = isDirectionOpen(windows[direction]);
 
   return (
     <div className="space-y-6">
@@ -190,7 +191,7 @@ export default function BoardingAttendancePage() {
 
       {isToday && !legOpen && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          {direction === 'onward' ? 'Onward' : 'Return'} scan window is {formatHM(windows[direction].start)}–{formatHM(windows[direction].end)}; camera scanning is closed, but you can still mark manually.
+          {direction === 'onward' ? 'Onward' : 'Return'} window is {formatHM(windows[direction].start)}–{formatHM(windows[direction].end)}; marking and scanning are closed for this leg until it opens. You can still undo a mark.
         </p>
       )}
 

@@ -30,6 +30,7 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
+  canUndo: boolean;
   busyId: string | null;
   onMark: (row: RosterRow) => void;
   onUnmark: (row: RosterRow) => void;
@@ -111,9 +112,9 @@ export function getRosterColumns(opts: {
       size: 120,
       header: () => null,
       cell: ({ row }) => {
-        if (!opts.canMark) return null;
         const busy = opts.busyId === row.original.learner_id;
         if (row.original.status === 'present') {
+          if (!opts.canUndo) return null;
           return (
             <button
               type="button"
@@ -125,6 +126,7 @@ export function getRosterColumns(opts: {
             </button>
           );
         }
+        if (!opts.canMark) return null;
         return (
           <button
             type="button"
