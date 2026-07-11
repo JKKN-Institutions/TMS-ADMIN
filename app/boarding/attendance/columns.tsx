@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check } from 'lucide-react';
+import { QrCode, Pencil, Check, Undo2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -30,8 +30,9 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
-  markingId: string | null;
+  busyId: string | null;
   onMark: (row: RosterRow) => void;
+  onUnmark: (row: RosterRow) => void;
 }): ColumnDef<RosterRow>[] {
   const selectColumn: ColumnDef<RosterRow> = {
     id: 'select',
@@ -110,8 +111,20 @@ export function getRosterColumns(opts: {
       size: 120,
       header: () => null,
       cell: ({ row }) => {
-        if (!opts.canMark || row.original.status === 'present') return null;
-        const busy = opts.markingId === row.original.learner_id;
+        if (!opts.canMark) return null;
+        const busy = opts.busyId === row.original.learner_id;
+        if (row.original.status === 'present') {
+          return (
+            <button
+              type="button"
+              onClick={() => opts.onUnmark(row.original)}
+              disabled={busy}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            >
+              <Undo2 className="h-3.5 w-3.5" /> {busy ? 'Undoing…' : 'Undo'}
+            </button>
+          );
+        }
         return (
           <button
             type="button"

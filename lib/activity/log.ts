@@ -10,7 +10,7 @@ import type { AuthContext } from '@/lib/api/with-auth';
 
 export type ActivityAction =
   | 'create' | 'update' | 'delete' | 'import' | 'assign' | 'unassign'
-  | 'upload' | 'activate' | 'deactivate' | 'scan' | 'mark' | 'generate';
+  | 'upload' | 'activate' | 'deactivate' | 'scan' | 'mark' | 'unmark' | 'generate';
 
 export type ActivityModule =
   | 'drivers' | 'vehicles' | 'routes' | 'route-optimization' | 'gps-devices'

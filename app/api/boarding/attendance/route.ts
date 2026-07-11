@@ -200,5 +200,62 @@ async function getHistory(request: NextRequest, auth: AuthContext) {
   }
 }
 
+interface ClearInput { routeId?: string; direction?: string; learnerIds?: string[] }
+
+/* ── Clear marks (DELETE) ───────────────────────────────────────────────────
+ * Revert one or many learners to "Unmarked" for today + a direction by deleting
+ * their tms_attendance rows. Same authority as marking (.manage + assigned to the
+ * route). Today-only (you can only undo the current day's marks). */
+async function clearMarks(request: NextRequest, auth: AuthContext) {
+  try {
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_MANAGE))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    const body = (await request.json().catch(() => ({}))) as ClearInput;
+    const routeId = String(body.routeId ?? '');
+    const direction = body.direction === 'return' ? 'return' : 'onward';
+    const learnerIds = Array.isArray(body.learnerIds) ? [...new Set(body.learnerIds.filter(Boolean))] : [];
+    if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
+    if (learnerIds.length === 0) return NextResponse.json({ error: 'No learners provided' }, { status: 400 });
+
+    // Authority: staff may only clear for routes they're assigned to.
+    if (!auth.isSuperAdmin) {
+      const assigned = await getAssignedRouteIdsForUser(auth);
+      if (!assigned.includes(routeId)) {
+        return NextResponse.json({ error: 'You are not assigned to this route' }, { status: 403 });
+      }
+    }
+
+    const svc = createServiceRoleClient();
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await svc
+      .from('tms_attendance')
+      .delete()
+      .eq('route_id', routeId)
+      .eq('trip_date', today)
+      .eq('direction', direction)
+      .in('learner_id', learnerIds)
+      .select('learner_id');
+    if (error) {
+      console.error('boarding clear mark error:', error);
+      return NextResponse.json({ error: 'Failed to clear attendance' }, { status: 500 });
+    }
+    const cleared = (data ?? []).length;
+
+    await logActivity(auth, request, {
+      module: 'boarding',
+      action: 'unmark',
+      entityType: 'tms_attendance',
+      description: `Cleared attendance for ${cleared} learner(s) on route ${routeId} (${direction})`,
+      metadata: { routeId, direction, count: cleared },
+    });
+    return NextResponse.json({ success: true, cleared });
+  } catch (e) {
+    console.error('boarding clear mark error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export const GET = withAuth((request, auth) => getHistory(request, auth));
 export const POST = withAuth((request, auth) => mark(request, auth));
+export const DELETE = withAuth((request, auth) => clearMarks(request, auth));

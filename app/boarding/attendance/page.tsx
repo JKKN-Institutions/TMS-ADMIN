@@ -38,7 +38,7 @@ export default function BoardingAttendancePage() {
   const [date, setDate] = useState(todayStr());
   const [direction, setDirection] = useState<AttDirection>('onward');
   const [scanOpen, setScanOpen] = useState(false);
-  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const dirSeeded = useRef(false);
   // Forces a re-render every 30s so the amber closed-window hint (isToday && !legOpen)
   // appears/disappears at a scan-window edge instead of lagging until an unrelated re-render.
@@ -73,7 +73,7 @@ export default function BoardingAttendancePage() {
 
   const markPresent = useCallback(
     async (row: RosterRow) => {
-      setMarkingId(row.learner_id);
+      setBusyId(row.learner_id);
       try {
         const res = await fetch('/api/boarding/attendance', {
           method: 'POST',
@@ -88,15 +88,38 @@ export default function BoardingAttendancePage() {
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to mark present');
       } finally {
-        setMarkingId(null);
+        setBusyId(null);
+      }
+    },
+    [direction, qc]
+  );
+
+  const unmarkPresent = useCallback(
+    async (row: RosterRow) => {
+      setBusyId(row.learner_id);
+      try {
+        const res = await fetch('/api/boarding/attendance', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ routeId: row.route_id, direction, learnerIds: [row.learner_id] }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to unmark');
+        toast.success(`Unmarked ${row.name}`);
+        qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to unmark');
+      } finally {
+        setBusyId(null);
       }
     },
     [direction, qc]
   );
 
   const columns = useMemo(
-    () => getRosterColumns({ canMark: isToday, markingId, onMark: markPresent }),
-    [isToday, markingId, markPresent]
+    () => getRosterColumns({ canMark: isToday, busyId, onMark: markPresent, onUnmark: unmarkPresent }),
+    [isToday, busyId, markPresent, unmarkPresent]
   );
 
   const filters: DataTableFilter[] = [
