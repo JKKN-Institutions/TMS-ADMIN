@@ -46,17 +46,33 @@ export default function ScanDialog({
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const busyRef = useRef(false);
   const lastTokenRef = useRef('');
+  // Kept current every render so the long-lived scan callback (registered once by the
+  // camera-start effect) always reads the latest direction/windows instead of the stale
+  // closure captured when the effect last ran.
+  const directionRef = useRef(direction);
+  directionRef.current = direction;
+  const windowsRef = useRef(windows);
+  windowsRef.current = windows;
+  // Bumped whenever the camera-lifecycle effect (re)starts or tears down, so an in-flight
+  // scanner.start() that resolves after teardown can detect it's stale and self-stop instead
+  // of being adopted into scannerRef.
+  const cameraGenRef = useRef(0);
 
   const win = windows[direction];
   const legOpen = isDirectionOpen(win);
 
   async function submit(token: string, walkUp = false) {
     if (!token) return;
-    if (!isDirectionOpen(windows[direction])) {
+    // Read the CURRENT direction/windows via refs, not the props closed over when this
+    // callback was registered with the scanner — the camera-start effect doesn't restart
+    // on a direction change, so the closed-over props could be stale.
+    const dir = directionRef.current;
+    const w = windowsRef.current;
+    if (!isDirectionOpen(w[dir])) {
       setResult({
         ok: false,
         reason: 'window_closed',
-        error: `${direction === 'onward' ? 'Onward (morning)' : 'Return (evening)'} scanning is open ${formatHM(win.start)}–${formatHM(win.end)} only.`,
+        error: `${dir === 'onward' ? 'Onward (morning)' : 'Return (evening)'} scanning is open ${formatHM(w[dir].start)}–${formatHM(w[dir].end)} only.`,
       });
       return;
     }
@@ -68,7 +84,7 @@ export default function ScanDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ token, direction, walkUp }),
+        body: JSON.stringify({ token, direction: dir, walkUp }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -104,21 +120,40 @@ export default function ScanDialog({
   async function startCamera() {
     if (scannerRef.current) return;
     if (!document.getElementById(READER_ID)) return;
+    // Snapshot the generation before the async start() call. If teardown runs while
+    // start() is still in flight, cameraGenRef will have moved on by the time we get
+    // here — that's our signal to stop the just-started stream instead of adopting it.
+    const gen = cameraGenRef.current;
     const scanner = new Html5Qrcode(READER_ID);
-    scannerRef.current = scanner;
     try {
       await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, (decoded) => submit(decoded), () => {});
+      if (cameraGenRef.current !== gen) {
+        // Cleanup already ran (dialog closed/unmounted) while start() was pending — this
+        // scanner was never assigned to scannerRef, so nothing else can stop it. Stop it
+        // ourselves so the camera stream isn't leaked.
+        try {
+          await scanner.stop();
+          await scanner.clear();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      scannerRef.current = scanner;
       setScanning(true);
     } catch {
-      setResult({ ok: false, error: 'Could not start camera — use manual entry below.' });
-      scannerRef.current = null;
+      if (cameraGenRef.current === gen) {
+        setResult({ ok: false, error: 'Could not start camera — use manual entry below.' });
+      }
     }
   }
 
   // Run the camera only while the dialog is open and the leg is open.
   useEffect(() => {
+    cameraGenRef.current++;
     if (open && legOpen) void startCamera();
     return () => {
+      cameraGenRef.current++;
       void stopCamera();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
