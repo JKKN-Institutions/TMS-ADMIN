@@ -127,3 +127,61 @@ export function groupRosterByStop(
   }
   return groups;
 }
+
+export interface RosterRow {
+  learner_id: string;
+  name: string;
+  roll: string | null;
+  route_id: string;
+  route_number: string | null;
+  stop_id: string | null;
+  stop_name: string;
+  stop_time: string | null;
+  status: 'present' | 'unmarked';
+  method: string | null;
+  scanned_at: string | null;
+}
+
+/**
+ * Pure: flatten one route's booked riders into attendance rows for a single leg.
+ * The caller must pass `orderedStops` with `.time` already resolved to the leg
+ * (stop_time onward / evening_time return) and `attendanceByLearner` already
+ * filtered to that leg. Riders sort by stop order then roll/name (numeric-aware);
+ * riders with a null/unknown stop fall into a trailing "Stop not set" bucket.
+ */
+export function buildRosterRows(
+  riders: RosterRider[],
+  route: { id: string; route_number: string | null },
+  orderedStops: OrderedStop[],
+  attendanceByLearner: Map<string, { status: string; method: string | null; scanned_at: string | null }>,
+): RosterRow[] {
+  const byId = new Map(orderedStops.map((s) => [s.id, s] as const));
+  const orderOf = (stopId: string | null) =>
+    stopId && byId.has(stopId) ? (byId.get(stopId)!.order ?? 0) : Number.MAX_SAFE_INTEGER;
+
+  const rows: RosterRow[] = riders.map((rider) => {
+    const stop = rider.stop_id && byId.has(rider.stop_id) ? byId.get(rider.stop_id)! : null;
+    const att = attendanceByLearner.get(rider.learner_id);
+    const present = att?.status === 'present';
+    return {
+      learner_id: rider.learner_id,
+      name: rider.name,
+      roll: rider.roll,
+      route_id: route.id,
+      route_number: route.route_number,
+      stop_id: stop ? stop.id : null,
+      stop_name: stop ? stop.name : 'Stop not set',
+      stop_time: stop ? stop.time : null,
+      status: present ? 'present' : 'unmarked',
+      method: present ? att!.method : null,
+      scanned_at: present ? att!.scanned_at : null,
+    };
+  });
+
+  rows.sort((a, b) => {
+    const byStop = orderOf(a.stop_id) - orderOf(b.stop_id);
+    if (byStop !== 0) return byStop;
+    return (a.roll ?? a.name).localeCompare(b.roll ?? b.name, undefined, { numeric: true });
+  });
+  return rows;
+}
