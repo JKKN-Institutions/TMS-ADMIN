@@ -185,7 +185,7 @@ export async function proxy(request: NextRequest) {
         const { data: canScan } = await supabase.rpc('user_has_permission', {
           permission_name: 'tms.attendance.scan',
         });
-        if (canScan) home = '/boarding/scan';
+        if (canScan) home = '/boarding/attendance';
       }
       if (pathname === home) {
         return NextResponse.redirect(

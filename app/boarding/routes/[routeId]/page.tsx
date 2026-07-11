@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Users, QrCode, ChevronLeft, ChevronRight, CalendarClock } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Users, ListChecks, ChevronLeft, ChevronRight, CalendarClock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/use-permissions';
 import { DataTable } from '@/components/ui/data-table';
@@ -157,8 +157,8 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
             {route?.route_name && <p className="text-gray-600 text-sm truncate">{route.route_name}</p>}
           </div>
         </div>
-        <Link href="/boarding/scan" className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700">
-          <QrCode className="h-4 w-4" /> Scan Boarding Pass
+        <Link href="/boarding/attendance" className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700">
+          <ListChecks className="h-4 w-4" /> Attendance &amp; Scan
         </Link>
       </div>
 

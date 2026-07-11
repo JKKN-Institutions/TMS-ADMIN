@@ -72,7 +72,7 @@ export default function SelectRoutePage() {
       // would hit the layout's stale access==='select' redirect and bounce
       // back to this (now-locked) screen. A full page load forces the
       // layout to remount and recompute access fresh.
-      window.location.assign('/boarding/scan');
+      window.location.assign('/boarding/attendance');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to select route');
       setSaving(false);
@@ -98,7 +98,7 @@ export default function SelectRoutePage() {
           You&apos;re already the in-charge of a bus. Contact an admin to change your route.
         </p>
         <button
-          onClick={() => router.replace('/boarding/scan')}
+          onClick={() => router.replace('/boarding/attendance')}
           className="mt-5 inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
         >
           Go to boarding

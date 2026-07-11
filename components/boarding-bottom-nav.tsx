@@ -7,16 +7,13 @@ import { boardingNavigation, type BoardingNavItem } from '@/lib/boarding/navigat
 
 /**
  * Mobile-only bottom navigation for the boarding-staff portal (lg:hidden).
- * Replaces the sidebar on small screens. Shows four primary destinations
- * (Dashboard, Passengers, Scan, Attendance) plus a three-dot "More" menu that
- * holds the rest (My Route, Live Location, Grievances, Notifications), so the bar
- * stays legible instead of cramming every item. The desktop sidebar still lists
- * everything from `boardingNavigation`.
+ * Four primary destinations (Dashboard, My Route, Passengers, Attendance) plus a
+ * three-dot "More" menu for the rest (Live Location, Grievances, Notifications).
  */
 const PRIMARY_HREFS = [
   '/boarding/dashboard',
+  '/boarding/routes',
   '/boarding/passengers',
-  '/boarding/scan',
   '/boarding/attendance',
 ];
 

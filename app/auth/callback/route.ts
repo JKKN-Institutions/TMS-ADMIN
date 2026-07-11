@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
       const { data: canScan } = await supabase.rpc('user_has_permission', {
         permission_name: 'tms.attendance.scan',
       });
-      if (canScan) home = '/boarding/scan';
+      if (canScan) home = '/boarding/attendance';
       else if (boardingEligible && staffAssignedCount === 0) home = '/boarding/select-route';
     }
     response.headers.set('location', new URL(home, request.url).toString());
