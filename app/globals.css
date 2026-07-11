@@ -340,13 +340,21 @@ html {
 }
 
 /* Sidebar Design */
+/* Height of the PWA top banner stack (install / update), measured live by
+   PwaProvider and set on <html>. The fixed sidebar + header and the page
+   content read it below so the banners push content down instead of hiding it.
+   0px whenever no banner is showing. */
+:root {
+  --pwa-banner-h: 0px;
+}
+
 .sidebar-modern {
   background-color: white;
   border-right: 1px solid rgb(229 231 235);
   position: fixed;
   left: 0;
-  top: 0;
-  height: 100%;
+  top: var(--pwa-banner-h, 0px);
+  height: calc(100% - var(--pwa-banner-h, 0px));
   display: flex;
   flex-direction: column;
   width: 240px;
@@ -418,8 +426,9 @@ html {
   background: #f8f9fb;
   min-height: 100vh;
   margin-left: 240px;
-  /* Clear the fixed 4rem header (border-box keeps total height at 100vh). */
-  padding-top: 4rem;
+  /* Clear the fixed 4rem header (border-box keeps total height at 100vh), plus
+     any PWA top banner stacked above it. */
+  padding-top: calc(4rem + var(--pwa-banner-h, 0px));
   display: flex;
   flex-direction: column;
   transition: margin-left 0.2s ease;
@@ -812,6 +821,40 @@ html {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Bug Reporter (Bug Boundary SDK) floating button.
+
+   The SDK (@boobalan_jkkn/bug-reporter-sdk) renders a fixed FAB at bottom-right
+   with NO position/size props exposed: a base INLINE style (bottom 1.5rem,
+   3.5rem square, 28px icon) plus a phones media-query that sets bottom 1rem /
+   3rem square with `!important`. Below the lg breakpoint that FAB overlaps our
+   fixed bottom navigation (components/*-bottom-nav), so here we (1) shrink it
+   everywhere and (2) lift it above the nav bar on the breakpoints where the nav
+   is present.
+
+   Specificity note: the SDK's own rules are `.bug-reporter-sdk
+   .bug-reporter-floating-btn` (0,2,0) `!important`, injected into <body> at
+   runtime — i.e. LATER in source order than this file, so an equal-specificity
+   override would lose the tie. The class is repeated below purely to reach
+   0,3,0 and win, without depending on the SDK's colour utility class. `!important`
+   is also needed to beat the non-important inline base position/size. */
+.bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
+  width: 2.75rem !important;
+  height: 2.75rem !important;
+}
+.bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn svg {
+  width: 1.25rem !important;
+  height: 1.25rem !important;
+}
+
+@media (max-width: 1024px) {
+  /* Sit just above the top edge of the ~3rem bottom nav (+ its safe-area pad)
+     instead of on top of it. `right` is left to the SDK. */
+  .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
+    bottom: calc(4rem + env(safe-area-inset-bottom)) !important;
+  }
+}
+
 /* Animations - subtle */
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -829,7 +872,7 @@ html {
    mobile slide-in drawer still covers the header when open. */
 .app-header {
   position: fixed;
-  top: 0;
+  top: var(--pwa-banner-h, 0px);
   left: 0;
   right: 0;
   z-index: 20;
