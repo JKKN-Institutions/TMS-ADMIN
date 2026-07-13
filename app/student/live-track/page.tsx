@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { BusContextStrip } from '@/components/live/bus-context-strip';
 import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
 import { CAMPUS } from '@/lib/gps/campus';
+import type { RoadRoute } from '@/lib/geo/route-to-campus';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -36,13 +37,13 @@ interface RouteInfo {
   id: string;
   label: string;
 }
-type Resp = { data?: { route: RouteInfo | null; vehicle: Vehicle | null }; notFound?: boolean };
+type Resp = { data?: { route: RouteInfo | null; vehicle: Vehicle | null; roadRoute?: RoadRoute | null }; notFound?: boolean };
 
 async function fetchBus(): Promise<Resp> {
   const res = await fetch('/api/student/location', { cache: 'no-store', credentials: 'same-origin' });
   if (res.status === 404) return { notFound: true };
   if (!res.ok) throw new Error('Failed to load location');
-  return { data: (await res.json()).data as { route: RouteInfo | null; vehicle: Vehicle | null } };
+  return { data: (await res.json()).data as { route: RouteInfo | null; vehicle: Vehicle | null; roadRoute?: RoadRoute | null } };
 }
 
 function formatUpdated(ts: string | null): string {
@@ -116,6 +117,7 @@ export default function StudentLiveTrackPage() {
 
   const route = data?.data?.route ?? null;
   const v = data?.data?.vehicle ?? null;
+  const roadRoute = data?.data?.roadRoute ?? null;
 
   if (!route) {
     return (
@@ -171,6 +173,7 @@ export default function StudentLiveTrackPage() {
                   accuracyM={v.accuracyM}
                   destination={CAMPUS}
                   viewer={viewer}
+                  routeGeometry={roadRoute?.geometry}
                 />
               </div>
 
