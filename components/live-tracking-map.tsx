@@ -320,6 +320,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
         st.marker.remove();
         st.circle?.remove();
         markersRef.current.delete(id);
+        enrichRef.current.delete(id);   // drop stale snap cache for gone buses
       }
     }
 
