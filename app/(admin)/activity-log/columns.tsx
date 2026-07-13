@@ -61,6 +61,7 @@ const MODULE_LABEL: Record<string, string> = {
   'settings': 'Settings',
   'fees': 'Fees',
   'notifications': 'Notifications',
+  'driver-mobiles': 'Driver Mobiles',
 };
 
 // Filter dropdown options for the DataTable — derived from the maps above so
