@@ -79,6 +79,7 @@ export default function DriverMobileDetailPage({ params }: { params: Promise<{ i
           <Field label="Driver phone" value={or(m.driver_phone)} />
           <Field label="Status" value={statusBadge(m.status)} />
           <Field label="Supplied date" value={fmtDate(m.supplied_date)} />
+          <Field label="Bus route" value={m.route_number ? `${m.route_number}${m.route_name ? ` — ${m.route_name}` : ''}` : '—'} />
         </div>
       </SectionCard>
 
