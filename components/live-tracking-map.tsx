@@ -140,9 +140,19 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapRef.current).setView(DEFAULT_CENTER, 10);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
+    // Street basemap: CARTO Voyager — clean, Google-like, free, no API key.
+    const street = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
+      maxZoom: 20,
+      attribution: '© OpenStreetMap contributors © CARTO',
+    });
+    // Satellite basemap: Esri World Imagery — free with attribution, no key.
+    const satellite = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 20, attribution: 'Tiles © Esri' },
+    );
+    street.addTo(map);
+    L.control.layers({ Street: street, Satellite: satellite }, {}, { position: 'topright' }).addTo(map);
 
     L.marker([CAMPUS.lat, CAMPUS.lng], {
       icon: L.divIcon({
