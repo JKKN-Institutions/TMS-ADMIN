@@ -31,4 +31,9 @@ describe('buildDriverMobilePayload', () => {
     expect(buildDriverMobilePayload({ driver_staff_id: 'abc-123' }).driver_staff_id).toBe('abc-123');
     expect(buildDriverMobilePayload({ driver_staff_id: '' }).driver_staff_id).toBe(null);
   });
+
+  it('passes route_id through as a uuid string, empty → null', () => {
+    expect(buildDriverMobilePayload({ route_id: 'route-9' }).route_id).toBe('route-9');
+    expect(buildDriverMobilePayload({ route_id: '' }).route_id).toBe(null);
+  });
 });

@@ -11,7 +11,7 @@ export const NUM_FIELDS = ['purchase_cost'] as const;
 
 export const DATE_FIELDS = ['supplied_date', 'purchase_date', 'warranty_expiry'] as const;
 
-export const UUID_FIELDS = ['driver_staff_id'] as const;
+export const UUID_FIELDS = ['driver_staff_id', 'route_id'] as const;
 
 export const TEXT_FIELDS = [
   'brand', 'model', 'color', 'imei', 'notes',
