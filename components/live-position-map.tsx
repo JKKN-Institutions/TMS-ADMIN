@@ -35,6 +35,8 @@ interface LivePositionMapProps {
   viewer?: LatLng | null;
   /** Optional route stops (future phase — pins + dashed connecting line). */
   stops?: StopPoint[];
+  /** Road route (bus → campus) as [lat,lng] points; drawn as a solid blue polyline. */
+  routeGeometry?: [number, number][];
 }
 
 // Glide slightly under the 5s reader poll so the marker settles just before the next fix.
@@ -78,7 +80,7 @@ function viewerIcon(): L.DivIcon {
  *  via next/dynamic with { ssr: false }. */
 const LivePositionMap: React.FC<LivePositionMapProps> = ({
   latitude, longitude, label, zoom = 15,
-  heading, accuracyM, destination, viewer, stops,
+  heading, accuracyM, destination, viewer, stops, routeGeometry,
 }) => {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -87,6 +89,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   const campusRef = useRef<L.Marker | null>(null);
   const viewerRef = useRef<L.Marker | null>(null);
   const stopsRef = useRef<L.LayerGroup | null>(null);
+  const routeLineRef = useRef<L.Polyline | null>(null);
   const hasFitRef = useRef(false);
 
   const animPosRef = useRef<LatLng>({ lat: latitude, lng: longitude });
@@ -99,9 +102,19 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   useEffect(() => {
     if (!elRef.current || mapRef.current) return;
     const map = L.map(elRef.current).setView([latitude, longitude], zoom);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
+    // Street basemap: CARTO Voyager — clean, Google-like, free, no API key.
+    const street = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
+      maxZoom: 20,
+      attribution: '© OpenStreetMap contributors © CARTO',
+    });
+    // Satellite basemap: Esri World Imagery — free with attribution, no key.
+    const satellite = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 20, attribution: 'Tiles © Esri' },
+    );
+    street.addTo(map);
+    L.control.layers({ Street: street, Satellite: satellite }, {}, { position: 'topright' }).addTo(map);
     const marker = L.marker([latitude, longitude], { icon: busIcon(heading) }).addTo(map);
     if (label) marker.bindPopup(label);
     mapRef.current = map;
@@ -115,6 +128,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       campusRef.current = null;
       viewerRef.current = null;
       stopsRef.current = null;
+      routeLineRef.current = null;
       hasFitRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -227,6 +241,23 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       stopsRef.current = group;
     }
   }, [stops]);
+
+  // Road route (bus → campus): solid blue polyline. Redraws when the route changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (routeLineRef.current) {
+      routeLineRef.current.remove();
+      routeLineRef.current = null;
+    }
+    if (routeGeometry && routeGeometry.length > 1) {
+      routeLineRef.current = L.polyline(routeGeometry, {
+        color: '#2563eb',
+        weight: 5,
+        opacity: 0.8,
+      }).addTo(map);
+    }
+  }, [routeGeometry]);
 
   // Frame bus + destination (+ viewer) into view ONCE; then leave the user's pan/zoom.
   useEffect(() => {
