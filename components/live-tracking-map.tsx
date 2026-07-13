@@ -3,7 +3,8 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { interpolateLatLng, shouldSnap, type LatLng } from '@/lib/gps/interpolate';
+import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/lib/gps/interpolate';
+import { shouldUseSnap } from '@/lib/geo/osrm';
 import { CAMPUS } from '@/lib/gps/campus';
 import { haversineKm } from '@/lib/gps/distance';
 
@@ -51,6 +52,41 @@ interface MarkerState {
   from: LatLng;
   to: LatLng;
   start: number;
+}
+
+interface Enrichment {
+  snapped: LatLng | null;
+  route: { geometry: [number, number][]; distanceKm: number; durationMin: number } | null;
+  address: string | null;
+}
+
+// Distance (m) a bus must move before we re-query enrichment for it.
+const REENRICH_M = 150;
+
+async function fetchEnrichment(
+  lat: number,
+  lng: number,
+  opts: { route: boolean; address: boolean },
+): Promise<Enrichment | null> {
+  try {
+    const qs = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
+      route: opts.route ? '1' : '0',
+      address: opts.address ? '1' : '0',
+    });
+    const res = await fetch(`/api/admin/track-all/directions?${qs.toString()}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json?.success) return null;
+    const snapped: LatLng | null =
+      json.snapped && shouldUseSnap(json.snapped.snapDistanceM)
+        ? { lat: json.snapped.lat, lng: json.snapped.lng }
+        : null;
+    return { snapped, route: json.route ?? null, address: json.address ?? null };
+  } catch {
+    return null;
+  }
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -126,6 +162,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
   const markersRef = useRef<Map<string, MarkerState>>(new Map());
   const rafRef = useRef<number | null>(null);
   const hasFitRef = useRef(false);
+  const enrichRef = useRef<Map<string, { at: LatLng; snapped: LatLng | null }>>(new Map());
+  const selectedIdRef = useRef<string | null>(null);
 
   const fitToMarkers = () => {
     const map = mapInstanceRef.current;
@@ -241,6 +279,40 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
           marker, circle, anim: target, from: target, to: target, start: performance.now(),
         });
       }
+    }
+
+    // Snap pass — runs AFTER the main loop above (which retargets every marker to
+    // the RAW fix each poll). For each fresh bus we (1) re-apply its cached snapped
+    // point so the raw retarget doesn't undo it, and (2) (re)fetch a snap when the
+    // bus is new or has moved > REENRICH_M. The selected bus's snap is owned by the
+    // selection effect (Task 6), which writes the same enrichRef cache.
+    for (const d of withLoc) {
+      const fresh = d.gps_status === 'online' || d.gps_status === 'recent';
+      if (!fresh) continue;
+      const here: LatLng = { lat: d.current_latitude, lng: d.current_longitude };
+      const prev = enrichRef.current.get(d.id);
+
+      // (1) Keep the marker on its cached snapped point.
+      if (prev?.snapped) {
+        const st = markersRef.current.get(d.id);
+        if (st) st.to = prev.snapped;
+      }
+
+      // (2) Non-selected buses: refetch a snap only when new or moved far.
+      if (selectedIdRef.current === d.id) continue;
+      const movedFar = !prev || haversineMeters(prev.at, here) >= REENRICH_M;
+      if (!movedFar) continue;
+      enrichRef.current.set(d.id, { at: here, snapped: prev?.snapped ?? null });
+      void fetchEnrichment(here.lat, here.lng, { route: false, address: false }).then((e) => {
+        if (!e) return;
+        enrichRef.current.set(d.id, { at: here, snapped: e.snapped });
+        const st = markersRef.current.get(d.id);
+        if (st && e.snapped) {
+          st.from = { ...st.anim };
+          st.to = e.snapped;
+          st.start = performance.now();
+        }
+      });
     }
 
     for (const [id, st] of markersRef.current) {
