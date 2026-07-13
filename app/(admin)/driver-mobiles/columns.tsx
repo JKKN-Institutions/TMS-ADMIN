@@ -15,6 +15,9 @@ export interface DriverMobileRow {
   driver_staff_id: string;
   driver_name: string;
   driver_phone: string | null;
+  route_id: string | null;
+  route_number: string | null;
+  route_name: string | null;
   brand: string;
   model: string;
   color: string | null;
@@ -104,6 +107,17 @@ export function getDriverMobileColumns(
         <span className="flex flex-col">
           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.original.driver_name}</span>
           {row.original.driver_phone && <span className="text-xs text-gray-500">{row.original.driver_phone}</span>}
+        </span>
+      ),
+    },
+    {
+      id: 'route',
+      accessorFn: (m) => m.route_number ?? '',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
+      cell: ({ row }) => (
+        <span className="flex flex-col">
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.original.route_number ?? '—'}</span>
+          {row.original.route_name && <span className="text-xs text-gray-500">{row.original.route_name}</span>}
         </span>
       ),
     },
