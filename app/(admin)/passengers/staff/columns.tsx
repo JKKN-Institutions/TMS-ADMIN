@@ -85,7 +85,7 @@ export function getStaffColumns(
     },
     {
       accessorKey: 'email',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Institution Email" />,
       cell: ({ row }) => <span className="text-gray-600">{row.original.email || '—'}</span>,
     },
     {

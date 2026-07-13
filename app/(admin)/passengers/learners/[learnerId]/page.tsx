@@ -62,7 +62,7 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Roll Number" value={learner.rollNumber} />
           <Field label="Register Number" value={learner.registerNumber} />
-          <Field label="Email" value={learner.email} />
+          <Field label="Institution Email" value={learner.email} />
           <Field label="Mobile" value={learner.mobile} />
           <Field label="Institution" value={learner.institutionName} />
           <Field label="Department" value={learner.departmentName} />
