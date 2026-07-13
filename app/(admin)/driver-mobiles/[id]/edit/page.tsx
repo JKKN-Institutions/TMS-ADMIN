@@ -62,6 +62,7 @@ export default function EditDriverMobilePage({ params }: { params: Promise<{ id:
         driverMobileId={m.id}
         initial={{
           driver_staff_id: m.driver_staff_id ?? '',
+          route_id: m.route_id ?? '',
           brand: m.brand ?? '',
           model: m.model ?? '',
           color: m.color ?? '',

@@ -24,3 +24,19 @@ export async function fetchDriverOptions(): Promise<DriverOption[]> {
     .filter((d) => d.ops != null)
     .map((d) => ({ id: d.id, name: d.name, phone: d.phone ?? null }));
 }
+
+export interface RouteOption {
+  id: string;
+  number: string;
+  name: string;
+}
+
+// Bus routes for the picker — from /api/admin/routes (tms_route). Optional field, so
+// the form adds a "— None —" choice; this returns only real routes.
+export async function fetchRouteOptions(): Promise<RouteOption[]> {
+  const res = await fetch('/api/admin/routes', { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load routes');
+  return (json.data as { id: string; route_number: string | null; route_name: string | null }[])
+    .map((r) => ({ id: r.id, number: r.route_number ?? '', name: r.route_name ?? '' }));
+}

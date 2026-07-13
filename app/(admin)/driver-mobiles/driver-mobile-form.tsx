@@ -6,12 +6,13 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { fetchDriverOptions } from './driver-mobile-api';
+import { fetchDriverOptions, fetchRouteOptions } from './driver-mobile-api';
 
 // Field set mirrors lib/driver-mobiles/fields.ts EDITABLE — a field added here
 // must be whitelisted there too, or the API silently drops it on save.
 interface FormValues {
   driver_staff_id: string;
+  route_id: string;
   brand: string;
   model: string;
   color: string;
@@ -34,7 +35,7 @@ interface FormValues {
 }
 
 const EMPTY: FormValues = {
-  driver_staff_id: '', brand: '', model: '', color: '', imei: '', status: 'assigned',
+  driver_staff_id: '', route_id: '', brand: '', model: '', color: '', imei: '', status: 'assigned',
   supplied_date: '', sim_number: '', phone_number: '', network_provider: '',
   purchase_date: '', purchase_cost: '', supplier_name: '', invoice_number: '', warranty_expiry: '',
   condition: '', storage_capacity: '', serial_number: '', accessories: '', notes: '',
@@ -53,6 +54,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
   const [saving, setSaving] = useState(false);
 
   const { data: drivers = [] } = useQuery({ queryKey: ['driver-options'], queryFn: fetchDriverOptions });
+  const { data: routes = [] } = useQuery({ queryKey: ['route-options'], queryFn: fetchRouteOptions });
 
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -75,6 +77,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
     try {
       const payload = {
         driver_staff_id: form.driver_staff_id,
+        route_id: form.route_id || null,
         brand: form.brand.trim(),
         model: form.model.trim(),
         color: form.color.trim() || null,
@@ -150,6 +153,15 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Supplied date</label>
             <input type="date" value={form.supplied_date} onChange={(e) => set('supplied_date', e.target.value)} className="input" disabled={saving} />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Bus route</label>
+            <select value={form.route_id} onChange={(e) => set('route_id', e.target.value)} className="input" disabled={saving}>
+              <option value="">— None —</option>
+              {routes.map((r) => (
+                <option key={r.id} value={r.id}>{r.number}{r.name ? ` — ${r.name}` : ''}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
