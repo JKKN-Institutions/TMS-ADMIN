@@ -185,6 +185,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
   };
 
   const selectBus = (d: DriverLocation) => {
+    clearRouteLine();
     selectedIdRef.current = d.id;
     setSelected({
       id: d.id,
@@ -347,16 +348,17 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       if (!fresh) continue;
       const here: LatLng = { lat: d.current_latitude, lng: d.current_longitude };
       const prev = enrichRef.current.get(d.id);
+      const movedFar = !prev || haversineMeters(prev.at, here) >= REENRICH_M;
 
-      // (1) Keep the marker on its cached snapped point.
-      if (prev?.snapped) {
+      // (1) Keep the marker on its cached snapped point — but NOT if it just teleported
+      //     far (a stale snap would misplace it until the refetch resolves).
+      if (prev?.snapped && !movedFar) {
         const st = markersRef.current.get(d.id);
         if (st) st.to = prev.snapped;
       }
 
       // (2) Non-selected buses: refetch a snap only when new or moved far.
       if (selectedIdRef.current === d.id) continue;
-      const movedFar = !prev || haversineMeters(prev.at, here) >= REENRICH_M;
       if (!movedFar) continue;
       enrichRef.current.set(d.id, { at: here, snapped: prev?.snapped ?? null });
       void fetchEnrichment(here.lat, here.lng, { route: false, address: false }).then((e) => {
