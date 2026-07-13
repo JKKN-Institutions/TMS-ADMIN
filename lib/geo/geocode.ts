@@ -56,3 +56,49 @@ export async function geocodeAddress(name: string): Promise<GeocodeResult | null
     return null;
   }
 }
+
+type FetchLike = typeof fetch;
+
+/** Build a short human label from Nominatim's structured address, else display_name. */
+function summariseAddress(json: { display_name?: string; address?: Record<string, string> }): string | null {
+  const a = json.address ?? {};
+  const parts = [
+    a.road || a.neighbourhood || a.suburb || a.hamlet,
+    a.village || a.town || a.city || a.county,
+    a.state_district || a.state,
+  ].filter((p): p is string => !!p);
+  const label = parts.join(', ');
+  return label || json.display_name || null;
+}
+
+async function reverseNominatim(lat: number, lng: number, fetchImpl: FetchLike): Promise<string | null> {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&zoom=16&addressdetails=1`;
+  const res = await fetchImpl(url, {
+    headers: { 'User-Agent': 'JKKN-TMS/1.0 (transport route optimization)', 'Accept-Language': 'en' },
+  });
+  if (!res.ok) return null;
+  const json = (await res.json()) as { display_name?: string; address?: Record<string, string> };
+  return summariseAddress(json);
+}
+
+async function reverseGoogle(lat: number, lng: number, fetchImpl: FetchLike): Promise<string | null> {
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_KEY}`;
+  const res = await fetchImpl(url);
+  if (!res.ok) return null;
+  const json = (await res.json()) as { results?: Array<{ formatted_address?: string }> };
+  return json.results?.[0]?.formatted_address ?? null;
+}
+
+/** Reverse-geocode a coordinate to a short address label, or null on failure. */
+export async function reverseGeocode(
+  lat: number,
+  lng: number,
+  fetchImpl: FetchLike = fetch,
+): Promise<string | null> {
+  try {
+    if (PROVIDER === 'google' && GOOGLE_KEY) return await reverseGoogle(lat, lng, fetchImpl);
+    return await reverseNominatim(lat, lng, fetchImpl);
+  } catch {
+    return null;
+  }
+}
