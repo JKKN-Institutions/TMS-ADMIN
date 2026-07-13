@@ -83,6 +83,12 @@ export const TMS_PERMISSIONS = {
   NOTIFICATIONS_VIEW: 'tms.notifications.view',
   NOTIFICATIONS_SEND: 'tms.notifications.send',
   NOTIFICATIONS_MANAGE: 'tms.notifications.manage',
+
+  // Driver mobile supply — physical phones supplied to drivers.
+  DRIVER_MOBILES_VIEW: 'tms.driver_mobiles.view',
+  DRIVER_MOBILES_CREATE: 'tms.driver_mobiles.create',
+  DRIVER_MOBILES_EDIT: 'tms.driver_mobiles.edit',
+  DRIVER_MOBILES_DELETE: 'tms.driver_mobiles.delete',
 } as const;
 
 export type TmsPermissionKey =
