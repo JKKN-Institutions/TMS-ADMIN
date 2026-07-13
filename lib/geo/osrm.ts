@@ -85,6 +85,7 @@ export async function routeToCampus(
       ([lo, la]) => [la, lo] as [number, number],
     );
     const [wLng, wLat] = wp.location;
+    if (!Number.isFinite(wLat) || !Number.isFinite(wLng)) return null;
     return {
       geometry,
       distanceKm: (route.distance ?? 0) / 1000,

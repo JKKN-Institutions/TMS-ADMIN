@@ -33,6 +33,10 @@ describe('snapToRoad', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ code: 'NoSegment', waypoints: [] }));
     expect(await snapToRoad(0, 0, fetchImpl)).toBeNull();
   });
+  it('returns null on a non-200 HTTP response', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false } as Response);
+    expect(await snapToRoad(0, 0, fetchImpl)).toBeNull();
+  });
   it('returns null on a thrown fetch', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('boom'));
     expect(await snapToRoad(0, 0, fetchImpl)).toBeNull();
@@ -56,5 +60,17 @@ describe('routeToCampus', () => {
   it('returns null when OSRM finds no route', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ code: 'NoRoute', routes: [] }));
     expect(await routeToCampus(0, 0, campus, fetchImpl)).toBeNull();
+  });
+  it('returns null on a non-200 HTTP response', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false } as Response);
+    expect(await routeToCampus(0, 0, campus, fetchImpl)).toBeNull();
+  });
+  it('returns null on a non-finite snapped-origin waypoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({
+      code: 'Ok',
+      routes: [{ geometry: { coordinates: [[77.70, 11.40], [77.72, 11.42]] }, distance: 5000, duration: 600 }],
+      waypoints: [{ location: [Number.NaN, Number.NaN], distance: 8 }],
+    }));
+    expect(await routeToCampus(11.40, 77.70, campus, fetchImpl)).toBeNull();
   });
 });
