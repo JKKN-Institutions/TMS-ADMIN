@@ -41,7 +41,21 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ success: true, data: { ...row, driver_name, driver_phone } });
+    let route_number: string | null = null;
+    let route_name: string | null = null;
+    if ((row as { route_id?: string | null }).route_id) {
+      const { data: rt } = await supabase
+        .from('tms_route')
+        .select('route_number, route_name')
+        .eq('id', (row as { route_id: string }).route_id)
+        .maybeSingle();
+      if (rt) {
+        route_number = rt.route_number ?? null;
+        route_name = rt.route_name ?? null;
+      }
+    }
+
+    return NextResponse.json({ success: true, data: { ...row, driver_name, driver_phone, route_number, route_name } });
   } catch (e) {
     console.error('Driver mobile detail API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

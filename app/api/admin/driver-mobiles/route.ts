@@ -28,6 +28,21 @@ async function resolveDriverNames(
   return map;
 }
 
+// Resolve route number + name for a set of route ids (tms_driver_mobile stores only route_id).
+async function resolveRouteInfo(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  routeIds: string[]
+): Promise<Map<string, { number: string | null; name: string | null }>> {
+  const map = new Map<string, { number: string | null; name: string | null }>();
+  const ids = [...new Set(routeIds.filter(Boolean))];
+  if (!ids.length) return map;
+  const { data } = await supabase.from('tms_route').select('id, route_number, route_name').in('id', ids);
+  for (const r of (data ?? []) as { id: string; route_number: string | null; route_name: string | null }[]) {
+    map.set(r.id, { number: r.route_number ?? null, name: r.route_name ?? null });
+  }
+  return map;
+}
+
 async function getDriverMobiles() {
   try {
     const supabase = createServiceRoleClient();
@@ -40,12 +55,15 @@ async function getDriverMobiles() {
       console.error('Driver mobiles query error:', error);
       return NextResponse.json({ error: 'Failed to fetch driver mobiles' }, { status: 500 });
     }
-    const list = (rows ?? []) as { driver_staff_id: string }[];
+    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null }[];
     const names = await resolveDriverNames(supabase, list.map((r) => r.driver_staff_id));
+    const routes = await resolveRouteInfo(supabase, list.map((r) => r.route_id ?? '').filter(Boolean));
     const data = list.map((r) => ({
       ...r,
       driver_name: names.get(r.driver_staff_id)?.name ?? '—',
       driver_phone: names.get(r.driver_staff_id)?.phone ?? null,
+      route_number: r.route_id ? routes.get(r.route_id)?.number ?? null : null,
+      route_name: r.route_id ? routes.get(r.route_id)?.name ?? null : null,
     }));
     return NextResponse.json({ success: true, data, count: data.length });
   } catch (e) {
