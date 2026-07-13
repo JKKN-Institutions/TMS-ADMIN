@@ -50,8 +50,10 @@ async function handler(request: NextRequest, auth: AuthContext) {
   }
 
   const sp = request.nextUrl.searchParams;
-  const lat = Number(sp.get('lat'));
-  const lng = Number(sp.get('lng'));
+  const latParam = sp.get('lat');
+  const lngParam = sp.get('lng');
+  const lat = latParam === null ? NaN : Number(latParam);
+  const lng = lngParam === null ? NaN : Number(lngParam);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return NextResponse.json({ error: 'lat and lng are required numbers' }, { status: 400 });
   }
