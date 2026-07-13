@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/lib/gps/interpolate';
@@ -164,6 +164,11 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
   const hasFitRef = useRef(false);
   const enrichRef = useRef<Map<string, { at: LatLng; snapped: LatLng | null }>>(new Map());
   const selectedIdRef = useRef<string | null>(null);
+  const [selected, setSelected] = useState<{
+    id: string; name: string; route: string | null; address: string | null;
+    distanceKm: number | null; durationMin: number | null;
+  } | null>(null);
+  const routeLineRef = useRef<L.Polyline | null>(null);
 
   const fitToMarkers = () => {
     const map = mapInstanceRef.current;
@@ -171,6 +176,51 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     const markers = [...markersRef.current.values()].map((s) => s.marker);
     if (markers.length === 0) return;
     map.fitBounds(L.featureGroup(markers).getBounds().pad(0.15));
+  };
+
+  const clearRouteLine = () => {
+    routeLineRef.current?.remove();
+    routeLineRef.current = null;
+  };
+
+  const selectBus = (d: DriverLocation) => {
+    selectedIdRef.current = d.id;
+    setSelected({
+      id: d.id,
+      name: d.name,
+      route: d.route_name ? `${d.route_number ?? ''} · ${d.route_name}`.trim() : null,
+      address: null,
+      distanceKm: null,
+      durationMin: null,
+    });
+    void fetchEnrichment(d.current_latitude, d.current_longitude, { route: true, address: true }).then((e) => {
+      if (!e || selectedIdRef.current !== d.id) return;
+      const map = mapInstanceRef.current;
+      if (map && e.route) {
+        clearRouteLine();
+        routeLineRef.current = L.polyline(e.route.geometry, {
+          color: '#2563eb', weight: 5, opacity: 0.85,
+        }).addTo(map);
+      }
+      if (e.snapped) {
+        // Cache the snap so Task 5's snap pass keeps this bus on-road each poll.
+        enrichRef.current.set(d.id, {
+          at: { lat: d.current_latitude, lng: d.current_longitude },
+          snapped: e.snapped,
+        });
+        const st = markersRef.current.get(d.id);
+        if (st) { st.from = { ...st.anim }; st.to = e.snapped; st.start = performance.now(); }
+      }
+      setSelected((prev) => (prev && prev.id === d.id
+        ? { ...prev, address: e.address, distanceKm: e.route?.distanceKm ?? null, durationMin: e.route?.durationMin ?? null }
+        : prev));
+    });
+  };
+
+  const clearSelection = () => {
+    selectedIdRef.current = null;
+    clearRouteLine();
+    setSelected(null);
   };
 
   // Initialise the map once, and run ONE animation loop that glides every marker.
@@ -218,6 +268,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       markersRef.current.clear();
+      routeLineRef.current?.remove();
+      routeLineRef.current = null;
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -246,6 +298,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
         const p = existing.marker.getPopup();
         if (p) p.setContent(popup);
         else existing.marker.bindPopup(popup);
+        existing.marker.off('click');
+        existing.marker.on('click', () => selectBus(d));
 
         if (d.location_accuracy != null && d.location_accuracy > 0) {
           if (!existing.circle) {
@@ -272,6 +326,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       } else {
         const marker = L.marker([target.lat, target.lng], { icon }).addTo(map);
         marker.bindPopup(popup);
+        marker.on('click', () => selectBus(d));
         const circle = d.location_accuracy != null && d.location_accuracy > 0
           ? L.circle([target.lat, target.lng], { radius: d.location_accuracy, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
           : null;
@@ -355,6 +410,34 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       >
         Recenter
       </button>
+      {selected && (
+        <div
+          style={{
+            position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
+            background: 'white', border: '1px solid #E5E7EB', borderRadius: 10,
+            padding: '10px 12px', maxWidth: 320, boxShadow: '0 2px 10px rgba(0,0,0,0.15)',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'start' }}>
+            <div style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>{selected.name}</div>
+            <button
+              type="button" onClick={clearSelection} aria-label="Clear selection"
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#6B7280', fontSize: 16, lineHeight: 1 }}
+            >×</button>
+          </div>
+          {selected.route && <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>{selected.route}</div>}
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+            📍 {selected.address ?? 'Locating…'}
+          </div>
+          {(selected.distanceKm != null) && (
+            <div style={{ fontSize: 12, color: '#2563eb', marginTop: 4 }}>
+              🚌 {selected.distanceKm.toFixed(1)} km to campus
+              {selected.durationMin != null ? ` · ~${selected.durationMin} min` : ''}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
