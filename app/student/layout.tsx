@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Bus, Power, PanelLeft, PanelLeftClose, Sun, Moon, Monitor, LogOut, Check, Bell,
+  Bus, Power, PanelLeft, PanelLeftClose, Sun, Moon, Monitor, LogOut, Check,
 } from 'lucide-react';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -233,17 +233,6 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
-            <a
-              href="/student/notifications"
-              onClick={(e) => {
-                e.preventDefault();
-                router.push('/student/notifications');
-              }}
-              title="Notifications"
-              className="p-2 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800"
-            >
-              <Bell className="w-5 h-5" />
-            </a>
             <NotificationBell viewAllHref="/student/notifications" />
             <ThemeToggle />
             <ProfileMenu />
