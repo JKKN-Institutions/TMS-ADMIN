@@ -13,7 +13,7 @@ import { getDriverMobileColumns, type DriverMobileRow } from './columns';
 async function fetchMobiles(): Promise<DriverMobileRow[]> {
   const res = await fetch('/api/admin/driver-mobiles');
   const result = await res.json();
-  if (!res.ok || !result.success) throw new Error(result.error || 'Failed to fetch driver mobiles');
+  if (!res.ok || !result.success) throw new Error(result.error || 'Failed to fetch tracking mobiles');
   return (result.data || []) as DriverMobileRow[];
 }
 
@@ -36,7 +36,7 @@ export default function DriverMobilesPage() {
   });
 
   useEffect(() => {
-    if (isError) toast.error('Failed to load driver mobiles');
+    if (isError) toast.error('Failed to load tracking mobiles');
   }, [isError]);
 
   const confirmDelete = async () => {
@@ -53,7 +53,7 @@ export default function DriverMobilesPage() {
       setDeleteTarget(null);
       await refetch();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to delete driver mobile');
+      toast.error(e instanceof Error ? e.message : 'Failed to delete tracking mobile');
     } finally {
       setDeleting(false);
     }
@@ -116,7 +116,7 @@ export default function DriverMobilesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Driver Mobiles</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Tracking Mobiles</h1>
           <p className="text-gray-600">Manage mobile phones supplied to drivers</p>
         </div>
         {canManage && (
@@ -150,7 +150,7 @@ export default function DriverMobilesPage() {
       <DataTable
         columns={columns}
         data={mobiles}
-        entityName="driver mobiles"
+        entityName="tracking mobiles"
         isLoading={loading}
         searchPlaceholder="Search brand, model, IMEI, driver..."
         enableRowSelection={canManage}
@@ -179,7 +179,7 @@ export default function DriverMobilesPage() {
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-        title="Delete driver mobile?"
+        title="Delete tracking mobile?"
         description={
           deleteTarget
             ? `This permanently deletes "${deleteTarget.brand} ${deleteTarget.model}". This action cannot be undone.`
@@ -195,7 +195,7 @@ export default function DriverMobilesPage() {
         open={!!bulkTarget}
         onOpenChange={(open) => { if (!open) setBulkTarget(null); }}
         title={`Delete ${bulkTarget?.rows.length ?? 0} mobile(s)?`}
-        description="This permanently deletes the selected driver mobiles. This action cannot be undone."
+        description="This permanently deletes the selected tracking mobiles. This action cannot be undone."
         confirmLabel="Delete Selected"
         onConfirm={confirmBulkDelete}
         loading={bulkDeleting}

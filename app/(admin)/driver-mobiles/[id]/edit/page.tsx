@@ -18,7 +18,7 @@ export default function EditDriverMobilePage({ params }: { params: Promise<{ id:
     return (
       <div className="space-y-6">
         <DetailPageHeader
-          crumbs={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Driver Mobiles', href: '/driver-mobiles' }, { label: 'Edit' }]}
+          crumbs={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Tracking Mobiles', href: '/driver-mobiles' }, { label: 'Edit' }]}
           backHref="/driver-mobiles"
           title="Loading…"
           subtitle="Fetching mobile"
@@ -32,12 +32,12 @@ export default function EditDriverMobilePage({ params }: { params: Promise<{ id:
     return (
       <div className="space-y-6">
         <DetailPageHeader
-          crumbs={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Driver Mobiles', href: '/driver-mobiles' }, { label: 'Not found' }]}
+          crumbs={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Tracking Mobiles', href: '/driver-mobiles' }, { label: 'Not found' }]}
           backHref="/driver-mobiles"
-          title="Driver mobile not found"
+          title="Tracking mobile not found"
           subtitle="It may have been deleted"
         />
-        <Link href="/driver-mobiles" className="text-sm font-medium text-green-600 hover:underline">Back to driver mobiles</Link>
+        <Link href="/driver-mobiles" className="text-sm font-medium text-green-600 hover:underline">Back to tracking mobiles</Link>
       </div>
     );
   }
@@ -49,7 +49,7 @@ export default function EditDriverMobilePage({ params }: { params: Promise<{ id:
       <DetailPageHeader
         crumbs={[
           { label: 'Dashboard', href: '/dashboard' },
-          { label: 'Driver Mobiles', href: '/driver-mobiles' },
+          { label: 'Tracking Mobiles', href: '/driver-mobiles' },
           { label: `${m.brand} ${m.model}`, href: `/driver-mobiles/${m.id}` },
           { label: 'Edit' },
         ]}

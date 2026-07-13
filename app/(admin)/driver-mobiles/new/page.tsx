@@ -9,11 +9,11 @@ export default function NewDriverMobilePage() {
       <DetailPageHeader
         crumbs={[
           { label: 'Dashboard', href: '/dashboard' },
-          { label: 'Driver Mobiles', href: '/driver-mobiles' },
+          { label: 'Tracking Mobiles', href: '/driver-mobiles' },
           { label: 'Add Mobile' },
         ]}
         backHref="/driver-mobiles"
-        title="Add Driver Mobile"
+        title="Add Tracking Mobile"
         subtitle="Record a phone supplied to a driver"
       />
       <DriverMobileForm mode="create" />

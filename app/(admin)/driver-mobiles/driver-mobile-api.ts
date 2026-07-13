@@ -3,7 +3,7 @@ import type { DriverMobileRow } from './columns';
 export async function fetchDriverMobile(id: string): Promise<DriverMobileRow> {
   const res = await fetch(`/api/admin/driver-mobiles/${id}`, { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load driver mobile');
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load tracking mobile');
   return json.data as DriverMobileRow;
 }
 

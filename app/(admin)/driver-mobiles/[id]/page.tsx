@@ -10,7 +10,7 @@ import { statusBadge } from '../columns';
 
 const crumbs = (name: string) => [
   { label: 'Dashboard', href: '/dashboard' },
-  { label: 'Driver Mobiles', href: '/driver-mobiles' },
+  { label: 'Tracking Mobiles', href: '/driver-mobiles' },
   { label: name },
 ];
 
@@ -45,10 +45,10 @@ export default function DriverMobileDetailPage({ params }: { params: Promise<{ i
   if (isError || !m) {
     return (
       <div className="space-y-6">
-        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/driver-mobiles" title="Driver mobile not found" />
+        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/driver-mobiles" title="Tracking mobile not found" />
         <p className="text-gray-600">
           This mobile could not be loaded.{' '}
-          <Link href="/driver-mobiles" className="text-green-600 hover:underline">Back to driver mobiles</Link>
+          <Link href="/driver-mobiles" className="text-green-600 hover:underline">Back to tracking mobiles</Link>
         </p>
       </div>
     );
@@ -60,7 +60,7 @@ export default function DriverMobileDetailPage({ params }: { params: Promise<{ i
         crumbs={crumbs(`${m.brand} ${m.model}`)}
         backHref="/driver-mobiles"
         title={`${m.brand} ${m.model}`}
-        subtitle="Driver mobile"
+        subtitle="Tracking mobile"
         actions={
           canManage ? (
             <Link

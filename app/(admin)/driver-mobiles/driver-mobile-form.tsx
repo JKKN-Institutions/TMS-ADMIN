@@ -107,7 +107,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
-      toast.success(mode === 'create' ? 'Driver mobile added' : 'Driver mobile updated');
+      toast.success(mode === 'create' ? 'Tracking mobile added' : 'Tracking mobile updated');
       router.push(mode === 'create' ? '/driver-mobiles' : `/driver-mobiles/${driverMobileId}`);
       router.refresh();
     } catch (err) {
