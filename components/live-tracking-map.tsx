@@ -52,6 +52,7 @@ interface MarkerState {
   from: LatLng;
   to: LatLng;
   start: number;
+  driver: DriverLocation;   // latest data for this marker, read by the click handler
 }
 
 interface Enrichment {
@@ -295,11 +296,10 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
 
       if (existing) {
         existing.marker.setIcon(icon);
+        existing.driver = d;
         const p = existing.marker.getPopup();
         if (p) p.setContent(popup);
         else existing.marker.bindPopup(popup);
-        existing.marker.off('click');
-        existing.marker.on('click', () => selectBus(d));
 
         if (d.location_accuracy != null && d.location_accuracy > 0) {
           if (!existing.circle) {
@@ -326,13 +326,14 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       } else {
         const marker = L.marker([target.lat, target.lng], { icon }).addTo(map);
         marker.bindPopup(popup);
-        marker.on('click', () => selectBus(d));
         const circle = d.location_accuracy != null && d.location_accuracy > 0
           ? L.circle([target.lat, target.lng], { radius: d.location_accuracy, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
           : null;
-        markersRef.current.set(d.id, {
-          marker, circle, anim: target, from: target, to: target, start: performance.now(),
-        });
+        const st: MarkerState = {
+          marker, circle, anim: target, from: target, to: target, start: performance.now(), driver: d,
+        };
+        markersRef.current.set(d.id, st);
+        marker.on('click', () => selectBus(st.driver));
       }
     }
 
