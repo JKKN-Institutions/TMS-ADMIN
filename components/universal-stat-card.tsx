@@ -1,8 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { 
+import {
   TrendingUp, 
   TrendingDown, 
   Minus, 
@@ -198,6 +197,13 @@ export default function UniversalStatCard({
   const colors = colorVariants[color];
   const sizes = sizeVariants[size];
   const TrendIcon = trend ? getTrendIcon(trend.direction) : null;
+  // Staggered fade-in entrance without framer-motion: reuse the global `.fade-in`
+  // keyframe and just offset the delay per card. `both` fill-mode keeps the card
+  // hidden during the delay so there's no flash before it fades in.
+  const enterStyle = {
+    animationDelay: `${delay * 0.06}s`,
+    animationFillMode: 'both' as const,
+  };
 
   if (loading) {
     return (
@@ -219,13 +225,10 @@ export default function UniversalStatCard({
   // Gradient variant (like analytics page)
   if (variant === 'gradient') {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: delay * 0.1 }}
-        whileHover={{ scale: 1.02, y: -2 }}
+      <div
         onClick={onClick}
-        className={`relative overflow-hidden rounded-2xl shadow-lg border border-white/20 ${colors.gradient} backdrop-blur-sm ${
+        style={enterStyle}
+        className={`fade-in transition-transform duration-200 hover:-translate-y-0.5 hover:scale-[1.02] relative overflow-hidden rounded-2xl shadow-lg border border-white/20 ${colors.gradient} backdrop-blur-sm ${
           onClick ? 'cursor-pointer' : ''
         }`}
       >
@@ -253,20 +256,17 @@ export default function UniversalStatCard({
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   // Enhanced variant
   if (variant === 'enhanced') {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ delay: delay * 0.1, type: "spring", stiffness: 100 }}
-        whileHover={{ y: -2, scale: 1.02 }}
+      <div
         onClick={onClick}
-        className={`relative overflow-hidden bg-white rounded-2xl shadow-lg border border-gray-100 ${sizes.padding} 
+        style={enterStyle}
+        className={`fade-in hover:-translate-y-0.5 hover:scale-[1.02] relative overflow-hidden bg-white rounded-2xl shadow-lg border border-gray-100 ${sizes.padding}
           hover:shadow-xl transition-all duration-300 ${colors.hover} ${
           onClick ? 'cursor-pointer' : ''
         }`}
@@ -315,19 +315,17 @@ export default function UniversalStatCard({
             )}
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   // Minimal variant
   if (variant === 'minimal') {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: delay * 0.05 }}
+      <div
         onClick={onClick}
-        className={`bg-white rounded-lg border border-gray-200 ${sizes.padding} hover:border-gray-300 transition-colors ${
+        style={enterStyle}
+        className={`fade-in bg-white rounded-lg border border-gray-200 ${sizes.padding} hover:border-gray-300 transition-colors ${
           onClick ? 'cursor-pointer' : ''
         }`}
       >
@@ -348,19 +346,16 @@ export default function UniversalStatCard({
             )}
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   // Default variant
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: delay * 0.1 }}
-      whileHover={{ y: -1, shadow: "lg" }}
+    <div
       onClick={onClick}
-      className={`bg-white rounded-xl shadow-sm border border-gray-200 ${sizes.padding} 
+      style={enterStyle}
+      className={`fade-in hover:-translate-y-px bg-white rounded-xl shadow-sm border border-gray-200 ${sizes.padding}
         hover:shadow-md transition-all duration-200 ${colors.hover} ${
         onClick ? 'cursor-pointer' : ''
       }`}
@@ -403,6 +398,6 @@ export default function UniversalStatCard({
           <Icon className={sizes.iconSize} />
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 } 
