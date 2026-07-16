@@ -19,7 +19,7 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 async function getAccess(auth: AuthContext) {
   try {
     if (auth.isSuperAdmin) {
-      return NextResponse.json({ success: true, data: { allowed: true, assignedRouteCount: 0, eligible: false, superAdmin: true } });
+      return NextResponse.json({ success: true, data: { allowed: true, assignedRouteCount: 0, eligible: false, hasRoute: false, superAdmin: true } });
     }
     // Eligibility is computed regardless of the scan permission — an eligible-but-
     // unassigned staffer lacks tms.attendance.scan but must still see eligible:true
@@ -32,14 +32,23 @@ async function getAccess(auth: AuthContext) {
       success: true,
       // assignedRouteCount comes from the RPC (the true active count), NOT routeIds.length
       // which is scan-gated and would under-report in the rare assigned-but-role-grant-failed
-      // state, wrongly unlocking the picker. `allowed` still requires scan permission AND an
-      // assignment, so it stays the authoritative "open the full portal" signal.
-      data: { allowed: routeIds.length > 0, assignedRouteCount: elig.assignedRouteCount, eligible: elig.eligible },
+      // state, wrongly offering the willingness toggle. `allowed` still requires scan
+      // permission AND an assignment, so it stays the authoritative "open the full portal"
+      // signal.
+      // hasRoute lets the layout show the denied screen instead of offering a toggle
+      // that cannot succeed. elig.routeId is deliberately NOT published — the client
+      // has no use for it and must never be able to name a route.
+      data: {
+        allowed: routeIds.length > 0,
+        assignedRouteCount: elig.assignedRouteCount,
+        eligible: elig.eligible,
+        hasRoute: elig.hasRoute,
+      },
     });
   } catch (e) {
     console.error('boarding access check error:', e);
     // Fail closed — if we can't confirm access, don't grant it.
-    return NextResponse.json({ success: true, data: { allowed: false, assignedRouteCount: 0, eligible: false } });
+    return NextResponse.json({ success: true, data: { allowed: false, assignedRouteCount: 0, eligible: false, hasRoute: false } });
   }
 }
 
