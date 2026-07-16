@@ -8,6 +8,7 @@ import {
 import { useAuth } from '@/providers/auth-provider';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import { boardingNavigation, deriveBoardingPageTitle } from '@/lib/boarding/navigation';
+import { deriveBoardingAccess } from '@/lib/boarding/access-state';
 import BoardingBottomNav from '@/components/boarding-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
@@ -117,7 +118,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   const [collapsed, setCollapsed] = useState(false);
   // Portal access requires an ACTUAL route assignment, not just the permission.
   // Authoritative check is server-side (/api/boarding/access). Super admins pass.
-  const [access, setAccess] = useState<'checking' | 'allowed' | 'select' | 'denied'>('checking');
+  const [access, setAccess] = useState<'checking' | 'allowed' | 'choose' | 'denied'>('checking');
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('tms-boarding-sidebar-collapsed') === '1');
@@ -147,9 +148,14 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
         const json = await res.json().catch(() => ({}));
         const d = json?.data ?? {};
         if (cancelled) return;
-        if (res.ok && d.allowed) setAccess('allowed');
-        else if (res.ok && d.eligible) setAccess('select');
-        else setAccess('denied');
+        if (res.ok) {
+          setAccess(deriveBoardingAccess({
+            allowed: !!d.allowed,
+            eligible: !!d.eligible,
+            assignedRouteCount: d.assignedRouteCount ?? 0,
+            hasRoute: !!d.hasRoute,
+          }));
+        } else setAccess('denied');
       } catch {
         if (!cancelled) setAccess('denied');
       }
@@ -157,10 +163,22 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
     return () => { cancelled = true; };
   }, [loading, user, profile]);
 
-  // Keep an unassigned-but-eligible staffer on the route picker.
+  // Keep an undecided-but-eligible staffer on the in-charge toggle.
   useEffect(() => {
-    if (access === 'select' && pathname !== '/boarding/select-route') {
-      router.replace('/boarding/select-route');
+    if (access === 'choose' && pathname !== '/boarding/in-charge') {
+      router.replace('/boarding/in-charge');
+    }
+  }, [access, pathname, router]);
+
+  // An already-assigned staffer must never be re-offered the toggle: the hard nav
+  // after confirming pushes a history entry, so pressing Back lands them back on
+  // /boarding/in-charge with a freshly-mounted willing=false. Tapping Confirm there
+  // takes the "declined" branch and tells them fees apply — false, since they ARE
+  // the in-charge and the assignment already exists (declining stores nothing, so
+  // nothing is corrupted, but the screen would lie about their fee status).
+  useEffect(() => {
+    if (access === 'allowed' && pathname === '/boarding/in-charge') {
+      router.replace('/boarding/attendance');
     }
   }, [access, pathname, router]);
 
@@ -177,7 +195,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
     );
   }
 
-  if (access === 'select') {
+  if (access === 'choose') {
     return (
       <BugReporterWrapper>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-950">

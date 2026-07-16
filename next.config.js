@@ -24,7 +24,13 @@ const nextConfig = {
   },
 
   experimental: {
-    turbopackFileSystemCacheForDev: true,
+    // Off: on Windows this persistent dev cache intermittently corrupts and takes
+    // the dev server with it — 404s on routes that exist, 500s on every path, and a
+    // stale lock left holding the port while nothing serves HTTP. It assumes a
+    // single writer, so two dev servers sharing one .next/cache (a worktree plus the
+    // main checkout) are enough to trigger it. Recovery is a full `.next` wipe, so
+    // the cache costs more than the cold starts it saves.
+    turbopackFileSystemCacheForDev: false,
     // Tree-shake barrel imports so a single `import { Icon } from 'lucide-react'`
     // (etc.) pulls only what's used instead of the whole package into shared JS.
     optimizePackageImports: [

@@ -163,9 +163,9 @@ export async function proxy(request: NextRequest) {
     let hasAccess = areaPermRes.data;
 
     // Staff self-service: a bus_required staffer WITHOUT tms.attendance.scan may
-    // still enter the boarding area to PICK a route. JIT eligibility, paid only on
-    // the boarding deny path (the brief pre-assignment window; the hot path already
-    // holds the permission and never reaches this RPC).
+    // still enter the boarding area to accept (or decline) in-charge duty. JIT
+    // eligibility, paid only on the boarding deny path (the brief pre-assignment
+    // window; the hot path already holds the permission and never reaches this RPC).
     if (!hasAccess && area === 'boarding') {
       const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
         p_profile_id: user.id,
@@ -185,7 +185,22 @@ export async function proxy(request: NextRequest) {
         const { data: canScan } = await supabase.rpc('user_has_permission', {
           permission_name: 'tms.attendance.scan',
         });
-        if (canScan) home = '/boarding/attendance';
+        if (canScan) {
+          home = '/boarding/attendance';
+        } else {
+          // Not a scanner either: this is the ONLY reliable path to the in-charge
+          // toggle for a bus_required staffer who hasn't decided yet — the bare
+          // domain, the installed PWA (start_url '/'), and /dashboard all land here
+          // with area 'admin', never area 'boarding', so the check just above never
+          // fires for them. Same RPC + cast idiom as the OAuth callback
+          // (app/auth/callback/route.ts). Runs ONLY on this (rare) area-gate-denied
+          // redirect path, never the hot path.
+          const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
+            p_profile_id: user.id,
+          });
+          const e = elig as { eligible?: boolean; assigned_route_count?: number } | null;
+          if (e?.eligible && (e.assigned_route_count ?? 0) === 0) home = '/boarding/in-charge';
+        }
       }
       if (pathname === home) {
         return NextResponse.redirect(

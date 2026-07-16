@@ -91,8 +91,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Bus_required staff have no area permission until they pick a route. Admit
-    // them via the eligibility oracle so they can reach /boarding/select-route.
+    // Bus_required staff have no area permission until they accept the in-charge
+    // duty. Admit them via the eligibility oracle so they reach /boarding/in-charge.
     if (!hasAnyTms) {
       const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
         p_profile_id: data.user.id,
@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
         permission_name: 'tms.attendance.scan',
       });
       if (canScan) home = '/boarding/attendance';
-      else if (boardingEligible && staffAssignedCount === 0) home = '/boarding/select-route';
+      else if (boardingEligible && staffAssignedCount === 0) home = '/boarding/in-charge';
     }
     response.headers.set('location', new URL(home, request.url).toString());
   }
