@@ -54,3 +54,6 @@ mcp.json
 
 # Subagent-driven-development scratch (ledger, briefs, reports)
 .superpowers/
+
+# Claude Code worktrees (nested checkouts — never commit)
+.claude/worktrees/
