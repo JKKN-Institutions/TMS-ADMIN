@@ -41,39 +41,78 @@ interface RawMessage {
   user?: Array<{ full_name?: string | null; email?: string | null }>;
 }
 
+// The deployed public Bug Reporter API nests the user-entered title and the
+// reporter's name/email inside `metadata` — NOT at the top level the SDK's
+// BugReport type advertises. Read them from there defensively, falling back to
+// any top-level values (in case the API shape changes) and finally to the
+// description / a generic label so a row is never blank.
+interface BugReportMeta {
+  title?: string | null;
+  reporter_name?: string | null;
+  reporter_email?: string | null;
+}
+function readMeta(b: BugReport): BugReportMeta {
+  return (b as unknown as { metadata?: BugReportMeta | null }).metadata ?? {};
+}
+function firstLine(s?: string | null, max = 80): string {
+  const line = (s ?? '').split('\n')[0].trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+function pickTitle(b: BugReport, meta: BugReportMeta): string {
+  return (meta.title || b.title || firstLine(b.description) || 'Untitled report').trim();
+}
+function pickReporter(b: BugReport, meta: BugReportMeta): { name: string; email: string | null } {
+  const email = meta.reporter_email || b.reporter_email || null;
+  return { name: meta.reporter_name || b.reporter_name || email || 'Anonymous', email };
+}
+// The platform's lifecycle stamps fresh reports `new` (and `reopened` when
+// re-opened); our UI vocabulary is open|in_progress|resolved|closed. Fold those
+// active states into `open` so the "Open" stat, the status filter and the badge
+// all count and label them correctly instead of falling through to a grey
+// "unknown".
+function normalizeStatus(status?: string | null): string {
+  const s = (status ?? '').toLowerCase();
+  if (s === 'new' || s === 'reopened') return 'open';
+  return s;
+}
+
 function toRow(b: BugReport): BugReportRow {
+  const meta = readMeta(b);
+  const reporter = pickReporter(b, meta);
   return {
     id: b.id,
-    title: b.title,
+    title: pickTitle(b, meta),
     category: b.category,
     priority: b.priority,
-    status: b.status,
+    status: normalizeStatus(b.status),
     portal: derivePortal(b.page_url),
     pageUrl: b.page_url,
-    reporterName: b.reporter_name || b.reporter_email || 'Anonymous',
-    reporterEmail: b.reporter_email ?? null,
+    reporterName: reporter.name,
+    reporterEmail: reporter.email,
     createdAt: b.created_at,
   };
 }
 
 function toDetail(res: GetBugReportDetailsResponse): BugReportDetail {
   const b = res.bug_report;
+  const meta = readMeta(b);
+  const reporter = pickReporter(b, meta);
   const rawMsgs = (res.messages ?? []) as unknown as RawMessage[];
   return {
     id: b.id,
-    title: b.title,
+    title: pickTitle(b, meta),
     description: b.description,
     category: b.category,
     priority: b.priority,
-    status: b.status,
+    status: normalizeStatus(b.status),
     portal: derivePortal(b.page_url),
     pageUrl: b.page_url,
     screenshotUrl: b.screenshot_url ?? null,
     consoleLogs: b.console_logs ?? null,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
-    reporterName: b.reporter_name || b.reporter_email || 'Anonymous',
-    reporterEmail: b.reporter_email ?? null,
+    reporterName: reporter.name,
+    reporterEmail: reporter.email,
     messages: rawMsgs.map((m) => ({
       id: m.id,
       message: m.message,
