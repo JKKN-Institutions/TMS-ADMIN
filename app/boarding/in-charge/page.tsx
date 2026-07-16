@@ -102,7 +102,7 @@ export default function InChargePage() {
 
   if (declined) {
     return (
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md sm:mt-6">
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
             <Bus className="h-6 w-6 text-gray-400" />
@@ -125,7 +125,7 @@ export default function InChargePage() {
   }
 
   return (
-    <div className="w-full max-w-md">
+    <div className="w-full max-w-md sm:mt-6">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-7">
         <div className="text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-green-600 sm:h-14 sm:w-14">

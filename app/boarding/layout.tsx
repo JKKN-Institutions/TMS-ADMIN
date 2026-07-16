@@ -219,7 +219,11 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
               <LogOut className="w-5 h-5" />
             </button>
           </header>
-          <div className="content-body fade-in flex flex-1 items-center justify-center">{children}</div>
+          {/* Top-aligned like every other portal page — centring this card dead in a
+              tall viewport left a large empty band under the fixed header. items-start
+              keeps it a consistent, small distance below the header; the page adds its
+              own responsive top offset. */}
+          <div className="content-body fade-in flex flex-1 items-start justify-center">{children}</div>
         </div>
       </BugReporterWrapper>
     );
