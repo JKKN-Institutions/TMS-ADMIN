@@ -6,20 +6,17 @@ import { grantBoardingRole } from '@/lib/boarding/roles';
 import { logActivity } from '@/lib/activity/log';
 
 /**
- * A bus_required staffer self-selects the ONE route they are in-charge of. This
- * is the self-service equivalent of the admin assign flow: it creates the
- * tms_staff_route_assignment (source='self') and grants the transport_boarding
- * role so the staffer flows through the existing gates afterwards. One-time:
- * a staffer with an existing active assignment is rejected (admin must change it).
+ * A bus_required staffer accepts the boarding in-charge duty.
+ *
+ * The route is NOT accepted from the client. It is resolved server-side from the
+ * staff master (staff.transport_route_id, via the eligibility RPC), so a staffer can
+ * only ever become in-charge of the bus they actually ride. This creates the
+ * tms_staff_route_assignment (source='self') and grants the transport_boarding role,
+ * after which the staffer flows through the exact gates an admin-assigned staffer
+ * uses. One-time: a staffer with an existing active assignment is rejected.
  */
 async function postSelfAssign(request: NextRequest, auth: AuthContext) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const routeId = String(body?.routeId ?? '').trim();
-    if (!routeId) {
-      return NextResponse.json({ error: 'Route is required' }, { status: 400 });
-    }
-
     const svc = createServiceRoleClient();
 
     // The assignment key is the staffer's email (matches getAssignedRouteIdsForUser).
@@ -29,10 +26,10 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Your profile has no email on file' }, { status: 400 });
     }
 
-    // Server-side authority: eligibility + one-time guard.
+    // Server-side authority: eligibility, the one-time guard, AND the route itself.
     const elig = await getStaffBoardingEligibility(auth.supabase, auth.userId);
     if (!elig.eligible) {
-      return NextResponse.json({ error: 'You are not eligible to select a route' }, { status: 403 });
+      return NextResponse.json({ error: 'You are not eligible to be a bus in-charge' }, { status: 403 });
     }
     if (elig.assignedRouteCount > 0) {
       return NextResponse.json(
@@ -40,36 +37,40 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
         { status: 409 }
       );
     }
+    // Recomputed at confirm time, so a route deactivated since the page loaded is
+    // caught here rather than assigned. The RPC already guarantees the route exists
+    // and is active, so no separate tms_route lookup is needed.
+    if (!elig.routeId) {
+      return NextResponse.json(
+        { error: 'Your route has not been allocated yet. Please contact an admin.' },
+        { status: 400 }
+      );
+    }
 
     // ── PHASE 2 SEAM (staff fees) ──────────────────────────────────────────────
     // When staff transport fees exist, block here if this staffer is not cleared
     // (mirror the learner tms_student_transport_access gate). No-op in Phase 1.
 
-    // Validate the route is real and active.
-    const { data: route, error: routeErr } = await svc
-      .from('tms_route').select('id, status').eq('id', routeId).maybeSingle();
-    if (routeErr?.code === '42P01') {
-      return NextResponse.json({ error: 'Routes table not found' }, { status: 503 });
-    }
-    if (!route) {
-      return NextResponse.json({ error: 'Route not found' }, { status: 404 });
-    }
-    if ((route as { status: string }).status !== 'active') {
-      return NextResponse.json({ error: 'That route is not active' }, { status: 400 });
-    }
-
     const { data: assignment, error } = await svc
       .from('tms_staff_route_assignment')
-      .insert({ staff_email: email, route_id: routeId, assigned_by: auth.userId, source: 'self', is_active: true })
+      .insert({
+        staff_email: email,
+        route_id: elig.routeId,
+        assigned_by: auth.userId,
+        source: 'self',
+        is_active: true,
+      })
       .select('*')
       .single();
     if (error) {
-      // 23505 = the active (staff_email, route_id) unique index — treat as already-done.
+      // 23505 = the active (staff_email, route_id) unique index. Now that the route is
+      // server-resolved, concurrent confirms resolve the SAME route — so this index,
+      // not the check-then-act guard above, is what actually settles the race.
       if (error.code === '23505') {
         return NextResponse.json({ error: 'You already have this route.' }, { status: 409 });
       }
       console.error('self-assign insert error:', error);
-      return NextResponse.json({ error: 'Failed to select route' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to accept the in-charge duty' }, { status: 500 });
     }
 
     await grantBoardingRole(svc, email, auth.userId);
@@ -82,11 +83,14 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_staff_route_assignment',
       entityId: (assignment as { id: string } | null)?.id,
       entityLabel: email,
-      description: `Self-assigned ${email} to route ${routeId}`,
-      metadata: { staffEmail: email, routeId, source: 'self' },
+      description: `${email} accepted bus in-charge for route ${elig.routeId}`,
+      metadata: { staffEmail: email, routeId: elig.routeId, source: 'self' },
     });
 
-    return NextResponse.json({ success: true, message: 'Route selected', assignment }, { status: 201 });
+    return NextResponse.json(
+      { success: true, message: 'You are now the bus in-charge', assignment },
+      { status: 201 }
+    );
   } catch (e) {
     console.error('self-assign error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
