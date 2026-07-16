@@ -170,6 +170,18 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
     }
   }, [access, pathname, router]);
 
+  // An already-assigned staffer must never be re-offered the toggle: the hard nav
+  // after confirming pushes a history entry, so pressing Back lands them back on
+  // /boarding/in-charge with a freshly-mounted willing=false. Tapping Confirm there
+  // takes the "declined" branch and tells them fees apply — false, since they ARE
+  // the in-charge and the assignment already exists (declining stores nothing, so
+  // nothing is corrupted, but the screen would lie about their fee status).
+  useEffect(() => {
+    if (access === 'allowed' && pathname === '/boarding/in-charge') {
+      router.replace('/boarding/attendance');
+    }
+  }, [access, pathname, router]);
+
   if (loading || !profile || access === 'checking') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
