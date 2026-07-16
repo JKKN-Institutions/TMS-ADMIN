@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { gpsFreshness } from '@/lib/gps/freshness';
+import { cachedRouteToCampus } from '@/lib/geo/route-to-campus';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -93,11 +94,18 @@ async function getBoardingLocation(_request: NextRequest, auth: AuthContext) {
       }
     }
 
+    const roadRoute =
+      vehicle && vehicle.hasFix && vehicle.status !== 'offline' &&
+      vehicle.latitude != null && vehicle.longitude != null
+        ? await cachedRouteToCampus(vehicle.latitude, vehicle.longitude)
+        : null;
+
     return NextResponse.json({
       success: true,
       data: {
         route: { id: route.id, label: `${route.route_number ?? '?'} · ${route.route_name ?? ''}`.trim() },
         vehicle,
+        roadRoute,
       },
     });
   } catch (e) {

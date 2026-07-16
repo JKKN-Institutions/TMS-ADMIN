@@ -18,14 +18,18 @@
 
 // ── SELECT column lists (kept here so the API routes and the row types stay in
 //    lockstep — change a column in one place only). ──────────────────────────
+// The Passenger module shows ONLY the institution-issued address, so we fetch
+// just that column and never pull the personal one:
+//   learners_profiles → college_email      (personal is student_email, omitted)
+//   staff             → institution_email  (personal is email, omitted)
 export const LEARNER_SELECT =
-  'id, first_name, last_name, student_email, college_email, student_mobile, ' +
+  'id, first_name, last_name, college_email, student_mobile, ' +
   'roll_number, register_number, lifecycle_status, institution_id, department_id, ' +
   'program_id, semester_id, ' +
   'bus_required, transport_route_id, transport_stop_id, transport_fee';
 
 export const STAFF_SELECT =
-  'id, first_name, last_name, email, institution_email, phone, staff_id, ' +
+  'id, first_name, last_name, institution_email, phone, staff_id, ' +
   'designation, status, is_active, institution_id, department_id, ' +
   'bus_required, transport_route_id, transport_stop_id';
 
@@ -50,7 +54,6 @@ export interface LearnerRow {
   id: string;
   first_name: string;
   last_name: string | null;
-  student_email: string;
   college_email: string | null;
   student_mobile: string;
   roll_number: string | null;
@@ -70,8 +73,7 @@ export interface StaffRow {
   id: string;
   first_name: string;
   last_name: string;
-  email: string;
-  institution_email: string;
+  institution_email: string | null;
   phone: string;
   staff_id: string | null;
   designation: string;
@@ -143,6 +145,14 @@ function fullName(first: string | null, last: string | null): string {
   return `${first ?? ''} ${last ?? ''}`.trim();
 }
 
+// Institution email only. The source columns are frequently an EMPTY STRING
+// rather than NULL, so `?? null` alone would surface a blank; trim-then-coalesce
+// yields a real "no institution email" (null) that the UI renders as "—".
+function instEmail(value: string | null | undefined): string | null {
+  const v = value?.trim();
+  return v ? v : null;
+}
+
 function routeLabel(refs: RefMaps, routeId: string | null): string | null {
   if (!routeId) return null;
   const r = refs.routes.get(routeId);
@@ -153,10 +163,10 @@ function routeLabel(refs: RefMaps, routeId: string | null): string | null {
 export function mapLearner(row: LearnerRow, refs: RefMaps): LearnerPassenger {
   return {
     id: row.id,
-    name: fullName(row.first_name, row.last_name) || (row.student_email ?? 'Unknown'),
+    name: fullName(row.first_name, row.last_name) || (instEmail(row.college_email) ?? 'Unknown'),
     rollNumber: row.roll_number,
     registerNumber: row.register_number,
-    email: row.student_email ?? row.college_email ?? null,
+    email: instEmail(row.college_email),
     mobile: row.student_mobile ?? null,
     lifecycleStatus: row.lifecycle_status,
     institutionName: row.institution_id ? refs.institutions.get(row.institution_id) ?? null : null,
@@ -173,9 +183,9 @@ export function mapLearner(row: LearnerRow, refs: RefMaps): LearnerPassenger {
 export function mapStaff(row: StaffRow, refs: RefMaps): StaffPassenger {
   return {
     id: row.id,
-    name: fullName(row.first_name, row.last_name) || (row.email ?? 'Unknown'),
+    name: fullName(row.first_name, row.last_name) || (instEmail(row.institution_email) ?? 'Unknown'),
     staffId: row.staff_id,
-    email: row.email ?? row.institution_email ?? null,
+    email: instEmail(row.institution_email),
     phone: row.phone ?? null,
     designation: row.designation,
     status: row.status,

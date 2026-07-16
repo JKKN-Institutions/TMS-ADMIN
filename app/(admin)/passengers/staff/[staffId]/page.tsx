@@ -81,7 +81,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ staffId:
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Staff ID" value={staff.staffId} />
           <Field label="Designation" value={staff.designation} />
-          <Field label="Email" value={staff.email} />
+          <Field label="Institution Email" value={staff.email} />
           <Field label="Phone" value={staff.phone} />
           <Field label="Institution" value={staff.institutionName} />
           <Field label="Department" value={staff.departmentName} />
