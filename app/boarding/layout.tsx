@@ -198,7 +198,12 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   if (access === 'choose') {
     return (
       <BugReporterWrapper>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+        {/* .app-header is position:fixed, so this shell must reserve its height the
+            same way .main-content does — otherwise the page renders UNDER the header.
+            flex-col is what gives .content-body's `flex: 1` something to fill, which
+            in turn lets the picker centre in the leftover space instead of hugging
+            the top. */}
+        <div className="flex min-h-screen flex-col bg-gray-50 pt-[calc(4rem+var(--pwa-banner-h,0px))] dark:bg-gray-950">
           <header className="app-header">
             <div className="flex items-center gap-2">
               <div className="w-9 h-9 bg-green-600 rounded-lg flex items-center justify-center">
@@ -214,7 +219,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
               <LogOut className="w-5 h-5" />
             </button>
           </header>
-          <div className="content-body fade-in">{children}</div>
+          <div className="content-body fade-in flex flex-1 items-center justify-center">{children}</div>
         </div>
       </BugReporterWrapper>
     );
