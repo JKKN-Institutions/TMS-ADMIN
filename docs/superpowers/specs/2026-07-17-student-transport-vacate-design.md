@@ -228,10 +228,22 @@ sidebar (`lib/navigation.ts`, alongside `/grievances` and `/enrollment-requests`
 1. `20260717120000_create_tms_transport_vacate_request.sql` — the table + three indexes (incl. the
    partial-unique) + the RLS select policy.
 2. `20260717120100_seed_tms_vacate_permissions.sql` — grants `tms.vacate.view` + `tms.vacate.manage`
-   via an additive jsonb merge. **Mechanism note:** the grant is *data-driven* (view → roles holding
-   `tms.dashboard.view`; manage → roles holding `tms.settings.manage`), matching the notification /
-   driver-mobile seed convention, rather than hardcoding `role_key='transport_head'`. Verified live:
-   this resolves to exactly `transport_head` and no other role, so the outcome matches the intent.
+   via an additive jsonb merge, data-driven off parent keys (view → `tms.dashboard.view`; manage →
+   `tms.settings.manage`), matching the notification / driver-mobile seed convention.
+4. `20260717130000_pin_vacate_perms_to_transport_head.sql` — **supersedes the rule in (2).** The
+   parent-key rule was a *proxy* for the intent, not the intent: it resolved to exactly
+   `transport_head` only by coincidence, and would have silently handed bill-cancelling power to any
+   role later granted `tms.settings.manage`. The authorization rule is now explicit and enforced —
+   **only two identities may approve/cancel a vacate**:
+   - **`super_admin`** — via the code bypass (`proxy.ts:167`, `requirePerm`'s
+     `if (auth.isSuperAdmin) return true`, and `usePermissions.can()`). Super admins hold no
+     `custom_role`, so they need — and must not be given — a grant.
+   - **`transport_head`** — the designated approver; granted explicitly by `role_key`.
+
+   The migration also STRIPS the vacate keys from every other role (a no-op today; self-healing
+   against future drift). Verified live: exactly one role holds the keys, and the approver set is
+   12 super admins + 2 `transport_head` holders. (One of those holds `transport_head` alongside a
+   primary `accounts` label — the `accounts` role itself grants nothing here.)
 3. `20260717120200_fn_approve_transport_vacate.sql` — the `SECURITY DEFINER` RPC above, **plus two
    things discovered during implementation**:
    - **Widening the ledger's status CHECK.** `tms_fee_bill_status_check` admitted only
