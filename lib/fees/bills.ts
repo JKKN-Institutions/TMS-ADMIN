@@ -10,7 +10,7 @@ import { resolveApplicablePeople } from './applicability';
 import { currentYearOf, deriveStudyYear, bandForYear } from './year-of-study';
 
 export type BillStatus =
-  | 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'staff_deferred' | 'unknown';
+  | 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'staff_deferred' | 'cancelled' | 'unknown';
 
 export interface TransportBillRow {
   id: string; // tms_fee_bill.id
@@ -261,6 +261,10 @@ export async function loadTransportBills(
 
     if (personType === 'staff' || r.status === 'staff_deferred') {
       status = 'staff_deferred';
+    } else if (r.status === 'cancelled') {
+      // Vacated: the ledger row was cancelled. It owes nothing and is not overdue.
+      status = 'cancelled';
+      pending = 0;
     } else if (!bill) {
       // ledger says billed but the money row is gone → flag, treat amount as pending.
       status = 'unknown';

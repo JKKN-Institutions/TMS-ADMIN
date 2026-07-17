@@ -144,6 +144,7 @@ export default function BillManagementPage() {
                 { label: 'Unpaid', value: 'unpaid' },
                 { label: 'Overdue', value: 'overdue' },
                 { label: 'Staff deferred', value: 'staff_deferred' },
+                { label: 'Cancelled', value: 'cancelled' },
               ],
             },
             TYPE_FILTER,

@@ -18,6 +18,7 @@ const STATUS_STYLE: Record<BillStatus, string> = {
   unpaid: 'bg-gray-100 text-gray-700 dark:bg-gray-500/15 dark:text-gray-300',
   overdue: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-400',
   staff_deferred: 'bg-purple-100 text-purple-800 dark:bg-purple-500/15 dark:text-purple-400',
+  cancelled: 'bg-slate-100 text-slate-600 line-through dark:bg-slate-500/15 dark:text-slate-400',
   unknown: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400',
 };
 
