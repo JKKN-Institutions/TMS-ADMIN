@@ -8,6 +8,7 @@ import {
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useTheme, type Theme } from '@/components/theme-provider';
+import { Toaster } from 'react-hot-toast';
 import { studentNavigation, deriveStudentPageTitle } from '@/lib/student/navigation';
 import StudentBottomNav from '@/components/student-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
@@ -247,6 +248,16 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
       {/* Floating shortcut to the booking board; stacks above the bug widget, hides on /student/bookings. */}
       <BookBusFab />
+
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3000,
+          style: { background: 'white', color: '#1a1a1a', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px' },
+          success: { style: { background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' } },
+          error: { style: { background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' } },
+        }}
+      />
     </div>
     </BugReporterWrapper>
   );
