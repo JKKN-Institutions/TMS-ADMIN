@@ -239,6 +239,13 @@ git commit -m "feat(vacate): migration — seed tms.vacate.view/manage permissio
 -- Target: kvizhngldtiuufknvehv. Idempotent (create or replace).
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- The ledger's status CHECK originally admitted only generated/staff_deferred/
+-- error. An approved vacate must flip the term bill to 'cancelled' (which also
+-- drops it out of the fb.status='generated' overdue gate). Widen additively.
+alter table public.tms_fee_bill drop constraint if exists tms_fee_bill_status_check;
+alter table public.tms_fee_bill add constraint tms_fee_bill_status_check
+  check (status = any (array['generated','staff_deferred','error','cancelled']));
+
 create or replace function public.tms_approve_transport_vacate(
   p_request_id uuid,
   p_approver   uuid
@@ -356,6 +363,68 @@ Expected: notices show `RESULT: {"ok": true, "cancelled_bill_count": N}` with `N
 ```bash
 git add supabase/migrations/20260717120200_fn_approve_transport_vacate.sql
 git commit -m "feat(vacate): migration — atomic tms_approve_transport_vacate RPC"
+```
+
+---
+
+### Task 3B: Bill Management shows cancelled bills correctly
+
+**Why (controller-discovered gap):** `loadTransportBills` fetches `tms_fee_bill.select('*')` with no status filter and has no `'cancelled'` branch, so after a vacate approval a cancelled bill would render as **"overdue"** and inflate the overdue KPIs. `BillStatus` must gain `'cancelled'`, which — because `STATUS_STYLE` is a `Record<BillStatus,string>` — forces a matching badge entry (else tsc breaks).
+
+**Files:**
+- Modify: `lib/fees/bills.ts`
+- Modify: `app/(admin)/bill-management/columns.tsx`
+- Modify: `app/(admin)/bill-management/page.tsx`
+
+**Interfaces:**
+- Produces: `BillStatus` includes `'cancelled'`; a cancelled ledger row (`tms_fee_bill.status='cancelled'`) maps to `status:'cancelled'`, `pending_amount:0`.
+
+- [ ] **Step 1: Add `'cancelled'` to the `BillStatus` union**
+
+In `lib/fees/bills.ts`, change the type (line ~12):
+```ts
+export type BillStatus =
+  | 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'staff_deferred' | 'cancelled' | 'unknown';
+```
+
+- [ ] **Step 2: Add the `'cancelled'` branch in `loadTransportBills`**
+
+In `lib/fees/bills.ts`, in the status compute, add a branch immediately AFTER the `staff_deferred` check and BEFORE the `!bill` check:
+```ts
+    if (personType === 'staff' || r.status === 'staff_deferred') {
+      status = 'staff_deferred';
+    } else if (r.status === 'cancelled') {
+      // Vacated: the ledger row was cancelled. It owes nothing and is not overdue.
+      status = 'cancelled';
+      pending = 0;
+    } else if (!bill) {
+```
+(Leave the rest of the chain unchanged. `pending` stays 0 so cancelled bills never enter `pendingAmount`/`overdueAmount`, and `status='cancelled'` keeps them out of `overdueRows`.)
+
+- [ ] **Step 3: Add the badge style (required by the exhaustive Record)**
+
+In `app/(admin)/bill-management/columns.tsx`, add to `STATUS_STYLE` (after `staff_deferred`):
+```ts
+  cancelled: 'bg-slate-100 text-slate-600 line-through dark:bg-slate-500/15 dark:text-slate-400',
+```
+
+- [ ] **Step 4: Add the status-filter option**
+
+In `app/(admin)/bill-management/page.tsx`, add to the `status` filter options (after the `Staff deferred` option):
+```ts
+                { label: 'Cancelled', value: 'cancelled' },
+```
+
+- [ ] **Step 5: Type-check the changed files**
+
+Run: `npx tsc --noEmit 2>&1 | grep -E "lib/fees/bills|bill-management" || echo "clean"`
+Expected: `clean` (the exhaustive `Record<BillStatus>` now has all keys).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/fees/bills.ts "app/(admin)/bill-management/columns.tsx" "app/(admin)/bill-management/page.tsx"
+git commit -m "feat(vacate): surface cancelled bills in Bill Management (not overdue)"
 ```
 
 ---
