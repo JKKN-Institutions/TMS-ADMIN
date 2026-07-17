@@ -154,8 +154,9 @@ consistent with the whole service-role codebase, the RPC trusts its caller and f
   `transport_year_id` / `route_id` / `stop_id`. Then notify approvers.
 
 **Admin — `app/api/admin/vacate-requests/route.ts`**
-- `GET` (requires `tms.vacate.view`) → list requests (default `pending`) with learner name/route and
-  an amount-to-cancel preview (sum of cancellable current-year terms). Chunk any `.in()` over 150 ids
+- `GET` (requires `tms.vacate.view`) → list requests in **all** statuses (the stat cards need the full
+  set; the status filter is applied client-side by the table) with learner name/route and an
+  amount-to-cancel preview (sum of cancellable current-year terms). Chunk any `.in()` over 150 ids
   (`lib/fees/bills.ts` gateway-limit rule).
 
 **Admin — `app/api/admin/vacate-requests/[id]/route.ts`**
@@ -224,18 +225,36 @@ sidebar (`lib/navigation.ts`, alongside `/grievances` and `/enrollment-requests`
 
 **Migrations (3 — applied live via Supabase MCP, each committed under `supabase/migrations/`)**
 
-1. `…_create_tms_transport_vacate_request.sql` — the table + three indexes (incl. the partial-unique).
-2. `…_add_tms_vacate_permissions.sql` — grant `tms.vacate.view` + `tms.vacate.manage` to
-   `transport_head` (additive jsonb merge).
-3. `…_fn_approve_transport_vacate.sql` — the `SECURITY DEFINER` RPC above.
+1. `20260717120000_create_tms_transport_vacate_request.sql` — the table + three indexes (incl. the
+   partial-unique) + the RLS select policy.
+2. `20260717120100_seed_tms_vacate_permissions.sql` — grants `tms.vacate.view` + `tms.vacate.manage`
+   via an additive jsonb merge. **Mechanism note:** the grant is *data-driven* (view → roles holding
+   `tms.dashboard.view`; manage → roles holding `tms.settings.manage`), matching the notification /
+   driver-mobile seed convention, rather than hardcoding `role_key='transport_head'`. Verified live:
+   this resolves to exactly `transport_head` and no other role, so the outcome matches the intent.
+3. `20260717120200_fn_approve_transport_vacate.sql` — the `SECURITY DEFINER` RPC above, **plus two
+   things discovered during implementation**:
+   - **Widening the ledger's status CHECK.** `tms_fee_bill_status_check` admitted only
+     `generated`/`staff_deferred`/`error` — the RPC's flip to `'cancelled'` violated it and failed
+     outright. The check is now additively widened to admit `'cancelled'`. (Found by the rolled-back
+     dry-run, before any production data was touched.)
+   - **A stale-year guard.** The request snapshots `transport_year_id` at submit time; across a
+     year rollover, approving a still-pending request would cancel the OLD year's bills while
+     leaving the new year's standing. The RPC now raises `vacate_request_stale_year` (→ 409) when the
+     snapshot is no longer `is_current`, and fails closed when no year is current.
 
 **New**
 
-- `lib/vacate/types.ts` — DTOs, status/eligibility shapes.
-- `lib/vacate/requests.ts` — read helpers (`loadVacateRequests` for admin, `getLearnerVacateState`
-  for student), the pure eligibility + cancellable-term selection, the reject update.
-- `lib/vacate/requests.test.ts` — vitest over the pure logic (import relatively; the `@/` alias
+- `lib/vacate/types.ts` — DTOs, status/eligibility shapes, **and the pure logic**
+  (`isTermCancellable`, `isVacateEligible`, `sumAmountToCancel`). Kept free of server imports so both
+  client components and vitest can import it.
+- `lib/vacate/types.test.ts` — vitest over those pure functions (import relatively; the `@/` alias
   breaks vitest).
+- `lib/vacate/requests.ts` — the I/O layer (`loadVacateRequests` for admin, `getLearnerVacateState`
+  for student, the reject update). Fails CLOSED on its learner/route lookups: a partial queue would
+  render every row as an unidentifiable "Unknown" on the screen where money gets cancelled.
+- `components/student/vacate-transport-card.tsx` — the student card (also surfaces an inline error
+  state, so a failed/blocked fetch is visible rather than an absent card).
 - `app/api/student/vacate-request/route.ts` — GET + POST.
 - `app/api/admin/vacate-requests/route.ts` — GET.
 - `app/api/admin/vacate-requests/[id]/route.ts` — PATCH.
@@ -247,17 +266,34 @@ sidebar (`lib/navigation.ts`, alongside `/grievances` and `/enrollment-requests`
 | File | Change |
 |---|---|
 | `lib/constants/tms-permissions.ts` | add `VACATE_VIEW`, `VACATE_MANAGE` |
+| `lib/activity/log.ts` | extend the `ActivityModule` + `ActivityAction` unions (they are CLOSED unions — the API routes won't compile without this) |
 | `app/student/fees/page.tsx` | render `<VacateTransportCard/>` |
 | `lib/navigation.ts` | add the `/vacate-requests` admin-sidebar entry gated by `tms.vacate.view` |
 | `app/(admin)/activity-log/columns.tsx` | register the `transport-vacate` module + `submit`/`approve`/`reject` actions |
+| `proxy.ts` | exempt `/api/student/vacate-request` from the fee gate (see the note below — this was originally, and wrongly, declared unnecessary) |
+| `lib/fees/bills.ts` + `app/(admin)/bill-management/{columns,page}.tsx` | **discovered gap:** `BillStatus` had no `'cancelled'`, and `loadTransportBills` has no status filter — so a cancelled bill rendered as **"overdue"** and inflated the overdue KPIs. Added a `'cancelled'` branch (`pending = 0`), the badge required by the exhaustive `Record<BillStatus,…>`, and a filter option. |
+| `app/student/layout.tsx` | **discovered gap:** the student portal mounted no `<Toaster/>` (admin + driver both do), so the card's `toast.error` was invisible — a failed submit looked like a dead button. Mounted one, matching the driver portal. |
+
+**`proxy.ts` — CHANGED (this section originally said "unchanged on purpose"; that was WRONG).**
+The original reasoning — *"the gate lifts on its own once the bill is cancelled — no gate change
+needed"* — considered only the POST-approval state and missed that the **request path itself sits
+behind the gate**. `STUDENT_EXEMPT_WHEN_BLOCKED` did not include `/api/student/vacate-request`, so a
+fee-gated learner (the exact population this feature exists for) loaded `/student/fees`, the card's
+fetch 402'd, and the card rendered nothing — silently. Caught by the final whole-branch review, not
+by any per-task review, because no task owned `proxy.ts`. It was invisible in testing (0 learners
+overdue today) and scheduled to break for ~910 learners on 2026-09-01. **Fix:**
+`/api/student/vacate-request` is now in `STUDENT_EXEMPT_WHEN_BLOCKED`; safe because the route is
+self-scoped (learner from the session, never client input) and still area-gated by
+`tms.passenger.self.view` — only the *fee* gate is bypassed.
 
 **Unchanged on purpose:** `learners_profiles` / `staff` / `billing_student_bills` schemas (we only
-write allowed columns), the generate route (this is its inverse, kept separate), and `proxy.ts` (the
-gate lifts on its own once the bill is cancelled — no gate change needed).
+write allowed columns) and the generate route (this is its inverse, kept separate — note its
+`billedKey` has no status filter, so a cancelled ledger row still occupies its `person:term` slot
+and re-running the same structure will NOT resurrect a cancelled bill).
 
 ## Testing
 
-- **vitest** on `lib/vacate/requests.ts` pure functions: eligibility (bus_required×active×has-bill
+- **vitest** on `lib/vacate/types.ts` pure functions: eligibility (bus_required×active×has-bill
   truth table), cancellable-term selection (paid skipped, partial/overdue/unpaid included,
   already-cancelled excluded), and the amount-to-cancel preview sum.
 - **tsc filtered to changed files** — the repo carries pre-existing `never` errors and
@@ -274,6 +310,18 @@ gate lifts on its own once the bill is cancelled — no gate change needed).
 
 ## Follow-ups (not this feature)
 
+- **Confirmation before Approve (TOP follow-up).** Approve is irreversible by design (`approved` is
+  terminal; un-approve is out of scope) yet fires from a single click on both the row menu and the
+  panel — a misclick permanently cancels a learner's bills. A shared `ConfirmDialog` already exists in
+  this codebase, so this is cheap. Deliberately NOT done here because it wasn't in the approved
+  design; raised for the owner's decision.
+- **Non-blocking nits found by review:** `totalBilledAmount` in `lib/fees/bills.ts` still counts
+  cancelled bills (pending/overdue correctly exclude them) — confirm whether that's the intended
+  historical "billed" figure; `entityLabel` passes a raw learner UUID into the activity log's
+  human-readable label; the admin queue's amount preview uses a LEFT-join while the RPC uses an
+  INNER-join, so a ledger row with no money row could overstate the preview (0 such rows exist
+  today); `loadVacateRequests` resolves terms serially per row; `tms_transport_year` has no partial
+  unique index on `is_current` (the submit path fails closed first via `.maybeSingle()`).
 - **Staff vacate** — arrives with staff transport fees; the learners-only RPC filter (`person_type
   = 'learner'`) is the seam.
 - **Admin "reverse a vacate"** — re-open the bill + re-assign; deliberately deferred while `approved`
