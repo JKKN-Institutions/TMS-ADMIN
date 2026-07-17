@@ -89,6 +89,7 @@ export async function getLearnerVacateState(svc: Svc, learnerId: string, yearId:
     .from('tms_transport_vacate_request')
     .select('status, reason, decision_note, created_at, cancelled_bill_count')
     .eq('learner_id', learnerId)
+    .eq('transport_year_id', yearId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -124,7 +125,8 @@ export async function loadVacateRequests(svc: Svc): Promise<VacateRequestDTO[]> 
   const learnerIds = [...new Set(reqs.map((r) => r.learner_id))];
   const nameById = new Map<string, { name: string; roll: string | null }>();
   for (const c of chunk(learnerIds)) {
-    const { data } = await svc.from('learners_profiles').select('id, first_name, last_name, roll_number').in('id', c);
+    const { data, error: learnerErr } = await svc.from('learners_profiles').select('id, first_name, last_name, roll_number').in('id', c);
+    if (learnerErr) throw new Error(`loadVacateRequests: resolve learner names failed: ${learnerErr.message}`);
     for (const l of (data ?? []) as Array<{ id: string; first_name: string | null; last_name: string | null; roll_number: string | null }>) {
       nameById.set(l.id, { name: `${l.first_name ?? ''} ${l.last_name ?? ''}`.trim() || 'Unknown', roll: l.roll_number });
     }
@@ -135,7 +137,8 @@ export async function loadVacateRequests(svc: Svc): Promise<VacateRequestDTO[]> 
   const routeById = new Map<string, string>();
   for (const c of chunk(routeIds)) {
     if (c.length === 0) continue;
-    const { data } = await svc.from('tms_route').select('id, route_number, route_name').in('id', c);
+    const { data, error: routeErr } = await svc.from('tms_route').select('id, route_number, route_name').in('id', c);
+    if (routeErr) throw new Error(`loadVacateRequests: resolve route labels failed: ${routeErr.message}`);
     for (const r of (data ?? []) as Array<{ id: string; route_number: string; route_name: string }>) {
       routeById.set(r.id, `${r.route_number} · ${r.route_name}`);
     }
