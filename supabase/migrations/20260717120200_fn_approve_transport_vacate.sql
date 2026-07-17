@@ -51,6 +51,17 @@ begin
     raise exception 'vacate_request_not_pending' using errcode = 'P0001';
   end if;
 
+  -- 1b. Refuse a request whose snapshotted year is no longer the current one.
+  -- The design decision is "current transport year ONLY". The request snapshots
+  -- transport_year_id at submit time; if the year has since rolled over, approving
+  -- would cancel the OLD year's bills (and clear the route) while leaving the NEW
+  -- year's bills standing — money cancelled for the wrong year. The learner's own
+  -- card is year-scoped, so a stale request is already invisible to them; refuse it
+  -- here and make them re-request. Also fail-closed when NO year is current.
+  if v_year_id is distinct from (select id from public.tms_transport_year where is_current limit 1) then
+    raise exception 'vacate_request_stale_year' using errcode = 'P0001';
+  end if;
+
   -- 2. Collect the not-fully-paid current-year term bills (both ids).
   select array_agg(fb.id), array_agg(fb.billing_student_bill_id)
     into v_ledger_ids, v_money_ids
