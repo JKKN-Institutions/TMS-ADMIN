@@ -7,6 +7,7 @@ import { AlertCircle, CheckCircle2, Clock, LogOut, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DataTable } from '@/components/ui/data-table';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePermissions } from '@/hooks/use-permissions';
 import { getVacateColumns, VacateStatusBadge } from './columns';
 import type { VacateRequestDTO } from '@/lib/vacate/types';
@@ -41,8 +42,13 @@ export default function VacateRequestsPage() {
   const { data: list = [], isLoading, error } = useQuery({ queryKey: ['admin-vacate-requests'], queryFn: fetchList });
   const [openId, setOpenId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState('');
+  // Approve permanently cancels a learner's bills and cannot be undone ('approved'
+  // is terminal), so BOTH approve entry points — the row menu and the panel button —
+  // route through this confirmation rather than firing on a single click.
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const selected = openId ? list.find((r) => r.id === openId) ?? null : null;
+  const confirming = confirmId ? list.find((r) => r.id === confirmId) ?? null : null;
 
   const decide = useMutation({
     mutationFn: async (payload: { id: string; action: 'approve' | 'reject'; note?: string }) => {
@@ -64,14 +70,18 @@ export default function VacateRequestsPage() {
       );
       setOpenId(null);
       setRejectNote('');
+      setConfirmId(null);
       qc.invalidateQueries({ queryKey: ['admin-vacate-requests'] });
     },
+    // Leave the confirm dialog OPEN on failure so the error is read next to the
+    // action that caused it and the approver can retry without re-finding the row.
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed'),
   });
 
+  // Opens the confirmation; the actual mutation fires from the dialog's onConfirm.
   const onApprove = (r: VacateRequestDTO) => {
     if (decide.isPending) return;
-    decide.mutate({ id: r.id, action: 'approve' });
+    setConfirmId(r.id);
   };
   const onReject = (r: VacateRequestDTO) => {
     setOpenId(r.id);
@@ -188,7 +198,7 @@ export default function VacateRequestsPage() {
                     Reject
                   </Button>
                   <Button
-                    onClick={() => decide.mutate({ id: selected.id, action: 'approve' })}
+                    onClick={() => setConfirmId(selected.id)}
                     disabled={decide.isPending}
                   >
                     Approve &amp; cancel bill
@@ -199,6 +209,39 @@ export default function VacateRequestsPage() {
           </div>
         </div>
       )}
+
+      {/* Irreversible-action gate. Spells out exactly what will be destroyed — who,
+          how much, and which route — because 'approved' is terminal: there is no
+          un-approve, and the cancelled bills are not restored by anything in the UI. */}
+      <ConfirmDialog
+        open={!!confirming}
+        onOpenChange={(next) => {
+          if (!next) setConfirmId(null);
+        }}
+        title="Approve vacate & cancel bill?"
+        description={
+          confirming ? (
+            <>
+              This permanently cancels{' '}
+              <strong>
+                {confirming.learnerName}
+                {confirming.rollNumber ? ` (${confirming.rollNumber})` : ''}
+              </strong>
+              &apos;s remaining current-year transport fees
+              {confirming.amountToCancel > 0 ? ` — ${inr(confirming.amountToCancel)}` : ''} and removes their
+              route assignment
+              {confirming.routeLabel ? ` (${confirming.routeLabel})` : ''}. The learner is notified.{' '}
+              <strong>This cannot be undone.</strong>
+            </>
+          ) : null
+        }
+        confirmLabel="Approve & cancel bill"
+        danger
+        loading={decide.isPending}
+        onConfirm={() => {
+          if (confirmId) decide.mutate({ id: confirmId, action: 'approve' });
+        }}
+      />
     </div>
   );
 }
