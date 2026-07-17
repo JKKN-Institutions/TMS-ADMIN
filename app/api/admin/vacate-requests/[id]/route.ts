@@ -45,6 +45,7 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
       if (error) {
         const msg = error.message || '';
         if (msg.includes('not_pending')) return NextResponse.json({ error: 'Request is no longer pending' }, { status: 409 });
+        if (msg.includes('stale_year')) return NextResponse.json({ error: 'This request is from a previous transport year and can no longer be approved. Ask the learner to submit a new request.' }, { status: 409 });
         if (msg.includes('not_found')) return NextResponse.json({ error: 'Request not found' }, { status: 404 });
         console.error('vacate approve RPC error:', error);
         return NextResponse.json({ error: 'Failed to approve' }, { status: 500 });

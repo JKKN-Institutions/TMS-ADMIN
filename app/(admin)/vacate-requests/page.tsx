@@ -143,7 +143,10 @@ export default function VacateRequestsPage() {
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {selected.rollNumber ? `${selected.rollNumber} · ` : ''}
-                {selected.routeLabel ?? 'No route'} · To cancel: {inr(selected.amountToCancel)}
+                {selected.routeLabel ?? 'No route'} ·{' '}
+                {selected.status === 'approved'
+                  ? `${selected.cancelledBillCount} term(s) cancelled`
+                  : `To cancel: ${inr(selected.amountToCancel)}`}
               </p>
             </div>
             <button

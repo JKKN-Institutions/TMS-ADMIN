@@ -116,7 +116,12 @@ export async function proxy(request: NextRequest) {
 
   // Transport-payment gate scope (student area, off the always-allowed paths) — both
   // knowable before any I/O, so we can decide up front whether to fire its RPC.
-  const STUDENT_EXEMPT_WHEN_BLOCKED = ['/student/fees', '/student/grievances', '/api/student/transport-access'];
+  const STUDENT_EXEMPT_WHEN_BLOCKED = [
+    '/student/fees',
+    '/student/grievances',
+    '/api/student/transport-access',
+    '/api/student/vacate-request',
+  ];
   const studentGateApplies =
     area === 'student' &&
     !STUDENT_EXEMPT_WHEN_BLOCKED.some((p) => pathname === p || pathname.startsWith(p + '/'));

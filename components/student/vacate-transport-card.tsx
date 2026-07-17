@@ -15,7 +15,7 @@ async function fetchState(): Promise<LearnerVacateState> {
 
 export default function VacateTransportCard() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ['student-vacate-state'], queryFn: fetchState });
+  const { data, isLoading, isError } = useQuery({ queryKey: ['student-vacate-state'], queryFn: fetchState });
   const [reason, setReason] = useState('');
   const [confirming, setConfirming] = useState(false);
 
@@ -39,7 +39,15 @@ export default function VacateTransportCard() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed'),
   });
 
-  if (isLoading || !data) return null;
+  if (isLoading) return null;
+  if (isError) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+        Couldn&apos;t load your transport options. Please refresh the page, or contact the transport office if this persists.
+      </div>
+    );
+  }
+  if (!data) return null;
 
   const req = data.request;
 
