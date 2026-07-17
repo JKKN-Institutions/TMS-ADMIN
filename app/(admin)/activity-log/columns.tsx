@@ -45,6 +45,9 @@ const ACTION_BADGE: Record<string, string> = {
   mark: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
   unmark: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400',
   generate: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400',
+  submit: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400',
+  approve: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400',
+  reject: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400',
 };
 
 const MODULE_LABEL: Record<string, string> = {
@@ -63,6 +66,7 @@ const MODULE_LABEL: Record<string, string> = {
   'fees': 'Fees',
   'notifications': 'Notifications',
   'driver-mobiles': 'Tracking Mobiles',
+  'transport-vacate': 'Transport Vacate',
 };
 
 // Filter dropdown options for the DataTable — derived from the maps above so

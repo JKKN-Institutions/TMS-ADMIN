@@ -89,6 +89,11 @@ export const TMS_PERMISSIONS = {
   DRIVER_MOBILES_CREATE: 'tms.driver_mobiles.create',
   DRIVER_MOBILES_EDIT: 'tms.driver_mobiles.edit',
   DRIVER_MOBILES_DELETE: 'tms.driver_mobiles.delete',
+
+  // Student transport vacate — request to leave the bus + transport-head approval
+  // that cancels the current-year bill.
+  VACATE_VIEW: 'tms.vacate.view',
+  VACATE_MANAGE: 'tms.vacate.manage',
 } as const;
 
 export type TmsPermissionKey =
