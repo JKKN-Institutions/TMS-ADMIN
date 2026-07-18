@@ -197,6 +197,36 @@ async function loadBillMap(
 }
 
 /**
+ * Roll composed bill rows up into the KPI summary.
+ *
+ * Cancelled (vacated) bills are VOIDED, not billed — a Transport-Vacate approval
+ * cancels a learner's unpaid current-year bills. They keep their live `amount` on
+ * the row (so the ledger still shows what was owed) but owe nothing, so they must
+ * be excluded from Billed / Collected / Pending. Counting them in Billed inflated
+ * that tile above Collected + Pending and above MyJKKN's Transport Fees "Total
+ * Billed", which also excludes them (that was the observed ₹5,500 mismatch).
+ *
+ * `unbilledCount` is left 0 here — the caller fills it because it needs the year's
+ * active fee structures, which these rows alone don't carry.
+ */
+export function summarizeBills(rows: TransportBillRow[]): BillSummary {
+  const activeLearnerRows = rows.filter(
+    (r) => r.person_type === 'learner' && r.status !== 'cancelled'
+  );
+  const overdueRows = rows.filter((r) => r.status === 'overdue');
+  return {
+    totalBilledAmount: activeLearnerRows.reduce((s, r) => s + r.amount, 0),
+    collectedAmount: activeLearnerRows.reduce((s, r) => s + r.paid_amount, 0),
+    pendingAmount: activeLearnerRows.reduce((s, r) => s + r.pending_amount, 0),
+    overdueAmount: overdueRows.reduce((s, r) => s + r.pending_amount, 0),
+    overdueCount: overdueRows.length,
+    billedPeople: new Set(rows.map((r) => r.person_id)).size,
+    staffDeferred: rows.filter((r) => r.person_type === 'staff').length,
+    unbilledCount: 0,
+  };
+}
+
+/**
  * Compose transport bill rows + KPI summary from the tms_fee_bill ledger.
  * Pass a transportYearId to scope; omit for all years.
  */
@@ -304,18 +334,7 @@ export async function loadTransportBills(
     };
   });
 
-  const learnerRows = rows.filter((r) => r.person_type === 'learner');
-  const overdueRows = rows.filter((r) => r.status === 'overdue');
-  const summary: BillSummary = {
-    totalBilledAmount: learnerRows.reduce((s, r) => s + r.amount, 0),
-    collectedAmount: learnerRows.reduce((s, r) => s + r.paid_amount, 0),
-    pendingAmount: learnerRows.reduce((s, r) => s + r.pending_amount, 0),
-    overdueAmount: overdueRows.reduce((s, r) => s + r.pending_amount, 0),
-    overdueCount: overdueRows.length,
-    billedPeople: new Set(rows.map((r) => r.person_id)).size,
-    staffDeferred: rows.filter((r) => r.person_type === 'staff').length,
-    unbilledCount: 0,
-  };
+  const summary = summarizeBills(rows);
 
   return { summary, rows };
 }
