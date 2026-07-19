@@ -66,12 +66,12 @@ async function getDashboard() {
       totalRevenue: 0
     };
 
-    // Fetch recent activities (simplified)
-    const { data: recentActivities } = await supabase
-      .from('bookings')
-      .select('*, students(student_name), routes(route_name)')
-      .order('created_at', { ascending: false })
-      .limit(5);
+    // Recent activity is rendered from static UI on the dashboard, so nothing here
+    // consumed this result. The query also joined the DROPPED legacy `students` /
+    // `routes` tables (returned nulls) and cost an extra SERIAL Supabase round trip
+    // on every dashboard load AFTER the Promise.all above. Removed. If a real
+    // "recent activity" feed is wanted later, source it from tms_activity_log and
+    // fold it INTO the Promise.all so it stays parallel.
 
     // Create mock critical alerts
     const criticalAlerts = [
@@ -90,7 +90,7 @@ async function getDashboard() {
       success: true,
       data: {
         stats,
-        recentActivities: recentActivities || [],
+        recentActivities: [],
         criticalAlerts,
         performanceMetrics
       }

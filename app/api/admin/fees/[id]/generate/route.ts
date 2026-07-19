@@ -140,15 +140,31 @@ async function generate(request: NextRequest, auth: AuthContext) {
     const billedKey = new Set((existing ?? []).map((r) => `${r.person_id}:${r.term_no}`));
 
     // Anyone already billed by ANOTHER structure for the same transport year?
+    // resolvedIds can be the whole applicable population (~1k). A single .in() over
+    // that many UUIDs overflows the Supabase gateway → HTTP 400 → an unchecked
+    // { data:null } would silently report ZERO conflicts, so cross-structure
+    // double-billing would go unflagged in BOTH dry-run and generate. Chunk the id
+    // list to <=150 and FAIL LOUD on error.
     let conflictCount = 0;
     if (resolvedIds.length) {
-      const { data: other } = await supabase
-        .from('tms_fee_bill')
-        .select('person_id')
-        .eq('transport_year_id', fs.transport_year_id)
-        .neq('fee_structure_id', id)
-        .in('person_id', resolvedIds);
-      conflictCount = new Set((other ?? []).map((r) => r.person_id)).size;
+      const conflicted = new Set<string>();
+      const CHUNK = 150;
+      for (let i = 0; i < resolvedIds.length; i += CHUNK) {
+        const { data: other, error: conflictErr } = await supabase
+          .from('tms_fee_bill')
+          .select('person_id')
+          .eq('transport_year_id', fs.transport_year_id)
+          .neq('fee_structure_id', id)
+          .in('person_id', resolvedIds.slice(i, i + CHUNK));
+        if (conflictErr) {
+          return NextResponse.json(
+            { error: 'Failed to check for cross-structure billing conflicts.' },
+            { status: 500 }
+          );
+        }
+        for (const r of (other ?? []) as Array<{ person_id: string }>) conflicted.add(r.person_id);
+      }
+      conflictCount = conflicted.size;
     }
 
     let toGenerate = 0;
