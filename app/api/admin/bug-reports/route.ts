@@ -1,12 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import {
-  isBugReporterConfigured,
-  listBugReports,
-  getBugReport,
-  replyToBugReport,
-} from '@/lib/bug-reports/client';
+import { isBugReporterConfigured, listBugReports, getBugReport } from '@/lib/bug-reports/client';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+import { dispatchNotification } from '@/lib/notifications/dispatch';
+import { buildReplyNotification } from '@/lib/bug-reports/notify';
 import { derivePortal, type BugReportRow, type BugReportDetail } from '@/lib/bug-reports/shared';
 import type { BugReport, GetBugReportDetailsResponse } from '@boobalan_jkkn/bug-reporter-sdk';
 
@@ -174,12 +172,50 @@ async function handlePost(request: NextRequest, auth: AuthContext) {
   if (!isBugReporterConfigured()) {
     return NextResponse.json({ error: 'Bug Reporter is not configured' }, { status: 503 });
   }
+
+  // Resolve the recipient from the AUTHORITATIVE platform record (read works),
+  // never from the client — so a reply can't be aimed at another student. The
+  // platform's own /messages write is unusable here: it requires a NOT NULL
+  // sender_user_id that our API-key auth has no user for. We route the reply to
+  // the reporter's TMS notification inbox instead.
+  let reporterEmail: string | null;
+  let displayId: string | null;
   try {
-    await replyToBugReport(id, message.slice(0, 4000));
-    return NextResponse.json({ success: true });
+    const b = (await getBugReport(id)).bug_report;
+    reporterEmail = pickReporter(b, readMeta(b)).email;
+    displayId = (b as unknown as { display_id?: string | null }).display_id ?? null;
   } catch (e) {
-    console.error('bug-reports reply error:', e);
-    return NextResponse.json({ error: (e as Error).message || 'Failed to send reply' }, { status: 502 });
+    console.error('bug-reports reply: load report failed:', e);
+    return NextResponse.json(
+      { error: "Couldn't load the report to find the reporter." },
+      { status: 502 },
+    );
+  }
+
+  if (!reporterEmail) {
+    return NextResponse.json({ success: true, delivered: false, reason: 'no_email' });
+  }
+
+  const { title, body: notifBody } = buildReplyNotification(displayId, message);
+  try {
+    const svc = createServiceRoleClient();
+    const { recipientCount } = await dispatchNotification(svc, {
+      title,
+      body: notifBody,
+      category: 'general',
+      url: null,
+      createdBy: auth.userId,
+      targeting: { type: 'emails', emails: [reporterEmail] },
+    });
+    return recipientCount > 0
+      ? NextResponse.json({ success: true, delivered: true, recipientCount })
+      : NextResponse.json({ success: true, delivered: false, reason: 'no_profile' });
+  } catch (e) {
+    console.error('bug-reports reply: notify failed:', e);
+    return NextResponse.json(
+      { error: (e as Error).message || 'Failed to notify the reporter' },
+      { status: 502 },
+    );
   }
 }
 

@@ -78,6 +78,11 @@ export function getBugReport(id: string): Promise<GetBugReportDetailsResponse> {
   return request<GetBugReportDetailsResponse>(`/api/v1/public/bug-reports/${encodeURIComponent(id)}`);
 }
 
+// NOTE: currently UNUSED. The platform's /messages insert requires a NOT NULL
+// sender_user_id, which our API-key auth (no user identity) cannot supply, so it
+// 500s. The admin console now routes replies to the reporter's TMS notification
+// inbox instead (see app/api/admin/bug-reports/route.ts handlePost). Kept for
+// reference / if the platform later accepts API-key senders.
 export function replyToBugReport(id: string, message: string): Promise<unknown> {
   return request(`/api/v1/public/bug-reports/${encodeURIComponent(id)}/messages`, {
     method: 'POST',
