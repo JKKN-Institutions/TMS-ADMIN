@@ -52,7 +52,9 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
     queryFn: () => fetchDetail(id),
   });
 
-  const sendReply = useMutation({
+  type SendResult = { delivered: boolean; reason?: 'no_email' | 'no_profile' };
+
+  const sendReply = useMutation<SendResult>({
     mutationFn: async () => {
       const res = await fetch('/api/admin/bug-reports', {
         method: 'POST',
@@ -60,11 +62,15 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
         credentials: 'same-origin',
         body: JSON.stringify({ id, message: reply }),
       });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed');
+      const json = (await res.json().catch(() => ({}))) as SendResult & { error?: string };
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      return json;
     },
-    onSuccess: () => {
-      setReply('');
-      qc.invalidateQueries({ queryKey: ['admin-bug-report', id] });
+    onSuccess: (data) => {
+      if (data.delivered) {
+        setReply('');
+        qc.invalidateQueries({ queryKey: ['admin-bug-report', id] });
+      }
     },
   });
 
@@ -177,21 +183,38 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
             ))}
           </div>
           {canReply && (
-            <div className="flex gap-2">
-              <Input
-                value={reply}
-                onChange={(e) => setReply(e.target.value)}
-                placeholder="Reply to reporter…"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && reply && !sendReply.isPending) sendReply.mutate();
-                }}
-              />
-              <Button onClick={() => sendReply.mutate()} disabled={!reply || sendReply.isPending}>
-                Send
-              </Button>
+            <div className="space-y-1.5">
+              <div className="flex gap-2">
+                <Input
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  placeholder="Reply to reporter…"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && reply && !sendReply.isPending) sendReply.mutate();
+                  }}
+                />
+                <Button onClick={() => sendReply.mutate()} disabled={!reply || sendReply.isPending}>
+                  Send
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Replies are delivered to the reporter&apos;s notification inbox.
+              </p>
             </div>
           )}
-          {sendReply.isError && <p className="text-xs text-destructive">{(sendReply.error as Error).message}</p>}
+          {sendReply.isSuccess && sendReply.data?.delivered && (
+            <p className="text-xs text-green-600">Reply delivered to the reporter&apos;s inbox.</p>
+          )}
+          {sendReply.isSuccess && sendReply.data && !sendReply.data.delivered && (
+            <p className="text-xs text-amber-600">
+              {sendReply.data.reason === 'no_email'
+                ? 'This report has no reporter email — nothing to deliver.'
+                : "The reporter isn't a TMS app user — reply couldn't be delivered."}
+            </p>
+          )}
+          {sendReply.isError && (
+            <p className="text-xs text-destructive">{(sendReply.error as Error).message}</p>
+          )}
         </div>
       </SectionCard>
 
