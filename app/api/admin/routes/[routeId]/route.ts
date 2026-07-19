@@ -33,42 +33,20 @@ export async function GET(
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { data: route, error } = await supabase
-      .from('tms_route')
-      .select('*')
-      .eq('id', routeId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Route detail query error:', error);
-      return NextResponse.json({ error: 'Failed to fetch route' }, { status: 500 });
-    }
-    if (!route) {
-      return NextResponse.json({ error: 'Route not found' }, { status: 404 });
-    }
-
-    const { data: stops } = await supabase
-      .from('tms_route_stop')
-      .select('*')
-      .eq('route_id', routeId)
-      .order('sequence_order', { ascending: true });
-
-    // Occupancy: seats come from the assigned vehicle (tms_route.total_capacity is
-    // stale — 0 for most routes); riders are counted live from the allocation
-    // (current_passengers is stale too), using the same roster filter as the portals.
-    let vehicleCapacity: number | null = null;
-    if (route.vehicle_id) {
-      const { data: veh } = await supabase
-        .from('tms_vehicle')
-        .select('capacity')
-        .eq('id', route.vehicle_id)
-        .maybeSingle();
-      vehicleCapacity = (veh as { capacity: number | null } | null)?.capacity ?? null;
-    }
-    // Learner + staff rider counts, each using the same filter as its roster
-    // drill-down. The staff table may be absent in some environments (42P01) —
-    // that error just yields a null count, which we treat as zero.
-    const [{ count: passengerCount }, { count: staffCount }] = await Promise.all([
+    // route, stops, and both rider counts all key off routeId alone — only the
+    // vehicle lookup needs a field FROM the route row (vehicle_id) — so fetch them
+    // in ONE parallel wave instead of the old route → stops → vehicle → counts
+    // serial waterfall.
+    const [routeRes, stopsRes, passengerRes, staffRes] = await Promise.all([
+      supabase.from('tms_route').select('*').eq('id', routeId).maybeSingle(),
+      supabase
+        .from('tms_route_stop')
+        .select('*')
+        .eq('route_id', routeId)
+        .order('sequence_order', { ascending: true }),
+      // Learner + staff rider counts, each using the same filter as its roster
+      // drill-down. The staff table may be absent in some environments (42P01) —
+      // that error just yields a null count, which we treat as zero.
       supabase
         .from('learners_profiles')
         .select('id', { count: 'exact', head: true })
@@ -82,6 +60,32 @@ export async function GET(
         .eq('bus_required', true)
         .eq('is_active', true),
     ]);
+
+    const { data: route, error } = routeRes;
+    if (error) {
+      console.error('Route detail query error:', error);
+      return NextResponse.json({ error: 'Failed to fetch route' }, { status: 500 });
+    }
+    if (!route) {
+      return NextResponse.json({ error: 'Route not found' }, { status: 404 });
+    }
+
+    const stops = stopsRes.data;
+    const passengerCount = passengerRes.count;
+    const staffCount = staffRes.count;
+
+    // Occupancy: seats come from the assigned vehicle (tms_route.total_capacity is
+    // stale — 0 for most routes). This is the ONLY lookup that depends on the route
+    // row (its vehicle_id), so it runs after the parallel wave above.
+    let vehicleCapacity: number | null = null;
+    if (route.vehicle_id) {
+      const { data: veh } = await supabase
+        .from('tms_vehicle')
+        .select('capacity')
+        .eq('id', route.vehicle_id)
+        .maybeSingle();
+      vehicleCapacity = (veh as { capacity: number | null } | null)?.capacity ?? null;
+    }
 
     return NextResponse.json({
       success: true,

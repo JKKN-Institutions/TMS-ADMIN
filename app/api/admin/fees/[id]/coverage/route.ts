@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { selectByIds } from '@/lib/supabase/chunked';
 import { resolveApplicablePeople } from '@/lib/fees/applicability';
 import { currentYearOf, deriveStudyYear, bandForYear } from '@/lib/fees/year-of-study';
 
@@ -72,12 +73,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const learnerIds = people.filter((p) => p.person_type === 'learner').map((p) => p.person_id);
     const staffIds = people.filter((p) => p.person_type === 'staff').map((p) => p.person_id);
     const nameMap = new Map<string, { name: string; code: string | null }>();
+    // learnerIds / staffIds are the WHOLE applicable population (can be ~1k). A
+    // single .in() over that many UUIDs overflows the Supabase gateway → HTTP 400 →
+    // an unchecked { data:null } would silently blank EVERY name. Chunk + fail loud.
     if (learnerIds.length) {
-      const { data } = await supabase
-        .from('learners_profiles')
-        .select('id, first_name, last_name, roll_number')
-        .in('id', learnerIds);
-      for (const r of data ?? []) {
+      const data = await selectByIds<{ id: string; first_name: string | null; last_name: string | null; roll_number: string | null }>(
+        supabase, 'learners_profiles', 'id, first_name, last_name, roll_number', learnerIds
+      );
+      for (const r of data) {
         nameMap.set(r.id, {
           name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
           code: r.roll_number ?? null,
@@ -85,11 +88,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       }
     }
     if (staffIds.length) {
-      const { data } = await supabase
-        .from('staff')
-        .select('id, first_name, last_name, staff_id')
-        .in('id', staffIds);
-      for (const r of data ?? []) {
+      const data = await selectByIds<{ id: string; first_name: string | null; last_name: string | null; staff_id: string | null }>(
+        supabase, 'staff', 'id, first_name, last_name, staff_id', staffIds
+      );
+      for (const r of data) {
         nameMap.set(r.id, {
           name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
           code: r.staff_id ?? null,
