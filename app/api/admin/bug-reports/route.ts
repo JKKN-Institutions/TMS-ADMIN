@@ -182,7 +182,7 @@ async function handlePost(request: NextRequest, auth: AuthContext) {
   let displayId: string | null;
   try {
     const b = (await getBugReport(id)).bug_report;
-    reporterEmail = pickReporter(b, readMeta(b)).email;
+    reporterEmail = pickReporter(b, readMeta(b)).email?.toLowerCase() ?? null;
     displayId = (b as unknown as { display_id?: string | null }).display_id ?? null;
   } catch (e) {
     console.error('bug-reports reply: load report failed:', e);
