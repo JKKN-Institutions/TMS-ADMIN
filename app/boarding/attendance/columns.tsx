@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, Undo2 } from 'lucide-react';
+import { QrCode, Pencil, Check, X } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -16,6 +16,12 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
         <Check className="h-3 w-3" /> Present
       </span>
     );
+  if (status === 'absent')
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">
+        <X className="h-3 w-3" /> Absent
+      </span>
+    );
   return (
     <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
       Unmarked
@@ -25,15 +31,15 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
 
 /**
  * Booked-students columns for the Attendance page. Route/Status are filterable.
- * The Action column shows a "Mark present" button for unmarked rows only when
- * `canMark` (today) — a manual override that POSTs to /api/boarding/attendance.
+ * The Action column is a single toggle button, shown only when `canMark` (the
+ * travel day AND the leg's onward/return window is open). It shows the NEXT
+ * action: unmarked/absent → "Present", present → "Absent"; the Status badge shows
+ * the current state. Clicking POSTs that status to /api/boarding/attendance.
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
-  canUndo: boolean;
   busyId: string | null;
-  onMark: (row: RosterRow) => void;
-  onUnmark: (row: RosterRow) => void;
+  onMark: (row: RosterRow, status: 'present' | 'absent') => void;
 }): ColumnDef<RosterRow>[] {
   const selectColumn: ColumnDef<RosterRow> = {
     id: 'select',
@@ -96,7 +102,7 @@ export function getRosterColumns(opts: {
       header: ({ column }) => <DataTableColumnHeader column={column} title="Marked" />,
       size: 110,
       cell: ({ row }) =>
-        row.original.status === 'present' ? (
+        row.original.status !== 'unmarked' ? (
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
             {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
             {fmtTime(row.original.scanned_at)}
@@ -112,29 +118,29 @@ export function getRosterColumns(opts: {
       size: 120,
       header: () => null,
       cell: ({ row }) => {
-        const busy = opts.busyId === row.original.learner_id;
-        if (row.original.status === 'present') {
-          if (!opts.canUndo) return null;
-          return (
-            <button
-              type="button"
-              onClick={() => opts.onUnmark(row.original)}
-              disabled={busy}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-            >
-              <Undo2 className="h-3.5 w-3.5" /> {busy ? 'Undoing…' : 'Undo'}
-            </button>
-          );
-        }
+        // Marking is gated to the travel day AND an open leg window; otherwise
+        // no control shows at all (present and absent are both disabled by timing).
         if (!opts.canMark) return null;
-        return (
+        const busy = opts.busyId === row.original.learner_id;
+        // Single toggle showing the NEXT action: present → mark Absent, else → mark Present.
+        const next: 'present' | 'absent' = row.original.status === 'present' ? 'absent' : 'present';
+        return next === 'present' ? (
           <button
             type="button"
-            onClick={() => opts.onMark(row.original)}
+            onClick={() => opts.onMark(row.original, 'present')}
             disabled={busy}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
           >
-            <Check className="h-3.5 w-3.5" /> {busy ? 'Marking…' : 'Mark present'}
+            <Check className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Present'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => opts.onMark(row.original, 'absent')}
+            disabled={busy}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+          >
+            <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}
           </button>
         );
       },

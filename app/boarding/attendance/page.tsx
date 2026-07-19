@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Circle, ListChecks, Download, QrCode } from 'lucide-react';
+import { CheckCircle2, XCircle, ListChecks, Download, QrCode } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import ScanDialog from '@/components/boarding/scan-dialog';
@@ -16,7 +16,7 @@ interface RosterResponse {
   date: string;
   direction: AttDirection;
   rows: RosterRow[];
-  counts: { total: number; marked: number; unmarked: number };
+  counts: { total: number; present: number; absent: number; unmarked: number };
 }
 
 async function fetchRoster(date: string, direction: AttDirection): Promise<RosterResponse> {
@@ -69,50 +69,27 @@ export default function BoardingAttendancePage() {
   }, [isError, error]);
 
   const rows = data?.rows ?? [];
-  const counts = data?.counts ?? { total: 0, marked: 0, unmarked: 0 };
+  const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0 };
 
   const legOpen = isDirectionOpen(windows[direction]);
   const canMark = isToday && legOpen;
 
-  const markPresent = useCallback(
-    async (row: RosterRow) => {
+  const mark = useCallback(
+    async (row: RosterRow, status: 'present' | 'absent') => {
       setBusyId(row.learner_id);
       try {
         const res = await fetch('/api/boarding/attendance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ routeId: row.route_id, direction, marks: [{ learnerId: row.learner_id, status: 'present' }] }),
+          body: JSON.stringify({ routeId: row.route_id, direction, marks: [{ learnerId: row.learner_id, status }] }),
         });
         const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark present');
-        toast.success(`Marked ${row.name} present`);
+        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark attendance');
+        toast.success(`Marked ${row.name} ${status}`);
         qc.invalidateQueries({ queryKey: ['boarding-roster'] });
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to mark present');
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [direction, qc]
-  );
-
-  const unmarkPresent = useCallback(
-    async (row: RosterRow) => {
-      setBusyId(row.learner_id);
-      try {
-        const res = await fetch('/api/boarding/attendance', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ routeId: row.route_id, direction, learnerIds: [row.learner_id] }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to unmark');
-        toast.success(`Unmarked ${row.name}`);
-        qc.invalidateQueries({ queryKey: ['boarding-roster'] });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to unmark');
+        toast.error(e instanceof Error ? e.message : 'Failed to mark attendance');
       } finally {
         setBusyId(null);
       }
@@ -121,12 +98,12 @@ export default function BoardingAttendancePage() {
   );
 
   const columns = useMemo(
-    () => getRosterColumns({ canMark, canUndo: isToday, busyId, onMark: markPresent, onUnmark: unmarkPresent }),
-    [canMark, isToday, busyId, markPresent, unmarkPresent]
+    () => getRosterColumns({ canMark, busyId, onMark: mark }),
+    [canMark, busyId, mark]
   );
 
   const filters: DataTableFilter[] = [
-    { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Unmarked', value: 'unmarked' }] },
+    { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
   ];
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
@@ -173,8 +150,8 @@ export default function BoardingAttendancePage() {
       {/* Analytics tiles + day picker */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="grid flex-1 grid-cols-3 gap-3">
-          <Tile label="Marked" value={counts.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
-          <Tile label="Unmarked" value={counts.unmarked} tone="gray" icon={<Circle className="h-4 w-4" />} />
+          <Tile label="Present" value={counts.present} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
+          <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
           <Tile label="Total bookings" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
         </div>
         <div>
@@ -182,7 +159,6 @@ export default function BoardingAttendancePage() {
           <input
             type="date"
             value={date}
-            max={todayStr()}
             onChange={(e) => setDate(e.target.value)}
             className="h-[38px] rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500"
           />
@@ -191,7 +167,7 @@ export default function BoardingAttendancePage() {
 
       {isToday && !legOpen && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          {direction === 'onward' ? 'Onward' : 'Return'} window is {formatHM(windows[direction].start)}–{formatHM(windows[direction].end)}; marking and scanning are closed for this leg until it opens. You can still undo a mark.
+          {direction === 'onward' ? 'Onward' : 'Return'} window is {formatHM(windows[direction].start)}–{formatHM(windows[direction].end)}; marking present/absent and scanning are closed for this leg until it opens.
         </p>
       )}
 
@@ -240,10 +216,12 @@ export default function BoardingAttendancePage() {
   );
 }
 
-function Tile({ label, value, tone, icon }: { label: string; value: number; tone: 'green' | 'gray' | 'slate'; icon: React.ReactNode }) {
+function Tile({ label, value, tone, icon }: { label: string; value: number; tone: 'green' | 'red' | 'gray' | 'slate'; icon: React.ReactNode }) {
   const toneCls =
     tone === 'green'
       ? 'text-green-700 dark:text-green-300'
+      : tone === 'red'
+      ? 'text-red-700 dark:text-red-300'
       : tone === 'gray'
       ? 'text-gray-600 dark:text-gray-300'
       : 'text-slate-700 dark:text-slate-300';
