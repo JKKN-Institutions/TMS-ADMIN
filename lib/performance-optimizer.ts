@@ -200,7 +200,10 @@ export class PerformanceOptimizer {
       }
     ];
 
-    return await this.batchQuery(queries);
+    // Heterogeneous batch (each key returns a different shape), so pin the
+    // element type to `unknown` — otherwise TS infers T from the first entry
+    // and rejects the rest.
+    return await this.batchQuery<unknown>(queries);
   }
 
   // Image optimization
