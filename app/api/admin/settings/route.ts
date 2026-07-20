@@ -1,192 +1,117 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase';
+import { NextResponse, type NextRequest } from 'next/server';
+import { withAuth, type AuthContext } from '@/lib/api/with-auth';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+import { logActivity } from '@/lib/activity/log';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
-interface SchedulingSettings {
+interface SchedulingSettingsData {
   enableBookingTimeWindow: boolean;
   bookingWindowEndHour: number;
-  bookingWindowDaysBefore: number;
+  bookingDaysAhead: number;
   autoNotifyPassengers: boolean;
-  sendReminderHours: number[];
 }
 
-// GET - Retrieve admin settings
-export async function GET() {
+const DEFAULT_SETTINGS: SchedulingSettingsData = {
+  enableBookingTimeWindow: true,
+  bookingWindowEndHour: 20,
+  bookingDaysAhead: 6,
+  autoNotifyPassengers: true,
+};
+
+async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
+  if (auth.isSuperAdmin) return true;
+  const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: permission });
+  return !!data;
+}
+
+function validate(settings: Record<string, unknown>): string | null {
+  const hour = settings.bookingWindowEndHour;
+  if (typeof hour !== 'number' || hour < 0 || hour > 23) {
+    return 'Booking cutoff hour must be between 0 and 23';
+  }
+  const days = settings.bookingDaysAhead;
+  if (typeof days !== 'number' || days < 1 || days > 14) {
+    return 'Booking days available must be between 1 and 14';
+  }
+  return null;
+}
+
+async function getSettings(auth: AuthContext) {
   try {
-    const { data: settings, error } = await supabaseAdmin
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.SETTINGS_VIEW))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    const svc = createServiceRoleClient();
+    const { data, error } = await svc
       .from('admin_settings')
-      .select('*')
+      .select('settings_data, updated_at')
       .eq('setting_type', 'scheduling')
       .order('updated_at', { ascending: false })
       .limit(1);
-
     if (error) {
-      console.error('Error fetching admin settings:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch settings' },
-        { status: 500 }
-      );
+      console.error('admin/settings GET error:', error);
+      return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
     }
-
-    // Return settings if found, otherwise return default settings
-    if (settings && settings.length > 0) {
-      return NextResponse.json({
-        settings: settings[0].settings_data,
-        lastUpdated: settings[0].updated_at
-      });
-    } else {
-      // Return default settings
-      const defaultSettings: SchedulingSettings = {
-        enableBookingTimeWindow: true,
-        bookingWindowEndHour: 19, // 7 PM cutoff
-        bookingWindowDaysBefore: 1,
-        autoNotifyPassengers: true,
-        sendReminderHours: [24, 2]
-      };
-
-      return NextResponse.json({
-        settings: defaultSettings,
-        lastUpdated: null
-      });
+    if (data && data.length > 0) {
+      return NextResponse.json({ settings: data[0].settings_data, lastUpdated: data[0].updated_at });
     }
-  } catch (error) {
-    console.error('Error in GET /api/admin/settings:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ settings: DEFAULT_SETTINGS, lastUpdated: null });
+  } catch (e) {
+    console.error('admin/settings GET error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST - Save admin settings
-export async function POST(request: NextRequest) {
+async function saveSettings(request: NextRequest, auth: AuthContext) {
   try {
-    const body = await request.json();
-    const { settings } = body;
-
-    if (!settings) {
-      return NextResponse.json(
-        { error: 'Settings data is required' },
-        { status: 400 }
-      );
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.SETTINGS_MANAGE))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-
-    // Validate critical settings
-    if (settings.bookingWindowEndHour > 23 || settings.bookingWindowEndHour < 0) {
-      return NextResponse.json(
-        { error: 'Booking window end hour must be between 0 and 23' },
-        { status: 400 }
-      );
+    const body = (await request.json().catch(() => ({}))) as { settings?: Record<string, unknown> };
+    const settings = body.settings;
+    if (!settings || typeof settings !== 'object') {
+      return NextResponse.json({ error: 'Settings data is required' }, { status: 400 });
     }
+    const invalid = validate(settings);
+    if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
-    if (settings.bookingWindowDaysBefore < 1) {
-      return NextResponse.json(
-        { error: 'Booking window must be at least 1 day before trip' },
-        { status: 400 }
-      );
-    }
-
-    // Upsert settings
-    const { data, error } = await supabaseAdmin
+    const svc = createServiceRoleClient();
+    const { data, error } = await svc
       .from('admin_settings')
-      .upsert({
-        setting_type: 'scheduling',
-        settings_data: settings,
-        updated_at: new Date().toISOString(),
-        updated_by: 'admin' // This could be dynamic based on authentication
-      }, {
-        onConflict: 'setting_type'
-      })
+      .upsert(
+        {
+          setting_type: 'scheduling',
+          settings_data: settings,
+          updated_at: new Date().toISOString(),
+          updated_by: auth.userId,
+        },
+        { onConflict: 'setting_type' }
+      )
       .select();
-
     if (error) {
-      console.error('Error saving admin settings:', error);
-      return NextResponse.json(
-        { error: 'Failed to save settings' },
-        { status: 500 }
-      );
+      console.error('admin/settings POST error:', error);
+      return NextResponse.json({ error: 'Failed to save settings' }, { status: 500 });
     }
+
+    await logActivity(auth, request, {
+      module: 'settings',
+      action: 'update',
+      entityType: 'admin_settings',
+      description: `Updated scheduling settings — cutoff ${settings.bookingWindowEndHour}:00, days ahead ${settings.bookingDaysAhead}`,
+      metadata: settings,
+    });
 
     return NextResponse.json({
       message: 'Settings saved successfully',
       settings: data[0].settings_data,
-      lastUpdated: data[0].updated_at
+      lastUpdated: data[0].updated_at,
     });
-  } catch (error) {
-    console.error('Error in POST /api/admin/settings:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+  } catch (e) {
+    console.error('admin/settings POST error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// PUT - Update specific setting
-export async function PUT(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { key, value } = body;
-
-    if (!key || value === undefined) {
-      return NextResponse.json(
-        { error: 'Setting key and value are required' },
-        { status: 400 }
-      );
-    }
-
-    // Get current settings
-    const { data: currentSettings, error: fetchError } = await supabaseAdmin
-      .from('admin_settings')
-      .select('settings_data')
-      .eq('setting_type', 'scheduling')
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Error fetching current settings:', fetchError);
-      return NextResponse.json(
-        { error: 'Failed to fetch current settings' },
-        { status: 500 }
-      );
-    }
-
-    // Update the specific setting
-    const updatedSettings = {
-      ...(currentSettings?.settings_data || {}),
-      [key]: value
-    };
-
-    // Save updated settings
-    const { data, error } = await supabaseAdmin
-      .from('admin_settings')
-      .upsert({
-        setting_type: 'scheduling',
-        settings_data: updatedSettings,
-        updated_at: new Date().toISOString(),
-        updated_by: 'admin'
-      }, {
-        onConflict: 'setting_type'
-      })
-      .select();
-
-    if (error) {
-      console.error('Error updating setting:', error);
-      return NextResponse.json(
-        { error: 'Failed to update setting' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      message: 'Setting updated successfully',
-      key,
-      value,
-      settings: data[0].settings_data,
-      lastUpdated: data[0].updated_at
-    });
-  } catch (error) {
-    console.error('Error in PUT /api/admin/settings:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-} 
+export const GET = withAuth((_req, auth) => getSettings(auth));
+export const POST = withAuth((req, auth) => saveSettings(req, auth));
+export const PUT = withAuth((req, auth) => saveSettings(req, auth));
