@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -24,6 +25,7 @@ interface TransportYearFormProps {
 
 export function TransportYearForm({ mode, transportYearId, initial }: TransportYearFormProps) {
   const router = useRouter();
+  const qc = useQueryClient();
   const [form, setForm] = useState<FormValues>({
     name: initial?.name ?? '',
     start_date: initial?.start_date ?? '',
@@ -73,6 +75,12 @@ export function TransportYearForm({ mode, transportYearId, initial }: TransportY
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
       toast.success(mode === 'create' ? 'Transport year added' : 'Transport year updated');
+      // The list/detail/edit pages are client components reading TanStack Query,
+      // whose cache router.refresh() does NOT touch (that only busts the RSC
+      // cache). Without this, staleTime: 60_000 serves the pre-save snapshot on
+      // nav and the save looks like it silently failed.
+      qc.invalidateQueries({ queryKey: ['transport-years'] });
+      if (transportYearId) qc.invalidateQueries({ queryKey: ['transport-year', transportYearId] });
       router.push(mode === 'create' ? '/transport-years' : `/transport-years/${transportYearId}`);
       router.refresh();
     } catch (err) {
