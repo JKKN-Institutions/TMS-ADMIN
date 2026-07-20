@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchDriverOptions, fetchRouteOptions } from './driver-mobile-api';
 
@@ -32,6 +32,9 @@ interface FormValues {
   serial_number: string;
   accessories: string;
   notes: string;
+  handover_by: string;
+  handover_date: string;
+  image_path: string;
 }
 
 const EMPTY: FormValues = {
@@ -39,6 +42,7 @@ const EMPTY: FormValues = {
   supplied_date: '', sim_number: '', phone_number: '', network_provider: '',
   purchase_date: '', purchase_cost: '', supplier_name: '', invoice_number: '', warranty_expiry: '',
   condition: '', storage_capacity: '', serial_number: '', accessories: '', notes: '',
+  handover_by: '', handover_date: '', image_path: '',
 };
 
 interface DriverMobileFormProps {
@@ -52,6 +56,65 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
   const [form, setForm] = useState<FormValues>({ ...EMPTY, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Best-effort: resolve a signed preview URL for a stored image path. Never throws —
+  // returns null on any failure so a preview hiccup can't masquerade as an upload failure.
+  const fetchPreviewUrl = async (path: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/admin/driver-mobiles/image?path=${encodeURIComponent(path)}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      const json = await res.json();
+      return res.ok && json.success ? json.url : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Edit mode: if the record already has an image, fetch a signed url to preview it.
+  useEffect(() => {
+    const path = initial?.image_path;
+    if (!path) return;
+    let cancelled = false;
+    fetchPreviewUrl(path).then((url) => { if (!cancelled) setImagePreview(url); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file after a remove
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/admin/driver-mobiles/image', {
+        method: 'POST',
+        body: fd,
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
+      set('image_path', json.path);
+      setImagePreview(await fetchPreviewUrl(json.path));
+      toast.success('Image uploaded');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const onRemoveImage = () => {
+    set('image_path', '');
+    setImagePreview(null);
+  };
 
   const { data: drivers = [] } = useQuery({ queryKey: ['driver-options'], queryFn: fetchDriverOptions });
   const { data: routes = [] } = useQuery({ queryKey: ['route-options'], queryFn: fetchRouteOptions });
@@ -97,6 +160,9 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
         serial_number: form.serial_number.trim() || null,
         accessories: form.accessories.trim() || null,
         notes: form.notes.trim() || null,
+        handover_by: form.handover_by.trim() || null,
+        handover_date: form.handover_date || null,
+        image_path: form.image_path || null,
       };
       const res = await fetch('/api/admin/driver-mobiles', {
         method: mode === 'create' ? 'POST' : 'PUT',
@@ -162,6 +228,78 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
                 <option key={r.id} value={r.id}>{r.number}{r.name ? ` — ${r.name}` : ''}</option>
               ))}
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Handover */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <h3 className="mb-4 text-sm font-semibold text-gray-900">Handover</h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Handover by</label>
+            <input
+              value={form.handover_by}
+              onChange={(e) => set('handover_by', e.target.value)}
+              className="input"
+              placeholder="Name of person who handed over"
+              disabled={saving}
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Handover date</label>
+            <input
+              type="date"
+              value={form.handover_date}
+              onChange={(e) => set('handover_date', e.target.value)}
+              className="input"
+              disabled={saving}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="mb-2 block text-sm font-medium text-gray-700">Phone image</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={onPickImage}
+              className="hidden"
+            />
+            {imagePreview ? (
+              <div className="flex items-center gap-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imagePreview} alt="Phone" className="h-24 w-24 rounded-lg object-cover ring-1 ring-gray-200" />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={saving || uploadingImage}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Replace'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRemoveImage}
+                    disabled={saving || uploadingImage}
+                    className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={saving || uploadingImage}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+              >
+                {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploadingImage ? 'Uploading…' : 'Upload image'}
+              </button>
+            )}
+            <p className="mt-1 text-xs text-gray-500">JPG, PNG or WEBP, up to 5 MB.</p>
           </div>
         </div>
       </div>
@@ -268,7 +406,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
         <Link href={cancelHref} className="inline-flex h-10 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
           Cancel
         </Link>
-        <button type="submit" disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-green-600 px-4 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60">
+        <button type="submit" disabled={saving || uploadingImage} className="inline-flex h-10 items-center gap-2 rounded-lg bg-green-600 px-4 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {mode === 'create' ? 'Add Mobile' : 'Save Changes'}
         </button>

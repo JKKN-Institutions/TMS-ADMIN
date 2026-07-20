@@ -82,6 +82,9 @@ export default function EditDriverMobilePage({ params }: { params: Promise<{ id:
           serial_number: m.serial_number ?? '',
           accessories: m.accessories ?? '',
           notes: m.notes ?? '',
+          handover_by: m.handover_by ?? '',
+          handover_date: d(m.handover_date),
+          image_path: m.image_path ?? '',
         }}
       />
     </div>

@@ -83,6 +83,30 @@ export default function DriverMobileDetailPage({ params }: { params: Promise<{ i
         </div>
       </SectionCard>
 
+      <SectionCard title="Handover">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Handover by" value={or(m.handover_by)} />
+          <Field label="Handover date" value={fmtDate(m.handover_date)} />
+          <Field
+            label="Phone image"
+            value={
+              m.image_url ? (
+                <a href={m.image_url} target="_blank" rel="noopener noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={m.image_url}
+                    alt={`${m.brand} ${m.model}`}
+                    className="h-24 w-24 rounded-lg object-cover ring-1 ring-gray-200 transition hover:opacity-90"
+                  />
+                </a>
+              ) : (
+                '—'
+              )
+            }
+          />
+        </div>
+      </SectionCard>
+
       <SectionCard title="Device">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Brand" value={or(m.brand)} />

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { buildDriverMobilePayload } from '@/lib/driver-mobiles/fields';
+import { buildDriverMobilePayload, DRIVER_MOBILE_IMAGE_BUCKET } from '@/lib/driver-mobiles/fields';
 import { logActivity } from '@/lib/activity/log';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -55,15 +55,27 @@ async function getDriverMobiles() {
       console.error('Driver mobiles query error:', error);
       return NextResponse.json({ error: 'Failed to fetch driver mobiles' }, { status: 500 });
     }
-    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null }[];
+    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null; image_path: string | null }[];
     const names = await resolveDriverNames(supabase, list.map((r) => r.driver_staff_id));
     const routes = await resolveRouteInfo(supabase, list.map((r) => r.route_id ?? '').filter(Boolean));
+
+    // Batch-sign every phone photo in one round trip (private bucket → signed urls).
+    const imagePaths = [...new Set(list.map((r) => r.image_path).filter((p): p is string => !!p))];
+    const signed = new Map<string, string>();
+    if (imagePaths.length) {
+      const { data: urls } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).createSignedUrls(imagePaths, 3600);
+      for (const u of urls ?? []) {
+        if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+      }
+    }
+
     const data = list.map((r) => ({
       ...r,
       driver_name: names.get(r.driver_staff_id)?.name ?? '—',
       driver_phone: names.get(r.driver_staff_id)?.phone ?? null,
       route_number: r.route_id ? routes.get(r.route_id)?.number ?? null : null,
       route_name: r.route_id ? routes.get(r.route_id)?.name ?? null : null,
+      image_url: r.image_path ? signed.get(r.image_path) ?? null : null,
     }));
     return NextResponse.json({ success: true, data, count: data.length });
   } catch (e) {

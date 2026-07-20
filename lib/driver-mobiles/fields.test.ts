@@ -36,4 +36,19 @@ describe('buildDriverMobilePayload', () => {
     expect(buildDriverMobilePayload({ route_id: 'route-9' }).route_id).toBe('route-9');
     expect(buildDriverMobilePayload({ route_id: '' }).route_id).toBe(null);
   });
+
+  it('trims handover_by text, empty → null', () => {
+    expect(buildDriverMobilePayload({ handover_by: '  Ramesh K  ' }).handover_by).toBe('Ramesh K');
+    expect(buildDriverMobilePayload({ handover_by: '   ' }).handover_by).toBe(null);
+  });
+
+  it('passes image_path through as trimmed text, empty → null', () => {
+    expect(buildDriverMobilePayload({ image_path: '2026/abc-phone.jpg' }).image_path).toBe('2026/abc-phone.jpg');
+    expect(buildDriverMobilePayload({ image_path: '' }).image_path).toBe(null);
+  });
+
+  it('passes handover_date through as a date string, empty → null', () => {
+    expect(buildDriverMobilePayload({ handover_date: '2026-07-20' }).handover_date).toBe('2026-07-20');
+    expect(buildDriverMobilePayload({ handover_date: '' }).handover_date).toBe(null);
+  });
 });
