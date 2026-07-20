@@ -29,7 +29,7 @@ import {
   Monitor
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import SchedulingConfigManager, { defaultSchedulingSettings, type SchedulingSettings } from '../../../lib/scheduling-config';
+import { defaultSchedulingSettings, type SchedulingSettings } from '../../../lib/scheduling-config';
 import { AttendanceWindowSettings } from '@/components/admin/attendance-window-settings';
 
 // Scheduling settings are the only tab backed by a real API call today — the
@@ -158,11 +158,11 @@ const SettingsPage = () => {
                     type="checkbox"
                     id="enableBookingTimeWindow"
                     checked={schedulingSettings.enableBookingTimeWindow}
-                    onChange={(e) => setSchedulingSettings({...schedulingSettings, enableBookingTimeWindow: e.target.checked})}
+                    onChange={(e) => setSchedulingSettings({ ...schedulingSettings, enableBookingTimeWindow: e.target.checked })}
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label htmlFor="enableBookingTimeWindow" className="ml-2 text-sm text-gray-600">
-                    Restrict booking to specific time window
+                    Enforce a daily booking cutoff time
                   </label>
                 </div>
               </div>
@@ -173,7 +173,7 @@ const SettingsPage = () => {
                 </label>
                 <select
                   value={schedulingSettings.bookingWindowEndHour}
-                  onChange={(e) => setSchedulingSettings({...schedulingSettings, bookingWindowEndHour: parseInt(e.target.value)})}
+                  onChange={(e) => setSchedulingSettings({ ...schedulingSettings, bookingWindowEndHour: parseInt(e.target.value) })}
                   className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   {Array.from({ length: 24 }, (_, i) => (
@@ -189,64 +189,19 @@ const SettingsPage = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Booking Window (Days Before)
+                  Booking days available (days ahead)
                 </label>
                 <input
                   type="number"
-                  value={schedulingSettings.bookingWindowDaysBefore}
-                  onChange={(e) => setSchedulingSettings({...schedulingSettings, bookingWindowDaysBefore: parseInt(e.target.value)})}
+                  value={schedulingSettings.bookingDaysAhead}
+                  onChange={(e) => setSchedulingSettings({ ...schedulingSettings, bookingDaysAhead: parseInt(e.target.value) })}
                   min="1"
-                  max="7"
+                  max="14"
                   className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
                 <p className="text-sm text-gray-600 mt-1">
-                  Number of days before the trip when booking deadline applies
+                  How many days ahead learners can book (Sunday is always a holiday)
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Auto-notify Passengers
-                </label>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="autoNotifyPassengers"
-                    checked={schedulingSettings.autoNotifyPassengers}
-                    onChange={(e) => setSchedulingSettings({...schedulingSettings, autoNotifyPassengers: e.target.checked})}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="autoNotifyPassengers" className="ml-2 text-sm text-gray-600">
-                    Send notifications to passengers automatically
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Reminder Hours
-              </label>
-              <div className="space-y-2">
-                {[24, 12, 6, 2, 1].map((hour) => (
-                  <div key={hour} className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id={`reminder-${hour}`}
-                      checked={schedulingSettings.sendReminderHours.includes(hour)}
-                      onChange={(e) => {
-                        const newHours = e.target.checked
-                          ? [...schedulingSettings.sendReminderHours, hour].sort((a, b) => b - a)
-                          : schedulingSettings.sendReminderHours.filter(h => h !== hour);
-                        setSchedulingSettings(prev => ({ ...prev, sendReminderHours: newHours }));
-                      }}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor={`reminder-${hour}`} className="ml-2 text-sm text-gray-600">
-                      {hour} hours before trip
-                    </label>
-                  </div>
-                ))}
               </div>
             </div>
 
@@ -257,12 +212,12 @@ const SettingsPage = () => {
                   <p className="font-medium text-yellow-800 mb-1">Current Booking Policy:</p>
                   <ul className="text-yellow-700 space-y-1 text-sm">
                     <li>• Students can book trips anytime after admin approval</li>
-                    <li>• Booking deadline: {schedulingSettings.bookingWindowEndHour === 0 ? '12:00 AM' : 
-                       schedulingSettings.bookingWindowEndHour < 12 ? `${schedulingSettings.bookingWindowEndHour}:00 AM` : 
-                       schedulingSettings.bookingWindowEndHour === 12 ? '12:00 PM' : 
+                    <li>• Booking deadline: {schedulingSettings.bookingWindowEndHour === 0 ? '12:00 AM' :
+                       schedulingSettings.bookingWindowEndHour < 12 ? `${schedulingSettings.bookingWindowEndHour}:00 AM` :
+                       schedulingSettings.bookingWindowEndHour === 12 ? '12:00 PM' :
                        `${schedulingSettings.bookingWindowEndHour-12}:00 PM`} the day before the trip</li>
                     <li>• Each schedule must be individually approved by admin</li>
-                    <li>• No booking allowed on the same day as the trip</li>
+                    <li>• Booking opens for the next {schedulingSettings.bookingDaysAhead} day(s); Sundays remain closed</li>
                   </ul>
                 </div>
               </div>
