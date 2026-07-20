@@ -662,7 +662,18 @@ export async function GET(request: NextRequest) {
 
   const svc = createServiceRoleClient();
   const date = istToday();
-  const summary = { date, evaluated: 0, skipped: 0, warned: 0, removed: 0, billed: 0, errors: 0 };
+  const summary = {
+    date,
+    evaluated: 0,
+    skipped: 0,
+    warned: 0,
+    removed: 0,
+    billed: 0,
+    errors: 0,
+    // Which staffer failed and why. A bare error COUNT is undiagnosable in a
+    // job that revokes roles and writes bills — always carry the reason out.
+    failures: [] as Array<{ staffEmail: string; message: string }>,
+  };
 
   const { data: assignments, error: aErr } = await svc
     .from('tms_staff_route_assignment')
@@ -811,9 +822,14 @@ export async function GET(request: NextRequest) {
           });
         }
       }
-    } catch {
+    } catch (e) {
       // One staffer's failure must never abort the run for the others.
       summary.errors++;
+      summary.failures.push({
+        staffEmail: a.staff_email,
+        message: e instanceof Error ? e.message : String(e),
+      });
+      console.error('[incharge-attendance] failed for', a.staff_email, e);
     }
   }
 
