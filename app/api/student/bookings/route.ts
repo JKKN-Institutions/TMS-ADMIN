@@ -8,7 +8,7 @@ import { bookableDates, cutoffFor, dayStatus, isCancelable, isSunday } from '@/l
 import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
 import { isOverCapacity } from '@/lib/booking/capacity';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
-import { loadSchedulingConfig } from '@/lib/settings/scheduling';
+import { loadSchedulingConfig, toWindowOpts } from '@/lib/settings/scheduling';
 
 /**
  * Self-scoped daily booking board + book/cancel. The learner (and their route/stop)
@@ -31,13 +31,9 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
     const cfg = await loadSchedulingConfig(svc);
-    // When the admin has disabled the daily time-window, bypass ONLY the time
-    // cutoff — cutoffHour: 24 makes cutoffFor() land at 00:00 IST of the travel
-    // date itself, so booking stays open through the whole prior day. The
-    // horizon (daysAhead) and Sunday / service-calendar gates still apply.
-    const winOpts = cfg.enableBookingTimeWindow
-      ? { cutoffHour: cfg.cutoffHour, daysAhead: cfg.daysAhead }
-      : { cutoffHour: 24, daysAhead: cfg.daysAhead };
+    // See toWindowOpts() in lib/settings/scheduling.ts for the cutoffHour: 24
+    // sentinel semantics used when the daily time-window is disabled.
+    const winOpts = toWindowOpts(cfg);
     const dates = bookableDates(new Date(), cfg.daysAhead);
 
     let routeLabel: string | null = null;
@@ -186,9 +182,7 @@ async function mutate(request: NextRequest, auth: AuthContext) {
     // same effective cutoff/horizon — see window.test.ts for the regression
     // this guards (a booking that book() allows but cancel() used to reject).
     const cfg = await loadSchedulingConfig(svc);
-    const winOpts = cfg.enableBookingTimeWindow
-      ? { cutoffHour: cfg.cutoffHour, daysAhead: cfg.daysAhead }
-      : { cutoffHour: 24, daysAhead: cfg.daysAhead };
+    const winOpts = toWindowOpts(cfg);
 
     if (action === 'book') {
       if (isSunday(travelDate)) {
@@ -246,8 +240,13 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       });
     }
 
-    // cancel — uses the SAME cfg-derived winOpts as book() above, so a date the
-    // learner was allowed to book is never one they get trapped unable to cancel.
+    // cancel — uses the SAME cfg-derived winOpts (toWindowOpts(cfg)) as book()
+    // above, so the two paths cannot diverge on the admin-configured cutoff/
+    // horizon. NOTE: this does not cover a per-date tms_booking_window.deadline
+    // override — book() honours that via effectiveOpen(), but isCancelable()
+    // takes no window param, so a deadline set later than the standard cutoff
+    // can still leave a bookable date not (yet) cancelable. Pre-existing gap,
+    // tracked separately; not addressed here.
     // isCancelable() deliberately does not gate on Sunday (a pre-existing Sunday
     // booking must stay cancelable), so no isSunday() check is added here.
     if (!isCancelable(travelDate, new Date(), winOpts)) {

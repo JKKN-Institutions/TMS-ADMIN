@@ -38,6 +38,20 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
 }
 
 /**
+ * Map an effective SchedulingConfig to the WindowOpts the booking libraries take.
+ * When the daily time-window is disabled we pass hour 24 — a deliberate sentinel that
+ * makes cutoffFor() land on 00:00 IST of the travel date, i.e. booking stays open
+ * through the whole prior day. The horizon / Sunday / service-calendar gates are
+ * unaffected: daysAhead is always passed through unchanged.
+ */
+export function toWindowOpts(cfg: SchedulingConfig): { cutoffHour: number; daysAhead: number } {
+  return {
+    cutoffHour: cfg.enableBookingTimeWindow ? cfg.cutoffHour : 24,
+    daysAhead: cfg.daysAhead,
+  };
+}
+
+/**
  * Load the effective scheduling config from admin_settings (setting_type='scheduling').
  * Service-role only; falls back to defaults if the row/table is missing or malformed.
  */

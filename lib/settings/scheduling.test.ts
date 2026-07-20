@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSchedulingConfig, DEFAULT_SCHEDULING_CONFIG } from './scheduling';
+import { parseSchedulingConfig, toWindowOpts, DEFAULT_SCHEDULING_CONFIG } from './scheduling';
 
 describe('parseSchedulingConfig', () => {
   it('returns defaults for null / non-object input', () => {
@@ -68,5 +68,26 @@ describe('parseSchedulingConfig', () => {
     // -Infinity for bookingDaysAhead → daysAhead falls back to 6
     cfg = parseSchedulingConfig({ bookingDaysAhead: -Infinity });
     expect(cfg.daysAhead).toBe(6);
+  });
+});
+
+describe('toWindowOpts', () => {
+  it('enabled: passes cutoffHour and daysAhead through unchanged', () => {
+    const cfg = { enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true };
+    expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 18, daysAhead: 4 });
+  });
+
+  it('disabled: cutoffHour becomes the 24 sentinel, but daysAhead is STILL passed through unchanged', () => {
+    const cfg = { enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true };
+    expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 24, daysAhead: 4 });
+  });
+
+  it('disabling the time window never widens or narrows the horizon, whatever daysAhead is set to', () => {
+    for (const daysAhead of [1, 6, 14]) {
+      const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false });
+      const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false });
+      expect(disabled.daysAhead).toBe(enabled.daysAhead);
+      expect(disabled.daysAhead).toBe(daysAhead);
+    }
   });
 });
