@@ -37,6 +37,10 @@ export interface DriverMobileRow {
   storage_capacity: string | null;
   serial_number: string | null;
   accessories: string | null;
+  image_path: string | null;
+  image_url: string | null;
+  handover_by: string | null;
+  handover_date: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -101,6 +105,25 @@ export function getDriverMobileColumns(
       ),
     },
     {
+      id: 'photo',
+      enableSorting: false,
+      enableHiding: true,
+      size: 64,
+      header: () => <span className="text-xs font-medium text-gray-500">Photo</span>,
+      cell: ({ row }) =>
+        row.original.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={row.original.image_url}
+            alt={`${row.original.brand} ${row.original.model}`}
+            className="h-10 w-10 rounded-md object-cover ring-1 ring-gray-200 dark:ring-gray-700"
+            loading="lazy"
+          />
+        ) : (
+          <span className="text-sm text-gray-400">—</span>
+        ),
+    },
+    {
       accessorKey: 'driver_name',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Driver" />,
       cell: ({ row }) => (
@@ -148,6 +171,19 @@ export function getDriverMobileColumns(
       header: ({ column }) => <DataTableColumnHeader column={column} title="Supplied" />,
       cell: ({ row }) => (
         <span className="whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{fmtDate(row.original.supplied_date)}</span>
+      ),
+    },
+    {
+      id: 'handover_by',
+      accessorFn: (m) => m.handover_by ?? '',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Handover by" />,
+      cell: ({ row }) => (
+        <span className="flex flex-col">
+          <span className="text-sm text-gray-700 dark:text-gray-300">{row.original.handover_by || '—'}</span>
+          {row.original.handover_date && (
+            <span className="text-xs text-gray-500">{fmtDate(row.original.handover_date)}</span>
+          )}
+        </span>
       ),
     },
     {

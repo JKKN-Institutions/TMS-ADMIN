@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { MoreHorizontal, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { driverNavigation, type DriverNavItem } from '@/lib/driver/navigation';
 
 // Quick-access destinations for the primary bar, in priority order. The first 4 LIVE
@@ -58,82 +57,79 @@ export default function DriverBottomNav() {
 
   return (
     <>
-      {/* "More" bottom sheet — full menu in a 3-column icon grid. */}
-      <AnimatePresence>
-        {moreOpen && (
-          <motion.div
-            key="more"
-            className="fixed inset-0 z-50 lg:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div className="absolute inset-0 bg-black/50" onClick={() => setMoreOpen(false)} />
-            <motion.div
-              className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-hidden rounded-t-3xl border-t border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 32, stiffness: 320 }}
+      {/* "More" bottom sheet — always mounted, shown/hidden via CSS transitions
+          (replaces framer-motion's AnimatePresence so the lib stays out of the
+          driver layout's shared first-load JS; mirrors components/bottom-nav.tsx). */}
+      <div
+        className={`fixed inset-0 z-50 lg:hidden transition-opacity duration-200 ${
+          moreOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        aria-hidden={!moreOpen}
+      >
+        <div className="absolute inset-0 bg-black/50" onClick={() => setMoreOpen(false)} />
+        <div
+          role="dialog"
+          aria-modal="true"
+          className={`absolute inset-x-0 bottom-0 max-h-[80vh] overflow-hidden rounded-t-3xl border-t border-gray-200 bg-white transition-transform duration-300 ease-out dark:border-gray-800 dark:bg-gray-900 ${
+            moreOpen ? 'translate-y-0' : 'translate-y-full'
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-gray-800">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">All Menus</h2>
+            <button
+              type="button"
+              onClick={() => setMoreOpen(false)}
+              aria-label="Close menu"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-gray-800">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">All Menus</h2>
-                <button
-                  type="button"
-                  onClick={() => setMoreOpen(false)}
-                  aria-label="Close menu"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
+              <X className="h-5 w-5" />
+            </button>
+          </div>
 
-              <div className="max-h-[calc(80vh_-_3.25rem)] overflow-y-auto px-4 py-3 pb-[calc(1rem_+_env(safe-area-inset-bottom))]">
-                <div className="grid grid-cols-3 gap-2">
-                  {driverNavigation.map((item) => {
-                    const Icon = item.icon;
+          <div className="max-h-[calc(80vh_-_3.25rem)] overflow-y-auto px-4 py-3 pb-[calc(1rem_+_env(safe-area-inset-bottom))]">
+            <div className="grid grid-cols-3 gap-2">
+              {driverNavigation.map((item) => {
+                const Icon = item.icon;
 
-                    // Not-yet-built pages render as a disabled tile with a "Soon" tag.
-                    if (item.comingSoon) {
-                      return (
-                        <div
-                          key={item.href}
-                          className="flex cursor-not-allowed flex-col items-center gap-1.5 rounded-xl border border-gray-200 p-3 text-center opacity-50 dark:border-gray-800"
-                        >
-                          <Icon className="h-5 w-5 text-gray-400" />
-                          <span className="line-clamp-2 text-[11px] font-medium leading-tight text-gray-400">
-                            {item.name}
-                          </span>
-                          <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">
-                            Soon
-                          </span>
-                        </div>
-                      );
-                    }
+                // Not-yet-built pages render as a disabled tile with a "Soon" tag.
+                if (item.comingSoon) {
+                  return (
+                    <div
+                      key={item.href}
+                      className="flex cursor-not-allowed flex-col items-center gap-1.5 rounded-xl border border-gray-200 p-3 text-center opacity-50 dark:border-gray-800"
+                    >
+                      <Icon className="h-5 w-5 text-gray-400" />
+                      <span className="line-clamp-2 text-[11px] font-medium leading-tight text-gray-400">
+                        {item.name}
+                      </span>
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">
+                        Soon
+                      </span>
+                    </div>
+                  );
+                }
 
-                    const active = isActive(item.href);
-                    return (
-                      <button
-                        key={item.href}
-                        type="button"
-                        onClick={() => go(item.href)}
-                        className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition-colors ${
-                          active
-                            ? 'border-green-500 bg-green-50 text-green-700 dark:border-green-500/40 dark:bg-green-500/15 dark:text-green-300'
-                            : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800/60'
-                        }`}
-                      >
-                        <Icon className="h-5 w-5" />
-                        <span className="line-clamp-2 text-[11px] font-medium leading-tight">{item.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                const active = isActive(item.href);
+                return (
+                  <button
+                    key={item.href}
+                    type="button"
+                    onClick={() => go(item.href)}
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition-colors ${
+                      active
+                        ? 'border-green-500 bg-green-50 text-green-700 dark:border-green-500/40 dark:bg-green-500/15 dark:text-green-300'
+                        : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800/60'
+                    }`}
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="line-clamp-2 text-[11px] font-medium leading-tight">{item.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Primary bar — live shortcuts + More. */}
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden dark:border-gray-800 dark:bg-gray-900">

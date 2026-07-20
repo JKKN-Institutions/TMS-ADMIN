@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { DRIVER_MOBILE_IMAGE_BUCKET } from '@/lib/driver-mobiles/fields';
 
 /**
  * GET one driver mobile (full row + resolved driver name/phone) by id. Backs the
@@ -55,7 +56,14 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ success: true, data: { ...row, driver_name, driver_phone, route_number, route_name } });
+    let image_url: string | null = null;
+    const imgPath = (row as { image_path?: string | null }).image_path;
+    if (imgPath) {
+      const { data: signed } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).createSignedUrl(imgPath, 3600);
+      image_url = signed?.signedUrl ?? null;
+    }
+
+    return NextResponse.json({ success: true, data: { ...row, driver_name, driver_phone, route_number, route_name, image_url } });
   } catch (e) {
     console.error('Driver mobile detail API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

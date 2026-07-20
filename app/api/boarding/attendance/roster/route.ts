@@ -47,7 +47,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       const { data } = await svc.from('tms_route').select('id');
       routeIds = ((data ?? []) as { id: string }[]).map((r) => r.id);
     }
-    const empty = { success: true, data: { date, direction, rows: [] as RosterRow[], counts: { total: 0, marked: 0, unmarked: 0 } } };
+    const empty = { success: true, data: { date, direction, rows: [] as RosterRow[], counts: { total: 0, present: 0, absent: 0, unmarked: 0 } } };
     if (routeIds.length === 0) return NextResponse.json(empty);
 
     const { data: routeData } = await svc
@@ -84,10 +84,11 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       rows.push(...buildRosterRows(riders, { id: rt.id, route_number: rt.route_number }, stopsByRoute.get(rt.id) ?? [], attByLearner));
     }
 
-    const marked = rows.filter((r) => r.status === 'present').length;
+    const present = rows.filter((r) => r.status === 'present').length;
+    const absent = rows.filter((r) => r.status === 'absent').length;
     return NextResponse.json({
       success: true,
-      data: { date, direction, rows, counts: { total: rows.length, marked, unmarked: rows.length - marked } },
+      data: { date, direction, rows, counts: { total: rows.length, present, absent, unmarked: rows.length - present - absent } },
     });
   } catch (e) {
     console.error('boarding attendance roster error:', e);

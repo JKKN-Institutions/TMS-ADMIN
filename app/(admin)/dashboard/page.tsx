@@ -62,7 +62,11 @@ const DashboardPage = () => {
   // mount. Auth is enforced server-side by proxy.ts.
   const {
     data: dashboardStats,
-    isFetching: loading,
+    // isPending (not isFetching): the full-screen spinner should show ONLY on the
+    // first load when there is no cached data. isFetching is also true on the silent
+    // 60s background revalidation, which made the whole page flash back to "Loading…"
+    // and threw away the instant cached render — defeating the React Query cache.
+    isPending: loading,
     isError,
     refetch,
   } = useQuery({ queryKey: ['dashboard-stats'], queryFn: fetchDashboardData });
