@@ -137,7 +137,7 @@ export interface RosterRow {
   stop_id: string | null;
   stop_name: string;
   stop_time: string | null;
-  status: 'present' | 'unmarked';
+  status: 'present' | 'absent' | 'unmarked';
   method: string | null;
   scanned_at: string | null;
 }
@@ -162,7 +162,10 @@ export function buildRosterRows(
   const rows: RosterRow[] = riders.map((rider) => {
     const stop = rider.stop_id && byId.has(rider.stop_id) ? byId.get(rider.stop_id)! : null;
     const att = attendanceByLearner.get(rider.learner_id);
-    const present = att?.status === 'present';
+    // Three-state: an attendance row is either 'present' or 'absent'; no row → 'unmarked'.
+    const status: RosterRow['status'] =
+      att?.status === 'present' ? 'present' : att?.status === 'absent' ? 'absent' : 'unmarked';
+    const marked = status !== 'unmarked';
     return {
       learner_id: rider.learner_id,
       name: rider.name,
@@ -172,9 +175,9 @@ export function buildRosterRows(
       stop_id: stop ? stop.id : null,
       stop_name: stop ? stop.name : 'Stop not set',
       stop_time: stop ? stop.time : null,
-      status: present ? 'present' : 'unmarked',
-      method: present ? att!.method : null,
-      scanned_at: present ? att!.scanned_at : null,
+      status,
+      method: marked ? att!.method : null,
+      scanned_at: marked ? att!.scanned_at : null,
     };
   });
 

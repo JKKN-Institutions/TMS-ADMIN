@@ -61,15 +61,17 @@ describe('buildRosterRows', () => {
     expect(rows[0].route_number).toBe('05');
   });
 
-  it('leaves a rider unmarked (null method/time) when no present row exists', () => {
+  it('marks a rider absent (carrying method/time) when an absent row exists; no row → unmarked', () => {
     const att = new Map([['a', { status: 'absent', method: 'manual', scanned_at: 'x' }]]);
     const rows = buildRosterRows([r('a', '10', 's1'), r('b', '20', 's2')], route, stops, att);
     const a = rows.find((x) => x.learner_id === 'a')!;
     const b = rows.find((x) => x.learner_id === 'b')!;
-    expect(a.status).toBe('unmarked'); // 'absent' counts as unmarked in the two-state model
-    expect(a.method).toBeNull();
-    expect(b.status).toBe('unmarked');
+    expect(a.status).toBe('absent'); // three-state model: 'absent' is a first-class status
+    expect(a.method).toBe('manual');
+    expect(a.scanned_at).toBe('x');
+    expect(b.status).toBe('unmarked'); // no attendance row at all
     expect(b.method).toBeNull();
+    expect(b.scanned_at).toBeNull();
   });
 
   it('resolves the leg-appropriate stop name + time and sorts by stop order then roll', () => {
