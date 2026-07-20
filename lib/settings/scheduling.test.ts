@@ -35,4 +35,38 @@ describe('parseSchedulingConfig', () => {
     expect(cfg.daysAhead).toBe(6);
     expect(cfg.autoNotifyPassengers).toBe(true);
   });
+
+  it('falls back to defaults for wrong-typed values', () => {
+    // Non-numeric string for bookingWindowEndHour → cutoffHour falls back to 20
+    let cfg = parseSchedulingConfig({ bookingWindowEndHour: 'late' });
+    expect(cfg.cutoffHour).toBe(20);
+
+    // null for bookingDaysAhead → daysAhead falls back to 6
+    cfg = parseSchedulingConfig({ bookingDaysAhead: null });
+    expect(cfg.daysAhead).toBe(6);
+
+    // String for autoNotifyPassengers → falls back to true
+    cfg = parseSchedulingConfig({ autoNotifyPassengers: 'true' });
+    expect(cfg.autoNotifyPassengers).toBe(true);
+
+    // NaN for bookingWindowEndHour → cutoffHour falls back to 20
+    cfg = parseSchedulingConfig({ bookingWindowEndHour: NaN });
+    expect(cfg.cutoffHour).toBe(20);
+
+    // Array for bookingDaysAhead → daysAhead falls back to 6
+    cfg = parseSchedulingConfig({ bookingDaysAhead: [5] as unknown });
+    expect(cfg.daysAhead).toBe(6);
+
+    // Object for autoNotifyPassengers → falls back to true
+    cfg = parseSchedulingConfig({ autoNotifyPassengers: {} as unknown });
+    expect(cfg.autoNotifyPassengers).toBe(true);
+
+    // Infinity for bookingWindowEndHour → cutoffHour falls back to 20
+    cfg = parseSchedulingConfig({ bookingWindowEndHour: Infinity });
+    expect(cfg.cutoffHour).toBe(20);
+
+    // -Infinity for bookingDaysAhead → daysAhead falls back to 6
+    cfg = parseSchedulingConfig({ bookingDaysAhead: -Infinity });
+    expect(cfg.daysAhead).toBe(6);
+  });
 });
