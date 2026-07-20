@@ -37,7 +37,7 @@ An admin can set "Booking Cutoff Time = 7 PM," see it save, and observe **no cha
 
 ## 2. Goals
 
-1. Make the admin-configured **booking cutoff hour** actually govern student booking (wire `admin_settings` → enforcement).
+1. Make the admin-configured **booking cutoff hour** AND the **bookable horizon length** ("booking days available" = how many days ahead) actually govern student booking (wire `admin_settings` → enforcement).
 2. Deliver **automatic** daily learner booking reminders (existing reminder logic + a real trigger), reflecting the configured cutoff.
 3. Reduce attendance to **Onward (morning) only** — remove the Return/evening path from settings and the scan flow, without destroying historical data.
 4. Make the **Notifications / Security / System** tabs real and honest — controls that affect real behavior, real read-only data, and removal of misleading fakes.
@@ -45,7 +45,7 @@ An admin can set "Booking Cutoff Time = 7 PM," see it save, and observe **no cha
 
 ## 3. Non-goals
 
-- Changing the weekly Mon–Sat booking **horizon** shape (`bookableDates()` / `bookingWeekEnd()`) — only the daily cutoff hour is configurable.
+- Per-weekday selection of which days are bookable — only the horizon **length** (`bookingDaysAhead` = how many days ahead) and the daily cutoff hour are configurable. Sunday remains the fixed weekly holiday and service-calendar exceptions still apply.
 - Building email / SMS / web-push channels.
 - Implementing app-side session timeout, 2FA, IP restriction, or password expiry (owned by the external identity provider).
 - Deleting historical `tms_attendance` return rows or the `tms_attendance_window` return row.
@@ -61,28 +61,31 @@ Each phase is independently shippable, testable, and mergeable.
 
 - `lib/booking/window.ts`
   - `cutoffFor(travelDate: string, cutoffHour = 20): Date` — add an optional hour parameter; default preserves current behavior. Internally replace the `CUTOFF_HOUR_IST` constant use with the param.
-  - Keep `bookableDates`, `bookingWeekEnd`, `isSunday`, `isBookingOpen`, `dayStatus` behaviourally unchanged; where they call `cutoffFor` with no hour they keep the 20:00 default (so unrelated callers are unaffected).
+  - `bookableDates(now = new Date(), daysAhead = 7): string[]` — replace the fixed weekly window with a **configurable rolling horizon**: `today+1 … today+daysAhead` inclusive. Default `7` (closest to the old "one week" feel). Sundays inside the range stay in the list but remain non-bookable via `isSunday` (unchanged). `bookingWeekEnd()` becomes unused by the horizon; retain only if still referenced elsewhere, otherwise remove with its tests.
+  - `isBookingOpen`, `dayStatus`, `isCancelable` accept the same optional `daysAhead`/`cutoffHour` (defaulting) so unrelated callers are unaffected; `isSunday` unchanged.
 - `lib/booking/calendar.ts`
-  - `effectiveOpen(date, opts)` — accept an optional `cutoffHour` in `opts`; use it when computing the fallback deadline (`cutoffFor(date, cutoffHour)`); a per-date `window.deadline` override still wins.
+  - `effectiveOpen(date, opts)` — accept optional `cutoffHour` AND `daysAhead` in `opts`; use them for the fallback deadline (`cutoffFor(date, cutoffHour)`) and the horizon check (`bookableDates(now, daysAhead)`); a per-date `window.deadline` override still wins over the cutoff.
+  - `cellStatus` / `buildMonthCells` — thread `daysAhead` so the calendar's `out_of_horizon` greying matches the configured horizon.
 - New `lib/settings/scheduling.ts`
-  - `loadSchedulingConfig(svc): Promise<{ enableBookingTimeWindow: boolean; cutoffHour: number; autoNotifyPassengers: boolean }>` — reads the `admin_settings` row (`setting_type='scheduling'`), returns a safe default (`{ enableBookingTimeWindow: true, cutoffHour: 20, autoNotifyPassengers: true }`) if missing/malformed. Clamps `cutoffHour` to 0..23. `cutoffHour` is sourced from the stored `bookingWindowEndHour`. This single loader is the shared source of truth used by both Phase 1 (enforcement) and Phase 2 (reminders).
-  - Semantics: `enableBookingTimeWindow === false` ⇒ the daily time-cutoff is **bypassed** (booking stays open until the travel day, still within the weekly horizon and still blocked on Sundays / service-calendar exceptions).
+  - `loadSchedulingConfig(svc): Promise<{ enableBookingTimeWindow: boolean; cutoffHour: number; daysAhead: number; autoNotifyPassengers: boolean }>` — reads the `admin_settings` row (`setting_type='scheduling'`), returns a safe default (`{ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead: 7, autoNotifyPassengers: true }`) if missing/malformed. Clamps `cutoffHour` to 0..23 and `daysAhead` to 1..14. `cutoffHour` ← stored `bookingWindowEndHour`; `daysAhead` ← stored `bookingDaysAhead`. This single loader is the shared source of truth used by Phase 1 (enforcement), Phase 2 (reminders), and the student board.
+  - Semantics: `enableBookingTimeWindow === false` ⇒ the daily time-cutoff is **bypassed** (booking stays open until the travel day, still within the configured `daysAhead` horizon and still blocked on Sundays / service-calendar exceptions).
 - `app/api/student/bookings/route.ts`
-  - In the `book` action (and the board's cutoff display), load `loadSchedulingConfig(svc)` and thread `cutoffHour` (and the enable flag) into `effectiveOpen` / `cutoffFor`. When the enable flag is off, skip the time-cutoff gate but keep horizon + Sunday + exception gates.
+  - GET board: load `loadSchedulingConfig(svc)` and build the horizon with `bookableDates(now, daysAhead)`; the month view threads `daysAhead` into `buildMonthCells` for correct greying.
+  - `book` action: thread `cutoffHour`, `daysAhead`, and the enable flag into `effectiveOpen`. When `enableBookingTimeWindow` is off, skip the time-cutoff gate but keep horizon + Sunday + exception gates.
 - `app/api/admin/settings/route.ts` — **harden**:
   - Convert `GET`/`POST`/`PUT` to `withAuth`; require `requirePerm('tms.settings.manage')` on writes (GET may allow `tms.settings.view` or the same manage perm — decided in plan).
   - Replace direct `supabaseAdmin` import with `createServiceRoleClient()` inside the handler after the permission check.
   - Add `logActivity({ module: 'settings', action: 'update', ... })` on write, mirroring the attendance-windows route.
-  - Keep the existing validation (`bookingWindowEndHour` 0..23; `bookingWindowDaysBefore >= 1`).
+  - Validation: `bookingWindowEndHour` 0..23; `bookingDaysAhead` 1..14 (replacing the old `bookingWindowDaysBefore >= 1` check).
 
 **Rejected alternative:** reading `admin_settings` directly inside `window.ts`. Rejected — it would make the pure module impure, add a DB call to calendar math, and break `window.test.ts`.
 
-**UI:** the Scheduling tab keeps the fields that now drive behavior (`enableBookingTimeWindow`, `bookingWindowEndHour` cutoff); the "Current Booking Policy" info box stops hardcoding "8 PM" and renders the configured cutoff. Fields that still would not affect anything under the chosen scope — **"Booking Window (Days Before)"** (horizon is fixed) and the **"Reminder Hours"** checkboxes (the reminder model is "daily, before cutoff", not the [24,2]-hour model) — are either removed or relabeled read-only, to keep with the "no decorative settings" principle. `autoNotifyPassengers` stays but its canonical control moves to the Notifications tab (Phase 4).
+**UI:** the Scheduling tab keeps the fields that now drive behavior — `enableBookingTimeWindow`, `bookingWindowEndHour` (cutoff), and the repurposed days field now storing **`bookingDaysAhead`**, labeled **"Booking days available (days ahead)"** (min 1, max 14). The "Current Booking Policy" info box stops hardcoding "8 PM" and renders the configured cutoff + the configured horizon. The **"Reminder Hours"** checkboxes (the reminder model is "daily, before cutoff", not the [24,2]-hour model) are removed/relabeled read-only, per the "no decorative settings" principle. `autoNotifyPassengers` stays but its canonical control moves to the Notifications tab (Phase 4).
 
 ### Phase 2 — Automatic learner booking reminders
 
 - New `lib/booking/reminders.ts`
-  - `sendBookingReminders(svc, { createdBy }): Promise<{ date: string; reminded: number }>` — the current body of `send-reminders/route.ts`, extracted verbatim, plus:
+  - `sendBookingReminders(svc, { createdBy }): Promise<{ date: string; reminded: number }>` — the current body of `send-reminders/route.ts`, extracted verbatim. **Targeting (explicit):** the reminder goes ONLY to transport learners (`bus_required`, with a route + a login profile) who have **no booking** for the target date and were not already reminded — learners who already booked, and non-transport users, are never notified. Plus:
     - Read `loadSchedulingConfig(svc)`; if `autoNotifyPassengers` is off (from the scheduling settings), return `{ date, reminded: 0 }` without dispatching.
     - Build the message body from the configured cutoff hour (e.g. "closes at 7 PM today"), not a hardcoded 8 PM.
   - Preserve the existing idempotency (dedupe via the `url` marker + prior recipients).
@@ -140,7 +143,7 @@ Writes become onward-only; historical reads stay intact (no destructive migratio
 ## 6. Testing
 
 - Verify with **build + vitest**, not `tsc` (chronically red on main; not build-gated).
-- Phase 1: unit tests for `cutoffFor(hour)` and `effectiveOpen` with a configured cutoff; update `lib/booking/window.test.ts` and `lib/booking/calendar.test.ts` (they assert exact windows for fixed clocks).
+- Phase 1: unit tests for `cutoffFor(hour)`, `effectiveOpen` with a configured cutoff, and `bookableDates(now, daysAhead)` for the configurable horizon (assert `daysAhead=1` ⇒ tomorrow only; `daysAhead=7`; Sundays inside the range still non-bookable). Update `lib/booking/window.test.ts` and `lib/booking/calendar.test.ts` (they assert exact windows for fixed clocks, so the fixed-weekly-window assertions must be rewritten for the N-day horizon).
 - Phase 2: unit test for `sendBookingReminders` (autoNotify off ⇒ 0; message reflects configured cutoff; idempotency path). Cron route: secret-required (401 without, 200 with).
 - Phase 3: update `lib/boarding/attendance-window.test.ts` for onward-only `activeDirection`.
 - Auth-gated end-to-end flows need the **user's** authenticated browser to smoke-test; headless checks are limited to build + curl probes (307/401).
@@ -153,7 +156,8 @@ Writes become onward-only; historical reads stay intact (no destructive migratio
 
 ## 8. Risks & mitigations
 
-- **Changing a pure booking lib** could shift the student gate unexpectedly → default params preserve current behavior; tests assert both default (20:00) and configured cases.
+- **Changing a pure booking lib** could shift the student gate unexpectedly → default params preserve current cutoff behavior; tests assert both default (20:00) and configured cases.
+- **Horizon change is a behavior change, not just a default** — replacing the variable Mon–Sat weekly window with a fixed `daysAhead=7` means the exact set of bookable days shifts (e.g. on a Monday the old window ended Saturday; N=7 ends next Monday). This is intended (admin now controls it) but must be called out at rollout, and the per-date override note in `[[project_booking_window]]` ("overrides only extend within the current week") becomes "within the `daysAhead` horizon". Seed the setting explicitly (e.g. `bookingDaysAhead=6`) if the office wants to preserve the "this week only" feel.
 - **Cron double-fire** → endpoint idempotency (existing) makes it safe.
 - **Removing evening attendance** is cross-cutting (scan flow) → keep reads tolerant of legacy `'return'` rows; ship as its own phase with its own smoke test.
 - **Settings API hardening** could break the current unauthenticated caller (the Settings page fetch) → the page is already an authenticated admin context via the proxy; verify the perm is granted to the admin roles.
@@ -168,4 +172,12 @@ Writes become onward-only; historical reads stay intact (no destructive migratio
 
 ## 10. Open questions
 
-None outstanding — the four scope forks were resolved: wire the cutoff hour; remove evening marking entirely; Supabase pg_cron trigger; make the decorative tabs real where feasible.
+None outstanding. Resolved scope decisions:
+1. Wire the booking **cutoff hour** into enforcement.
+2. Make **"booking days available"** a real setting — a configurable rolling **N-day-ahead** horizon (`bookingDaysAhead`), NOT per-weekday selection.
+3. Booking reminders go **only to non-booked** transport learners.
+4. **Remove evening marking entirely** from attendance (onward-only).
+5. Trigger reminders via **Supabase pg_cron**.
+6. Make the decorative **Notifications/Security/System** tabs real where feasible; drop the fakes.
+
+Deferred to the implementation plan (not design ambiguities): exact GET permission on the settings route; the `createdBy` value the cron uses for `tms_notification`; whether `bookingWeekEnd()` is deleted or retained; the default `bookingDaysAhead` seed value the office prefers.
