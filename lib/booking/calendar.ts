@@ -36,40 +36,43 @@ export function monthDays(monthStr: string): string[] {
   return out;
 }
 
-/** Is booking open for a date, honoring an optional window override? */
+/** Is booking open for a date, honoring an optional window override + injected config? */
 export function effectiveOpen(
   date: string,
-  opts: { window?: WindowOverride; now?: Date }
+  opts: { window?: WindowOverride; now?: Date; cutoffHour?: number; daysAhead?: number }
 ): boolean {
   const now = opts.now ?? new Date();
   if (isSunday(date)) return false; // weekly holiday — never bookable
   if (opts.window && !opts.window.enabled) return false;
-  if (!bookableDates(now).includes(date)) return false;
+  if (!bookableDates(now, opts.daysAhead).includes(date)) return false;
   const deadlineMs = opts.window?.deadline
     ? new Date(opts.window.deadline).getTime()
-    : cutoffFor(date).getTime();
+    : cutoffFor(date, opts.cutoffHour).getTime();
   return now.getTime() < deadlineMs;
 }
 
 /** Status for ONE date. A service-calendar exception wins over everything. */
 export function cellStatus(
   date: string,
-  opts: { hasBooking: boolean; exception?: CalendarException; window?: WindowOverride; now?: Date }
+  opts: {
+    hasBooking: boolean;
+    exception?: CalendarException;
+    window?: WindowOverride;
+    now?: Date;
+    cutoffHour?: number;
+    daysAhead?: number;
+  }
 ): CalendarStatus {
   if (opts.exception) return opts.exception.kind; // 'holiday' | 'no_service'
-  // Sunday is a fixed weekly holiday. A real admin exception (above) still wins
-  // so a named holiday can show its note; otherwise every Sunday reads weekly-off.
-  // A legacy Sunday booking stays visible as 'locked' (non-actionable here).
   if (isSunday(date)) return opts.hasBooking ? 'locked' : 'weekly_off';
   const now = opts.now ?? new Date();
-  if (!bookableDates(now).includes(date)) return opts.hasBooking ? 'locked' : 'out_of_horizon';
-  // window-aware open/closed; falls back to the pure dayStatus when no window.
+  if (!bookableDates(now, opts.daysAhead).includes(date)) return opts.hasBooking ? 'locked' : 'out_of_horizon';
   if (opts.window) {
-    const open = effectiveOpen(date, { window: opts.window, now });
+    const open = effectiveOpen(date, { window: opts.window, now, cutoffHour: opts.cutoffHour, daysAhead: opts.daysAhead });
     if (opts.hasBooking) return open ? 'booked' : 'locked';
     return open ? 'open' : 'closed';
   }
-  const s = dayStatus(opts.hasBooking, date, now);
+  const s = dayStatus(opts.hasBooking, date, now, { cutoffHour: opts.cutoffHour, daysAhead: opts.daysAhead });
   return s === 'not_booked' ? 'open' : s;
 }
 
@@ -81,6 +84,8 @@ export function buildMonthCells(
     exceptions: Map<string, CalendarException>;
     windows?: Map<string, WindowOverride>;
     now?: Date;
+    cutoffHour?: number;
+    daysAhead?: number;
   }
 ): DayCell[] {
   return monthDays(monthStr).map((date) => {
@@ -92,6 +97,8 @@ export function buildMonthCells(
         exception,
         window: opts.windows?.get(date),
         now: opts.now,
+        cutoffHour: opts.cutoffHour,
+        daysAhead: opts.daysAhead,
       }),
       note: exception?.note ?? null,
     };

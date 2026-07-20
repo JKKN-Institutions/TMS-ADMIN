@@ -83,3 +83,17 @@ describe('Sunday weekly holiday', () => {
     expect(effectiveOpen('2026-06-28', { window: { enabled: true, deadline: null, capacityOverride: null }, now: NOW })).toBe(false);
   });
 });
+
+describe('effectiveOpen with injected config', () => {
+  it('closes a date that is outside the configured daysAhead horizon', () => {
+    // Monday 2026-06-22; daysAhead=1 => only 2026-06-23 is in the horizon
+    const now = new Date('2026-06-22T03:00:00Z');
+    expect(effectiveOpen('2026-06-23', { now, daysAhead: 1 })).toBe(true);
+    expect(effectiveOpen('2026-06-24', { now, daysAhead: 1 })).toBe(false);
+  });
+  it('applies a configured cutoff hour to the fallback deadline', () => {
+    // 19:00 IST cutoff: 13:29 UTC prior day open, 13:31 closed
+    expect(effectiveOpen('2026-06-23', { now: new Date('2026-06-22T13:29:00Z'), cutoffHour: 19 })).toBe(true);
+    expect(effectiveOpen('2026-06-23', { now: new Date('2026-06-22T13:31:00Z'), cutoffHour: 19 })).toBe(false);
+  });
+});
