@@ -8,6 +8,7 @@ import { bookableDates, cutoffFor, dayStatus, isCancelable, isSunday } from '@/l
 import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
 import { isOverCapacity } from '@/lib/booking/capacity';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
+import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 
 /**
  * Self-scoped daily booking board + book/cancel. The learner (and their route/stop)
@@ -28,8 +29,16 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
     const learner = await getLearnerRowForUser(auth);
     if (!learner) return NextResponse.json({ error: 'Learner profile not found' }, { status: 404 });
 
-    const dates = bookableDates();
     const svc = createServiceRoleClient();
+    const cfg = await loadSchedulingConfig(svc);
+    // When the admin has disabled the daily time-window, bypass ONLY the time
+    // cutoff — cutoffHour: 24 makes cutoffFor() land at 00:00 IST of the travel
+    // date itself, so booking stays open through the whole prior day. The
+    // horizon (daysAhead) and Sunday / service-calendar gates still apply.
+    const winOpts = cfg.enableBookingTimeWindow
+      ? { cutoffHour: cfg.cutoffHour, daysAhead: cfg.daysAhead }
+      : { cutoffHour: 24, daysAhead: cfg.daysAhead };
+    const dates = bookableDates(new Date(), cfg.daysAhead);
 
     let routeLabel: string | null = null;
     let stopLabel: string | null = null;
@@ -96,10 +105,10 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
         attendance.set(r.trip_date, list);
       }
 
-      const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows }).map((c) => ({
+      const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows, cutoffHour: winOpts.cutoffHour, daysAhead: winOpts.daysAhead }).map((c) => ({
         ...c,
         cutoff: c.status === 'open' || c.status === 'booked'
-          ? (windows.get(c.date)?.deadline ?? cutoffFor(c.date).toISOString())
+          ? (windows.get(c.date)?.deadline ?? cutoffFor(c.date, winOpts.cutoffHour).toISOString())
           : null,
         attendance: attendance.get(c.date),
       }));
@@ -126,13 +135,19 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
 
     const days = dates.map((date) => ({
       date,
-      status: dayStatus(booked.has(date), date),
-      cutoff: cutoffFor(date).toISOString(),
+      status: dayStatus(booked.has(date), date, new Date(), winOpts),
+      cutoff: cutoffFor(date, winOpts.cutoffHour).toISOString(),
     }));
 
     return NextResponse.json({
       success: true,
-      data: { routeLabel, stopLabel, assigned: !!learner.transport_route_id, days },
+      data: {
+        routeLabel,
+        stopLabel,
+        assigned: !!learner.transport_route_id,
+        days,
+        maxBookableDate: dates[dates.length - 1] ?? null,
+      },
     });
   } catch (e) {
     console.error('student/bookings GET error:', e);
@@ -164,8 +179,12 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       if (isSunday(travelDate)) {
         return NextResponse.json({ error: 'Sunday is a weekly holiday — buses do not run that day' }, { status: 409 });
       }
+      const cfg = await loadSchedulingConfig(svc);
       const winMap = await loadWindows(svc, learner.transport_route_id, travelDate, travelDate);
-      if (!effectiveOpen(travelDate, { window: winMap.get(travelDate) })) {
+      const openOpts = cfg.enableBookingTimeWindow
+        ? { window: winMap.get(travelDate), cutoffHour: cfg.cutoffHour, daysAhead: cfg.daysAhead }
+        : { window: winMap.get(travelDate), cutoffHour: 24, daysAhead: cfg.daysAhead };
+      if (!effectiveOpen(travelDate, openOpts)) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });
       }
       const blocking = await loadExceptions(svc, learner.transport_route_id, travelDate, travelDate);
