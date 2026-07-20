@@ -59,7 +59,7 @@ export default function BillManagementPage() {
   );
   const yearLabel = years.find((y) => y.id === selectedYear)?.name;
 
-  const { data: bills, isLoading: billsLoading } = useQuery({
+  const { data: bills, isLoading: billsLoading, isError: billsError } = useQuery({
     queryKey: ['bill-management', selectedYear],
     queryFn: () => fetchBills(selectedYear),
     enabled: !!selectedYear,
@@ -138,7 +138,9 @@ export default function BillManagementPage() {
       {!selectedYear ? (
         <EmptyMsg>Select a transport year to view billing.</EmptyMsg>
       ) : view === 'analytics' ? (
-        billsLoading || !summary ? (
+        billsError ? (
+          <EmptyMsg>Couldn&apos;t load billing data. Please try again.</EmptyMsg>
+        ) : billsLoading || !summary ? (
           <div className="flex min-h-[40vh] items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-green-600" />
           </div>

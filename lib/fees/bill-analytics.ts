@@ -4,7 +4,7 @@
 // filter (learner && not cancelled) mirrors summarizeBills so charts and KPI
 // tiles reconcile — staff are staff_deferred (no money), cancelled bills are void.
 
-import type { TransportBillRow } from './bills';
+import { isActiveLearnerBill, type TransportBillRow } from './bills';
 
 export interface LearnerPaymentBreakdown {
   fullyPaid: number;
@@ -24,8 +24,7 @@ export interface TermStat {
   learners: number;
 }
 
-const activeLearnerRows = (rows: TransportBillRow[]) =>
-  rows.filter((r) => r.person_type === 'learner' && r.status !== 'cancelled');
+const activeLearnerRows = (rows: TransportBillRow[]) => rows.filter(isActiveLearnerBill);
 
 // Distinct-learner payment status. A learner spans several term rows, so we fold
 // their terms together first, then bucket once.
