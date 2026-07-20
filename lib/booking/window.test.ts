@@ -101,6 +101,25 @@ describe('isCancelable', () => {
     expect(isBookingOpen('2026-06-28', new Date('2026-06-27T06:00:00Z'))).toBe(false);
     expect(isCancelable('2026-06-28', new Date('2026-06-27T06:00:00Z'))).toBe(true);
   });
+
+  // Regression: the book route and the cancel route must be driven by the SAME
+  // admin-configured opts. Before this fix, cancel always ran at the hardcoded
+  // defaults (cutoffHour 20 / daysAhead 6) even when book() honored a wider
+  // configured horizon — trapping a learner in a booking they couldn't cancel.
+  it('agrees with isBookingOpen under a non-default horizon (daysAhead=10)', () => {
+    const now = new Date('2026-06-22T03:00:00Z'); // Monday, IST morning
+    const opts = { daysAhead: 10 };
+    const dayPlus8 = addDays(istToday(now), 8);
+
+    // Under the configured horizon, day+8 is both bookable and cancelable.
+    expect(isBookingOpen(dayPlus8, now, opts)).toBe(true);
+    expect(isCancelable(dayPlus8, now, opts)).toBe(true);
+
+    // Under the DEFAULT horizon (no opts passed), the same date is neither —
+    // proving the divergence this test guards against was real.
+    expect(isBookingOpen(dayPlus8, now)).toBe(false);
+    expect(isCancelable(dayPlus8, now)).toBe(false);
+  });
 });
 
 describe('dayStatus', () => {

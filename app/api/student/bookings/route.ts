@@ -182,15 +182,20 @@ async function mutate(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
+    // Loaded once, above the book/cancel branch, so BOTH paths agree on the
+    // same effective cutoff/horizon — see window.test.ts for the regression
+    // this guards (a booking that book() allows but cancel() used to reject).
+    const cfg = await loadSchedulingConfig(svc);
+    const winOpts = cfg.enableBookingTimeWindow
+      ? { cutoffHour: cfg.cutoffHour, daysAhead: cfg.daysAhead }
+      : { cutoffHour: 24, daysAhead: cfg.daysAhead };
+
     if (action === 'book') {
       if (isSunday(travelDate)) {
         return NextResponse.json({ error: 'Sunday is a weekly holiday — buses do not run that day' }, { status: 409 });
       }
-      const cfg = await loadSchedulingConfig(svc);
       const winMap = await loadWindows(svc, learner.transport_route_id, travelDate, travelDate);
-      const openOpts = cfg.enableBookingTimeWindow
-        ? { window: winMap.get(travelDate), cutoffHour: cfg.cutoffHour, daysAhead: cfg.daysAhead }
-        : { window: winMap.get(travelDate), cutoffHour: 24, daysAhead: cfg.daysAhead };
+      const openOpts = { window: winMap.get(travelDate), ...winOpts };
       if (!effectiveOpen(travelDate, openOpts)) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });
       }
@@ -241,8 +246,11 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       });
     }
 
-    // cancel
-    if (!isCancelable(travelDate)) {
+    // cancel — uses the SAME cfg-derived winOpts as book() above, so a date the
+    // learner was allowed to book is never one they get trapped unable to cancel.
+    // isCancelable() deliberately does not gate on Sunday (a pre-existing Sunday
+    // booking must stay cancelable), so no isSunday() check is added here.
+    if (!isCancelable(travelDate, new Date(), winOpts)) {
       return NextResponse.json({ error: 'Cancellation is closed for that date' }, { status: 409 });
     }
     const del = await svc
