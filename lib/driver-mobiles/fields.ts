@@ -2,6 +2,10 @@
 // Single source of truth for tms_driver_mobile writable fields + payload
 // normalisation. Used by the driver-mobiles API so create/update share one path.
 
+// Private Supabase Storage bucket holding phone photos. Shared by every route
+// that uploads or signs a driver-mobile image, so the string lives in one place.
+export const DRIVER_MOBILE_IMAGE_BUCKET = 'tms-driver-mobile-images';
+
 export const ENUM_FIELDS: Record<string, readonly string[]> = {
   status: ['assigned', 'returned', 'damaged', 'lost'],
   condition: ['new', 'used', 'refurbished'],
@@ -9,7 +13,7 @@ export const ENUM_FIELDS: Record<string, readonly string[]> = {
 
 export const NUM_FIELDS = ['purchase_cost'] as const;
 
-export const DATE_FIELDS = ['supplied_date', 'purchase_date', 'warranty_expiry'] as const;
+export const DATE_FIELDS = ['supplied_date', 'purchase_date', 'warranty_expiry', 'handover_date'] as const;
 
 export const UUID_FIELDS = ['driver_staff_id', 'route_id'] as const;
 
@@ -18,6 +22,7 @@ export const TEXT_FIELDS = [
   'sim_number', 'phone_number', 'network_provider',
   'supplier_name', 'invoice_number',
   'storage_capacity', 'serial_number', 'accessories',
+  'handover_by', 'image_path',
 ] as const;
 
 // Every column the API will write (whitelist).
