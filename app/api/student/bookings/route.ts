@@ -115,7 +115,14 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
 
       return NextResponse.json({
         success: true,
-        data: { routeLabel, stopLabel, assigned: !!learner.transport_route_id, month: monthParam, cells },
+        data: {
+          routeLabel,
+          stopLabel,
+          assigned: !!learner.transport_route_id,
+          month: monthParam,
+          cells,
+          maxBookableDate: dates[dates.length - 1] ?? null,
+        },
       });
     }
 
