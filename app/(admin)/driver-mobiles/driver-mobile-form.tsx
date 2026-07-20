@@ -60,23 +60,27 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Best-effort: resolve a signed preview URL for a stored image path. Never throws —
+  // returns null on any failure so a preview hiccup can't masquerade as an upload failure.
+  const fetchPreviewUrl = async (path: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/admin/driver-mobiles/image?path=${encodeURIComponent(path)}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      const json = await res.json();
+      return res.ok && json.success ? json.url : null;
+    } catch {
+      return null;
+    }
+  };
+
   // Edit mode: if the record already has an image, fetch a signed url to preview it.
   useEffect(() => {
     const path = initial?.image_path;
     if (!path) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/admin/driver-mobiles/image?path=${encodeURIComponent(path)}`, {
-          cache: 'no-store',
-          credentials: 'same-origin',
-        });
-        const json = await res.json();
-        if (!cancelled && res.ok && json.success) setImagePreview(json.url);
-      } catch {
-        /* preview is best-effort; ignore */
-      }
-    })();
+    fetchPreviewUrl(path).then((url) => { if (!cancelled) setImagePreview(url); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -98,12 +102,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
       set('image_path', json.path);
-      const sres = await fetch(`/api/admin/driver-mobiles/image?path=${encodeURIComponent(json.path)}`, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-      });
-      const sjson = await sres.json();
-      setImagePreview(sres.ok && sjson.success ? sjson.url : null);
+      setImagePreview(await fetchPreviewUrl(json.path));
       toast.success('Image uploaded');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
