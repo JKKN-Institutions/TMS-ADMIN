@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save, Plus, Trash2, Wand2, Layers } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchMasters, fetchTransportYearOptions, type MasterOption } from './fee-api';
@@ -113,6 +114,7 @@ function TermList({
 
 export function FeeStructureForm({ mode, feeId, initial }: Props) {
   const router = useRouter();
+  const qc = useQueryClient();
   const bandKey = useRef(0);
   const newBand = (years: number[] = []): BandRow => ({
     key: `b${bandKey.current++}`, label: '', study_years: years, total_amount: '', terms: [blankTerm(1)],
@@ -261,6 +263,14 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
       toast.success(mode === 'create' ? 'Fee structure created' : 'Fee structure updated');
+      // router.refresh() only busts the RSC cache; the list/detail pages read
+      // TanStack Query, so without this the save looks like it did nothing.
+      // Coverage is derived from the structure's audience/bands, so it goes too.
+      qc.invalidateQueries({ queryKey: ['fee-structures'] });
+      if (feeId) {
+        qc.invalidateQueries({ queryKey: ['fee-structure', feeId] });
+        qc.invalidateQueries({ queryKey: ['fee-coverage', feeId] });
+      }
       router.push(mode === 'create' ? '/fees' : `/fees/${feeId}`);
       router.refresh();
     } catch (err) {

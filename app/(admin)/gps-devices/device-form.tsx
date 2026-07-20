@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -37,6 +38,7 @@ export function GpsDeviceForm({
   initial?: Partial<GpsDeviceFormValues>;
 }) {
   const router = useRouter();
+  const qc = useQueryClient();
   const [form, setForm] = useState<GpsDeviceFormValues>({
     device_id: initial?.device_id ?? '',
     device_name: initial?.device_name ?? '',
@@ -97,6 +99,10 @@ export function GpsDeviceForm({
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
       toast.success(mode === 'create' ? 'GPS device added' : 'GPS device updated');
+      // router.refresh() only busts the RSC cache; the list/detail pages read
+      // TanStack Query, so without this the save looks like it did nothing.
+      qc.invalidateQueries({ queryKey: ['gps-devices'] });
+      if (deviceId) qc.invalidateQueries({ queryKey: ['gps-device', deviceId] });
       router.push(mode === 'create' ? '/gps-devices' : `/gps-devices/${deviceId}`);
       router.refresh();
     } catch (err) {

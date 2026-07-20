@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchDriverOptions, fetchRouteOptions } from './driver-mobile-api';
@@ -53,6 +53,7 @@ interface DriverMobileFormProps {
 
 export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobileFormProps) {
   const router = useRouter();
+  const qc = useQueryClient();
   const [form, setForm] = useState<FormValues>({ ...EMPTY, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const [saving, setSaving] = useState(false);
@@ -174,6 +175,10 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
       toast.success(mode === 'create' ? 'Tracking mobile added' : 'Tracking mobile updated');
+      // router.refresh() only busts the RSC cache; the list/detail pages read
+      // TanStack Query, so without this the save looks like it did nothing.
+      qc.invalidateQueries({ queryKey: ['driver-mobiles'] });
+      if (driverMobileId) qc.invalidateQueries({ queryKey: ['driver-mobile', driverMobileId] });
       router.push(mode === 'create' ? '/driver-mobiles' : `/driver-mobiles/${driverMobileId}`);
       router.refresh();
     } catch (err) {
