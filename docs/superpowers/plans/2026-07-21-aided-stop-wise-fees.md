@@ -18,7 +18,12 @@
 - **No existing table's columns change.** Only an additive `CHECK` value on `tms_fee_structure.fee_mode`. `tms_fee_structure_term` and `tms_fee_structure_year_band` are untouched.
 - **`lib/fees/applicability.ts` is not modified** — the staff cron also calls it.
 - **`sum(terms) === annual` exactly.** Rounding remainder goes on the final term.
-- **Verification reality:** `npm run lint` crashes (circular ESLint config) and `npm run type-check` is chronically red on `main` without gating `next build` (`ignoreBuildErrors: true`). Neither is a regression gate. Use `npm test` (vitest), `npm run build`, and path-scoped `npx tsc --noEmit` on changed files.
+- **Verification reality:** `npm run lint` crashes (circular ESLint config) — **do not run it**. `npm run type-check` is chronically red (~540 pre-existing errors) and does not gate `next build` (`ignoreBuildErrors: true`). Type success is defined as: `npx tsc --noEmit 2>&1 | grep <changed-file>` returns **zero lines**. Do not treat the repo-wide red tsc as a regression.
+- **VITEST: the `@/` alias does NOT resolve under vitest.** Test files and any `lib/` source they pull in must use **relative** imports (`./stop-rate`, `./types`). Route files under `app/` may use `@/` — Next resolves it. Single file: `npx vitest run <path>`.
+- **Test baseline on this branch is 232 passed / 28 files.** Any task's suite run must meet or exceed it.
+- **`npm run build` is CONTESTED** — another session's dev server (PID 12328) holds port 3001 and reads `.next/`. Do not run `npm run build` or start a dev server unless the controller says the conflict is resolved; use the tsc-grep gate instead.
+- **Auth-gated browser verification is the HUMAN's job** — the agent's Chrome is unauthenticated. Implementers verify via vitest + tsc-grep only, and record any browser step as owed.
+- **Git:** explicit `git add <exact paths>` only — **never** bare `-A` / `-u` (the worktree carries unrelated dirty `.claude/` and `next-env.d.ts`). Commit locally; **never push**. **No history rewrites** — never `--amend`, `rebase`, or `reset`.
 - **API response shape:** success `{ success: true, data, message? }`, failure `{ error: string }` with an HTTP status.
 - **Migrations** are applied to the live DB *and* committed as `.sql` under `supabase/migrations/`.
 - **Commit trailer** on every commit: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
@@ -566,8 +571,10 @@ export interface ResolveContext {
   currentYear: number | null;
   flatTerms: BillableTerm[];
   bands: ResolveBand[];
-  stopTerms: StopScheduleTerm[];
-  stopRateByStopId: Map<string, number>;
+  // Only read when feeMode === 'stop_wise'. Optional so the flat/tiered call
+  // sites need not pass empty placeholders they would never use.
+  stopTerms?: StopScheduleTerm[];
+  stopRateByStopId?: Map<string, number>;
 }
 
 export type UnresolvedReason = 'no_matching_band' | 'no_stop' | 'no_stop_rate';
@@ -642,8 +649,11 @@ with:
 
 ```ts
 import { currentYearOf } from '@/lib/fees/year-of-study';
-import { resolvePersonTerms, type StopScheduleTerm } from '@/lib/fees/resolve-terms';
+import { resolvePersonTerms } from '@/lib/fees/resolve-terms';
 ```
+
+`deriveStudyYear` and `bandForYear` move out of this file entirely — they are now called only from
+inside `resolvePersonTerms`. Removing them from the import is part of the rewire, not an oversight.
 
 - [ ] **Step 2: Replace the resolution loop**
 
@@ -654,27 +664,19 @@ Replace lines 117-131 (the block beginning `// Resolve each person to the terms.
     // are skipped + reported, never guessed. See lib/fees/resolve-terms.ts.
     const resolved: Resolved[] = [];
     let unresolved = 0;
-    const stopTerms: StopScheduleTerm[] = [];
-    const stopRateByStopId = new Map<string, number>();
     for (const person of people) {
       const outcome = resolvePersonTerms(
-        {
-          admission_year: person.admission_year,
-          transport_stop_id: null,
-        },
-        {
-          feeMode: fs.fee_mode,
-          currentYear,
-          flatTerms,
-          bands,
-          stopTerms,
-          stopRateByStopId,
-        }
+        { admission_year: person.admission_year, transport_stop_id: null },
+        { feeMode: fs.fee_mode, currentYear, flatTerms, bands }
       );
       if (!outcome.ok) { unresolved++; continue; }
       resolved.push({ person, terms: outcome.terms, band: outcome.band as Band | null });
     }
 ```
+
+`stopTerms` / `stopRateByStopId` are deliberately **not** passed here. This task is
+behaviour-preserving and handles `flat` / `tiered` only; Task 6 adds the stop-wise data. They are
+optional on `ResolveContext` precisely so this call site needs no placeholder.
 
 - [ ] **Step 3: Verify the whole fee test suite still passes**
 
@@ -815,18 +817,27 @@ Then insert this block inside `resolvePersonTerms`, **before** the final `// 'fl
 
 ```ts
   if (ctx.feeMode === 'stop_wise') {
+    const schedule = ctx.stopTerms ?? [];
+    if (!schedule.length) {
+      // The caller must load the schedule before resolving anyone. Throwing
+      // beats returning "unresolved": a missing schedule is a bug affecting
+      // EVERY student, not a data gap affecting one, and it must not be
+      // reported as if some students merely lacked a stop.
+      throw new Error('resolvePersonTerms: stop_wise requires a non-empty stopTerms schedule.');
+    }
     if (!person.transport_stop_id) return { ok: false, reason: 'no_stop' };
-    const annual = ctx.stopRateByStopId.get(person.transport_stop_id);
+
+    const annual = ctx.stopRateByStopId?.get(person.transport_stop_id);
     // `undefined` means no rate row exists — unresolved. A rate of 0 is a real
     // configured value (a free stop) and IS billed, so check for undefined
     // explicitly rather than relying on falsiness.
     if (annual === undefined) return { ok: false, reason: 'no_stop_rate' };
 
-    const amounts = splitAnnual(annual, ctx.stopTerms.map((t) => t.share_percent));
+    const amounts = splitAnnual(annual, schedule.map((t) => t.share_percent));
     return {
       ok: true,
       band: null,
-      terms: ctx.stopTerms.map((t, i) => ({
+      terms: schedule.map((t, i) => ({
         term_no: t.term_no,
         term_label: t.term_label,
         amount: amounts[i],
@@ -836,10 +847,23 @@ Then insert this block inside `resolvePersonTerms`, **before** the final `// 'fl
   }
 ```
 
+Add a test for that guard to the `stop_wise` describe block:
+
+```ts
+  it('throws when the schedule is missing — a bug affecting everyone, not a per-student gap', () => {
+    expect(() =>
+      resolvePersonTerms(
+        { admission_year: 2024, transport_stop_id: 'stop-kachu-palli' },
+        ctx({ feeMode: 'stop_wise', stopRateByStopId: rates, stopTerms: [] })
+      )
+    ).toThrow(/non-empty stopTerms/i);
+  });
+```
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run lib/fees/resolve-terms.test.ts`
-Expected: PASS — 13 tests. The flat/tiered characterization tests must still pass.
+Expected: PASS — 14 tests. The flat/tiered characterization tests must still pass.
 
 - [ ] **Step 5: Commit**
 
@@ -1002,7 +1026,7 @@ Replace the loop body written in Task 4 so it passes the loaded data instead of 
     }
 ```
 
-Note: delete the `const stopTerms` / `const stopRateByStopId` placeholder declarations added in Task 4 Step 2 — the real ones are now declared earlier in Step 3.
+Note: Task 4 deliberately passed no stop data, so there are no placeholder declarations to remove — this step only widens the context object and the person object with the real values loaded in Steps 3 and 4.
 
 - [ ] **Step 6: Surface the reasons in the preview**
 
