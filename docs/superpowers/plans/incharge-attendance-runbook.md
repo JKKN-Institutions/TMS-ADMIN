@@ -5,11 +5,30 @@
    Vercel automatically sends it as `Authorization: Bearer $CRON_SECRET` to scheduled paths.
 2. Deploy. The schedule in `vercel.json` (`30 15 * * *` UTC = 21:00 IST) activates on deploy.
 
-## Manual invocation
+## Dry run — ALWAYS DO THIS FIRST
+    curl -H "Authorization: Bearer $CRON_SECRET" \
+      "https://tmsadmin.jkkn.ai/api/cron/incharge-attendance?dryRun=1"
+
+`?dryRun=1` computes and reports every outcome but **writes nothing and notifies nobody**.
+The response gains a `plan[]` array listing, per staffer, exactly what a real run would do
+(`skip:<reason>` / `warn` / `reset` / `remove`, plus `wouldBill`). Auth is still required.
+
+Use this before any manual invocation, and any time you want to know what tonight's
+21:00 IST run will do. A real run sends notifications to real staff and cannot be undone.
+
+## Manual invocation (REAL — mutates and notifies)
     curl -H "Authorization: Bearer $CRON_SECRET" \
       https://tmsadmin.jkkn.ai/api/cron/incharge-attendance
 
-Returns `{ success, data: { date, evaluated, skipped, warned, removed, billed, errors } }`.
+Returns `{ success, data: { date, dryRun, evaluated, skipped, warned, removed, billed, errors,
+failures: [{ staffEmail, message }], plan: [] } }`.
+
+`failures[]` carries the staff email and reason for every staffer the run could not evaluate —
+check it whenever `errors > 0`. An infrastructure failure is recorded there and deliberately
+does NOT produce a strike.
+
+⚠️ Run it only AFTER 21:00 IST. Earlier in the day, attendance can still legitimately be
+marked, so an earlier run would strike in-charges for work they still have hours to do.
 
 ## Prerequisite for billing
 The loop bills only from an ACTIVE `tms_fee_structure` with `audience='staff'` for the
