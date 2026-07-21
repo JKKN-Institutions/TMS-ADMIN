@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchDriverOptions, fetchRouteOptions } from './driver-mobile-api';
+import { MAX_DRIVER_MOBILE_IMAGES } from '@/lib/driver-mobiles/images';
 
 // Field set mirrors lib/driver-mobiles/fields.ts EDITABLE — a field added here
 // must be whitelisted there too, or the API silently drops it on save.
@@ -34,7 +35,7 @@ interface FormValues {
   notes: string;
   handover_by: string;
   handover_date: string;
-  image_path: string;
+  image_paths: string[];
 }
 
 const EMPTY: FormValues = {
@@ -42,7 +43,7 @@ const EMPTY: FormValues = {
   supplied_date: '', sim_number: '', phone_number: '', network_provider: '',
   purchase_date: '', purchase_cost: '', supplier_name: '', invoice_number: '', warranty_expiry: '',
   condition: '', storage_capacity: '', serial_number: '', accessories: '', notes: '',
-  handover_by: '', handover_date: '', image_path: '',
+  handover_by: '', handover_date: '', image_paths: [],
 };
 
 interface DriverMobileFormProps {
@@ -58,8 +59,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
   const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string | null>>({});
 
   // Best-effort: resolve a signed preview URL for a stored image path. Never throws —
   // returns null on any failure so a preview hiccup can't masquerade as an upload failure.
@@ -76,45 +76,73 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
     }
   };
 
-  // Edit mode: if the record already has an image, fetch a signed url to preview it.
+  // Edit mode: fetch a signed preview url for each existing image.
   useEffect(() => {
-    const path = initial?.image_path;
-    if (!path) return;
+    const paths = initial?.image_paths ?? [];
+    if (!paths.length) return;
     let cancelled = false;
-    fetchPreviewUrl(path).then((url) => { if (!cancelled) setImagePreview(url); });
+    (async () => {
+      const entries = await Promise.all(
+        paths.map(async (p) => [p, await fetchPreviewUrl(p)] as const),
+      );
+      if (!cancelled) setImagePreviews(Object.fromEntries(entries));
+    })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const onPickImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = ''; // allow re-picking the same file after a remove
-    if (!file) return;
+    if (!files.length) return;
+
+    const remaining = MAX_DRIVER_MOBILE_IMAGES - form.image_paths.length;
+    if (remaining <= 0) {
+      toast.error(`At most ${MAX_DRIVER_MOBILE_IMAGES} images`);
+      return;
+    }
+    const accepted = files.slice(0, remaining);
+    if (files.length > remaining) {
+      toast.error(`Only ${remaining} more image${remaining === 1 ? '' : 's'} allowed`);
+    }
+
     setUploadingImage(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/admin/driver-mobiles/image', {
-        method: 'POST',
-        body: fd,
-        cache: 'no-store',
-        credentials: 'same-origin',
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
-      set('image_path', json.path);
-      setImagePreview(await fetchPreviewUrl(json.path));
-      toast.success('Image uploaded');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      for (const file of accepted) {
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch('/api/admin/driver-mobiles/image', {
+            method: 'POST',
+            body: fd,
+            cache: 'no-store',
+            credentials: 'same-origin',
+          });
+          const json = await res.json();
+          if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
+          // Append immediately so one bad file cannot discard the good ones.
+          setForm((f) => ({ ...f, image_paths: [...f.image_paths, json.path] }));
+          const url = await fetchPreviewUrl(json.path);
+          setImagePreviews((m) => ({ ...m, [json.path]: url }));
+        } catch (err) {
+          toast.error(err instanceof Error ? `${file.name}: ${err.message}` : 'Upload failed');
+        }
+      }
+      toast.success('Images uploaded');
     } finally {
       setUploadingImage(false);
     }
   };
 
-  const onRemoveImage = () => {
-    set('image_path', '');
-    setImagePreview(null);
+  const onRemoveImage = (path: string) => {
+    // Only drops the reference. The server deletes the file on save, so
+    // cancelling this form leaves the stored image untouched.
+    setForm((f) => ({ ...f, image_paths: f.image_paths.filter((p) => p !== path) }));
+    setImagePreviews((m) => {
+      const next = { ...m };
+      delete next[path];
+      return next;
+    });
   };
 
   const { data: drivers = [] } = useQuery({ queryKey: ['driver-options'], queryFn: fetchDriverOptions });
@@ -163,7 +191,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
         notes: form.notes.trim() || null,
         handover_by: form.handover_by.trim() || null,
         handover_date: form.handover_date || null,
-        image_path: form.image_path || null,
+        image_paths: form.image_paths,
       };
       const res = await fetch('/api/admin/driver-mobiles', {
         method: mode === 'create' ? 'POST' : 'PUT',
@@ -261,53 +289,51 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
               disabled={saving}
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="mb-2 block text-sm font-medium text-gray-700">Phone image</label>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={onPickImage}
-              className="hidden"
-            />
-            {imagePreview ? (
-              <div className="flex items-center gap-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imagePreview} alt="Phone" className="h-24 w-24 rounded-lg object-cover ring-1 ring-gray-200" />
-                <div className="flex gap-2">
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm font-medium">Phone photos</label>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            onChange={onPickImages}
+            disabled={uploadingImage || form.image_paths.length >= MAX_DRIVER_MOBILE_IMAGES}
+            className="block w-full text-sm"
+          />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {form.image_paths.length} of {MAX_DRIVER_MOBILE_IMAGES} used · JPG, PNG or WEBP, up to 5MB each.
+            The first image is used as the cover.
+          </p>
+
+          {form.image_paths.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-3">
+              {form.image_paths.map((path, i) => (
+                <div key={path} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imagePreviews[path] ?? ''}
+                    alt={i === 0 ? 'Cover handover photo' : `Handover photo ${i + 1}`}
+                    className="h-24 w-24 rounded border border-gray-200 object-cover dark:border-gray-700"
+                  />
+                  {i === 0 && (
+                    <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">
+                      Cover
+                    </span>
+                  )}
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={saving || uploadingImage}
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    onClick={() => onRemoveImage(path)}
+                    aria-label="Remove image"
+                    className="absolute -right-2 -top-2 rounded-full bg-red-600 px-1.5 text-xs text-white hover:bg-red-700"
                   >
-                    {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Replace'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onRemoveImage}
-                    disabled={saving || uploadingImage}
-                    className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
-                  >
-                    Remove
+                    ×
                   </button>
                 </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={saving || uploadingImage}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
-              >
-                {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                {uploadingImage ? 'Uploading…' : 'Upload image'}
-              </button>
-            )}
-            <p className="mt-1 text-xs text-gray-500">JPG, PNG or WEBP, up to 5 MB.</p>
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+    </div>
 
       {/* Device details */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">

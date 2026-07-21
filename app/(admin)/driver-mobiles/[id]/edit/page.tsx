@@ -84,7 +84,7 @@ export default function EditDriverMobilePage({ params }: { params: Promise<{ id:
           notes: m.notes ?? '',
           handover_by: m.handover_by ?? '',
           handover_date: d(m.handover_date),
-          image_path: m.image_path ?? '',
+          image_paths: (m as any).image_paths ?? [],
         }}
       />
     </div>
