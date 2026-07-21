@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { buildFeeStructurePayload } from '@/lib/fees/fields';
 import { logActivity } from '@/lib/activity/log';
+import { validateShares } from '@/lib/fees/stop-rate';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -24,6 +25,15 @@ interface BandInput {
   label?: string | null;
   band_order?: number;
   terms?: unknown;
+}
+
+// One instalment of a stop_wise schedule — a percentage SHARE, not a rupee
+// amount (the rupee value depends on the person's boarding stop).
+interface StopTermInput {
+  term_no?: number;
+  term_label?: string | null;
+  due_date: string;
+  share_percent: number | string;
 }
 
 // Terms must equal split_count and sum to total_amount.
@@ -67,6 +77,18 @@ function validateBands(bands: unknown): string | null {
   return null;
 }
 
+// Stop-wise structures: every term needs a due date, and shares must sum to
+// 100 — anything else silently over/under-bills every student and staff
+// member at every stop. The sum-to-100 rule itself lives in validateShares
+// (lib/fees/stop-rate.ts); this only adds the due-date + shape checks.
+function validateStopTerms(terms: unknown): string | null {
+  const rows = Array.isArray(terms) ? (terms as StopTermInput[]) : [];
+  const shareErr = validateShares(rows.map((t) => Number(t.share_percent)));
+  if (shareErr) return shareErr;
+  if (rows.some((t) => !t.due_date)) return 'Every term needs a due date.';
+  return null;
+}
+
 function buildTermRows(feeStructureId: string, terms: TermInput[], yearBandId: string | null = null) {
   return terms.map((t, i) => ({
     fee_structure_id: feeStructureId,
@@ -107,6 +129,27 @@ async function writeBands(
     if (tErr) return tErr.message || 'Failed to save year band terms';
   }
   return null;
+}
+
+// Replace a stop_wise structure's instalment schedule. Assumes the caller has
+// already run validateStopTerms — mirrors how writeBands assumes validateBands
+// has already run — so this is purely the DB write (delete + re-insert).
+async function writeStopTerms(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  feeStructureId: string,
+  terms: StopTermInput[]
+): Promise<string | null> {
+  await supabase.from('tms_fee_structure_stop_term').delete().eq('fee_structure_id', feeStructureId);
+  const { error } = await supabase.from('tms_fee_structure_stop_term').insert(
+    terms.map((t, i) => ({
+      fee_structure_id: feeStructureId,
+      term_no: t.term_no ?? i + 1,
+      term_label: t.term_label?.toString().trim() || `Term ${i + 1}`,
+      due_date: t.due_date,
+      share_percent: Number(t.share_percent),
+    }))
+  );
+  return error ? 'Failed to save the instalment schedule.' : null;
 }
 
 async function getFees() {
@@ -174,10 +217,13 @@ async function postFee(request: NextRequest, auth: AuthContext) {
     if (audience !== 'student' && audience !== 'staff') {
       return NextResponse.json({ error: 'Audience must be student or staff' }, { status: 400 });
     }
-    const feeMode = payload.fee_mode === 'tiered' ? 'tiered' : 'flat';
+    const feeMode = payload.fee_mode === 'tiered' ? 'tiered' : payload.fee_mode === 'stop_wise' ? 'stop_wise' : 'flat';
     if (feeMode === 'tiered' && audience !== 'student') {
       return NextResponse.json({ error: 'Year-of-study tiers apply to learners only' }, { status: 400 });
     }
+    // stop_wise serves BOTH audiences (a student structure scoped to Arts
+    // Aided, and a staff structure with institution_ids=null) — no audience
+    // restriction here, unlike tiered above.
 
     const supabase = createServiceRoleClient();
 
@@ -205,6 +251,39 @@ async function postFee(request: NextRequest, auth: AuthContext) {
         module: 'fees', action: 'create', entityType: 'tms_fee_structure',
         entityId: parent.id, entityLabel: parent.name,
         description: `Created tiered fee structure ${parent.name}`, changes: { after: parent },
+      });
+      return NextResponse.json({ success: true, data: parent, message: 'Fee structure created successfully' });
+    }
+
+    // ── stop_wise ────────────────────────────────────────────────────────────
+    if (feeMode === 'stop_wise') {
+      const stopErr = validateStopTerms(body.stop_terms);
+      if (stopErr) return NextResponse.json({ error: stopErr }, { status: 400 });
+
+      // Structure-level total/split are unused in stop_wise mode (each stop
+      // owns its own annual amount via tms_fee_structure_stop_rate).
+      const { data: parent, error } = await supabase
+        .from('tms_fee_structure')
+        .insert([{ ...payload, audience, fee_mode: 'stop_wise', total_amount: 0, split_count: 1, created_by: auth.userId, updated_by: auth.userId }])
+        .select()
+        .single();
+      if (error) {
+        console.error('Fee structure create error:', error);
+        return NextResponse.json({ error: 'Failed to create fee structure' }, { status: 500 });
+      }
+      const writeErr = await writeStopTerms(supabase, parent.id, body.stop_terms as StopTermInput[]);
+      if (writeErr) {
+        // Same rollback the band-write path uses — never leave a structure
+        // that has no usable schedule, because generation would 400 with no
+        // way to fix it in place.
+        await supabase.from('tms_fee_structure').delete().eq('id', parent.id);
+        console.error('Fee stop-term create error:', writeErr);
+        return NextResponse.json({ error: writeErr }, { status: 500 });
+      }
+      await logActivity(auth, request, {
+        module: 'fees', action: 'create', entityType: 'tms_fee_structure',
+        entityId: parent.id, entityLabel: parent.name,
+        description: `Created stop-wise fee structure ${parent.name}`, changes: { after: parent },
       });
       return NextResponse.json({ success: true, data: parent, message: 'Fee structure created successfully' });
     }
@@ -271,9 +350,11 @@ async function putFee(request: NextRequest, auth: AuthContext) {
     if (!before) return NextResponse.json({ error: 'Fee structure not found' }, { status: 404 });
 
     // Effective mode = the new fee_mode if provided, else the stored one.
-    const feeMode = (payload.fee_mode ?? before.fee_mode) === 'tiered' ? 'tiered' : 'flat';
+    const requestedMode = payload.fee_mode ?? before.fee_mode;
+    const feeMode = requestedMode === 'tiered' ? 'tiered' : requestedMode === 'stop_wise' ? 'stop_wise' : 'flat';
     const hasTerms = 'terms' in body;
     const hasBands = 'bands' in body;
+    const hasStopTerms = 'stop_terms' in body;
 
     if (feeMode === 'tiered') {
       if (hasBands) {
@@ -305,6 +386,41 @@ async function putFee(request: NextRequest, auth: AuthContext) {
         module: 'fees', action: 'update', entityType: 'tms_fee_structure',
         entityId: id, entityLabel: updated.name,
         description: `Updated tiered fee structure ${updated.name}`, changes: { before, after: updated },
+      });
+      return NextResponse.json({ success: true, data: updated, message: 'Fee structure updated successfully' });
+    }
+
+    // ── stop_wise ────────────────────────────────────────────────────────────
+    if (feeMode === 'stop_wise') {
+      if (hasStopTerms) {
+        const stopErr = validateStopTerms(body.stop_terms);
+        if (stopErr) return NextResponse.json({ error: stopErr }, { status: 400 });
+      }
+      // stop_wise doesn't use the structure-level total/split either.
+      const { data: updated, error } = await supabase
+        .from('tms_fee_structure')
+        .update({ ...payload, fee_mode: 'stop_wise', total_amount: 0, split_count: 1, updated_by: auth.userId })
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) {
+        console.error('Fee structure update error:', error);
+        return NextResponse.json({ error: 'Failed to update fee structure' }, { status: 500 });
+      }
+      if (hasStopTerms) {
+        // Switching into stop_wise also clears any leftover bands and flat terms.
+        await supabase.from('tms_fee_structure_year_band').delete().eq('fee_structure_id', id);
+        await supabase.from('tms_fee_structure_term').delete().eq('fee_structure_id', id);
+        const writeErr = await writeStopTerms(supabase, id, body.stop_terms as StopTermInput[]);
+        if (writeErr) {
+          console.error('Fee stop-term replace error:', writeErr);
+          return NextResponse.json({ error: 'Fee structure updated but failed to save the instalment schedule' }, { status: 500 });
+        }
+      }
+      await logActivity(auth, request, {
+        module: 'fees', action: 'update', entityType: 'tms_fee_structure',
+        entityId: id, entityLabel: updated.name,
+        description: `Updated stop-wise fee structure ${updated.name}`, changes: { before, after: updated },
       });
       return NextResponse.json({ success: true, data: updated, message: 'Fee structure updated successfully' });
     }

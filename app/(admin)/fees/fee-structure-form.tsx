@@ -7,13 +7,17 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save, Plus, Trash2, Wand2, Layers } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchMasters, fetchTransportYearOptions, type MasterOption } from './fee-api';
-import type { FeeAudience, FeeStatus, FeeMode } from '@/lib/fees/types';
+import type { FeeAudience, FeeStatus, FeeMode, FeeStructureStopTerm } from '@/lib/fees/types';
+import { validateShares } from '@/lib/fees/stop-rate';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/select-menu';
 import { SelectMenuMulti } from '@/components/ui/select-menu-multi';
 import { inr } from './columns';
 
 interface TermRow { term_label: string; amount: string; due_date: string }
 interface BandRow { key: string; label: string; study_years: number[]; total_amount: string; terms: TermRow[] }
+// One instalment of a stop_wise schedule — a percentage SHARE, not a rupee
+// amount (the rupee value depends on the student/staff's boarding stop).
+interface StopTermRow { term_no: number; term_label: string; due_date: string; share_percent: number }
 
 export interface FeeFormInitial {
   name: string;
@@ -28,6 +32,7 @@ export interface FeeFormInitial {
   notes: string;
   terms: TermRow[];
   bands: Array<{ label: string; study_years: number[]; total_amount: string; terms: TermRow[] }>;
+  stop_terms?: FeeStructureStopTerm[];
 }
 
 interface Props {
@@ -140,6 +145,19 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
       ? initial.bands.map((b) => ({ key: `b${bandKey.current++}`, label: b.label, study_years: b.study_years, total_amount: b.total_amount, terms: b.terms.length ? b.terms : [blankTerm(1)] }))
       : [newBand([1]), newBand([2, 3])]
   );
+  const [stopTerms, setStopTerms] = useState<StopTermRow[]>(
+    initial?.stop_terms && initial.stop_terms.length
+      ? initial.stop_terms.map((t, i) => ({
+          term_no: t.term_no ?? i + 1,
+          term_label: t.term_label ?? `Term ${i + 1}`,
+          due_date: t.due_date ?? '',
+          share_percent: Number(t.share_percent),
+        }))
+      : [
+          { term_no: 1, term_label: 'Term 1', due_date: '', share_percent: 50 },
+          { term_no: 2, term_label: 'Term 2', due_date: '', share_percent: 50 },
+        ]
+  );
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -160,11 +178,18 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
 
   const isStudent = form.audience === 'student';
   const isTiered = isStudent && form.fee_mode === 'tiered';
+  // Unlike tiered, stop_wise is NOT gated on audience — it serves both a
+  // student structure (Arts Aided) and a staff structure (institution_ids
+  // null = all institutions). Do not copy the isStudent gate used above.
+  const isStopWise = form.fee_mode === 'stop_wise';
 
   const totalNum = Number(form.total_amount) || 0;
+  const stopSharesTotal = stopTerms.reduce((s, t) => s + (Number(t.share_percent) || 0), 0);
 
   const updateBand = (i: number, patch: Partial<BandRow>) =>
     setBands((bs) => bs.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
+  const updateStopTerm = (i: number, patch: Partial<StopTermRow>) =>
+    setStopTerms((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -186,6 +211,15 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         else if (b.terms.some((t) => !t.due_date)) next[`band${i}`] = 'Every term needs a due date';
         else if (Math.abs(b.terms.reduce((s, t) => s + (Number(t.amount) || 0), 0) - bt) > 0.01) next[`band${i}`] = 'Term amounts must equal the band total';
       });
+    } else if (isStopWise) {
+      // Shares must sum to 100 — anything else silently over/under-bills every
+      // stop. Reuse the same validateShares the server enforces (lib/fees/stop-rate.ts)
+      // instead of re-implementing the sum check here.
+      if (stopTerms.some((t) => !t.due_date)) next.stopTerms = 'Every term needs a due date';
+      else {
+        const shareErr = validateShares(stopTerms.map((t) => Number(t.share_percent) || 0));
+        if (shareErr) next.stopTerms = shareErr;
+      }
     } else {
       if (!form.total_amount || totalNum <= 0) next.total_amount = 'Total fee must be greater than 0';
       const termsSum = terms.reduce((s, t) => s + (Number(t.amount) || 0), 0);
@@ -218,7 +252,10 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         transport_year_id: form.transport_year_id,
         audience: form.audience,
         status: form.status,
-        fee_mode: isTiered ? 'tiered' : 'flat',
+        // Send the actually-selected mode. Coercing to isTiered ? 'tiered' :
+        // 'flat' here would silently save a stop_wise pick as 'flat', billing
+        // everyone the flat term amounts instead of their stop's rate.
+        fee_mode: form.fee_mode,
         institution_ids: form.institution_ids.length ? form.institution_ids : null,
         staff_role_keys: !isStudent && form.staff_role_keys.length ? form.staff_role_keys : null,
         lifecycle_statuses: isStudent && form.lifecycle_statuses.length ? form.lifecycle_statuses : null,
@@ -239,6 +276,16 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
                 amount: Number(t.amount),
                 due_date: t.due_date,
               })),
+            })),
+          }
+        : isStopWise
+        ? {
+            ...base,
+            stop_terms: stopTerms.map((t, i) => ({
+              term_no: i + 1,
+              term_label: t.term_label.trim() || `Term ${i + 1}`,
+              due_date: t.due_date,
+              share_percent: Number(t.share_percent),
             })),
           }
         : {
@@ -321,7 +368,13 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
             <label className="mb-2 block text-sm font-medium text-gray-700">Applies to *</label>
             <SelectMenu
               value={form.audience}
-              onValueChange={(v) => set('audience', v as FeeAudience)}
+              onValueChange={(v) => {
+                const audience = v as FeeAudience;
+                set('audience', audience);
+                // Tiered (year-of-study bands) is student-only; stop_wise is
+                // fine for either audience, so only tiered needs a reset here.
+                if (audience !== 'student' && form.fee_mode === 'tiered') set('fee_mode', 'flat');
+              }}
               options={AUDIENCE_OPTIONS}
               ariaLabel="Applies to"
               disabled={saving}
@@ -404,27 +457,37 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
           </div>
         )}
 
-        {/* Fee-by-year toggle (learners only) */}
-        {isStudent && (
-          <div className="mt-5">
-            <label className="mb-2 block text-sm font-medium text-gray-700">Fee by year of study</label>
-            <div className="flex max-w-md gap-2">
-              <button type="button" className={modeBtn(form.fee_mode === 'flat')} onClick={() => set('fee_mode', 'flat')} disabled={saving}>
-                Same fee for all years
-              </button>
+        {/* Fee mode. Tiered (year-of-study bands) is student-only; stop_wise is
+            NOT — it must stay selectable for both audiences (a staff structure
+            with institution_ids=null covers all institutions), so this whole
+            block is unconditional and only the tiered button is isStudent-gated. */}
+        <div className="mt-5">
+          <label className="mb-2 block text-sm font-medium text-gray-700">Fee mode</label>
+          <div className="flex max-w-xl flex-wrap gap-2">
+            <button type="button" className={modeBtn(form.fee_mode === 'flat')} onClick={() => set('fee_mode', 'flat')} disabled={saving}>
+              Same fee for all years
+            </button>
+            {isStudent && (
               <button type="button" className={modeBtn(form.fee_mode === 'tiered')} onClick={() => set('fee_mode', 'tiered')} disabled={saving}>
                 Different fee by year of study
               </button>
-            </div>
-            <p className="mt-1 text-xs text-gray-500">
-              Tiered uses each learner’s year of study (derived from admission year). Learners with no admission year are reported as unresolved at generation.
-            </p>
+            )}
+            <button type="button" className={modeBtn(form.fee_mode === 'stop_wise')} onClick={() => set('fee_mode', 'stop_wise')} disabled={saving}>
+              Stop-wise (amount depends on boarding stop)
+            </button>
           </div>
-        )}
+          <p className="mt-1 text-xs text-gray-500">
+            {isTiered
+              ? 'Tiered uses each learner’s year of study (derived from admission year). Learners with no admission year are reported as unresolved at generation.'
+              : isStopWise
+              ? 'Each boarding stop carries its own annual amount, set on the structure’s detail page after saving. These terms decide the due dates and what share of that annual amount falls in each instalment.'
+              : 'One total fee applies to everyone matched by the conditions above.'}
+          </p>
+        </div>
       </div>
 
       {/* ── Fee & terms (flat) ── */}
-      {!isTiered && (
+      {!isTiered && !isStopWise && (
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="mb-4 text-sm font-semibold text-gray-900">Fee &amp; terms</h3>
           <div className="mb-4 max-w-xs">
@@ -492,6 +555,85 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Instalment schedule (stop_wise) ── */}
+      {isStopWise && (
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="mb-1 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Instalment schedule</h3>
+            <button
+              type="button"
+              onClick={() =>
+                setStopTerms((ts) => [
+                  ...ts,
+                  { term_no: ts.length + 1, term_label: `Term ${ts.length + 1}`, due_date: '', share_percent: 0 },
+                ])
+              }
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              disabled={saving}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add term
+            </button>
+          </div>
+          <p className="mb-4 text-xs text-gray-500">
+            Each boarding stop carries its own annual amount, set on the structure&apos;s detail page
+            after saving. These terms decide the due dates and what share of that annual amount falls
+            in each instalment.
+          </p>
+          {errors.stopTerms && <p className="mb-3 text-xs text-red-500">{errors.stopTerms}</p>}
+
+          <div className="space-y-3">
+            {stopTerms.map((t, i) => (
+              <div key={i} className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 p-3 sm:grid-cols-[1fr_160px_140px_40px] sm:items-end">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-600">Term {i + 1} label</label>
+                  <input
+                    value={t.term_label}
+                    onChange={(e) => updateStopTerm(i, { term_label: e.target.value })}
+                    className="input"
+                    placeholder={`Term ${i + 1}`}
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-600">Due date</label>
+                  <input
+                    type="date"
+                    value={t.due_date}
+                    onChange={(e) => updateStopTerm(i, { due_date: e.target.value })}
+                    className="input"
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-600">Share %</label>
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={t.share_percent}
+                    onChange={(e) => updateStopTerm(i, { share_percent: Number(e.target.value) })}
+                    className="input"
+                    placeholder="0.00"
+                    disabled={saving}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStopTerms(stopTerms.length > 1 ? stopTerms.filter((_, idx) => idx !== i) : stopTerms)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-950 dark:hover:text-red-400"
+                  disabled={saving || stopTerms.length <= 1}
+                  aria-label="Remove term"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className={`mt-3 text-sm ${Math.abs(stopSharesTotal - 100) > 0.01 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+            Shares total: <span className="font-semibold">{stopSharesTotal}%</span> / 100%
+            {Math.abs(stopSharesTotal - 100) > 0.01 && ' — must sum to 100'}
           </div>
         </div>
       )}
