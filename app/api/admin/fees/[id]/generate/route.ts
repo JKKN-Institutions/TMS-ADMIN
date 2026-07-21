@@ -6,7 +6,12 @@ import { logActivity } from '@/lib/activity/log';
 import { resolveApplicablePeople, type ApplicablePerson } from '@/lib/fees/applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from '@/lib/fees/types';
 import { currentYearOf } from '@/lib/fees/year-of-study';
-import { resolvePersonTerms } from '@/lib/fees/resolve-terms';
+import {
+  resolvePersonTerms,
+  UNRESOLVED_LABEL,
+  type StopScheduleTerm,
+  type UnresolvedReason,
+} from '@/lib/fees/resolve-terms';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -55,6 +60,13 @@ async function generate(request: NextRequest, auth: AuthContext) {
     }
 
     const isTiered = fs.fee_mode === 'tiered';
+    const isStopWise = fs.fee_mode === 'stop_wise';
+    if (isStopWise && fs.audience !== 'student') {
+      return NextResponse.json(
+        { error: 'Stop-wise fee structures apply to students only.' },
+        { status: 400 }
+      );
+    }
 
     // Transport year start → the calendar year used to derive year of study, and
     // the date used to resolve each learner's academic_year. Needed for dry-run too.
@@ -112,18 +124,100 @@ async function generate(request: NextRequest, auth: AuthContext) {
       }
     }
 
+    // stop_wise: the shared share-based schedule + every configured stop rate.
+    const stopTerms: StopScheduleTerm[] = [];
+    const stopRateByStopId = new Map<string, number>();
+    if (isStopWise) {
+      const { data: stRows, error: stErr } = await supabase
+        .from('tms_fee_structure_stop_term')
+        .select('term_no, term_label, due_date, share_percent')
+        .eq('fee_structure_id', id)
+        .order('term_no', { ascending: true });
+      if (stErr) {
+        return NextResponse.json({ error: 'Failed to load the instalment schedule.' }, { status: 500 });
+      }
+      for (const t of (stRows ?? []) as Array<{
+        term_no: number; term_label: string | null; due_date: string; share_percent: number;
+      }>) {
+        stopTerms.push({
+          term_no: t.term_no,
+          term_label: t.term_label,
+          due_date: t.due_date,
+          share_percent: Number(t.share_percent),
+        });
+      }
+      if (stopTerms.length === 0) {
+        return NextResponse.json(
+          { error: 'This stop-wise fee structure has no instalment terms defined.' },
+          { status: 400 }
+        );
+      }
+
+      const { data: rateRows, error: rateErr } = await supabase
+        .from('tms_fee_structure_stop_rate')
+        .select('stop_id, annual_amount')
+        .eq('fee_structure_id', id);
+      if (rateErr) {
+        return NextResponse.json({ error: 'Failed to load stop rates.' }, { status: 500 });
+      }
+      for (const r of (rateRows ?? []) as Array<{ stop_id: string; annual_amount: number }>) {
+        stopRateByStopId.set(r.stop_id, Number(r.annual_amount));
+      }
+      if (stopRateByStopId.size === 0) {
+        return NextResponse.json(
+          { error: 'This stop-wise fee structure has no stop rates. Upload the rate sheet first.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const people = await resolveApplicablePeople(supabase, fs);
+
+    // Boarding stops for the cohort. Fetched here rather than inside
+    // resolveApplicablePeople because the staff cron shares that function and
+    // must not change. Chunked to 150 ids: a larger .in() overflows the
+    // Supabase gateway with HTTP 400, and an unchecked { data: null } would
+    // silently make every learner look stop-less.
+    const stopByPerson = new Map<string, string | null>();
+    if (isStopWise) {
+      const ids = people.map((p) => p.person_id);
+      const CHUNK_STOPS = 150;
+      for (let i = 0; i < ids.length; i += CHUNK_STOPS) {
+        const { data: lp, error: lpErr } = await supabase
+          .from('learners_profiles')
+          .select('id, transport_stop_id')
+          .in('id', ids.slice(i, i + CHUNK_STOPS));
+        if (lpErr) {
+          return NextResponse.json({ error: 'Failed to resolve boarding stops.' }, { status: 500 });
+        }
+        for (const r of (lp ?? []) as Array<{ id: string; transport_stop_id: string | null }>) {
+          stopByPerson.set(r.id, r.transport_stop_id);
+        }
+      }
+    }
 
     // Resolve each person to the terms that apply to them. Unresolvable people
     // are skipped + reported, never guessed. See lib/fees/resolve-terms.ts.
     const resolved: Resolved[] = [];
     let unresolved = 0;
+    const unresolvedByReason: Record<UnresolvedReason, number> = {
+      no_matching_band: 0,
+      no_stop: 0,
+      no_stop_rate: 0,
+    };
     for (const person of people) {
       const outcome = resolvePersonTerms(
-        { admission_year: person.admission_year, transport_stop_id: null },
-        { feeMode: fs.fee_mode, currentYear, flatTerms, bands }
+        {
+          admission_year: person.admission_year,
+          transport_stop_id: stopByPerson.get(person.person_id) ?? null,
+        },
+        { feeMode: fs.fee_mode, currentYear, flatTerms, bands, stopTerms, stopRateByStopId }
       );
-      if (!outcome.ok) { unresolved++; continue; }
+      if (!outcome.ok) {
+        unresolved++;
+        unresolvedByReason[outcome.reason]++;
+        continue;
+      }
       resolved.push({ person, terms: outcome.terms, band: outcome.band as Band | null });
     }
 
@@ -193,6 +287,8 @@ async function generate(request: NextRequest, auth: AuthContext) {
       feeMode: fs.fee_mode,
       applicable: resolved.length,
       unresolved, // tiered: no admission year / year matches no band
+      unresolvedByReason,
+      stopRateCount: isStopWise ? stopRateByStopId.size : null,
       learnerCount,
       staffCount,
       termsPerPerson: isTiered ? null : flatTerms.length,
@@ -339,7 +435,11 @@ async function generate(request: NextRequest, auth: AuthContext) {
     if (runId) {
       const noteParts: string[] = [];
       if (errors > 0) noteParts.push(`${errors} row(s) errored`);
-      if (unresolved > 0) noteParts.push(`${unresolved} learner(s) unresolved (no admission year / no matching band)`);
+      for (const [reason, count] of Object.entries(unresolvedByReason)) {
+        if (count > 0) {
+          noteParts.push(`${count} learner(s) unresolved — ${UNRESOLVED_LABEL[reason as UnresolvedReason]}`);
+        }
+      }
       await supabase.from('tms_fee_generation_run').update({
         applicable_count: resolved.length,
         learner_billed_count: learnerBilled,
