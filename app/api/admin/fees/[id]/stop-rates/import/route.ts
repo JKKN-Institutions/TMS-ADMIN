@@ -39,6 +39,25 @@ async function importSheet(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'A .xlsx file is required (field "file").' }, { status: 400 });
     }
 
+    // The real rate sheet is ~479 rows / well under 200 KB. Cap generously: this
+    // endpoint reads the whole file into memory, so an unbounded upload is a
+    // memory-exhaustion risk even from an authenticated admin picking the wrong file.
+    const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { error: 'File is too large. The rate sheet should be well under 5 MB.' },
+        { status: 400 }
+      );
+    }
+
+    const name = file.name.toLowerCase();
+    if (!name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+      return NextResponse.json(
+        { error: 'Upload the .xlsx rate sheet downloaded from the template button.' },
+        { status: 400 }
+      );
+    }
+
     const supabase = createServiceRoleClient();
 
     const { data: fs } = await supabase
