@@ -118,3 +118,82 @@ describe('resolvePersonTerms — tiered (existing behaviour)', () => {
     expect(r).toEqual({ ok: false, reason: 'no_matching_band' });
   });
 });
+
+// ── NEW: stop_wise ──────────────────────────────────────────────────────────
+describe('resolvePersonTerms — stop_wise', () => {
+  const rates = new Map<string, number>([
+    ['stop-kachu-palli', 9900],
+    ['stop-pillukurichi', 18400],
+  ]);
+
+  it('splits the stop annual amount across the shared schedule', () => {
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: 'stop-kachu-palli' },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'Term 1', amount: 4950, due_date: '2026-06-15' },
+        { term_no: 2, term_label: 'Term 2', amount: 4950, due_date: '2026-11-15' },
+      ]);
+      expect(r.band).toBeNull();
+    }
+  });
+
+  it('prices a different stop differently', () => {
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: 'stop-pillukurichi' },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.terms.reduce((s, t) => s + t.amount, 0)).toBe(18400);
+  });
+
+  it('ignores year of study entirely', () => {
+    const a = resolvePersonTerms(
+      { admission_year: 2020, transport_stop_id: 'stop-kachu-palli' },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
+    );
+    const b = resolvePersonTerms(
+      { admission_year: null, transport_stop_id: 'stop-kachu-palli' },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
+    );
+    expect(a).toEqual(b);
+  });
+
+  it('is UNRESOLVED when the student has no boarding stop', () => {
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: null },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
+    );
+    expect(r).toEqual({ ok: false, reason: 'no_stop' });
+  });
+
+  it('is UNRESOLVED when the stop has no configured rate — never billed as 0', () => {
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: 'stop-with-no-rate' },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
+    );
+    expect(r).toEqual({ ok: false, reason: 'no_stop_rate' });
+  });
+
+  it('bills a genuine zero rate rather than calling it unresolved', () => {
+    const free = new Map<string, number>([['stop-free', 0]]);
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: 'stop-free' },
+      ctx({ feeMode: 'stop_wise', stopRateByStopId: free })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.terms.map((t) => t.amount)).toEqual([0, 0]);
+  });
+
+  it('throws when the schedule is missing — a bug affecting everyone, not a per-student gap', () => {
+    expect(() =>
+      resolvePersonTerms(
+        { admission_year: 2024, transport_stop_id: 'stop-kachu-palli' },
+        ctx({ feeMode: 'stop_wise', stopRateByStopId: rates, stopTerms: [] })
+      )
+    ).toThrow(/non-empty stopTerms/i);
+  });
+});

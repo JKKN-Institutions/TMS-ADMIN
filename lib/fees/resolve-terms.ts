@@ -9,6 +9,7 @@
 // An unresolvable person is NEVER given a guessed amount. They are reported.
 
 import { deriveStudyYear, bandForYear } from './year-of-study';
+import { splitAnnual } from './stop-rate';
 import type { FeeMode } from './types';
 
 export interface BillableTerm {
@@ -71,6 +72,36 @@ export function resolvePersonTerms(
     const band = bandForYear(ctx.bands, year);
     if (!band) return { ok: false, reason: 'no_matching_band' };
     return { ok: true, terms: band.terms, band };
+  }
+
+  if (ctx.feeMode === 'stop_wise') {
+    const schedule = ctx.stopTerms ?? [];
+    if (!schedule.length) {
+      // The caller must load the schedule before resolving anyone. Throwing
+      // beats returning "unresolved": a missing schedule is a bug affecting
+      // EVERY student, not a data gap affecting one, and it must not be
+      // reported as if some students merely lacked a stop.
+      throw new Error('resolvePersonTerms: stop_wise requires a non-empty stopTerms schedule.');
+    }
+    if (!person.transport_stop_id) return { ok: false, reason: 'no_stop' };
+
+    const annual = ctx.stopRateByStopId?.get(person.transport_stop_id);
+    // `undefined` means no rate row exists — unresolved. A rate of 0 is a real
+    // configured value (a free stop) and IS billed, so check for undefined
+    // explicitly rather than relying on falsiness.
+    if (annual === undefined) return { ok: false, reason: 'no_stop_rate' };
+
+    const amounts = splitAnnual(annual, schedule.map((t) => t.share_percent));
+    return {
+      ok: true,
+      band: null,
+      terms: schedule.map((t, i) => ({
+        term_no: t.term_no,
+        term_label: t.term_label,
+        amount: amounts[i],
+        due_date: t.due_date,
+      })),
+    };
   }
 
   // 'flat' — everyone matched gets the structure terms verbatim.
