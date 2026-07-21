@@ -42,9 +42,24 @@ describe('buildDriverMobilePayload', () => {
     expect(buildDriverMobilePayload({ handover_by: '   ' }).handover_by).toBe(null);
   });
 
-  it('passes image_path through as trimmed text, empty → null', () => {
-    expect(buildDriverMobilePayload({ image_path: '2026/abc-phone.jpg' }).image_path).toBe('2026/abc-phone.jpg');
-    expect(buildDriverMobilePayload({ image_path: '' }).image_path).toBe(null);
+  it('normalises image_paths into a clean ordered array', () => {
+    expect(buildDriverMobilePayload({ image_paths: ['2026/a.jpg', ' 2026/b.jpg '] }).image_paths).toEqual([
+      '2026/a.jpg',
+      '2026/b.jpg',
+    ]);
+  });
+
+  it('coerces junk image_paths input to an empty array', () => {
+    expect(buildDriverMobilePayload({ image_paths: 'not-an-array' }).image_paths).toEqual([]);
+    expect(buildDriverMobilePayload({ image_paths: ['', '  '] }).image_paths).toEqual([]);
+  });
+
+  it('omits image_paths entirely when the key is absent (partial update)', () => {
+    expect('image_paths' in buildDriverMobilePayload({ brand: 'Nokia' })).toBe(false);
+  });
+
+  it('no longer writes the removed image_path column', () => {
+    expect('image_path' in buildDriverMobilePayload({ image_path: '2026/a.jpg' })).toBe(false);
   });
 
   it('passes handover_date through as a date string, empty → null', () => {
