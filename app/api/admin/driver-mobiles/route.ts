@@ -55,12 +55,14 @@ async function getDriverMobiles() {
       console.error('Driver mobiles query error:', error);
       return NextResponse.json({ error: 'Failed to fetch driver mobiles' }, { status: 500 });
     }
-    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null; image_path: string | null }[];
+    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null; image_paths: string[] | null }[];
     const names = await resolveDriverNames(supabase, list.map((r) => r.driver_staff_id));
     const routes = await resolveRouteInfo(supabase, list.map((r) => r.route_id ?? '').filter(Boolean));
 
-    // Batch-sign every phone photo in one round trip (private bucket → signed urls).
-    const imagePaths = [...new Set(list.map((r) => r.image_path).filter((p): p is string => !!p))];
+    // Batch-sign every phone photo across every row in ONE round trip.
+    // Keyed by PATH, never by position — with N images per row an index-based
+    // map would silently render one phone's photo on another phone's card.
+    const imagePaths = [...new Set(list.flatMap((r) => r.image_paths ?? []).filter(Boolean))];
     const signed = new Map<string, string>();
     if (imagePaths.length) {
       const { data: urls } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).createSignedUrls(imagePaths, 3600);
@@ -75,7 +77,9 @@ async function getDriverMobiles() {
       driver_phone: names.get(r.driver_staff_id)?.phone ?? null,
       route_number: r.route_id ? routes.get(r.route_id)?.number ?? null : null,
       route_name: r.route_id ? routes.get(r.route_id)?.name ?? null : null,
-      image_url: r.image_path ? signed.get(r.image_path) ?? null : null,
+      // A path that fails to sign yields null in place, so the array stays
+      // aligned with image_paths instead of shifting.
+      image_urls: (r.image_paths ?? []).map((p) => signed.get(p) ?? null),
     }));
     return NextResponse.json({ success: true, data, count: data.length });
   } catch (e) {
