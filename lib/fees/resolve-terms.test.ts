@@ -159,7 +159,39 @@ describe('resolvePersonTerms — stop_wise', () => {
       { admission_year: null, transport_stop_id: 'stop-kachu-palli' },
       ctx({ feeMode: 'stop_wise', stopRateByStopId: rates })
     );
-    expect(a).toEqual(b);
+    expect(a).toEqual({
+      ok: true,
+      band: null,
+      terms: [
+        { term_no: 1, term_label: 'Term 1', amount: 4950, due_date: '2026-06-15' },
+        { term_no: 2, term_label: 'Term 2', amount: 4950, due_date: '2026-11-15' },
+      ],
+    });
+    expect(b).toEqual(a);
+  });
+
+  it('maps each amount to its own term — uneven shares catch an index swap', () => {
+    // 60/40 on 10000 => 6000 then 4000. With symmetric shares an index swap is
+    // invisible; uneven shares make the mapping observable.
+    const unevenTerms = [
+      { term_no: 1, term_label: 'First', due_date: '2026-06-15', share_percent: 60 },
+      { term_no: 2, term_label: 'Second', due_date: '2026-11-15', share_percent: 40 },
+    ];
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: 'stop-uneven' },
+      ctx({
+        feeMode: 'stop_wise',
+        stopTerms: unevenTerms,
+        stopRateByStopId: new Map<string, number>([['stop-uneven', 10000]]),
+      })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'First', amount: 6000, due_date: '2026-06-15' },
+        { term_no: 2, term_label: 'Second', amount: 4000, due_date: '2026-11-15' },
+      ]);
+    }
   });
 
   it('is UNRESOLVED when the student has no boarding stop', () => {
