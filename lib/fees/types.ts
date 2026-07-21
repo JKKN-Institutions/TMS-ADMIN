@@ -5,7 +5,9 @@ export type FeeAudience = 'student' | 'staff';
 export type FeeStatus = 'draft' | 'active' | 'archived';
 // 'flat'  = one total + term split for everyone matched (the original model).
 // 'tiered' = per-year-of-study amounts via year bands (tms_fee_structure_year_band).
-export type FeeMode = 'flat' | 'tiered';
+// 'stop_wise' = per-boarding-stop annual amount (tms_fee_structure_stop_rate),
+// split across a shared percentage schedule (tms_fee_structure_stop_term).
+export type FeeMode = 'flat' | 'tiered' | 'stop_wise';
 
 export interface FeeStructureTerm {
   id?: string;
@@ -29,6 +31,31 @@ export interface FeeStructureYearBand {
   total_amount: number;
   split_count: number;
   terms?: FeeStructureTerm[]; // joined by the API layer
+}
+
+// A per-boarding-stop annual amount within a stop_wise fee structure.
+export interface FeeStructureStopRate {
+  id?: string;
+  fee_structure_id?: string;
+  stop_id: string;
+  annual_amount: number;
+  // joined by the API layer for display
+  stop_name?: string | null;
+  route_id?: string | null;
+  route_number?: string | null;
+  route_name?: string | null;
+  sequence_order?: number | null;
+}
+
+// One instalment of a stop_wise structure. Carries a SHARE, not an amount —
+// the rupee value depends on the student's stop.
+export interface FeeStructureStopTerm {
+  id?: string;
+  fee_structure_id?: string;
+  term_no: number;
+  term_label: string | null;
+  due_date: string; // 'YYYY-MM-DD'
+  share_percent: number;
 }
 
 export interface FeeStructureRow {
@@ -56,6 +83,8 @@ export interface FeeStructureRow {
   transport_year_name?: string | null;
   terms?: FeeStructureTerm[]; // flat structures only
   bands?: FeeStructureYearBand[]; // tiered structures only
+  stop_terms?: FeeStructureStopTerm[]; // stop_wise structures only
+  stop_rates?: FeeStructureStopRate[]; // stop_wise structures only
 }
 
 // The learner lifecycle states billed when a structure leaves lifecycle_statuses
