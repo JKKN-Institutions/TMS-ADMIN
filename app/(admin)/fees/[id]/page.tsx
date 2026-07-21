@@ -390,6 +390,7 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                             stop — so report how many stops are priced instead. */}
                         <Stat label="Stops priced" value={preview.stopRateCount ?? 0} />
                         <Stat label="Unresolved" value={preview.unresolved} />
+                        <Stat label="Exempt (in-charge)" value={preview.exemptInCharge ?? 0} />
                       </>
                     ) : (
                       <Stat label="Fee / person" value={inr(preview.totalPerPerson ?? 0)} />
@@ -422,6 +423,12 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                         ? `${preview.unresolvedByReason.no_stop_rate} whose stop has no fee configured. `
                         : ''}
                       These are not billed — assign stops or price the missing stops, then re-run.
+                    </p>
+                  )}
+                  {preview.feeMode === 'stop_wise' && (preview.exemptInCharge ?? 0) > 0 && (
+                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                      {preview.exemptInCharge} staff are exempt because they hold an active bus in-charge role.
+                      They are not billed while they keep it.
                     </p>
                   )}
                   <button
