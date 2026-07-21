@@ -9,6 +9,7 @@ import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-vie
 import { DataTable } from '@/components/ui/data-table';
 import { getCoverageColumns } from './coverage-columns';
 import { exportCoverage } from './coverage-export';
+import { StopRatesCard } from './stop-rates-card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   fetchFeeStructure, fetchCoverage, fetchMasters, runGeneration,
@@ -304,6 +305,12 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
         </SectionCard>
       )}
 
+      {fee.fee_mode === 'stop_wise' && (
+        <SectionCard title="Stop rates">
+          <StopRatesCard feeId={fee.id} canManage={canManage} />
+        </SectionCard>
+      )}
+
       {/* Generate panel */}
       {canGenerate && (
         <SectionCard title="Generate bills">
@@ -332,6 +339,13 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                     <Stat label="Already billed (skip)" value={preview.alreadyBilledPairs} />
                     {preview.feeMode === 'tiered' ? (
                       <Stat label="Unresolved" value={preview.unresolved} />
+                    ) : preview.feeMode === 'stop_wise' ? (
+                      <>
+                        {/* Stop-wise has no single per-person total — it varies by
+                            stop — so report how many stops are priced instead. */}
+                        <Stat label="Stops priced" value={preview.stopRateCount ?? 0} />
+                        <Stat label="Unresolved" value={preview.unresolved} />
+                      </>
                     ) : (
                       <Stat label="Fee / person" value={inr(preview.totalPerPerson ?? 0)} />
                     )}
@@ -349,10 +363,22 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                   <p className="mt-3 text-xs text-gray-500">
                     {preview.learnerCount} learner(s), {preview.staffCount} staff
                     {preview.feeMode === 'flat' && preview.termsPerPerson != null && ` · ${preview.termsPerPerson} term(s) each`}.
-                    {preview.unresolved > 0 && ` ⚠️ ${preview.unresolved} learner(s) have no admission year / no matching band — skipped.`}
+                    {preview.unresolved > 0 && preview.feeMode !== 'stop_wise' && ` ⚠️ ${preview.unresolved} learner(s) have no admission year / no matching band — skipped.`}
                     {preview.staffDeferred && ' Staff are recorded for coverage only (real staff billing is phase 2).'}
                     {preview.conflictCount > 0 && ` ⚠️ ${preview.conflictCount} person(s) already billed by another structure for this year.`}
                   </p>
+                  {preview.feeMode === 'stop_wise' && preview.unresolved > 0 && (
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                      ⚠️{' '}
+                      {preview.unresolvedByReason?.no_stop
+                        ? `${preview.unresolvedByReason.no_stop} with no boarding stop assigned. `
+                        : ''}
+                      {preview.unresolvedByReason?.no_stop_rate
+                        ? `${preview.unresolvedByReason.no_stop_rate} whose stop has no fee configured. `
+                        : ''}
+                      These are not billed — assign stops or price the missing stops, then re-run.
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={() => setConfirmGen(true)}

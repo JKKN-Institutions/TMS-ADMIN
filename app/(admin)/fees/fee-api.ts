@@ -44,9 +44,13 @@ export interface GeneratePreviewBand {
 export interface GeneratePreview {
   mode: 'dry_run' | 'generate';
   audience: 'student' | 'staff';
-  feeMode: 'flat' | 'tiered';
+  feeMode: 'flat' | 'tiered' | 'stop_wise';
   applicable: number;
-  unresolved: number; // tiered: no admission year / year matches no band
+  unresolved: number; // tiered: no admission year / year matches no band; stop_wise: no stop / no stop rate
+  // Breakdown behind `unresolved`, keyed by reason. tiered only ever populates
+  // no_matching_band; stop_wise only ever populates no_stop / no_stop_rate.
+  unresolvedByReason?: Record<'no_matching_band' | 'no_stop' | 'no_stop_rate', number>;
+  stopRateCount?: number | null; // stop_wise only: how many stops currently have a configured rate
   learnerCount: number;
   staffCount: number;
   termsPerPerson: number | null; // null for tiered (varies by band)
