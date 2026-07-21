@@ -2170,15 +2170,21 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 11: Stop rates card on the structure detail page
+## Task 11: Stop rates card + fix the dry-run preview for stop-wise
 
 **Files:**
 - Create: `app/(admin)/fees/[id]/stop-rates-card.tsx`
 - Modify: `app/(admin)/fees/[id]/page.tsx`
+- Modify: `app/(admin)/fees/fee-api.ts`
 
 **Interfaces:**
 - Consumes: `GET`/`PUT /api/admin/fees/[id]/stop-rates` (Task 7); template + import routes (Tasks 8, 9)
 - Produces: `<StopRatesCard feeId={string} />`
+
+> **Added 2026-07-21 after the Task 6 review.** Making `stop_wise` reachable end-to-end exposed a gap
+> this task now owns: the dry-run preview panel misreports stop-wise runs. The dry run is the
+> **safety gate** an operator uses to decide whether to bill — a gate showing ₹0 and hiding unresolved
+> counts is worse than none, because it manufactures false confidence. Steps 2a–2c below close it.
 
 - [ ] **Step 1: Create the card**
 
@@ -2329,10 +2335,56 @@ Then, next to the existing "Year bands" SectionCard, add:
 )}
 ```
 
-- [ ] **Step 3: Verify the build**
+- [ ] **Step 2a: Widen the preview type (`app/(admin)/fees/fee-api.ts`)**
 
-Run: `npm run build`
-Expected: `Compiled successfully`.
+`GeneratePreview.feeMode` is still `'flat' | 'tiered'` and the interface lacks the fields Task 6 now
+returns. The response is applied with an `as GeneratePreview` cast, so this compiles clean while
+being wrong — the cast is exactly why nothing caught it. Update the interface:
+
+```ts
+  feeMode: 'flat' | 'tiered' | 'stop_wise';
+  unresolvedByReason?: Record<'no_matching_band' | 'no_stop' | 'no_stop_rate', number>;
+  stopRateCount?: number | null;
+```
+
+- [ ] **Step 2b: Fix the "Fee / person" stat for stop-wise (`app/(admin)/fees/[id]/page.tsx`)**
+
+The server computes `totalPerPerson` as `isTiered ? null : flatTerms.reduce(...)`. For `stop_wise`,
+`flatTerms` is always `[]`, so it arrives as **0** and the panel renders "₹0" for a fully priced
+structure. Stop-wise has no single per-person total — it varies by stop. Render the count of priced
+stops instead:
+
+```tsx
+{preview.feeMode === 'stop_wise' ? (
+  <Stat label="Stops priced" value={String(preview.stopRateCount ?? 0)} />
+) : preview.feeMode === 'tiered' ? null : (
+  <Stat label="Fee / person" value={inr(preview.totalPerPerson ?? 0)} />
+)}
+```
+
+Match the existing `<Stat>`/markup shape used by the surrounding stats — do not invent a new component.
+
+- [ ] **Step 2c: Show unresolved for stop-wise, with the RIGHT reason**
+
+The "Unresolved" stat renders only when `feeMode === 'tiered'`, and its warning text hardcodes
+"no admission year / no matching band" — wrong for `no_stop` and `no_stop_rate`, whose remedies are
+completely different (assign the person a stop vs. price that stop). Render the stat for `stop_wise`
+too, and break the warning down by reason:
+
+```tsx
+{preview.feeMode === 'stop_wise' && preview.unresolved > 0 && (
+  <p className="text-sm text-amber-700 dark:text-amber-400">
+    {preview.unresolvedByReason?.no_stop ? `${preview.unresolvedByReason.no_stop} with no boarding stop assigned. ` : ''}
+    {preview.unresolvedByReason?.no_stop_rate ? `${preview.unresolvedByReason.no_stop_rate} whose stop has no fee configured. ` : ''}
+    These are not billed.
+  </p>
+)}
+```
+
+- [ ] **Step 3: Verify types**
+
+Run: `npx tsc --noEmit 2>&1 | grep -E "fees/\[id\]/page|fees/fee-api|stop-rates-card"`
+Expected: **zero lines**. (Do not run `npm run build` — a parallel session's dev server holds `.next/`.)
 
 - [ ] **Step 4: Exercise the round trip**
 
