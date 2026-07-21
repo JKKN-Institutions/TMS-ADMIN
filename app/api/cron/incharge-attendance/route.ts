@@ -66,11 +66,15 @@ export async function GET(request: NextRequest) {
     try {
       summary.evaluated++;
 
-      const { data: strike } = await svc
+      const { data: strike, error: strikeErr } = await svc
         .from('tms_incharge_attendance_strike')
         .select('*')
         .eq('assignment_id', a.id)
         .maybeSingle();
+      // A failed load would silently reset the streak AND drop
+      // last_evaluated_date (losing same-day idempotency). Fail this staffer
+      // instead — the catch records it and no strike is written.
+      if (strikeErr) throw new Error(`strike load failed: ${strikeErr.message}`);
 
       const prev: StrikeState = {
         consecutiveMisses: strike?.consecutive_misses ?? 0,
@@ -85,11 +89,15 @@ export async function GET(request: NextRequest) {
       // Route-level coverage: ANY mark on this route today, either leg, counts.
       let attendanceMarked = false;
       if (a.route_id) {
-        const { count } = await svc
+        const { count, error: attErr } = await svc
           .from('tms_attendance')
           .select('id', { count: 'exact', head: true })
           .eq('route_id', a.route_id)
           .eq('trip_date', date);
+        // NEVER let a failed query read as "nobody marked attendance" — that
+        // would strike, and eventually BILL, a staffer for an infrastructure
+        // failure. Fail loudly instead.
+        if (attErr) throw new Error(`attendance count failed: ${attErr.message}`);
         attendanceMarked = (count ?? 0) > 0;
       }
 
@@ -97,7 +105,7 @@ export async function GET(request: NextRequest) {
         date,
         hasBookedRiders: roster.riders.length > 0,
         attendanceMarked,
-        assignedOnDate: (a.assigned_at ?? '').slice(0, 10) === date,
+        assignedOnDate: a.assigned_at ? istToday(new Date(a.assigned_at)) === date : false,
       });
 
       if (outcome.action === 'skip') {
@@ -106,16 +114,28 @@ export async function GET(request: NextRequest) {
       }
 
       // Resolve the staffer's profile once — needed for notifications.
-      const { data: profile } = await svc
+      const { data: profile, error: profErr } = await svc
         .from('profiles')
         .select('id')
         .ilike('email', a.staff_email)
         .maybeSingle();
-      const actorId = a.assigned_by ?? profile?.id ?? null;
+      if (profErr) throw new Error(`profile load failed: ${profErr.message}`);
+      const profileId = profile?.id ?? null;
+      const actorId = a.assigned_by ?? profileId ?? null;
+      const reachable = Boolean(profileId && actorId);
 
       let billingStatus: BillingStatus | null = null;
 
-      if (outcome.action === 'remove') {
+      if (outcome.action === 'remove' && !reachable) {
+        // Never revoke a role or bill a person we cannot even notify. The
+        // strike is still persisted below, so this resurfaces on every run
+        // until a human fixes the missing profiles row.
+        summary.errors++;
+        summary.failures.push({
+          staffEmail: a.staff_email,
+          message: 'no reachable profiles row — removal and billing skipped',
+        });
+      } else if (outcome.action === 'remove') {
         // performRemoval guarantees revoke-then-bill, and that a billing
         // failure cannot undo the revoke. See lib/boarding/incharge-attendance.ts.
         const removal = await performRemoval({
@@ -165,7 +185,12 @@ export async function GET(request: NextRequest) {
           consecutive_misses: outcome.state.consecutiveMisses,
           missed_dates: outcome.state.missedDates,
           last_evaluated_date: outcome.state.lastEvaluatedDate,
-          warned_at: outcome.action === 'warn' ? new Date().toISOString() : strike?.warned_at ?? null,
+          warned_at:
+            outcome.action === 'warn'
+              ? new Date().toISOString()
+              : outcome.action === 'reset'
+                ? null
+                : strike?.warned_at ?? null,
           removed_at: outcome.action === 'remove' ? new Date().toISOString() : strike?.removed_at ?? null,
           billing_status: billingStatus ?? strike?.billing_status ?? null,
           updated_at: new Date().toISOString(),
@@ -173,27 +198,33 @@ export async function GET(request: NextRequest) {
         { onConflict: 'assignment_id' },
       );
 
-      if (profile?.id && actorId) {
-        if (outcome.action === 'warn') {
+      if (outcome.action === 'warn') {
+        // Counted whether or not delivery succeeds — the strike DID advance.
+        summary.warned++;
+        if (reachable && profileId && actorId) {
           const copy = warningCopy(outcome.state.missedDates);
           await notifyProfile(svc, {
-            profileId: profile.id,
+            profileId,
             actorId,
             title: copy.title,
             body: copy.body,
             url: '/boarding/attendance',
           });
-          summary.warned++;
-        } else if (outcome.action === 'remove') {
-          const copy = removalCopy(outcome.state.missedDates, billingStatus === 'billed');
-          await notifyProfile(svc, {
-            profileId: profile.id,
-            actorId,
-            title: copy.title,
-            body: copy.body,
-            url: '/boarding/in-charge',
+        } else {
+          summary.failures.push({
+            staffEmail: a.staff_email,
+            message: 'warning not delivered — no reachable profiles row',
           });
         }
+      } else if (outcome.action === 'remove' && reachable && profileId && actorId && billingStatus !== null) {
+        const copy = removalCopy(outcome.state.missedDates, billingStatus === 'billed');
+        await notifyProfile(svc, {
+          profileId,
+          actorId,
+          title: copy.title,
+          body: copy.body,
+          url: '/boarding/in-charge',
+        });
       }
     } catch (e) {
       // One staffer's failure must never abort the run for the others.
