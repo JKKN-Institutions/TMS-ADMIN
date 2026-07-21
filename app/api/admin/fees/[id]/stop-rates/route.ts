@@ -40,6 +40,20 @@ async function list(request: NextRequest, auth: AuthContext) {
 
     const supabase = createServiceRoleClient();
 
+    // Validate that this is a stop-wise structure
+    const { data: fs } = await supabase
+      .from('tms_fee_structure')
+      .select('id, fee_mode')
+      .eq('id', id)
+      .maybeSingle();
+    if (!fs) return NextResponse.json({ error: 'Fee structure not found' }, { status: 404 });
+    if (fs.fee_mode !== 'stop_wise') {
+      return NextResponse.json(
+        { error: 'Stop rates apply only to stop-wise fee structures.' },
+        { status: 400 }
+      );
+    }
+
     const { data: stops, error: stopErr } = await supabase
       .from('tms_route_stop')
       .select('id, stop_name, sequence_order, route_id, tms_route(route_number, route_name)')
@@ -140,6 +154,15 @@ async function upsert(request: NextRequest, auth: AuthContext) {
       });
     }
 
+    // Upsert first, delete second. Without a transaction, delete-then-upsert can
+    // permanently lose an operator's entire price list if the upsert fails (no recovery).
+    // Upsert-then-delete can only leave stale rows, which a retry clears.
+    if (toUpsert.length) {
+      const { error } = await supabase
+        .from('tms_fee_structure_stop_rate')
+        .upsert(toUpsert, { onConflict: 'fee_structure_id,stop_id' });
+      if (error) return NextResponse.json({ error: 'Failed to save stop rates' }, { status: 500 });
+    }
     if (toDelete.length) {
       const { error } = await supabase
         .from('tms_fee_structure_stop_rate')
@@ -147,12 +170,6 @@ async function upsert(request: NextRequest, auth: AuthContext) {
         .eq('fee_structure_id', id)
         .in('stop_id', toDelete);
       if (error) return NextResponse.json({ error: 'Failed to clear stop rates' }, { status: 500 });
-    }
-    if (toUpsert.length) {
-      const { error } = await supabase
-        .from('tms_fee_structure_stop_rate')
-        .upsert(toUpsert, { onConflict: 'fee_structure_id,stop_id' });
-      if (error) return NextResponse.json({ error: 'Failed to save stop rates' }, { status: 500 });
     }
 
     return NextResponse.json({
