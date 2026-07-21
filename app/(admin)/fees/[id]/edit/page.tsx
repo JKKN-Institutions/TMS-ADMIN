@@ -76,6 +76,17 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
               due_date: t.due_date ? String(t.due_date).split('T')[0] : '',
             })),
           })),
+          // Without this, the form falls back to its default 2-term 50/50
+          // schedule and the mandatory draft->active save silently overwrites
+          // the real saved stop_wise schedule (see aided-task-10-review.md).
+          stop_terms: (data.stop_terms ?? []).map((t) => ({
+            id: t.id,
+            fee_structure_id: t.fee_structure_id,
+            term_no: t.term_no,
+            term_label: t.term_label ?? `Term ${t.term_no}`,
+            due_date: t.due_date ? String(t.due_date).split('T')[0] : '',
+            share_percent: Number(t.share_percent),
+          })),
         }}
       />
     </div>

@@ -382,6 +382,16 @@ async function putFee(request: NextRequest, auth: AuthContext) {
           return NextResponse.json({ error: 'Fee structure updated but failed to save year bands' }, { status: 500 });
         }
       }
+      // Leaving stop_wise (or already not stop_wise): tms_fee_structure_stop_term
+      // self-heals on any future stop_wise PUT (the form always resends the full
+      // schedule), but tms_fee_structure_stop_rate does not -- it's managed on
+      // a separate screen (the stop-rates sub-route) and nothing else ever
+      // clears it. Left in place, a later switch back to stop_wise would
+      // resurface these stale per-stop prices and bill generation would
+      // consume them unfiltered. Clear both here for consistency; the rate
+      // table is the one that actually matters.
+      await supabase.from('tms_fee_structure_stop_rate').delete().eq('fee_structure_id', id);
+      await supabase.from('tms_fee_structure_stop_term').delete().eq('fee_structure_id', id);
       await logActivity(auth, request, {
         module: 'fees', action: 'update', entityType: 'tms_fee_structure',
         entityId: id, entityLabel: updated.name,
@@ -456,6 +466,16 @@ async function putFee(request: NextRequest, auth: AuthContext) {
         return NextResponse.json({ error: 'Fee structure updated but failed to save terms' }, { status: 500 });
       }
     }
+    // Leaving stop_wise (or already not stop_wise): tms_fee_structure_stop_term
+    // self-heals on any future stop_wise PUT (the form always resends the full
+    // schedule), but tms_fee_structure_stop_rate does not -- it's managed on a
+    // separate screen (the stop-rates sub-route) and nothing else ever clears
+    // it. Left in place, a later switch back to stop_wise would resurface
+    // these stale per-stop prices and bill generation would consume them
+    // unfiltered. Clear both here for consistency; the rate table is the one
+    // that actually matters.
+    await supabase.from('tms_fee_structure_stop_rate').delete().eq('fee_structure_id', id);
+    await supabase.from('tms_fee_structure_stop_term').delete().eq('fee_structure_id', id);
 
     await logActivity(auth, request, {
       module: 'fees', action: 'update', entityType: 'tms_fee_structure',
