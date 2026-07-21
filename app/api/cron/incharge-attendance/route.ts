@@ -33,6 +33,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Dry run: compute and report every outcome, but write nothing and notify
+  // nobody. Mirrors the fees generate route's dry_run convention. Auth is
+  // still required — this is not a public preview.
+  const dryRun = request.nextUrl.searchParams.get('dryRun') === '1';
+
   const svc = createServiceRoleClient();
   const date = istToday();
   const summary = {
@@ -46,6 +51,14 @@ export async function GET(request: NextRequest) {
     // Which staffer failed and why. A bare error COUNT is undiagnosable in a
     // job that revokes roles and writes bills — always carry the reason out.
     failures: [] as Array<{ staffEmail: string; message: string }>,
+    dryRun,
+    plan: [] as Array<{
+      staffEmail: string;
+      action: string;
+      consecutiveMisses: number;
+      missedDates: string[];
+      wouldBill: boolean;
+    }>,
   };
 
   const { data: assignments, error: aErr } = await svc
@@ -110,7 +123,26 @@ export async function GET(request: NextRequest) {
 
       if (outcome.action === 'skip') {
         summary.skipped++;
+        if (dryRun) {
+          summary.plan.push({
+            staffEmail: a.staff_email,
+            action: `skip:${outcome.reason}`,
+            consecutiveMisses: prev.consecutiveMisses,
+            missedDates: prev.missedDates,
+            wouldBill: false,
+          });
+        }
         continue;
+      }
+
+      if (dryRun) {
+        summary.plan.push({
+          staffEmail: a.staff_email,
+          action: outcome.action,
+          consecutiveMisses: outcome.state.consecutiveMisses,
+          missedDates: outcome.state.missedDates,
+          wouldBill: outcome.action === 'remove',
+        });
       }
 
       // Resolve the staffer's profile once — needed for notifications.
@@ -135,6 +167,9 @@ export async function GET(request: NextRequest) {
           staffEmail: a.staff_email,
           message: 'no reachable profiles row — removal and billing skipped',
         });
+      } else if (outcome.action === 'remove' && dryRun) {
+        // Count what WOULD happen; revoke nothing, bill nothing.
+        summary.removed++;
       } else if (outcome.action === 'remove') {
         // performRemoval guarantees revoke-then-bill, and that a billing
         // failure cannot undo the revoke. See lib/boarding/incharge-attendance.ts.
@@ -177,31 +212,35 @@ export async function GET(request: NextRequest) {
       }
 
       // Persist the strike state (upsert on the unique assignment_id).
-      await svc.from('tms_incharge_attendance_strike').upsert(
-        {
-          assignment_id: a.id,
-          staff_email: a.staff_email,
-          route_id: a.route_id,
-          consecutive_misses: outcome.state.consecutiveMisses,
-          missed_dates: outcome.state.missedDates,
-          last_evaluated_date: outcome.state.lastEvaluatedDate,
-          warned_at:
-            outcome.action === 'warn'
-              ? new Date().toISOString()
-              : outcome.action === 'reset'
-                ? null
-                : strike?.warned_at ?? null,
-          removed_at: outcome.action === 'remove' ? new Date().toISOString() : strike?.removed_at ?? null,
-          billing_status: billingStatus ?? strike?.billing_status ?? null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'assignment_id' },
-      );
+      if (!dryRun) {
+        await svc.from('tms_incharge_attendance_strike').upsert(
+          {
+            assignment_id: a.id,
+            staff_email: a.staff_email,
+            route_id: a.route_id,
+            consecutive_misses: outcome.state.consecutiveMisses,
+            missed_dates: outcome.state.missedDates,
+            last_evaluated_date: outcome.state.lastEvaluatedDate,
+            warned_at:
+              outcome.action === 'warn'
+                ? new Date().toISOString()
+                : outcome.action === 'reset'
+                  ? null
+                  : strike?.warned_at ?? null,
+            removed_at: outcome.action === 'remove' ? new Date().toISOString() : strike?.removed_at ?? null,
+            billing_status: billingStatus ?? strike?.billing_status ?? null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'assignment_id' },
+        );
+      }
 
       if (outcome.action === 'warn') {
         // Counted whether or not delivery succeeds — the strike DID advance.
         summary.warned++;
-        if (reachable && profileId && actorId) {
+        if (dryRun) {
+          // no delivery in a dry run
+        } else if (reachable && profileId && actorId) {
           const copy = warningCopy(outcome.state.missedDates);
           await notifyProfile(svc, {
             profileId,
@@ -216,7 +255,14 @@ export async function GET(request: NextRequest) {
             message: 'warning not delivered — no reachable profiles row',
           });
         }
-      } else if (outcome.action === 'remove' && reachable && profileId && actorId && billingStatus !== null) {
+      } else if (
+        outcome.action === 'remove' &&
+        !dryRun &&
+        reachable &&
+        profileId &&
+        actorId &&
+        billingStatus !== null
+      ) {
         const copy = removalCopy(outcome.state.missedDates, billingStatus === 'billed');
         await notifyProfile(svc, {
           profileId,
