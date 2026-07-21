@@ -61,12 +61,6 @@ async function generate(request: NextRequest, auth: AuthContext) {
 
     const isTiered = fs.fee_mode === 'tiered';
     const isStopWise = fs.fee_mode === 'stop_wise';
-    if (isStopWise && fs.audience !== 'student') {
-      return NextResponse.json(
-        { error: 'Stop-wise fee structures apply to students only.' },
-        { status: 400 }
-      );
-    }
 
     // Transport year start → the calendar year used to derive year of study, and
     // the date used to resolve each learner's academic_year. Needed for dry-run too.
@@ -174,23 +168,28 @@ async function generate(request: NextRequest, auth: AuthContext) {
     const people = await resolveApplicablePeople(supabase, fs);
 
     // Boarding stops for the cohort. Fetched here rather than inside
-    // resolveApplicablePeople because the staff cron shares that function and
-    // must not change. Chunked to 150 ids: a larger .in() overflows the
-    // Supabase gateway with HTTP 400, and an unchecked { data: null } would
-    // silently make every learner look stop-less.
+    // resolveApplicablePeople because the staff in-charge cron shares that
+    // function and must not change.
+    //
+    // The source table follows the structure's audience: learners and staff each
+    // carry their own transport_stop_id. Chunked to 150 ids: a larger .in()
+    // overflows the Supabase gateway with HTTP 400, and an unchecked
+    // { data: null } would silently make every person look stop-less — i.e.
+    // everyone unresolved and nobody billed.
     const stopByPerson = new Map<string, string | null>();
     if (isStopWise) {
+      const stopTable = fs.audience === 'staff' ? 'staff' : 'learners_profiles';
       const ids = people.map((p) => p.person_id);
       const CHUNK_STOPS = 150;
       for (let i = 0; i < ids.length; i += CHUNK_STOPS) {
-        const { data: lp, error: lpErr } = await supabase
-          .from('learners_profiles')
+        const { data: rows, error: stopErr } = await supabase
+          .from(stopTable)
           .select('id, transport_stop_id')
           .in('id', ids.slice(i, i + CHUNK_STOPS));
-        if (lpErr) {
+        if (stopErr) {
           return NextResponse.json({ error: 'Failed to resolve boarding stops.' }, { status: 500 });
         }
-        for (const r of (lp ?? []) as Array<{ id: string; transport_stop_id: string | null }>) {
+        for (const r of (rows ?? []) as Array<{ id: string; transport_stop_id: string | null }>) {
           stopByPerson.set(r.id, r.transport_stop_id);
         }
       }
