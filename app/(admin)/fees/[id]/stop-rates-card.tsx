@@ -1,19 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Download, Loader2, UploadCloud } from 'lucide-react';
-
-interface StopRateRow {
-  stop_id: string;
-  stop_name: string;
-  sequence_order: number;
-  route_id: string;
-  route_number: string | null;
-  route_name: string | null;
-  annual_amount: number | null;
-}
+import { DataTable } from '@/components/ui/data-table';
+import { getStopRateColumns, type StopRateRow } from './stop-rates-columns';
 
 interface ImportRowError {
   row: number;
@@ -46,6 +38,8 @@ export function StopRatesCard({ feeId, canManage }: { feeId: string; canManage: 
   });
 
   const priced = rows.filter((r) => r.annual_amount !== null);
+
+  const columns = useMemo(() => getStopRateColumns(), []);
 
   async function onUpload(file: File) {
     setUploading(true);
@@ -127,36 +121,24 @@ export function StopRatesCard({ feeId, canManage }: { feeId: string; canManage: 
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[36rem] text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 dark:border-gray-700">
-              <th className="py-2 pr-3">Route</th>
-              <th className="py-2 pr-3">#</th>
-              <th className="py-2 pr-3">Stop</th>
-              <th className="py-2 pr-3 text-right">Annual (₹)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.stop_id} className="border-b border-gray-100 last:border-0 dark:border-gray-800">
-                <td className="py-1.5 pr-3 whitespace-nowrap text-gray-900 dark:text-gray-100">
-                  {r.route_number} — {r.route_name}
-                </td>
-                <td className="py-1.5 pr-3 text-gray-500">{r.sequence_order}</td>
-                <td className="py-1.5 pr-3 text-gray-900 dark:text-gray-100">{r.stop_name}</td>
-                <td className="py-1.5 pr-3 text-right">
-                  {r.annual_amount === null ? (
-                    <span className="text-amber-600 dark:text-amber-400">needs rate</span>
-                  ) : (
-                    <span className="text-gray-900 dark:text-gray-100">{r.annual_amount.toLocaleString('en-IN')}</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={rows}
+        entityName="stops"
+        getRowId={(r) => r.stop_id}
+        enableRowSelection={false}
+        searchPlaceholder="Search stop or route..."
+        filters={[
+          {
+            columnId: 'priced',
+            title: 'Status',
+            options: [
+              { label: 'Priced', value: 'priced' },
+              { label: 'Needs rate', value: 'unpriced' },
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }
