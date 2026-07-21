@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Save, Upload } from 'lucide-react';
+import { Loader2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchDriverOptions, fetchRouteOptions } from './driver-mobile-api';
 import { MAX_DRIVER_MOBILE_IMAGES } from '@/lib/driver-mobiles/images';
