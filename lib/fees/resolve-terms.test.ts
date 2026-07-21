@@ -72,7 +72,10 @@ describe('resolvePersonTerms — tiered (existing behaviour)', () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.band?.id).toBe('band-2');
-      expect(r.terms).toHaveLength(2);
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'Term 1', amount: 2500, due_date: '2026-06-15' },
+        { term_no: 2, term_label: 'Term 2', amount: 2500, due_date: '2026-11-15' },
+      ]);
     }
   });
 
@@ -82,7 +85,12 @@ describe('resolvePersonTerms — tiered (existing behaviour)', () => {
       ctx({ feeMode: 'tiered' })
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.band?.id).toBe('band-1');
+    if (r.ok) {
+      expect(r.band?.id).toBe('band-1');
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'Term 1', amount: 500, due_date: '2026-06-15' },
+      ]);
+    }
   });
 
   it('is UNRESOLVED when the admission year is missing (never guessed)', () => {
