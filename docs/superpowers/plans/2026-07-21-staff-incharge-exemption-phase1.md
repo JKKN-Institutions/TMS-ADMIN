@@ -77,25 +77,39 @@ git checkout feat/aided-stop-wise-fees && npx vitest run 2>&1 | grep -E "Test Fi
 Write both numbers down. The merged trunk must carry the **union** of both suites — if the combined
 number is lower than either input, tests were lost in the merge.
 
+> **CORRECTED 2026-07-21 by pre-flight check.** Local `main` is **40 commits ahead** of `origin/main`
+> across 45 files (driver-mobiles, settings-overhaul, bill-management analytics). The original
+> `--ff-only` would refuse, and a rebase would replay 29 commits — five of which touch
+> `generate/route.ts` — potentially conflicting on that live billing route repeatedly, against
+> partial intermediate state. **Merge instead: each conflicted file is resolved exactly once, with
+> both final versions in view, and no history is rewritten.**
+>
+> Measured conflict surface: in-charge→main **0 files**; stop-wise→main **1** (`lib/fees/bills.ts`);
+> stop-wise↔in-charge **1** (`app/api/admin/fees/[id]/generate/route.ts`).
+
 - [ ] **Step 3: Merge the in-charge branch into main**
 
 ```bash
 git checkout main
-git merge --ff-only feat/incharge-attendance-fee-enforcement
+git merge --no-ff feat/incharge-attendance-fee-enforcement -m "Merge feat/incharge-attendance-fee-enforcement into main"
 ```
 
-Expected: fast-forward (main is at `origin/main` with no local commits of its own on this path).
-If it refuses, **STOP and report** — a non-fast-forward means main has diverged and the plan's
-assumption is wrong.
+Expected: clean merge — the two share **zero** changed files. If git reports ANY conflict, **STOP and
+report**: it contradicts the measured overlap and something has changed since.
 
-- [ ] **Step 4: Rebase the stop-wise branch onto the new main**
+- [ ] **Step 4: Merge main into the stop-wise branch**
 
 ```bash
 git checkout feat/aided-stop-wise-fees
-git rebase main
+git merge main
 ```
 
-This is the only history rewrite permitted anywhere in this project, and it is deliberate.
+Expected: conflicts in exactly two files — `app/api/admin/fees/[id]/generate/route.ts` and
+`lib/fees/bills.ts`. **Do NOT rebase.** No history rewrite anywhere in this task.
+
+For `lib/fees/bills.ts`, both sides must survive: main's bill-management analytics changes, and this
+branch's `stopWiseBillable` predicate plus the stop-wise narrowing in `loadUnbilledPeople`. They are
+in different functions — keep both.
 
 - [ ] **Step 5: Resolve the conflict in the billing route**
 
@@ -136,18 +150,34 @@ from tms_fee_structure fs where fs.fee_mode in ('flat','tiered') order by fs.nam
 Expected, unchanged: Testing `2026-06-19` / 2 rows; Transport Fees 2026-2027 `2026-06-19` / 1232;
 Transport Fees 2026-2027(Arts Self) `2026-06-19` / 718.
 
-- [ ] **Step 8: Commit the resolution**
-
-The rebase creates no commit of its own for a clean resolution; if `git status` shows a pending
-rebase, finish it with `git rebase --continue`. Then verify:
+- [ ] **Step 8: Complete the merge commit**
 
 ```bash
-git log --oneline -1
+git add "app/api/admin/fees/[id]/generate/route.ts" lib/fees/bills.ts
+git commit -m "Merge main into feat/aided-stop-wise-fees
+
+Brings in the in-charge attendance loop plus main's driver-mobiles,
+settings-overhaul and bill-management work. Two files needed resolution:
+
+generate/route.ts -- kept BOTH the in-charge branch's buildStaffFeeBillRow
+delegation and this branch's stop_wise term loading, rate lookup and
+per-reason unresolved reporting. They change different things.
+
+bills.ts -- kept main's analytics changes alongside this branch's
+stopWiseBillable predicate and stop-wise unbilled narrowing.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+Then verify nothing stray was committed:
+
+```bash
+git show --stat --oneline HEAD | tail -5
 git status --porcelain
 ```
 
-Expected: the branch tip is your last stop-wise commit, and the working tree carries only the
-pre-existing dirt (`.claude/`, `next-env.d.ts`, `bun.lock`).
+Expected: the merge commit lists only files from the two branches, and the working tree carries only
+the pre-existing dirt (`.claude/`, `next-env.d.ts`, `bun.lock`).
 
 ---
 
