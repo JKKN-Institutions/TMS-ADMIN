@@ -107,6 +107,7 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
     }
 
     setUploadingImage(true);
+    let uploaded = 0;
     try {
       for (const file of accepted) {
         try {
@@ -122,13 +123,16 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
           if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
           // Append immediately so one bad file cannot discard the good ones.
           setForm((f) => ({ ...f, image_paths: [...f.image_paths, json.path] }));
+          uploaded += 1;
           const url = await fetchPreviewUrl(json.path);
           setImagePreviews((m) => ({ ...m, [json.path]: url }));
         } catch (err) {
           toast.error(err instanceof Error ? `${file.name}: ${err.message}` : 'Upload failed');
         }
       }
-      toast.success('Images uploaded');
+      if (uploaded > 0) {
+        toast.success(`${uploaded} image${uploaded === 1 ? '' : 's'} uploaded`);
+      }
     } finally {
       setUploadingImage(false);
     }
