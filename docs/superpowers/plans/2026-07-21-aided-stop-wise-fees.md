@@ -13,7 +13,8 @@
 ## Global Constraints
 
 - **Scope by configuration, never hard-code.** Arts Aided is targeted via the structure's `institution_ids` array (`a33138b6-4eea-4675-941f-1071bf88b127`). No institution id may appear in application code.
-- **`stop_wise` is `audience = 'student'` only.** Reject `audience = 'staff'` with `stop_wise` at the API layer.
+- **`stop_wise` serves BOTH audiences** (amended 2026-07-21 by user directive; the original student-only rule is withdrawn). Two separate structures: `audience='student'` scoped to Arts Aided (6 learners), and `audience='staff'` with `institution_ids = NULL` meaning all institutions (105 active staff, all with a boarding stop, across 9 institutions). Boarding stops come from `learners_profiles.transport_stop_id` for students and `staff.transport_stop_id` for staff — the two tables carry the same transport columns.
+- **Staff bills remain LEDGER-ONLY** — `tms_fee_bill` with `status='staff_deferred'` and `billing_student_bill_id=null`, never a `billing_student_bills` row (its FK targets `learners_profiles` and rejects staff ids). Accepted knowingly; do not attempt to work around it.
 - **Never guess an amount.** A student with no `transport_stop_id`, or whose stop has no rate row, is `unresolved` — skipped, counted, reported. Never defaulted to 0 or to any fallback.
 - **No existing table's columns change.** Only an additive `CHECK` value on `tms_fee_structure.fee_mode`. `tms_fee_structure_term` and `tms_fee_structure_year_band` are untouched.
 - **`lib/fees/applicability.ts` is not modified** — the staff cron also calls it.

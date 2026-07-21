@@ -217,10 +217,44 @@ so a human can read and edit the sheet, and act as a tripwire if rows are reorde
 ## Non-goals
 
 - Combining stop-wise with year-of-study tiering. The three modes stay mutually exclusive.
-- Stop-wise fees for staff (`audience = 'staff'`). Staff billing is a deferred-ledger path with
-  no `billing_student_bills` row; mixing adds risk for no current benefit.
+- Making staff bills *payable*. See the amendment below — staff are now in scope, but only on the
+  existing deferred-ledger path.
 - Backfilling or reconciling the 2022-23 workbook.
 - Any change to flat or tiered behaviour.
+
+## Amendment — 2026-07-21: staff are in scope
+
+**User directive:** *"create the new fee structure for the aided, it's also applicable for all
+institution staffs for the above stopwise fees, so not update the arts self fee structure."*
+
+This reverses the original non-goal. Stop-wise now serves **two audiences**, via **two separate
+structures** — `tms_fee_structure.audience` is `'student' | 'staff'`, so one structure cannot do both:
+
+| | Structure A | Structure B |
+|---|---|---|
+| `fee_mode` | `stop_wise` | `stop_wise` |
+| `audience` | `student` | `staff` |
+| `institution_ids` | `[a33138b6-…]` (Arts Aided) | `NULL` = **all institutions** |
+| `staff_role_keys` | — | `NULL` = all roles |
+| Cohort (verified 2026-07-21) | 6 learners | **105 active staff, all with a boarding stop, across 9 institutions** |
+
+**Feasibility confirmed:** `staff` carries the same transport columns as `learners_profiles` —
+`transport_stop_id`, `transport_route_id`, `bus_required`, `institution_id`, `role_key`, `is_active`.
+
+**Rates:** identical amounts for both. Stop rates hang off the structure, so the same filled template
+is uploaded to each. Keeping them separate preserves the option of subsidised staff rates later.
+
+**Staff bills stay LEDGER-ONLY — decided knowingly.** The generator writes staff a `tms_fee_bill` row
+with `status = 'staff_deferred'` and `billing_student_bill_id = null`. It cannot do otherwise:
+`billing_student_bills.student_id` has a NOT NULL FK to `learners_profiles`, which rejects a staff id.
+So staff get a *record* of what they owe — visible in Bill Management, exportable — but **no payable
+bill in MyJKKN and no payment gate**. Making staff genuinely billable would need a schema change on a
+MyJKKN-owned table or a separate staff billing table; that is out of scope.
+
+**Code impact:** two surgical changes to `app/api/admin/fees/[id]/generate/route.ts` —
+(1) drop the `audience === 'student'` guard on stop-wise; (2) read boarding stops from `staff` when
+`audience = 'staff'`, from `learners_profiles` otherwise. Plus the form (Task 10) must allow
+`stop_wise` with `audience = 'staff'`.
 
 ## Risks
 
