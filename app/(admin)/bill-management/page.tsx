@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX, Loader2 } from 'lucide-react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import { getBillColumns, inr } from './columns';
@@ -10,7 +11,7 @@ import { getUnbilledColumns } from './unbilled-columns';
 import { exportBills } from './bill-export';
 import { fetchBills, fetchUnbilled, fetchTransportYearOptions } from './bill-management-api';
 
-type View = 'bills' | 'unbilled';
+type View = 'bills' | 'unbilled' | 'analytics';
 
 const TYPE_FILTER: DataTableFilter = {
   columnId: 'type',
@@ -20,6 +21,17 @@ const TYPE_FILTER: DataTableFilter = {
     { label: 'Staff', value: 'staff' },
   ],
 };
+
+// recharts (~390 KB) is heavy — load the analytics view as its own lazy chunk so
+// Bills/Unbilled never ship it. ssr:false: it renders client-only from cached rows.
+const BillAnalytics = dynamic(() => import('./bill-analytics'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <Loader2 className="h-8 w-8 animate-spin text-green-600" />
+    </div>
+  ),
+});
 
 export default function BillManagementPage() {
   const [selectedYear, setSelectedYear] = useState('');
@@ -47,7 +59,7 @@ export default function BillManagementPage() {
   );
   const yearLabel = years.find((y) => y.id === selectedYear)?.name;
 
-  const { data: bills, isLoading: billsLoading } = useQuery({
+  const { data: bills, isLoading: billsLoading, isError: billsError } = useQuery({
     queryKey: ['bill-management', selectedYear],
     queryFn: () => fetchBills(selectedYear),
     enabled: !!selectedYear,
@@ -118,10 +130,23 @@ export default function BillManagementPage() {
         <ToggleBtn active={view === 'unbilled'} onClick={() => setView('unbilled')} disabled={isAll}>
           Unbilled{!isAll && summary ? ` (${summary.unbilledCount})` : ''}
         </ToggleBtn>
+        <ToggleBtn active={view === 'analytics'} onClick={() => setView('analytics')}>
+          Analytics
+        </ToggleBtn>
       </div>
 
       {!selectedYear ? (
         <EmptyMsg>Select a transport year to view billing.</EmptyMsg>
+      ) : view === 'analytics' ? (
+        billsError ? (
+          <EmptyMsg>Couldn&apos;t load billing data. Please try again.</EmptyMsg>
+        ) : billsLoading || !summary ? (
+          <div className="flex min-h-[40vh] items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-green-600" />
+          </div>
+        ) : (
+          <BillAnalytics rows={rows} summary={summary} yearLabel={isAll ? undefined : yearLabel} />
+        )
       ) : view === 'bills' ? (
         <DataTable
           columns={billColumns}
