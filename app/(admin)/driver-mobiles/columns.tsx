@@ -37,8 +37,8 @@ export interface DriverMobileRow {
   storage_capacity: string | null;
   serial_number: string | null;
   accessories: string | null;
-  image_path: string | null;
-  image_url: string | null;
+  image_paths: string[] | null;
+  image_urls: (string | null)[] | null;
   handover_by: string | null;
   handover_date: string | null;
   created_at?: string | null;
@@ -110,18 +110,25 @@ export function getDriverMobileColumns(
       enableHiding: true,
       size: 64,
       header: () => <span className="text-xs font-medium text-gray-500">Photo</span>,
-      cell: ({ row }) =>
-        row.original.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={row.original.image_url}
-            alt={`${row.original.brand} ${row.original.model}`}
-            className="h-10 w-10 rounded-md object-cover ring-1 ring-gray-200 dark:ring-gray-700"
-            loading="lazy"
-          />
-        ) : (
-          <span className="text-sm text-gray-400">—</span>
-        ),
+      cell: ({ row }) => {
+        const urls = (row.original.image_urls ?? []).filter((u): u is string => !!u);
+        if (!urls.length) return <span className="text-gray-400">—</span>;
+        return (
+          <div className="flex items-center gap-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={urls[0]}
+              alt="Handover phone photo"
+              className="h-9 w-9 rounded border border-gray-200 object-cover dark:border-gray-700"
+            />
+            {urls.length > 1 && (
+              <span className="rounded bg-gray-100 px-1 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                +{urls.length - 1}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       accessorKey: 'driver_name',
