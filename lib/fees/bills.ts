@@ -67,6 +67,16 @@ const emptySummary = (): BillSummary => ({
   unbilledCount: 0,
 });
 
+/**
+ * The reconciliation rule, in ONE place. Money/learner math counts only LIVE
+ * learner bills: staff rows are `staff_deferred` (no money row) and cancelled
+ * (vacated) bills are voided. Bill Management's analytics aggregations import
+ * this rather than re-declaring it, so the charts can never drift from the KPI
+ * tiles that `summarizeBills` feeds.
+ */
+export const isActiveLearnerBill = (r: TransportBillRow): boolean =>
+  r.person_type === 'learner' && r.status !== 'cancelled';
+
 const uniq = <T,>(xs: (T | null | undefined)[]): T[] =>
   [...new Set(xs.filter((x): x is T => x != null))];
 
@@ -221,9 +231,7 @@ async function loadBillMap(
  * active fee structures, which these rows alone don't carry.
  */
 export function summarizeBills(rows: TransportBillRow[]): BillSummary {
-  const activeLearnerRows = rows.filter(
-    (r) => r.person_type === 'learner' && r.status !== 'cancelled'
-  );
+  const activeLearnerRows = rows.filter(isActiveLearnerBill);
   const overdueRows = rows.filter((r) => r.status === 'overdue');
   return {
     totalBilledAmount: activeLearnerRows.reduce((s, r) => s + r.amount, 0),

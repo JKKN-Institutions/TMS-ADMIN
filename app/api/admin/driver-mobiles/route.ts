@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { buildDriverMobilePayload, DRIVER_MOBILE_IMAGE_BUCKET } from '@/lib/driver-mobiles/fields';
+import { exceedsImageCap, removedPaths, MAX_DRIVER_MOBILE_IMAGES } from '@/lib/driver-mobiles/images';
 import { logActivity } from '@/lib/activity/log';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -55,12 +56,14 @@ async function getDriverMobiles() {
       console.error('Driver mobiles query error:', error);
       return NextResponse.json({ error: 'Failed to fetch driver mobiles' }, { status: 500 });
     }
-    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null; image_path: string | null }[];
+    const list = (rows ?? []) as { driver_staff_id: string; route_id: string | null; image_paths: string[] | null }[];
     const names = await resolveDriverNames(supabase, list.map((r) => r.driver_staff_id));
     const routes = await resolveRouteInfo(supabase, list.map((r) => r.route_id ?? '').filter(Boolean));
 
-    // Batch-sign every phone photo in one round trip (private bucket → signed urls).
-    const imagePaths = [...new Set(list.map((r) => r.image_path).filter((p): p is string => !!p))];
+    // Batch-sign every phone photo across every row in ONE round trip.
+    // Keyed by PATH, never by position — with N images per row an index-based
+    // map would silently render one phone's photo on another phone's card.
+    const imagePaths = [...new Set(list.flatMap((r) => r.image_paths ?? []).filter(Boolean))];
     const signed = new Map<string, string>();
     if (imagePaths.length) {
       const { data: urls } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).createSignedUrls(imagePaths, 3600);
@@ -75,7 +78,9 @@ async function getDriverMobiles() {
       driver_phone: names.get(r.driver_staff_id)?.phone ?? null,
       route_number: r.route_id ? routes.get(r.route_id)?.number ?? null : null,
       route_name: r.route_id ? routes.get(r.route_id)?.name ?? null : null,
-      image_url: r.image_path ? signed.get(r.image_path) ?? null : null,
+      // A path that fails to sign yields null in place, so the array stays
+      // aligned with image_paths instead of shifting.
+      image_urls: (r.image_paths ?? []).map((p) => signed.get(p) ?? null),
     }));
     return NextResponse.json({ success: true, data, count: data.length });
   } catch (e) {
@@ -96,6 +101,12 @@ async function postDriverMobile(request: NextRequest, auth: AuthContext) {
     }
     if (!payload.brand || !payload.model) {
       return NextResponse.json({ error: 'Brand and model are required' }, { status: 400 });
+    }
+    if (Array.isArray(payload.image_paths) && exceedsImageCap(payload.image_paths as string[])) {
+      return NextResponse.json(
+        { error: `At most ${MAX_DRIVER_MOBILE_IMAGES} images are allowed` },
+        { status: 400 },
+      );
     }
 
     const supabase = createServiceRoleClient();
@@ -143,10 +154,17 @@ async function putDriverMobile(request: NextRequest, auth: AuthContext) {
     if (Object.keys(payload).length === 0) {
       return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 });
     }
+    if (Array.isArray(payload.image_paths) && exceedsImageCap(payload.image_paths as string[])) {
+      return NextResponse.json(
+        { error: `At most ${MAX_DRIVER_MOBILE_IMAGES} images are allowed` },
+        { status: 400 },
+      );
+    }
 
     const supabase = createServiceRoleClient();
     const { data: before } = await supabase.from('tms_driver_mobile').select('*').eq('id', id).maybeSingle();
     if (!before) return NextResponse.json({ error: 'Driver mobile not found' }, { status: 404 });
+    const beforePaths = ((before as { image_paths?: string[] | null } | null)?.image_paths) ?? [];
 
     const { data, error } = await supabase
       .from('tms_driver_mobile')
@@ -160,6 +178,17 @@ async function putDriverMobile(request: NextRequest, auth: AuthContext) {
       }
       console.error('Driver mobile update error:', error);
       return NextResponse.json({ error: 'Failed to update driver mobile' }, { status: 500 });
+    }
+    // Delete files only once the row is safely updated — a failed write must
+    // never destroy an image the record still references. Removal is derived
+    // from the diff, so cancelling a form destroys nothing.
+    if ('image_paths' in payload) {
+      const gone = removedPaths(beforePaths, (payload.image_paths as string[]) ?? []);
+      if (gone.length) {
+        const { error: rmErr } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).remove(gone);
+        // Non-fatal: the row is already correct. A leaked object beats a failed save.
+        if (rmErr) console.error('Driver mobile image cleanup failed:', rmErr.message, gone);
+      }
     }
     await logActivity(auth, request, {
       module: 'driver-mobiles',
@@ -188,11 +217,16 @@ async function deleteDriverMobile(request: NextRequest, auth: AuthContext) {
     const supabase = createServiceRoleClient();
     const { data: existing } = await supabase.from('tms_driver_mobile').select('*').eq('id', id).maybeSingle();
     if (!existing) return NextResponse.json({ error: 'Driver mobile not found' }, { status: 404 });
+    const doomedPaths = ((existing as { image_paths?: string[] | null } | null)?.image_paths) ?? [];
 
     const { error } = await supabase.from('tms_driver_mobile').delete().eq('id', id);
     if (error) {
       console.error('Driver mobile delete error:', error);
       return NextResponse.json({ error: 'Failed to delete driver mobile' }, { status: 500 });
+    }
+    if (doomedPaths.length) {
+      const { error: rmErr } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).remove(doomedPaths);
+      if (rmErr) console.error('Driver mobile image purge failed:', rmErr.message, doomedPaths);
     }
     await logActivity(auth, request, {
       module: 'driver-mobiles',

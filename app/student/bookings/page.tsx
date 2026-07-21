@@ -16,6 +16,7 @@ interface MonthResp {
   assigned: boolean;
   month: string;
   cells: DayCell[];
+  maxBookableDate?: string;
 }
 
 async function fetchMonth(month: string): Promise<MonthResp> {
@@ -75,12 +76,14 @@ export default function StudentBookingsPage() {
     return m;
   }, [data]);
 
-  // Booking is limited to the current service week, so the calendar's Next arrow
-  // stops once the furthest bookable month is in view.
+  // Booking is limited to the configured horizon; the calendar's Next arrow stops once
+  // the furthest bookable month (from the server) is in view.
   const maxMonth = useMemo(() => {
+    const serverMax = data?.maxBookableDate;
+    if (serverMax) return serverMax.slice(0, 7);
     const ds = bookableDates();
     return (ds.length ? ds[ds.length - 1] : istMonth()).slice(0, 7);
-  }, []);
+  }, [data]);
 
   const bookedThisMonth = useMemo(
     () => (data?.cells ?? []).filter((c) => c.status === 'booked' || c.status === 'locked').length,
