@@ -53,8 +53,8 @@ export default function StudentFeesPage() {
         cache: 'no-store',
         credentials: 'same-origin',
       });
-      if (!res.ok) return { route_label: null, stop_name: null };
-      return (await res.json()).data as { route_label: string | null; stop_name: string | null };
+      if (!res.ok) return { route_label: null, stop_name: null, stop_wise: false };
+      return (await res.json()).data as { route_label: string | null; stop_name: string | null; stop_wise: boolean };
     },
   });
 
@@ -134,7 +134,10 @@ export default function StudentFeesPage() {
         </div>
       )}
 
-      {transport?.stop_name && (
+      {/* Only meaningful for stop_wise structures — flat/tiered fees don't depend
+          on the boarding stop at all, so this must never render for them (see
+          review I5). */}
+      {transport?.stop_wise && transport?.stop_name && (
         <div className="mb-4 rounded-lg border bg-muted/40 p-4 dark:bg-muted/20">
           <p className="text-sm text-muted-foreground">Your transport fee is based on your boarding stop</p>
           <p className="mt-1 font-medium">

@@ -163,6 +163,22 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
               />
               <Field label="Year bands" value={`${(fee.bands ?? []).length}`} />
             </>
+          ) : fee.fee_mode === 'stop_wise' ? (
+            <>
+              {/* stop_wise has no single total or split count — the fee varies
+                  per boarding stop (see the Stop rates card below) — so "Total
+                  Fee ₹0 / Terms 1" (the API's placeholder values) must never be
+                  shown here (review I1). */}
+              <Field
+                label="Fee mode"
+                value={
+                  <span className="inline-flex items-center rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
+                    Per boarding stop
+                  </span>
+                }
+              />
+              <Field label="Instalments" value={`${(fee.stop_terms ?? []).length}`} />
+            </>
           ) : (
             <>
               <Field label="Total Fee" value={inr(fee.total_amount)} />
@@ -276,6 +292,35 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               </div>
             ))}
+          </div>
+        </SectionCard>
+      ) : fee.fee_mode === 'stop_wise' ? (
+        <SectionCard title="Instalment schedule">
+          <p className="mb-3 text-xs text-gray-500">
+            The fee amount varies by boarding stop (see Stop rates below). This is the shared
+            percentage split applied to every stop&rsquo;s annual rate.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
+                  <th className="py-2 pr-4">#</th>
+                  <th className="py-2 pr-4">Term</th>
+                  <th className="py-2 pr-4">Due date</th>
+                  <th className="py-2 pr-4">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(fee.stop_terms ?? []).map((t) => (
+                  <tr key={t.term_no} className="border-b border-gray-100 dark:border-gray-800">
+                    <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
+                    <td className="py-2 pr-4 font-medium text-gray-900 dark:text-gray-100">{t.term_label || `Term ${t.term_no}`}</td>
+                    <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
+                    <td className="py-2 pr-4">{Number(t.share_percent)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </SectionCard>
       ) : (

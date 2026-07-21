@@ -104,6 +104,18 @@ export function getFeeColumns(
             </span>
           );
         }
+        if (f.fee_mode === 'stop_wise') {
+          // No single total — the amount varies per boarding stop. Showing
+          // "₹0" here (the API's placeholder value) reads as a broken/empty
+          // structure and invites deletion of the whole per-stop price list
+          // (review I2), so mark it clearly instead.
+          return (
+            <span className="flex items-center gap-1.5 font-medium text-gray-500 dark:text-gray-400">
+              By stop
+              <span className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">Stop-wise</span>
+            </span>
+          );
+        }
         return <span className="font-medium text-gray-900 dark:text-gray-100">{inr(f.total_amount)}</span>;
       },
       size: 150,
@@ -116,6 +128,12 @@ export function getFeeColumns(
         if (f.fee_mode === 'tiered') {
           const n = (f.bands ?? []).length;
           return <span className="text-sm text-gray-600 dark:text-gray-300">{n} band{n === 1 ? '' : 's'}</span>;
+        }
+        if (f.fee_mode === 'stop_wise') {
+          // split_count is a meaningless placeholder (always 1) for stop_wise;
+          // the real instalment count lives in tms_fee_structure_stop_term and
+          // isn't fetched by the list API, so show a dash rather than "1 term".
+          return <span className="text-sm text-gray-400 dark:text-gray-500">—</span>;
         }
         return (
           <span className="text-sm text-gray-600 dark:text-gray-300">

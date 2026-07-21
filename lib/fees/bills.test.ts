@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeBills, type TransportBillRow } from './bills';
+import { summarizeBills, stopWiseBillable, type TransportBillRow } from './bills';
 
 // Minimal row factory — only the fields summarizeBills reads matter; the rest are
 // filled with harmless defaults so tests read as just the money/status shape.
@@ -69,5 +69,27 @@ describe('summarizeBills', () => {
     ]);
     expect(s.overdueAmount).toBe(3000);
     expect(s.overdueCount).toBe(1);
+  });
+});
+
+describe('stopWiseBillable', () => {
+  // Used by loadUnbilledPeople to narrow a stop_wise structure's "expected to
+  // be billed" population — mirrors the tiered narrowing (people whose derived
+  // year matches no band aren't "expected" either). Without this, people the
+  // generator will always skip (no_stop / no_stop_rate) sat in Bill
+  // Management's Unbilled list forever with no possible remedy (review I4).
+  const priced = new Set(['stop-a', 'stop-b']);
+
+  it('is billable when the person has a stop and that stop is priced', () => {
+    expect(stopWiseBillable('stop-a', priced)).toBe(true);
+  });
+
+  it('is not billable with no boarding stop assigned', () => {
+    expect(stopWiseBillable(null, priced)).toBe(false);
+    expect(stopWiseBillable(undefined, priced)).toBe(false);
+  });
+
+  it('is not billable when the assigned stop has no configured rate', () => {
+    expect(stopWiseBillable('stop-unpriced', priced)).toBe(false);
   });
 });

@@ -72,6 +72,17 @@ const uniq = <T,>(xs: (T | null | undefined)[]): T[] =>
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Whether a stop_wise-applicable person can ever be billed: they need a
+ * boarding stop AND that stop needs a configured rate. Mirrors the tiered
+ * narrowing in loadUnbilledPeople (people whose derived year matches no band
+ * are excluded there the same way) — pulled out as a pure predicate so it's
+ * unit-testable without a Supabase client.
+ */
+export function stopWiseBillable(stopId: string | null | undefined, pricedStopIds: Set<string>): boolean {
+  return !!stopId && pricedStopIds.has(stopId);
+}
+
 // PostgREST serializes `.in('col', ids)` into the request URL. A few hundred
 // UUIDs overflow the Supabase API gateway's request-size limit (measured on this
 // project: 500 ids → 200 OK, 768 ids → HTTP 400 "Bad Request"), which supabase-js
@@ -384,6 +395,29 @@ export async function loadUnbilledPeople(
       eligible = people.filter(
         (p) => bandForYear(bands, deriveStudyYear(currentYear, p.admission_year)) !== null
       );
+    } else if (fs.fee_mode === 'stop_wise') {
+      // A stop_wise structure can only ever bill someone with a boarding stop
+      // whose stop has a priced rate — the generator itself always skips
+      // everyone else (no_stop / no_stop_rate). Without this narrowing they
+      // sit in the Bill Management "Unbilled" list forever with no remedy
+      // available from that screen (review I4).
+      const stopTable = fs.audience === 'staff' ? 'staff' : 'learners_profiles';
+      const stopRows = await selectByIds<{ id: string; transport_stop_id: string | null }>(
+        supabase,
+        stopTable,
+        'id, transport_stop_id',
+        people.map((p) => p.person_id)
+      );
+      const stopByPerson = new Map(stopRows.map((r) => [r.id, r.transport_stop_id]));
+
+      const { data: rateRows, error: rateErr } = await supabase
+        .from('tms_fee_structure_stop_rate')
+        .select('stop_id')
+        .eq('fee_structure_id', fs.id);
+      if (rateErr) throw rateErr;
+      const pricedStopIds = new Set((rateRows ?? []).map((r) => r.stop_id as string));
+
+      eligible = people.filter((p) => stopWiseBillable(stopByPerson.get(p.person_id), pricedStopIds));
     }
     for (const p of eligible) if (!applicable.has(p.person_id)) applicable.set(p.person_id, p);
   }
