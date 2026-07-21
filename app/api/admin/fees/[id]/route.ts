@@ -53,6 +53,24 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       bands = (bandRows ?? []).map((b) => ({ ...b, terms: byBand.get(b.id) ?? [] }));
     }
 
+    let stopTerms: unknown[] = [];
+    let stopRates: unknown[] = [];
+    if (data.fee_mode === 'stop_wise') {
+      const [{ data: st }, { data: sr }] = await Promise.all([
+        supabase
+          .from('tms_fee_structure_stop_term')
+          .select('id, term_no, term_label, due_date, share_percent')
+          .eq('fee_structure_id', data.id)
+          .order('term_no', { ascending: true }),
+        supabase
+          .from('tms_fee_structure_stop_rate')
+          .select('id, stop_id, annual_amount')
+          .eq('fee_structure_id', data.id),
+      ]);
+      stopTerms = st ?? [];
+      stopRates = sr ?? [];
+    }
+
     let transportYearName: string | null = null;
     if (data.transport_year_id) {
       const { data: ty } = await supabase
@@ -65,7 +83,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     return NextResponse.json({
       success: true,
-      data: { ...data, terms: terms ?? [], bands, transport_year_name: transportYearName },
+      data: {
+        ...data,
+        terms: terms ?? [],
+        bands,
+        transport_year_name: transportYearName,
+        stop_terms: stopTerms,
+        stop_rates: stopRates,
+      },
     });
   } catch (e) {
     console.error('Fee structure fetch error:', e);
