@@ -46,6 +46,18 @@ export default function StudentFeesPage() {
     queryFn: fetchAccess,
   });
 
+  const { data: transport } = useQuery({
+    queryKey: ['student-transport-context'],
+    queryFn: async () => {
+      const res = await fetch('/api/student/transport-context', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) return { route_label: null, stop_name: null };
+      return (await res.json()).data as { route_label: string | null; stop_name: string | null };
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -119,6 +131,16 @@ export default function StudentFeesPage() {
             <Info className="h-5 w-5 text-gray-500" />
             <p className="text-sm text-gray-600 dark:text-gray-300">No transport fees are currently assigned to your account.</p>
           </div>
+        </div>
+      )}
+
+      {transport?.stop_name && (
+        <div className="mb-4 rounded-lg border bg-muted/40 p-4 dark:bg-muted/20">
+          <p className="text-sm text-muted-foreground">Your transport fee is based on your boarding stop</p>
+          <p className="mt-1 font-medium">
+            {transport.stop_name}
+            {transport.route_label ? ` · Route ${transport.route_label}` : ''}
+          </p>
         </div>
       )}
 

@@ -121,6 +121,7 @@ export async function proxy(request: NextRequest) {
     '/student/grievances',
     '/api/student/transport-access',
     '/api/student/vacate-request',
+    '/api/student/transport-context',
   ];
   const studentGateApplies =
     area === 'student' &&
