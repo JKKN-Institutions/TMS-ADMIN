@@ -688,17 +688,40 @@ Expected: PASS — all existing `bills.test.ts` and `staff-bill.test.ts` tests p
 Run: `npm run build`
 Expected: `Compiled successfully`. (Ignore any pre-existing warnings.)
 
-- [ ] **Step 5: Prove no behaviour change against the live DB**
+- [ ] **Step 5: Prove no behaviour change — WITHOUT touching any existing structure**
 
-Dry-run the two existing structures and confirm the counts are unchanged. Start the dev server on **port 3001** — port 3000 is a different app (MyJKKN), so a probe there proves nothing.
+> **USER DIRECTIVE (2026-07-21):** Arts Self, and the other pre-existing fee structures, are OUT OF
+> SCOPE. Do **not** open, dry-run, or generate for them. The original browser dry-run gate is
+> cancelled and replaced by the two read-only checks below.
 
-```bash
-npm run dev -- -p 3001
+(a) The `flat` and `tiered` paths are pinned by the Task 3 characterization tests, which assert full
+rupee values — not just counts. Confirm they pass:
+
+Run: `npx vitest run lib/fees/resolve-terms.test.ts`
+Expected: PASS — 7 tests.
+
+(b) Confirm no existing structure's data was altered, via a read-only query (Supabase MCP
+`execute_sql`):
+
+```sql
+select fs.name, fs.fee_mode, fs.status, fs.updated_at,
+       (select count(*) from tms_fee_structure_year_band b where b.fee_structure_id=fs.id) as bands,
+       (select count(*) from tms_fee_bill fb where fb.fee_structure_id=fs.id) as ledger_rows,
+       (select count(*) from tms_fee_structure_stop_rate r where r.fee_structure_id=fs.id) as stop_rates,
+       (select count(*) from tms_fee_structure_stop_term t where t.fee_structure_id=fs.id) as stop_terms
+from tms_fee_structure fs order by fs.name;
 ```
 
-Then, signed in as an admin in the browser, open `/fees/6b2ebf76-f06d-4f40-95fb-f8654f152f16` (flat, "Transport Fees 2026-2027") and `/fees/4716ae9e-7850-458e-bf9e-2401d414a098` (tiered, "Arts Self"), press **Dry run** on each, and record `applicable`, `unresolved`, `toGeneratePairs`, `alreadyBilledPairs`.
+Expected, unchanged from the pre-task baseline:
 
-Expected: identical to the values shown before this task. If any differ, **stop and revert** — the extraction was not faithful.
+| name | fee_mode | updated_at | bands | ledger_rows | stop_rates | stop_terms |
+|---|---|---|---|---|---|---|
+| Testing | flat | 2026-06-19 06:50:59 | 0 | 2 | 0 | 0 |
+| Transport Fees 2026-2027 | flat | 2026-06-19 06:48:43 | 0 | 1232 | 0 | 0 |
+| Transport Fees 2026-2027(Arts Self) | tiered | 2026-06-19 06:47:46 | 2 | 718 | 0 | 0 |
+
+Any change to `updated_at`, `bands`, or `ledger_rows` means something wrote to an existing
+structure — **stop and revert**.
 
 - [ ] **Step 6: Commit**
 
@@ -2518,9 +2541,13 @@ Expected: PASS, including the flat/tiered characterization tests.
 Run: `npm run build`
 Expected: `Compiled successfully`.
 
-- [ ] **No regression to existing structures**
+- [ ] **No regression to existing structures — read-only check, no dry-runs**
 
-Dry-run both pre-existing structures one final time. `applicable`, `unresolved`, `toGeneratePairs` and `alreadyBilledPairs` must equal the values recorded in Task 4 Step 5.
+> **USER DIRECTIVE:** do NOT dry-run or generate for Arts Self or the flat structures.
+
+Re-run the read-only query from Task 4 Step 5. Every existing structure's `updated_at`, `bands`,
+`ledger_rows` must be unchanged, and `stop_rates` / `stop_terms` must still be **0** for all three —
+proving the new tables never touched them.
 
 - [ ] **End-to-end on the real cohort**
 
