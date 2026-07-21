@@ -32,6 +32,11 @@ describe('buildTemplateRows', () => {
     expect(rows[1].annual_amount).toBe('');
   });
 
+  it('pre-fills a configured rate of 0 rather than showing it blank', () => {
+    const rows = buildTemplateRows(STOPS, new Map([['s1', 0]]));
+    expect(rows[0].annual_amount).toBe(0);
+  });
+
   it('exposes headers matching the row keys', () => {
     const rows = buildTemplateRows(STOPS, new Map());
     expect(Object.keys(rows[0])).toEqual(TEMPLATE_HEADERS);
@@ -55,6 +60,15 @@ describe('parseImportRows', () => {
     );
     expect(errors).toEqual([]);
     expect(rates).toEqual([]);
+  });
+
+  it('accepts a rate of 0 — a free stop is priced, not unpriced', () => {
+    const { rates, errors } = parseImportRows(
+      [{ stop_id: 's1', route_number: '37', stop_name: 'KACHU PALLI', annual_amount: 0 }],
+      known
+    );
+    expect(errors).toEqual([]);
+    expect(rates).toEqual([{ stop_id: 's1', annual_amount: 0 }]);
   });
 
   it('rejects an unknown stop_id', () => {

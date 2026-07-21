@@ -42,10 +42,16 @@ async function template(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Failed to load route stops' }, { status: 500 });
     }
 
-    const { data: rates } = await supabase
+    const { data: rates, error: rateErr } = await supabase
       .from('tms_fee_structure_stop_rate')
       .select('stop_id, annual_amount')
       .eq('fee_structure_id', id);
+    if (rateErr) {
+      // Fail loudly: a silent failure here yields a template with every amount
+      // blank, which reads as "nothing priced yet" and invites the operator to
+      // overwrite a good price list.
+      return NextResponse.json({ error: 'Failed to load existing stop rates' }, { status: 500 });
+    }
     const existing = new Map<string, number>(
       ((rates ?? []) as Array<{ stop_id: string; annual_amount: number }>).map((r) => [
         r.stop_id,
