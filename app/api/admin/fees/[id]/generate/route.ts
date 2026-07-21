@@ -208,9 +208,16 @@ async function generate(request: NextRequest, auth: AuthContext) {
       const outcome = resolvePersonTerms(
         {
           admission_year: person.admission_year,
-          transport_stop_id: stopByPerson.get(person.person_id) ?? null,
+          transport_stop_id: isStopWise ? stopByPerson.get(person.person_id) ?? null : null,
         },
-        { feeMode: fs.fee_mode, currentYear, flatTerms, bands, stopTerms, stopRateByStopId }
+        {
+          feeMode: fs.fee_mode,
+          currentYear,
+          flatTerms,
+          bands,
+          stopTerms: isStopWise ? stopTerms : undefined,
+          stopRateByStopId: isStopWise ? stopRateByStopId : undefined,
+        }
       );
       if (!outcome.ok) {
         unresolved++;
@@ -434,10 +441,20 @@ async function generate(request: NextRequest, auth: AuthContext) {
     if (runId) {
       const noteParts: string[] = [];
       if (errors > 0) noteParts.push(`${errors} row(s) errored`);
-      for (const [reason, count] of Object.entries(unresolvedByReason)) {
-        if (count > 0) {
-          noteParts.push(`${count} learner(s) unresolved — ${UNRESOLVED_LABEL[reason as UnresolvedReason]}`);
+      if (isStopWise) {
+        // Stop-wise can be unresolved for three different reasons, and the operator
+        // needs to know WHICH — "no boarding stop" and "no rate configured for that
+        // stop" have completely different remedies. Says "person(s)" because a
+        // stop-wise structure may target staff, not only learners.
+        for (const [reason, count] of Object.entries(unresolvedByReason)) {
+          if (count > 0) {
+            noteParts.push(`${count} person(s) unresolved — ${UNRESOLVED_LABEL[reason as UnresolvedReason]}`);
+          }
         }
+      } else if (unresolved > 0) {
+        // Original wording, preserved byte-for-byte: flat/tiered runs must produce
+        // exactly the note they always have.
+        noteParts.push(`${unresolved} learner(s) unresolved (no admission year / no matching band)`);
       }
       await supabase.from('tms_fee_generation_run').update({
         applicable_count: resolved.length,
