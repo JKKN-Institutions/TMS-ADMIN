@@ -13,6 +13,7 @@ import {
   type UnresolvedReason,
 } from '@/lib/fees/resolve-terms';
 import { buildStaffFeeBillRow } from '@/lib/fees/staff-bill';
+import { filterOutInCharges } from '@/lib/fees/incharge-exemption';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -171,34 +172,63 @@ async function generate(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    const people = await resolveApplicablePeople(supabase, fs);
+    let people = await resolveApplicablePeople(supabase, fs);
 
-    // Boarding stops for the cohort. Fetched here rather than inside
-    // resolveApplicablePeople because the staff in-charge cron shares that
-    // function and must not change.
-    //
-    // The source table follows the structure's audience: learners and staff each
-    // carry their own transport_stop_id. Chunked to 150 ids: a larger .in()
-    // overflows the Supabase gateway with HTTP 400, and an unchecked
-    // { data: null } would silently make every person look stop-less — i.e.
-    // everyone unresolved and nobody billed.
+    // Boarding stops for the cohort, and — for staff — their email, which the
+    // in-charge exemption matches on. Fetched together in one pass rather than
+    // two. Fetched here rather than inside resolveApplicablePeople because the
+    // nightly in-charge cron shares that function and must not change.
+    // Chunked to 150 ids: a larger .in() overflows the Supabase gateway with
+    // HTTP 400, and an unchecked { data: null } would read as EMPTY — making
+    // every person look stop-less AND exempting nobody.
     const stopByPerson = new Map<string, string | null>();
+    const emailByPerson = new Map<string, string | null>();
     if (isStopWise) {
-      const stopTable = fs.audience === 'staff' ? 'staff' : 'learners_profiles';
+      const isStaff = fs.audience === 'staff';
+      const stopTable = isStaff ? 'staff' : 'learners_profiles';
+      const cols = isStaff ? 'id, transport_stop_id, email' : 'id, transport_stop_id';
       const ids = people.map((p) => p.person_id);
       const CHUNK_STOPS = 150;
       for (let i = 0; i < ids.length; i += CHUNK_STOPS) {
         const { data: rows, error: stopErr } = await supabase
           .from(stopTable)
-          .select('id, transport_stop_id')
+          .select(cols)
           .in('id', ids.slice(i, i + CHUNK_STOPS));
         if (stopErr) {
           return NextResponse.json({ error: 'Failed to resolve boarding stops.' }, { status: 500 });
         }
-        for (const r of (rows ?? []) as Array<{ id: string; transport_stop_id: string | null }>) {
+        for (const r of (rows ?? []) as unknown as Array<{ id: string; transport_stop_id: string | null; email?: string | null }>) {
           stopByPerson.set(r.id, r.transport_stop_id);
+          if (isStaff) emailByPerson.set(r.id, r.email ?? null);
         }
       }
+    }
+
+    // A bus in-charge holds a transport fee exemption in exchange for marking
+    // their route's riders. Applied here as a cohort FILTER (a standing state),
+    // not as an event — someone who takes the role simply leaves the cohort.
+    let exemptInCharge = 0;
+    if (isStopWise && fs.audience === 'staff') {
+      const { data: assignRows, error: assignErr } = await supabase
+        .from('tms_staff_route_assignment')
+        .select('staff_email')
+        .eq('is_active', true);
+      if (assignErr) {
+        // Fail loud: an unchecked failure here would exempt NOBODY and bill
+        // every in-charge, which is the exact opposite of the policy.
+        return NextResponse.json(
+          { error: 'Failed to load bus in-charge assignments.' },
+          { status: 500 }
+        );
+      }
+      const emails = ((assignRows ?? []) as Array<{ staff_email: string | null }>)
+        .map((r) => r.staff_email ?? '');
+      const filtered = filterOutInCharges(
+        people.map((p) => ({ ...p, email: emailByPerson.get(p.person_id) ?? null })),
+        emails
+      );
+      exemptInCharge = filtered.exemptCount;
+      people = filtered.kept;
     }
 
     // Resolve each person to the terms that apply to them. Unresolvable people
@@ -300,6 +330,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
       applicable: resolved.length,
       unresolved, // tiered: no admission year / year matches no band
       unresolvedByReason,
+      exemptInCharge,
       stopRateCount: isStopWise ? stopRateByStopId.size : null,
       learnerCount,
       staffCount,
@@ -445,6 +476,9 @@ async function generate(request: NextRequest, auth: AuthContext) {
     if (runId) {
       const noteParts: string[] = [];
       if (errors > 0) noteParts.push(`${errors} row(s) errored`);
+      if (exemptInCharge > 0) {
+        noteParts.push(`${exemptInCharge} staff exempt (active bus in-charge)`);
+      }
       if (isStopWise) {
         // Stop-wise can be unresolved for three different reasons, and the operator
         // needs to know WHICH — "no boarding stop" and "no rate configured for that
