@@ -68,6 +68,16 @@ export default function BoardingAttendancePage() {
     if (isError) toast.error(error instanceof Error ? error.message : 'Failed to load roster');
   }, [isError, error]);
 
+  const { data: strike } = useQuery({
+    queryKey: ['incharge-strike'],
+    queryFn: async () => {
+      const res = await fetch('/api/boarding/incharge-strike', { credentials: 'same-origin' });
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.data as { consecutiveMisses: number; missedDates: string[] } | null;
+    },
+  });
+
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0 };
 
@@ -169,6 +179,14 @@ export default function BoardingAttendancePage() {
         <p className="text-xs text-amber-700 dark:text-amber-300">
           {direction === 'onward' ? 'Onward' : 'Return'} window is {formatHM(windows[direction].start)}–{formatHM(windows[direction].end)}; marking present/absent and scanning are closed for this leg until it opens.
         </p>
+      )}
+
+      {strike && (
+        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          <strong>Attendance not marked on {strike.missedDates.join(', ')}.</strong>{' '}
+          Mark attendance on your next travel day — missing 2 travel days in a row removes
+          your bus in-charge role and transport fees will apply.
+        </div>
       )}
 
       <DataTable

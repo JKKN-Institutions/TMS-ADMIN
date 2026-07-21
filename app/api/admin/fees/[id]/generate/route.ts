@@ -6,6 +6,7 @@ import { logActivity } from '@/lib/activity/log';
 import { resolveApplicablePeople, type ApplicablePerson } from '@/lib/fees/applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from '@/lib/fees/types';
 import { currentYearOf, deriveStudyYear, bandForYear } from '@/lib/fees/year-of-study';
+import { buildStaffFeeBillRow } from '@/lib/fees/staff-bill';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -318,20 +319,18 @@ async function generate(request: NextRequest, auth: AuthContext) {
           if (ledErr) { errors++; continue; }
           learnerBilled++;
         } else {
-          // staff: coverage-only ledger row (no billing target in v1)
-          const { error: ledErr } = await supabase.from('tms_fee_bill').insert([{
-            generation_run_id: runId,
-            fee_structure_id: id,
-            transport_year_id: fs.transport_year_id,
-            person_id: p.person_id,
-            person_type: 'staff',
-            term_no: t.term_no,
-            amount,
-            due_date: t.due_date,
-            billing_category_id: categoryId,
-            billing_student_bill_id: null,
-            status: 'staff_deferred',
-          }]);
+          // staff: coverage-only ledger row (no billing target in v1).
+          // Row shape is shared with the in-charge enforcement loop.
+          const { error: ledErr } = await supabase.from('tms_fee_bill').insert([
+            buildStaffFeeBillRow({
+              runId,
+              feeStructureId: id,
+              transportYearId: fs.transport_year_id,
+              staffId: p.person_id,
+              categoryId,
+              term: { term_no: t.term_no, amount, due_date: t.due_date },
+            }),
+          ]);
           if (ledErr) { errors++; continue; }
           staffDeferred++;
         }
