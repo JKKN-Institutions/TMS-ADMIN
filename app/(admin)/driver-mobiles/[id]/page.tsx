@@ -88,20 +88,26 @@ export default function DriverMobileDetailPage({ params }: { params: Promise<{ i
           <Field label="Handover by" value={or(m.handover_by)} />
           <Field label="Handover date" value={fmtDate(m.handover_date)} />
           <Field
-            label="Phone image"
+            label="Photos"
             value={
-              m.image_url ? (
-                <a href={m.image_url} target="_blank" rel="noopener noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={m.image_url}
-                    alt={`${m.brand} ${m.model}`}
-                    className="h-24 w-24 rounded-lg object-cover ring-1 ring-gray-200 transition hover:opacity-90"
-                  />
-                </a>
-              ) : (
-                '—'
-              )
+              (() => {
+                const urls = (m.image_urls ?? []).filter((u): u is string => !!u);
+                if (!urls.length) return <span className="text-gray-400">No photos</span>;
+                return (
+                  <div className="flex flex-wrap gap-3">
+                    {urls.map((url, i) => (
+                      <a key={url} href={url} target="_blank" rel="noopener noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={i === 0 ? 'Cover handover photo' : `Handover photo ${i + 1}`}
+                          className="h-32 w-32 rounded border border-gray-200 object-cover dark:border-gray-700"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                );
+              })()
             }
           />
         </div>

@@ -26,7 +26,7 @@ function safeName(name: string): string {
   return ext ? `${base || 'file'}.${ext}` : base || 'file';
 }
 
-// POST: multipart upload → returns the storage path (saved into tms_driver_mobile.image_path).
+// POST: multipart upload → returns the storage path (saved into tms_driver_mobile.image_paths).
 async function uploadImage(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.DRIVER_MOBILES_CREATE, TMS_PERMISSIONS.DRIVER_MOBILES_EDIT))) {

@@ -56,14 +56,20 @@ export async function GET(
       }
     }
 
-    let image_url: string | null = null;
-    const imgPath = (row as { image_path?: string | null }).image_path;
-    if (imgPath) {
-      const { data: signed } = await supabase.storage.from(DRIVER_MOBILE_IMAGE_BUCKET).createSignedUrl(imgPath, 3600);
-      image_url = signed?.signedUrl ?? null;
+    const paths = ((row as { image_paths?: string[] | null }).image_paths ?? []).filter(Boolean);
+    let image_urls: (string | null)[] = [];
+    if (paths.length) {
+      const { data: signedList } = await supabase.storage
+        .from(DRIVER_MOBILE_IMAGE_BUCKET)
+        .createSignedUrls(paths, 3600);
+      const byPath = new Map<string, string>();
+      for (const u of signedList ?? []) {
+        if (u.path && u.signedUrl) byPath.set(u.path, u.signedUrl);
+      }
+      image_urls = paths.map((p) => byPath.get(p) ?? null);
     }
 
-    return NextResponse.json({ success: true, data: { ...row, driver_name, driver_phone, route_number, route_name, image_url } });
+    return NextResponse.json({ success: true, data: { ...row, driver_name, driver_phone, route_number, route_name, image_urls } });
   } catch (e) {
     console.error('Driver mobile detail API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

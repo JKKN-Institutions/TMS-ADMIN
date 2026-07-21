@@ -2,6 +2,8 @@
 // Single source of truth for tms_driver_mobile writable fields + payload
 // normalisation. Used by the driver-mobiles API so create/update share one path.
 
+import { normalizeImagePaths } from './images';
+
 // Private Supabase Storage bucket holding phone photos. Shared by every route
 // that uploads or signs a driver-mobile image, so the string lives in one place.
 export const DRIVER_MOBILE_IMAGE_BUCKET = 'tms-driver-mobile-images';
@@ -22,12 +24,16 @@ export const TEXT_FIELDS = [
   'sim_number', 'phone_number', 'network_provider',
   'supplier_name', 'invoice_number',
   'storage_capacity', 'serial_number', 'accessories',
-  'handover_by', 'image_path',
+  'handover_by',
 ] as const;
+
+// Array-valued columns. Mirrors lib/fees/fields.ts's ARRAY_FIELDS convention.
+export const ARRAY_FIELDS = ['image_paths'] as const;
 
 // Every column the API will write (whitelist).
 export const EDITABLE: readonly string[] = [
   ...Object.keys(ENUM_FIELDS), ...NUM_FIELDS, ...DATE_FIELDS, ...UUID_FIELDS, ...TEXT_FIELDS,
+  ...ARRAY_FIELDS,
 ];
 
 // Normalise a snake_case request body into a typed tms_driver_mobile payload.
@@ -49,6 +55,7 @@ export function buildDriverMobilePayload(body: Record<string, unknown>): Record<
   }
   for (const k of DATE_FIELDS) if (has(k)) out[k] = (body[k] as string) || null;
   for (const k of UUID_FIELDS) if (has(k)) out[k] = (body[k] as string) || null;
+  for (const k of ARRAY_FIELDS) if (has(k)) out[k] = normalizeImagePaths(body[k]);
 
   // status defaults to 'assigned' on create rather than null (matches DB default).
   // The column is NOT NULL default 'assigned', so the builder must NEVER emit
