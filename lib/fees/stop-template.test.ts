@@ -45,30 +45,44 @@ describe('buildTemplateRows', () => {
 
 describe('parseImportRows', () => {
   it('accepts a well-formed row', () => {
-    const { rates, errors } = parseImportRows(
+    const { rates, clears, errors } = parseImportRows(
       [{ stop_id: 's1', route_number: '37', stop_name: 'KACHU PALLI', annual_amount: 9900 }],
       known
     );
     expect(errors).toEqual([]);
     expect(rates).toEqual([{ stop_id: 's1', annual_amount: 9900 }]);
+    expect(clears).toEqual([]);
   });
 
-  it('skips a blank amount without erroring — partial fills are allowed', () => {
-    const { rates, errors } = parseImportRows(
+  it('treats a blank amount as an explicit clear, not "not yet priced"', () => {
+    const { rates, clears, errors } = parseImportRows(
       [{ stop_id: 's1', route_number: '37', stop_name: 'KACHU PALLI', annual_amount: '' }],
       known
     );
     expect(errors).toEqual([]);
     expect(rates).toEqual([]);
+    expect(clears).toEqual(['s1']);
   });
 
-  it('accepts a rate of 0 — a free stop is priced, not unpriced', () => {
-    const { rates, errors } = parseImportRows(
+  it('accepts a rate of 0 — a free stop is priced, not cleared', () => {
+    const { rates, clears, errors } = parseImportRows(
       [{ stop_id: 's1', route_number: '37', stop_name: 'KACHU PALLI', annual_amount: 0 }],
       known
     );
     expect(errors).toEqual([]);
     expect(rates).toEqual([{ stop_id: 's1', annual_amount: 0 }]);
+    expect(clears).toEqual([]);
+  });
+
+  it('leaves a stop absent from the sheet in neither rates nor clears', () => {
+    // Only s1 appears in the sheet; s2 (known but not in `rows`) must be untouched.
+    const { rates, clears, errors } = parseImportRows(
+      [{ stop_id: 's1', route_number: '37', stop_name: 'KACHU PALLI', annual_amount: 9900 }],
+      known
+    );
+    expect(errors).toEqual([]);
+    expect(rates.map((r) => r.stop_id)).not.toContain('s2');
+    expect(clears).not.toContain('s2');
   });
 
   it('rejects an unknown stop_id', () => {

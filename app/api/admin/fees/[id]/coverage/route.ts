@@ -21,6 +21,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // tiered = the terms of the band matching each learner's derived year. For a
     // tiered structure, only people who match a band are "applicable".
     const isTiered = fs.fee_mode === 'tiered';
+    const isStopWise = fs.fee_mode === 'stop_wise';
     let people = allPeople;
     const totalTermsFor = new Map<string, number>();
     if (isTiered) {
@@ -46,6 +47,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         totalTermsFor.set(p.person_id, termCountByBand.get(band.id) ?? 0);
         people.push(p);
       }
+    } else if (isStopWise) {
+      // stop_wise's schedule lives in tms_fee_structure_stop_term, not
+      // tms_fee_structure_term (which stop_wise never populates). Every
+      // priced person gets exactly this many terms, regardless of their
+      // boarding stop's rate — the schedule is shared, only the amount varies.
+      const { count: stopTermCount } = await supabase
+        .from('tms_fee_structure_stop_term')
+        .select('id', { count: 'exact', head: true })
+        .eq('fee_structure_id', id);
+      const stopWiseTotal = stopTermCount ?? 0;
+      for (const p of allPeople) totalTermsFor.set(p.person_id, stopWiseTotal);
     } else {
       const { count: termCount } = await supabase
         .from('tms_fee_structure_term')

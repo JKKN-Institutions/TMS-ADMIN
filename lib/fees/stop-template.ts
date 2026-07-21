@@ -57,12 +57,18 @@ function norm(v: unknown): string {
 /**
  * Validate a parsed sheet. Collects EVERY bad row so the operator can fix the
  * sheet in one pass; the caller writes nothing when `errors` is non-empty.
+ *
+ * A row present in the sheet with an explicitly BLANK amount means "clear this
+ * stop's rate" — its stop_id is returned in `clears`, not `rates`. A row
+ * absent from the sheet entirely is untouched (neither array). This mirrors
+ * `PUT /stop-rates`, where a blank/null amount deletes the row.
  */
 export function parseImportRows(
   rows: Record<string, unknown>[],
   known: Map<string, TemplateStop>
-): { rates: ParsedRate[]; errors: ParseError[] } {
+): { rates: ParsedRate[]; clears: string[]; errors: ParseError[] } {
   const rates: ParsedRate[] = [];
+  const clears: string[] = [];
   const errors: ParseError[] = [];
   const seen = new Set<string>();
 
@@ -101,7 +107,8 @@ export function parseImportRows(
 
     const rawAmount = raw.annual_amount;
     if (rawAmount === null || rawAmount === undefined || String(rawAmount).trim() === '') {
-      return; // blank = not yet priced; allowed
+      clears.push(stopId); // blank = explicitly cleared, not "not yet priced"
+      return;
     }
     const amount = Number(String(rawAmount).replace(/,/g, '').trim());
     if (!Number.isFinite(amount)) {
@@ -115,5 +122,5 @@ export function parseImportRows(
     rates.push({ stop_id: stopId, annual_amount: amount });
   });
 
-  return { rates, errors };
+  return { rates, clears, errors };
 }

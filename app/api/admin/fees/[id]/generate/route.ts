@@ -105,7 +105,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
           { status: 400 }
         );
       }
-    } else {
+    } else if (!isStopWise) {
       const { data: termsData } = await supabase
         .from('tms_fee_structure_term')
         .select('*')
@@ -117,6 +117,11 @@ async function generate(request: NextRequest, auth: AuthContext) {
         return NextResponse.json({ error: 'This fee structure has no terms defined.' }, { status: 400 });
       }
     }
+    // stop_wise deliberately has NO tms_fee_structure_term rows (POST never
+    // inserts them, PUT deletes them) — its schedule lives entirely in
+    // tms_fee_structure_stop_term, loaded by the isStopWise block below. Do
+    // NOT fall into the flat-terms branch above for stop_wise: it would always
+    // find zero rows and 400 before ever reaching its own schedule.
 
     // stop_wise: the shared share-based schedule + every configured stop rate.
     const stopTerms: StopScheduleTerm[] = [];

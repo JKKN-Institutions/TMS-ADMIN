@@ -97,7 +97,7 @@ async function importSheet(request: NextRequest, auth: AuthContext) {
       ])
     );
 
-    const { rates, errors } = parseImportRows(rows, known);
+    const { rates, clears, errors } = parseImportRows(rows, known);
 
     // All-or-nothing: a sheet with any bad row writes NOTHING, so the operator
     // never ends up with a half-applied price list they cannot reason about.
@@ -107,20 +107,34 @@ async function importSheet(request: NextRequest, auth: AuthContext) {
         { status: 400 }
       );
     }
-    if (!rates.length) {
+    if (!rates.length && !clears.length) {
       return NextResponse.json({ error: 'The sheet contained no amounts.' }, { status: 400 });
     }
 
-    const { error: upErr } = await supabase.from('tms_fee_structure_stop_rate').upsert(
-      rates.map((r) => ({
-        fee_structure_id: id,
-        stop_id: r.stop_id,
-        annual_amount: r.annual_amount,
-        updated_at: new Date().toISOString(),
-      })),
-      { onConflict: 'fee_structure_id,stop_id' }
-    );
-    if (upErr) return NextResponse.json({ error: 'Failed to save stop rates' }, { status: 500 });
+    if (rates.length) {
+      const { error: upErr } = await supabase.from('tms_fee_structure_stop_rate').upsert(
+        rates.map((r) => ({
+          fee_structure_id: id,
+          stop_id: r.stop_id,
+          annual_amount: r.annual_amount,
+          updated_at: new Date().toISOString(),
+        })),
+        { onConflict: 'fee_structure_id,stop_id' }
+      );
+      if (upErr) return NextResponse.json({ error: 'Failed to save stop rates' }, { status: 500 });
+    }
+
+    // Upsert first, delete second — same fail-safe ordering as PUT /stop-rates.
+    // Without a transaction, delete-then-upsert can permanently lose rates that
+    // were never meant to change if the upsert half fails mid-way.
+    if (clears.length) {
+      const { error: delErr } = await supabase
+        .from('tms_fee_structure_stop_rate')
+        .delete()
+        .eq('fee_structure_id', id)
+        .in('stop_id', clears);
+      if (delErr) return NextResponse.json({ error: 'Failed to clear stop rates' }, { status: 500 });
+    }
 
     await logActivity(auth, request, {
       module: 'fees',
@@ -128,14 +142,14 @@ async function importSheet(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_fee_structure',
       entityId: id,
       entityLabel: fs.name,
-      description: `Imported ${rates.length} stop rate(s) for ${fs.name}`,
-      metadata: { imported: rates.length },
+      description: `Imported ${rates.length} stop rate(s) for ${fs.name}${clears.length ? `, cleared ${clears.length}` : ''}`,
+      metadata: { imported: rates.length, cleared: clears.length },
     });
 
     return NextResponse.json({
       success: true,
-      data: { imported: rates.length, errors: [] },
-      message: `Imported ${rates.length} stop rate(s).`,
+      data: { imported: rates.length, cleared: clears.length, errors: [] },
+      message: `Imported ${rates.length} stop rate(s)${clears.length ? `; cleared ${clears.length}` : ''}.`,
     });
   } catch (e) {
     console.error('Stop rate import error:', e);
