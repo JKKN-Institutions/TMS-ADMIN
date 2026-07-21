@@ -5,7 +5,8 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
 import { resolveApplicablePeople, type ApplicablePerson } from '@/lib/fees/applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from '@/lib/fees/types';
-import { currentYearOf, deriveStudyYear, bandForYear } from '@/lib/fees/year-of-study';
+import { currentYearOf } from '@/lib/fees/year-of-study';
+import { resolvePersonTerms } from '@/lib/fees/resolve-terms';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -113,20 +114,17 @@ async function generate(request: NextRequest, auth: AuthContext) {
 
     const people = await resolveApplicablePeople(supabase, fs);
 
-    // Resolve each person to the terms that apply to them. For tiered structures a
-    // learner with no derivable year, or whose year matches no band, is UNRESOLVED
-    // (skipped + reported, never guessed).
+    // Resolve each person to the terms that apply to them. Unresolvable people
+    // are skipped + reported, never guessed. See lib/fees/resolve-terms.ts.
     const resolved: Resolved[] = [];
     let unresolved = 0;
     for (const person of people) {
-      if (!isTiered) {
-        resolved.push({ person, terms: flatTerms, band: null });
-        continue;
-      }
-      const year = deriveStudyYear(currentYear, person.admission_year);
-      const band = bandForYear(bands, year);
-      if (!band) { unresolved++; continue; }
-      resolved.push({ person, terms: band.terms, band });
+      const outcome = resolvePersonTerms(
+        { admission_year: person.admission_year, transport_stop_id: null },
+        { feeMode: fs.fee_mode, currentYear, flatTerms, bands }
+      );
+      if (!outcome.ok) { unresolved++; continue; }
+      resolved.push({ person, terms: outcome.terms, band: outcome.band as Band | null });
     }
 
     const resolvedIds = resolved.map((r) => r.person.person_id);
