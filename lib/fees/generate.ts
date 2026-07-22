@@ -328,8 +328,8 @@ export async function generateForStructure(
   // double-billing would go unflagged in BOTH dry-run and generate. Chunk the id
   // list to <=150 and FAIL LOUD on error.
   let conflictCount = 0;
+  const conflicted = new Set<string>();
   if (resolvedIds.length) {
-    const conflicted = new Set<string>();
     const CHUNK = 150;
     for (let i = 0; i < resolvedIds.length; i += CHUNK) {
       const { data: other, error: conflictErr } = await supabase
@@ -347,6 +347,18 @@ export async function generateForStructure(
       for (const r of (other ?? []) as Array<{ person_id: string }>) conflicted.add(r.person_id);
     }
     conflictCount = conflicted.size;
+  }
+
+  // AUTO POLICY (cron runs only): a person already billed by ANOTHER structure
+  // for this transport year is skipped, not double-billed. Manual runs keep
+  // today's behavior — surface the count, let the human decide.
+  let conflictSkipped = 0;
+  if (opts.autoPolicy && conflicted.size) {
+    const before = resolved.length;
+    for (let i = resolved.length - 1; i >= 0; i--) {
+      if (conflicted.has(resolved[i].person.person_id)) resolved.splice(i, 1);
+    }
+    conflictSkipped = before - resolved.length;
   }
 
   let toGenerate = 0;
@@ -387,6 +399,7 @@ export async function generateForStructure(
     alreadyBilledPairs: alreadyBilled,
     toGeneratePairs: toGenerate,
     conflictCount,
+    conflictSkipped,
     totalPerPerson: isTiered ? null : flatTerms.reduce((s, t) => s + Number(t.amount), 0),
     staffDeferred: fs.audience === 'staff',
     bands: bandSummary,
@@ -433,6 +446,20 @@ export async function generateForStructure(
     for (const a of (ays ?? []) as Array<{ id: string; academic_year_name: string | null }>) {
       if (a.academic_year_name) acadYearNameById.set(a.id, a.academic_year_name);
     }
+  }
+
+  // AUTO POLICY: don't write a run row when there is nothing to generate —
+  // a nightly sweep over N structures would otherwise bury the run history
+  // in no-op rows.
+  if (opts.autoPolicy && toGenerate === 0) {
+    return {
+      kind: 'generated',
+      summary: {
+        runId: null, applicable: resolved.length, learnerBilled: 0, staffDeferred: 0,
+        skipped: alreadyBilled, unresolved, errors: 0, conflictSkipped,
+        feeMode: fs.fee_mode as string,
+      },
+    };
   }
 
   const { data: run } = await supabase
@@ -563,7 +590,7 @@ export async function generateForStructure(
       skipped,
       unresolved,
       errors,
-      conflictSkipped: 0,
+      conflictSkipped,
       feeMode: fs.fee_mode as string,
     },
   };
