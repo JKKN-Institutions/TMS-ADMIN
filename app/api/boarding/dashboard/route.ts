@@ -3,6 +3,8 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { countRouteRoster } from '@/lib/passengers/route-roster';
+import { istToday } from '@/lib/booking/window';
 
 /**
  * Boarding-staff dashboard stats, scoped to the staff member's assigned routes
@@ -46,22 +48,26 @@ async function getDashboard(auth: AuthContext) {
       routeIds = routes.map((r) => r.id);
     }
 
-    // Students allocated to each scoped route.
-    const studentCounts: Record<string, number> = {};
-    let studentsTotal = 0;
-    if (routeIds.length) {
-      const { data: studs } = await svc
-        .from('learners_profiles').select('transport_route_id').in('transport_route_id', routeIds);
-      for (const s of (studs ?? []) as { transport_route_id: string | null }[]) {
-        if (!s.transport_route_id) continue;
-        studentCounts[s.transport_route_id] = (studentCounts[s.transport_route_id] ?? 0) + 1;
-        studentsTotal += 1;
-      }
-    }
+    // Riders allocated to each scoped route, via the SHARED roster definition
+    // (bus-required active learners + bus-required active staff) — the same
+    // helper the admin staff-assignment and analytics screens use, so all four
+    // screens report the same number for a route. This previously counted every
+    // learners_profiles row carrying the route id with no bus_required/lifecycle
+    // filter, which over-reported (route 24: 90 vs the real 87) by including
+    // people who will never board.
+    const studentCounts = routeIds.length
+      ? await countRouteRoster(svc, routeIds).catch((e) => {
+          console.error('boarding dashboard roster count error:', e);
+          return new Map<string, number>();
+        })
+      : new Map<string, number>();
+    const studentsTotal = [...studentCounts.values()].reduce((sum, n) => sum + n, 0);
 
-    // Today's attendance for scoped routes.
-    const today = new Date().toISOString().slice(0, 10);
-    let total = 0, onward = 0, ret = 0;
+    // Today's attendance for scoped routes. The date must be IST, not UTC:
+    // bookings are stored against IST travel_dates (lib/booking/window), so a
+    // UTC `today` would read the PREVIOUS day's rows between 00:00 and 05:29 IST.
+    const today = istToday();
+    let total = 0;
     const presentByRoute: Record<string, number> = {};
     let recent: Array<{ id: string; learner_name: string; roll_number: string | null; route_number: string | null; direction: string | null; scanned_at: string | null }> = [];
 
@@ -78,7 +84,6 @@ async function getDashboard(auth: AuthContext) {
         for (const a of rows) {
           if (a.status !== 'present') continue;
           total += 1;
-          if (a.direction === 'return') ret += 1; else onward += 1;
           presentByRoute[a.route_id] = (presentByRoute[a.route_id] ?? 0) + 1;
         }
 
@@ -109,20 +114,47 @@ async function getDashboard(auth: AuthContext) {
       }
     }
 
+    // Seats booked for today on the scoped routes — what the in-charge should
+    // EXPECT to board, against `total` (who actually did). One tms_booking row =
+    // one learner holding a seat for that travel_date; cancelling deletes the
+    // row, so a plain count is the live figure.
+    let bookedToday = 0;
+    const bookedByRoute: Record<string, number> = {};
+    if (routeIds.length) {
+      const { data: bks, error: bkErr } = await svc
+        .from('tms_booking')
+        .select('route_id')
+        .eq('travel_date', today)
+        .in('route_id', routeIds);
+      if (bkErr) {
+        // Missing table or query failure degrades to zero, never a 500 — same
+        // defensive contract as the attendance block above.
+        console.error('boarding dashboard booking count error:', bkErr);
+      } else {
+        for (const b of (bks ?? []) as { route_id: string | null }[]) {
+          if (!b.route_id) continue;
+          bookedByRoute[b.route_id] = (bookedByRoute[b.route_id] ?? 0) + 1;
+          bookedToday += 1;
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
         staffName,
         assignedRouteCount: routes.length,
         studentsTotal,
-        today: { total, onward, return: ret },
+        bookedToday,
+        today: { total },
         routes: routes
           .map((r) => ({
             id: r.id,
             route_number: r.route_number,
             route_name: r.route_name,
-            student_count: studentCounts[r.id] ?? 0,
+            student_count: studentCounts.get(r.id) ?? 0,
             present_today: presentByRoute[r.id] ?? 0,
+            booked_today: bookedByRoute[r.id] ?? 0,
           }))
           .sort((a, b) => (a.route_number ?? '').localeCompare(b.route_number ?? '')),
         recent,
