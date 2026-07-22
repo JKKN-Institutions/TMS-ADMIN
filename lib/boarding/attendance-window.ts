@@ -1,15 +1,22 @@
 /**
  * Pure IST time-of-day logic for attendance scan windows + a thin DB loader.
  *
- * Onward (morning) and Return (evening) boarding scans are each restricted to an
+ * Attendance is Onward (morning) only. Boarding scans are restricted to an
  * admin-configurable time window. India has no DST, so IST is a fixed +5:30
  * offset and all math is deterministic integer arithmetic — no timezone lib,
  * fully unit-testable. The pure functions never touch the DB; `loadAttendanceWindows`
  * wraps the table and falls back to DEFAULT_WINDOWS if it's absent/empty.
+ *
+ * History note: the transport office retired the Return (evening) leg. This is
+ * NOT a data migration — historical `tms_attendance` rows with `direction='return'`
+ * and the stored `tms_attendance_window` return row are RETAINED in the database
+ * and continue to render wherever the app surfaces past attendance (e.g. student
+ * attendance history, boarding roster history). We simply stopped WRITING new
+ * return rows and stopped reading the return window here; nothing was deleted.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type AttDirection = 'onward' | 'return';
+export type AttDirection = 'onward';
 
 export interface AttendanceWindow {
   direction: AttDirection;
@@ -18,12 +25,11 @@ export interface AttendanceWindow {
   enabled: boolean; // false ⇒ no time restriction for this direction (always open)
 }
 
-export type AttendanceWindows = Record<AttDirection, AttendanceWindow>;
+export type AttendanceWindows = { onward: AttendanceWindow };
 
 /** Defaults used until an admin customises them (and the fallback if the table is missing). */
 export const DEFAULT_WINDOWS: AttendanceWindows = {
   onward: { direction: 'onward', start: '07:00', end: '09:30', enabled: true },
-  return: { direction: 'return', start: '16:30', end: '19:00', enabled: true },
 };
 
 const IST_OFFSET_MIN = 5 * 60 + 30; // +05:30
@@ -63,33 +69,30 @@ export function isDirectionOpen(win: AttendanceWindow, now: Date = new Date()): 
 }
 
 /**
- * Which direction is currently open for scanning — drives the scan page's auto-tab.
- * Null when neither is open. If both are open (overlapping or both unrestricted),
- * pick by time-of-day: before 13:00 IST ⇒ onward, else ⇒ return.
+ * Whether scanning is open right now — drives the scan page's enablement.
+ * Attendance is onward-only, so this is simply the onward window's state:
+ * 'onward' when open, null when closed.
  */
 export function activeDirection(windows: AttendanceWindows, now: Date = new Date()): AttDirection | null {
-  const onwardOpen = isDirectionOpen(windows.onward, now);
-  const returnOpen = isDirectionOpen(windows.return, now);
-  if (onwardOpen && !returnOpen) return 'onward';
-  if (returnOpen && !onwardOpen) return 'return';
-  if (onwardOpen && returnOpen) return istMinutesOfDay(now) < 13 * 60 ? 'onward' : 'return';
-  return null;
+  return isDirectionOpen(windows.onward, now) ? 'onward' : null;
 }
 
-/** Load both windows from the DB; falls back to DEFAULT_WINDOWS on a missing table/row. */
+/**
+ * Load the onward window from the DB; falls back to DEFAULT_WINDOWS if absent/empty.
+ * A stored `direction='return'` row (retained for history — see file header) is
+ * deliberately filtered out of the query and ignored here, never deleted.
+ */
 export async function loadAttendanceWindows(svc: SupabaseClient): Promise<AttendanceWindows> {
-  const out: AttendanceWindows = {
-    onward: { ...DEFAULT_WINDOWS.onward },
-    return: { ...DEFAULT_WINDOWS.return },
-  };
+  const out: AttendanceWindows = { onward: { ...DEFAULT_WINDOWS.onward } };
   const { data, error } = await svc
     .from('tms_attendance_window')
-    .select('direction, start_time, end_time, enabled');
+    .select('direction, start_time, end_time, enabled')
+    .eq('direction', 'onward');
   if (error || !data) return out; // missing table / empty ⇒ defaults
   for (const r of data as { direction: string; start_time: string; end_time: string; enabled: boolean }[]) {
-    if (r.direction === 'onward' || r.direction === 'return') {
-      out[r.direction] = {
-        direction: r.direction,
+    if (r.direction === 'onward') {
+      out.onward = {
+        direction: 'onward',
         start: normalizeTime(r.start_time),
         end: normalizeTime(r.end_time),
         enabled: r.enabled,

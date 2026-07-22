@@ -54,13 +54,16 @@ describe('isDirectionOpen', () => {
 });
 
 describe('activeDirection', () => {
-  it('morning ⇒ onward', () => {
-    expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-06-28T02:30:00Z'))).toBe('onward'); // 08:00 IST
+  it('returns onward while the onward window is open', () => {
+    // 08:00 IST = 02:30 UTC
+    expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-07-23T02:30:00Z'))).toBe('onward');
   });
-  it('evening ⇒ return', () => {
-    expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-06-28T11:30:00Z'))).toBe('return'); // 17:00 IST
+  it('returns null outside the onward window', () => {
+    // 18:00 IST = 12:30 UTC — the old return window; now nothing is open
+    expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-07-23T12:30:00Z'))).toBeNull();
   });
-  it('midday (no window open) ⇒ null', () => {
-    expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-06-28T06:30:00Z'))).toBe(null); // 12:00 IST
+  it('returns onward at any time when the window is disabled', () => {
+    const win = { onward: { ...DEFAULT_WINDOWS.onward, enabled: false } };
+    expect(activeDirection(win, new Date('2026-07-23T12:30:00Z'))).toBe('onward');
   });
 });
