@@ -50,8 +50,6 @@ export async function getRouteStaffRows(
   return (data ?? []) as unknown as StaffRow[];
 }
 
-// A single PostgREST response is capped at 1000 rows (db-max-rows), so any
-// full-table scan must page or it silently truncates.
 const PAGE = 1000;
 
 /**
@@ -61,9 +59,16 @@ const PAGE = 1000;
  *
  * `tms_route.current_passengers` deliberately is NOT used: it is a dead
  * denormalized column (created `default 0`, never written), so it reads 0 for
- * every route. Learners are PAGED because the bus-required roster is already
- * ~995 rows against a 1000-row response cap — an unpaged fetch would begin
- * undercounting, silently, as soon as transport grows past the cap.
+ * every route.
+ *
+ * On PAGING: this project currently has NO PostgREST row cap — measured
+ * 2026-07-22, a service-role select returned all 1952 transport bills in one
+ * response, so `db-max-rows` is unset here and an unpaged fetch would be correct
+ * today. Paging anyway is cheap (one round trip until a result actually exceeds
+ * PAGE) and guards the one failure mode that gives no signal at all: if
+ * `db-max-rows` is ever configured on this project, or the code runs against a
+ * self-hosted PostgREST that sets it, an unpaged scan silently returns a short
+ * array — no error, no warning, just a quietly low number on screen.
  *
  * Returns a sparse map: a route with no riders is absent, so read it as
  * `counts.get(id) ?? 0`.
