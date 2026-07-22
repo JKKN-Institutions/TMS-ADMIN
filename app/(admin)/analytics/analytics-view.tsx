@@ -60,7 +60,7 @@ interface Analytics {
   kpis: Kpis;
   collectionStatus: { status: string; count: number; amount: number }[];
   revenueTrend: { month: string; billed: number; collected: number }[];
-  routeLoad: { name: string; learners: number }[];
+  routeLoad: { name: string; riders: number }[]; // learners + staff allocated to the route
   bookingsTrend: { date: string; count: number }[];
   fleetCompliance: { type: string; expired: number; expiring: number; valid: number; unknown: number }[];
   grievances: {
@@ -115,13 +115,13 @@ function RouteLoadChart({ data }: { data: Analytics['routeLoad'] }) {
           tickFormatter={(v: string) => (v.length > 22 ? v.slice(0, 21) + '…' : v)}
         />
         <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip />} />
-        <Bar dataKey="learners" name="Learners" fill="var(--viz-accent)" radius={[0, 4, 4, 0]} maxBarSize={18}>
-          <LabelList dataKey="learners" position="right" fill="var(--viz-tick)" fontSize={11} />
+        <Bar dataKey="riders" name="Riders" fill="var(--viz-accent)" radius={[0, 4, 4, 0]} maxBarSize={18}>
+          <LabelList dataKey="riders" position="right" fill="var(--viz-tick)" fontSize={11} />
         </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
-  const table = <DataTable head={['Route', 'Learners']} rows={data.map((r) => [r.name, num(r.learners)])} />;
+  const table = <DataTable head={['Route', 'Riders']} rows={data.map((r) => [r.name, num(r.riders)])} />;
   return { chart, table };
 }
 
@@ -408,12 +408,12 @@ function AnalyticsPage() {
               <StatTile label="Bookings in range" value={num(k.bookingsInRange)} sub={`${data.range.from} → ${data.range.to}`} Icon={CalendarCheck} tone="text-primary" />
             </div>
             <ChartCard
-              title="Transport learners per route"
-              subtitle="Active, bus-requiring learners assigned per route (top 20)"
+              title="Transport riders per route"
+              subtitle="Bus-requiring learners and staff assigned per route (top 20)"
               hasData={data.routeLoad.length > 0}
               chart={routeLoad.chart}
               table={routeLoad.table}
-              csv={{ filename: 'learners-per-route.csv', head: ['Route', 'Learners'], rows: data.routeLoad.map((r) => [r.name, r.learners]) }}
+              csv={{ filename: 'riders-per-route.csv', head: ['Route', 'Riders'], rows: data.routeLoad.map((r) => [r.name, r.riders]) }}
             />
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <ChartCard title="Fleet document compliance" subtitle={`${num(k.totalVehicles)} vehicles · expiry within 30 days`} hasData={data.fleetCompliance.some((d) => d.valid + d.expiring + d.expired + d.unknown > 0)} legend={fleet.legend} chart={fleet.chart} table={fleet.table} />
