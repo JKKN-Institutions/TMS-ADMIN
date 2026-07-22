@@ -16,10 +16,21 @@ export function formatCutoffHour(hour: number): string {
   return h < 12 ? `${h} AM` : `${h - 12} PM`;
 }
 
-/** The reminder's title/body for a travel date + the CONFIGURED cutoff. Pure. */
-export function reminderCopy(date: string, cutoffHour: number): { title: string; body: string } {
+/**
+ * The reminder's title/body for a travel date + the EFFECTIVE cutoff. Pure.
+ *
+ * `cutoffHour === null` means the admin turned the daily time window OFF, so there
+ * is no "closes at X" deadline that day — booking stays open through today. Passing
+ * the raw configured hour in that case would announce a deadline that does not
+ * exist, which is worse than announcing none.
+ */
+export function reminderCopy(date: string, cutoffHour: number | null): { title: string; body: string } {
+  const deadline =
+    cutoffHour === null
+      ? `Booking for ${date} stays open through today.`
+      : `Booking for ${date} closes at ${formatCutoffHour(cutoffHour)} today.`;
   return {
     title: "Book tomorrow's bus",
-    body: `Booking for ${date} closes at ${formatCutoffHour(cutoffHour)} today. Tap to reserve your seat.`,
+    body: `${deadline} Tap to reserve your seat.`,
   };
 }

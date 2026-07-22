@@ -25,4 +25,12 @@ describe('reminderCopy', () => {
   it('has a stable, non-empty title', () => {
     expect(reminderCopy('2026-07-23', 20).title.length).toBeGreaterThan(0);
   });
+  it('announces NO deadline when the time window is disabled (cutoffHour null)', () => {
+    // Disabling the daily window means there is no "closes at X" today. Announcing
+    // the stored hour anyway would state a deadline that does not exist.
+    const copy = reminderCopy('2026-07-23', null);
+    expect(copy.body).not.toContain('closes at');
+    expect(copy.body).toContain('2026-07-23');
+    expect(copy.body).toContain('stays open');
+  });
 });

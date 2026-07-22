@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { bookableDates } from './window';
+import { bookableDates, cutoffFor } from './window';
 import { loadSchedulingConfig } from '../settings/scheduling';
 import { dispatchNotification } from '../notifications/dispatch';
 import { reminderCopy } from './reminder-copy';
@@ -38,6 +38,17 @@ export async function sendBookingReminders(
 
   if (!cfg.autoNotifyPassengers) {
     return { ...base, skipped: 'autoNotifyPassengers is off' };
+  }
+
+  // The EFFECTIVE cutoff, not the raw stored hour: when the daily time window is
+  // disabled there is no deadline today, so the copy must not announce one.
+  const effectiveCutoff = cfg.enableBookingTimeWindow ? cfg.cutoffHour : null;
+
+  // Never send a "book by X" nudge after X has already passed. The cron fires at a
+  // FIXED time (17:00 IST) but the cutoff is admin-configurable 0..23, so an earlier
+  // cutoff would otherwise produce a reminder for a window that already closed.
+  if (effectiveCutoff !== null && Date.now() >= cutoffFor(date, effectiveCutoff).getTime()) {
+    return { ...base, skipped: `cutoff ${effectiveCutoff}:00 IST already passed for ${date}` };
   }
 
   const urlMarker = `/student/bookings?d=${date}`;
@@ -81,7 +92,7 @@ export async function sendBookingReminders(
   if (targetProfiles.length === 0) return summary;
   if (dryRun) return summary; // computed everything, wrote nothing
 
-  const copy = reminderCopy(date, cfg.cutoffHour);
+  const copy = reminderCopy(date, effectiveCutoff);
   const dispatched = await dispatchNotification(svc, {
     title: copy.title,
     body: copy.body,
