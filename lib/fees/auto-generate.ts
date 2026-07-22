@@ -60,7 +60,9 @@ export async function runAutoGeneration(
     try {
       const outcome: GenerateOutcome = await generateForStructure(svc, fs, {
         mode: opts.dryRun ? 'dry_run' : 'generate',
-        triggeredBy: null, // no human actor; renders as "Auto" in the runs view
+        triggeredBy: null, // NULL = auto run (manual runs always carry a user id);
+                            // tms_fee_generation_run is a backend audit ledger
+                            // with no UI today.
         autoPolicy: true,
       });
       if (outcome.kind === 'dry_run') {

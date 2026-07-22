@@ -151,7 +151,7 @@ blob. A separate `setting_type='fees'` would need a second pipeline for one bool
 
 ## Verification plan
 
-1. Vitest: `parseFeesConfig` (defaults, malformed blobs, explicit true/false).
+1. Vitest: `parseSchedulingConfig` (autoGenerateBills cases) (defaults, malformed blobs, explicit true/false).
 2. Full suite + `npm run build` green after the extraction, before the cron lands.
 3. Manual dry-run per structure returns identical counts before/after the refactor
    (compare against SQL replication).

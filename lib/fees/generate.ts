@@ -21,7 +21,7 @@ import { filterOutInCharges } from '@/lib/fees/incharge-exemption';
 export interface GenerateOptions {
   mode: 'dry_run' | 'generate';
   triggeredBy: string | null; // auth.userId manually; null for cron
-  autoPolicy?: boolean;       // Task 3 wires this; Task 2 defines but ignores it
+  autoPolicy?: boolean;       // set by cron/auto-generate runs; manual runs never set it
 }
 
 export interface GeneratedSummary {
@@ -32,7 +32,7 @@ export interface GeneratedSummary {
   skipped: number;
   unresolved: number;
   errors: number;
-  conflictSkipped: number; // Task 2: always 0. Task 3 fills it for autoPolicy runs.
+  conflictSkipped: number; // manual runs never set autoPolicy, so this stays 0; auto runs fill it
   feeMode: string;
 }
 
@@ -569,6 +569,12 @@ export async function generateForStructure(
       // Original wording, preserved byte-for-byte: flat/tiered runs must produce
       // exactly the note they always have.
       noteParts.push(`${unresolved} learner(s) unresolved (no admission year / no matching band)`);
+    }
+    // Auto-only (conflictSkipped is always 0 for manual runs — see
+    // GeneratedSummary above): leave a durable trace of cross-structure
+    // conflict skips on the run row itself, not just the in-memory summary.
+    if (conflictSkipped > 0) {
+      noteParts.push(`${conflictSkipped} person(s) skipped — already billed by another structure this year`);
     }
     await supabase.from('tms_fee_generation_run').update({
       applicable_count: resolved.length,
