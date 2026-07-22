@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCutoffHour, reminderCopy } from './reminders';
+import { formatCutoffHour, reminderCopy } from './reminder-copy';
 
 describe('formatCutoffHour', () => {
   it('formats midday and midnight', () => {

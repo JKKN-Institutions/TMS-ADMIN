@@ -1,6 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { bookableDates } from './window';
 import { loadSchedulingConfig } from '../settings/scheduling';
+import { dispatchNotification } from '../notifications/dispatch';
+import { reminderCopy } from './reminder-copy';
+
+// Re-exported so callers have one import site for the reminder API; the pure
+// implementations live in ./reminder-copy (see that file for why).
+export { formatCutoffHour, reminderCopy } from './reminder-copy';
 
 export interface ReminderSummary {
   date: string;
@@ -12,22 +18,6 @@ export interface ReminderSummary {
 }
 
 interface LearnerRow { id: string; profile_id: string | null }
-
-/** 24h hour → a short human label ("8 PM"). Pure. */
-export function formatCutoffHour(hour: number): string {
-  const h = ((hour % 24) + 24) % 24;
-  if (h === 0) return '12 AM';
-  if (h === 12) return '12 PM';
-  return h < 12 ? `${h} AM` : `${h - 12} PM`;
-}
-
-/** The reminder's title/body for a travel date + the CONFIGURED cutoff. Pure. */
-export function reminderCopy(date: string, cutoffHour: number): { title: string; body: string } {
-  return {
-    title: "Book tomorrow's bus",
-    body: `Booking for ${date} closes at ${formatCutoffHour(cutoffHour)} today. Tap to reserve your seat.`,
-  };
-}
 
 /**
  * Notify every transport learner who has NOT booked tomorrow yet.
@@ -91,13 +81,6 @@ export async function sendBookingReminders(
   if (targetProfiles.length === 0) return summary;
   if (dryRun) return summary; // computed everything, wrote nothing
 
-  // Dynamic import (not a top-level static import): lib/notifications/dispatch.ts
-  // statically imports next/server, and vitest's SSR module loader cannot resolve
-  // this file's OTHER `@/...` aliased imports when they sit in the same module as a
-  // next/server import (confirmed via isolated repro — unrelated to this file's
-  // logic). Deferring the import to call time keeps dispatch.ts out of the module
-  // graph for reminders.test.ts, which only exercises the pure copy builders above.
-  const { dispatchNotification } = await import('../notifications/dispatch');
   const copy = reminderCopy(date, cfg.cutoffHour);
   const dispatched = await dispatchNotification(svc, {
     title: copy.title,
