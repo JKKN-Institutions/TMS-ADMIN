@@ -10,6 +10,7 @@ interface SchedulingBlob {
   bookingWindowEndHour: number;
   bookingDaysAhead: number;
   autoNotifyPassengers: boolean;
+  autoGenerateBills: boolean;
 }
 
 /**
