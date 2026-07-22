@@ -174,21 +174,24 @@ async function generate(request: NextRequest, auth: AuthContext) {
 
     let people = await resolveApplicablePeople(supabase, fs);
 
-    // Boarding stops for the cohort, and — for staff — their email, which the
-    // in-charge exemption matches on. Fetched together in one pass rather than
-    // two. Fetched here rather than inside resolveApplicablePeople because the
-    // nightly in-charge cron shares that function and must not change.
+    // Boarding stops for the cohort, and — for staff — every address they are
+    // known by, which the in-charge exemption matches on. Fetched together in
+    // one pass rather than two. Fetched here rather than inside
+    // resolveApplicablePeople because the nightly in-charge cron shares that
+    // function and must not change.
     // Chunked to 150 ids: a larger .in() overflows the Supabase gateway with
     // HTTP 400, and an unchecked { data: null } would read as EMPTY — making
     // every person look stop-less AND exempting nobody.
     const stopByPerson = new Map<string, string | null>();
     const emailByPerson = new Map<string, string | null>();
+    const profileEmailByPerson = new Map<string, string | null>();
     if (isStopWise) {
       const isStaff = fs.audience === 'staff';
       const stopTable = isStaff ? 'staff' : 'learners_profiles';
-      const cols = isStaff ? 'id, transport_stop_id, email' : 'id, transport_stop_id';
+      const cols = isStaff ? 'id, transport_stop_id, email, profile_id' : 'id, transport_stop_id';
       const ids = people.map((p) => p.person_id);
       const CHUNK_STOPS = 150;
+      const profileIdByPerson = new Map<string, string | null>();
       for (let i = 0; i < ids.length; i += CHUNK_STOPS) {
         const { data: rows, error: stopErr } = await supabase
           .from(stopTable)
@@ -197,9 +200,46 @@ async function generate(request: NextRequest, auth: AuthContext) {
         if (stopErr) {
           return NextResponse.json({ error: 'Failed to resolve boarding stops.' }, { status: 500 });
         }
-        for (const r of (rows ?? []) as unknown as Array<{ id: string; transport_stop_id: string | null; email?: string | null }>) {
+        for (const r of (rows ?? []) as unknown as Array<{
+          id: string; transport_stop_id: string | null; email?: string | null; profile_id?: string | null;
+        }>) {
           stopByPerson.set(r.id, r.transport_stop_id);
-          if (isStaff) emailByPerson.set(r.id, r.email ?? null);
+          if (isStaff) {
+            emailByPerson.set(r.id, r.email ?? null);
+            profileIdByPerson.set(r.id, r.profile_id ?? null);
+          }
+        }
+      }
+
+      // The in-charge exemption must match on BOTH staff.email AND
+      // profiles.email: the self-assign path that turns a staff member into
+      // an in-charge (app/api/boarding/self-assign/route.ts) writes
+      // tms_staff_route_assignment.staff_email from profiles.email, not
+      // staff.email — and the two frequently diverge (personal vs
+      // institutional address). Resolving only staff.email silently bills
+      // every volunteer whose addresses differ. Chunked to <=150 ids and
+      // error-checked for the same gateway-400-reads-as-empty reason as every
+      // other .in() on this path — an unchecked failure here would lose every
+      // profile email and reintroduce that exact bug.
+      if (isStaff) {
+        const profileIds = [...new Set(
+          [...profileIdByPerson.values()].filter((v): v is string => !!v)
+        )];
+        const emailByProfileId = new Map<string, string | null>();
+        for (let i = 0; i < profileIds.length; i += CHUNK_STOPS) {
+          const { data: profRows, error: profErr } = await supabase
+            .from('profiles')
+            .select('id, email')
+            .in('id', profileIds.slice(i, i + CHUNK_STOPS));
+          if (profErr) {
+            return NextResponse.json({ error: 'Failed to resolve staff profile emails.' }, { status: 500 });
+          }
+          for (const r of (profRows ?? []) as Array<{ id: string; email: string | null }>) {
+            emailByProfileId.set(r.id, r.email ?? null);
+          }
+        }
+        for (const [personId, profileId] of profileIdByPerson) {
+          profileEmailByPerson.set(personId, profileId ? emailByProfileId.get(profileId) ?? null : null);
         }
       }
     }
@@ -208,6 +248,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
     // their route's riders. Applied here as a cohort FILTER (a standing state),
     // not as an event — someone who takes the role simply leaves the cohort.
     let exemptInCharge = 0;
+    let unmatchedInCharge = 0;
     if (isStopWise && fs.audience === 'staff') {
       const { data: assignRows, error: assignErr } = await supabase
         .from('tms_staff_route_assignment')
@@ -224,10 +265,14 @@ async function generate(request: NextRequest, auth: AuthContext) {
       const emails = ((assignRows ?? []) as Array<{ staff_email: string | null }>)
         .map((r) => r.staff_email ?? '');
       const filtered = filterOutInCharges(
-        people.map((p) => ({ ...p, email: emailByPerson.get(p.person_id) ?? null })),
+        people.map((p) => ({
+          ...p,
+          emails: [emailByPerson.get(p.person_id) ?? null, profileEmailByPerson.get(p.person_id) ?? null],
+        })),
         emails
       );
       exemptInCharge = filtered.exemptCount;
+      unmatchedInCharge = filtered.unmatchedInCharge;
       people = filtered.kept;
     }
 
@@ -331,6 +376,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
       unresolved, // tiered: no admission year / year matches no band
       unresolvedByReason,
       exemptInCharge,
+      unmatchedInCharge,
       stopRateCount: isStopWise ? stopRateByStopId.size : null,
       learnerCount,
       staffCount,
