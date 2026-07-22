@@ -23,8 +23,11 @@ export interface AssignmentRoute {
   departure_time?: string;
   arrival_time?: string;
   status?: string;
-  total_capacity?: number;
-  current_passengers?: number;
+  // Derived by the API: riders counted live from real allocation, seats from the
+  // route's assigned vehicle. The tms_route counter columns are dead (always 0)
+  // and must not be rendered — see lib/passengers/route-roster.ts.
+  passenger_count?: number;
+  capacity?: number | null;
 }
 
 // Shape of an assignment row from /api/admin/staff-route-assignments.
@@ -135,10 +138,13 @@ export function getAssignmentColumns(
       cell: ({ row }) => {
         const r = row.original.routes;
         if (!r) return <span className="text-gray-400">—</span>;
+        // Seats are unknown when the route has no vehicle assigned; show the
+        // rider count alone rather than dividing by a fabricated 0.
         return (
           <span className="flex items-center gap-1.5 tabular-nums text-sm text-gray-600 dark:text-gray-300">
             <Users className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-            {r.current_passengers ?? 0}/{r.total_capacity ?? 0}
+            {r.passenger_count ?? 0}
+            {r.capacity ? `/${r.capacity}` : ''}
           </span>
         );
       },

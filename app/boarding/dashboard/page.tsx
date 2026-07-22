@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
-  QrCode, Route as RouteIcon, Users, ArrowRight, CheckCircle2,
+  QrCode, Route as RouteIcon, Users, CalendarCheck, CheckCircle2,
   RefreshCw, ChevronRight, Clock, ListChecks, Activity, GraduationCap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -16,6 +16,7 @@ interface BoardingRoute {
   route_name: string | null;
   student_count: number;
   present_today: number;
+  booked_today: number;
 }
 interface RecentScan {
   id: string;
@@ -29,7 +30,10 @@ interface BoardingDashboard {
   staffName: string;
   assignedRouteCount: number;
   studentsTotal: number;
-  today: { total: number; onward: number; return: number };
+  bookedToday: number;
+  // Onward/return were dropped: attendance is onward-only, so `onward` always
+  // equalled `total` and `return` was never read.
+  today: { total: number };
   routes: BoardingRoute[];
   recent: RecentScan[];
 }
@@ -72,7 +76,7 @@ export default function BoardingDashboardPage() {
 
   const stats = [
     { title: 'Boarded Today', value: data?.today.total ?? 0, subtitle: 'Marked present', icon: CheckCircle2, color: 'green' as const, href: '/boarding/attendance' },
-    { title: 'Onward', value: data?.today.onward ?? 0, subtitle: 'Morning trips', icon: ArrowRight, color: 'blue' as const, href: '/boarding/attendance' },
+    { title: 'Booked Today', value: data?.bookedToday ?? 0, subtitle: 'Seats booked', icon: CalendarCheck, color: 'blue' as const, href: '/boarding/routes' },
     { title: 'Students', value: data?.studentsTotal ?? 0, subtitle: data?.routes?.[0]?.route_number ? `Route ${data.routes[0].route_number}` : 'On your route', icon: Users, color: 'indigo' as const, href: '/boarding/routes' },
   ];
 
@@ -197,8 +201,8 @@ export default function BoardingDashboardPage() {
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Onward</span>
-                  <span className="text-sm font-semibold text-gray-900">{data?.today.onward ?? 0}</span>
+                  <span className="text-sm text-gray-600 flex items-center gap-1.5"><CalendarCheck className="w-4 h-4 text-gray-400" /> Booked today</span>
+                  <span className="text-sm font-semibold text-gray-900">{data?.bookedToday ?? 0}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600 flex items-center gap-1.5"><GraduationCap className="w-4 h-4 text-gray-400" /> Students on your routes</span>
@@ -232,8 +236,13 @@ export default function BoardingDashboardPage() {
                   </span>
                 </div>
                 <div className="mt-4 flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/50">
-                  <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-                    <Users className="w-3.5 h-3.5" /> {myRoute.student_count} students
+                  <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                    <span className="inline-flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5" /> {myRoute.student_count} students
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <CalendarCheck className="w-3.5 h-3.5" /> {myRoute.booked_today} booked
+                    </span>
                   </span>
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600">
                     Open roster <ChevronRight className="w-3.5 h-3.5" />

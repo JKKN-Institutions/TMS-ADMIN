@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { istToday, addDays } from '@/lib/booking/window';
+import { ACTIVE_LIFECYCLE_STATUSES, countRosterByRoute } from '@/lib/passengers/types';
 
 /**
  * Transport analytics, aggregated server-side over the LIVE tms_ / learners /
@@ -77,6 +78,7 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       vehiclesRes,
       grievancesRes,
       learnersRouteRes,
+      staffRouteRes,
       learnersTransportRes,
       learnersActiveRes,
       driversRes,
@@ -91,14 +93,27 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         .from('tms_vehicle')
         .select('status, insurance_expiry, fitness_expiry, permit_expiry_date, pollution_expiry_date'),
       svc.from('tms_grievance').select('status, category'),
-      // Route load = active, bus-requiring learners assigned to each route. The
-      // tms_route.current_passengers/total_capacity columns are unpopulated (all
-      // zero), so learner allocation is the real per-route demand signal.
+      // Route load = every bus-requiring RIDER allocated to a route: learners AND
+      // staff. The tms_route.current_passengers/total_capacity columns are dead
+      // (default 0, never written), so allocation is the real demand signal.
+      //
+      // Both halves use the shared roster definition from lib/passengers — the
+      // same one the driver, boarding and staff-assignment screens use — and are
+      // summed by the shared countRosterByRoute. Before 2026-07-22 this counted
+      // learners only, and only lifecycle_status='active', so the dashboard
+      // reported 983 riders where every other screen reported 1100: it silently
+      // dropped all 105 staff riders plus learners in admitted/account states.
       svc
         .from('learners_profiles')
         .select('transport_route_id')
         .eq('bus_required', true)
-        .eq('lifecycle_status', 'active')
+        .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
+        .not('transport_route_id', 'is', null),
+      svc
+        .from('staff')
+        .select('transport_route_id')
+        .eq('bus_required', true)
+        .eq('is_active', true)
         .not('transport_route_id', 'is', null),
       svc
         .from('learners_profiles')
@@ -168,17 +183,16 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       .map(([month, v]) => ({ month, billed: Math.round(v.billed), collected: Math.round(v.collected) }))
       .sort((a, b) => a.month.localeCompare(b.month));
 
-    // ── Operations: route load (assigned transport learners per route) ──────────
-    const learnerRoutes = (learnersRouteRes.data ?? []) as { transport_route_id: string | null }[];
-    const loadByRoute: Record<string, number> = {};
-    for (const lr of learnerRoutes) {
-      if (lr.transport_route_id) loadByRoute[lr.transport_route_id] = (loadByRoute[lr.transport_route_id] ?? 0) + 1;
-    }
+    // ── Operations: route load (allocated riders per route — learners + staff) ──
+    const loadByRoute = countRosterByRoute(
+      (learnersRouteRes.data ?? []) as { transport_route_id: string | null }[],
+      (staffRouteRes.data ?? []) as { transport_route_id: string | null }[]
+    );
     const routeName = (r: RouteRow) => r.route_name || (r.route_number ? `Route ${r.route_number}` : 'Route');
     const routeLoad = routes
-      .map((r) => ({ name: routeName(r), learners: loadByRoute[r.id] ?? 0 }))
-      .filter((r) => r.learners > 0)
-      .sort((a, b) => b.learners - a.learners);
+      .map((r) => ({ name: routeName(r), riders: loadByRoute.get(r.id) ?? 0 }))
+      .filter((r) => r.riders > 0)
+      .sort((a, b) => b.riders - a.riders);
 
     // ── Operations: bookings trend (presence-based; one row = one booking) ──────
     const bookingByDate: Record<string, number> = {};
