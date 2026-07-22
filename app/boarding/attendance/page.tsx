@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ListChecks, Download, QrCode } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -26,20 +26,19 @@ async function fetchRoster(date: string, direction: AttDirection): Promise<Roste
   return json.data as RosterResponse;
 }
 
-async function fetchWindows(): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
+async function fetchWindows(): Promise<{ windows: AttendanceWindows }> {
   const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
-  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
-  return { windows: json.data.windows as AttendanceWindows, activeDirection: (json.data.activeDirection ?? null) as AttDirection | null };
+  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS };
+  return { windows: json.data.windows as AttendanceWindows };
 }
 
 export default function BoardingAttendancePage() {
   const qc = useQueryClient();
   const [date, setDate] = useState(todayStr());
-  const [direction, setDirection] = useState<AttDirection>('onward');
+  const direction: AttDirection = 'onward';
   const [scanOpen, setScanOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const dirSeeded = useRef(false);
   // Forces a re-render every 30s so the amber closed-window hint (isToday && !legOpen)
   // appears/disappears at a scan-window edge instead of lagging until an unrelated re-render.
   const [, setTick] = useState(0);
@@ -52,13 +51,6 @@ export default function BoardingAttendancePage() {
 
   const { data: winData } = useQuery({ queryKey: ['boarding-attendance-window'], queryFn: fetchWindows });
   const windows = winData?.windows ?? DEFAULT_WINDOWS;
-  // Seed the leg once from the server-computed active direction (device clock may be wrong).
-  useEffect(() => {
-    if (!dirSeeded.current && winData?.activeDirection) {
-      setDirection(winData.activeDirection);
-      dirSeeded.current = true;
-    }
-  }, [winData]);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['boarding-roster', date, direction],
@@ -81,7 +73,7 @@ export default function BoardingAttendancePage() {
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0 };
 
-  const legOpen = isDirectionOpen(windows[direction]);
+  const legOpen = isDirectionOpen(windows.onward);
   const canMark = isToday && legOpen;
 
   const mark = useCallback(
@@ -127,34 +119,16 @@ export default function BoardingAttendancePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `attendance-${date}-${direction}.csv`;
+    a.download = `attendance-${date}-onward.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
-          <p className="text-gray-600 mt-1 text-sm">Today&apos;s booked students — scan or mark them present for the selected leg.</p>
-        </div>
-        {/* Leg toggle */}
-        <div className="inline-flex overflow-hidden rounded-lg border border-gray-300 dark:border-gray-700">
-          {(['onward', 'return'] as AttDirection[]).map((d) => {
-            const active = direction === d;
-            return (
-              <button
-                key={d}
-                type="button"
-                onClick={() => { dirSeeded.current = true; setDirection(d); }}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${active ? 'bg-green-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300'}`}
-              >
-                {d === 'onward' ? 'Onward' : 'Return'}
-              </button>
-            );
-          })}
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
+        <p className="text-gray-600 mt-1 text-sm">Today&apos;s booked students — scan or mark them present.</p>
       </div>
 
       {/* Analytics tiles + day picker */}
@@ -177,7 +151,7 @@ export default function BoardingAttendancePage() {
 
       {isToday && !legOpen && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          {direction === 'onward' ? 'Onward' : 'Return'} window is {formatHM(windows[direction].start)}–{formatHM(windows[direction].end)}; marking present/absent and scanning are closed for this leg until it opens.
+          Attendance window is {formatHM(windows.onward.start)}–{formatHM(windows.onward.end)}; marking present/absent and scanning are closed until it opens.
         </p>
       )}
 
@@ -226,7 +200,6 @@ export default function BoardingAttendancePage() {
       <ScanDialog
         open={scanOpen}
         onOpenChange={setScanOpen}
-        direction={direction}
         windows={windows}
         onMarked={() => qc.invalidateQueries({ queryKey: ['boarding-roster'] })}
       />

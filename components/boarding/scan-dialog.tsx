@@ -6,7 +6,7 @@ import { Clock } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { isDirectionOpen, formatHM, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
+import { isDirectionOpen, formatHM, type AttendanceWindows } from '@/lib/boarding/attendance-window';
 
 type ScanResult = {
   ok: boolean;
@@ -22,21 +22,19 @@ type ScanResult = {
 const READER_ID = 'scan-dialog-reader';
 
 /**
- * Scanner-in-a-modal. Marks the passed-in leg (the page owns the toggle). Reuses
- * the old scan page's html5-qrcode + 6-digit + walk-up flow. Fires onMarked after
- * a successful scan so the page can refresh the roster. Camera runs only while the
- * dialog is open and the leg's window is open.
+ * Scanner-in-a-modal. Attendance is onward-only, so there is no leg to pick — every
+ * scan is marked onward. Reuses the old scan page's html5-qrcode + 6-digit + walk-up
+ * flow. Fires onMarked after a successful scan so the page can refresh the roster.
+ * Camera runs only while the dialog is open and the onward window is open.
  */
 export default function ScanDialog({
   open,
   onOpenChange,
-  direction,
   windows,
   onMarked,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  direction: AttDirection;
   windows: AttendanceWindows;
   onMarked: () => void;
 }) {
@@ -61,10 +59,8 @@ export default function ScanDialog({
   const busyRef = useRef(false);
   const lastTokenRef = useRef('');
   // Kept current every render so the long-lived scan callback (registered once by the
-  // camera-start effect) always reads the latest direction/windows instead of the stale
+  // camera-start effect) always reads the latest windows instead of the stale
   // closure captured when the effect last ran.
-  const directionRef = useRef(direction);
-  directionRef.current = direction;
   const windowsRef = useRef(windows);
   windowsRef.current = windows;
   // Bumped whenever the camera-lifecycle effect (re)starts or tears down, so an in-flight
@@ -72,21 +68,20 @@ export default function ScanDialog({
   // of being adopted into scannerRef.
   const cameraGenRef = useRef(0);
 
-  const win = windows[direction];
+  const win = windows.onward;
   const legOpen = isDirectionOpen(win);
 
   async function submit(token: string, walkUp = false) {
     if (!token) return;
-    // Read the CURRENT direction/windows via refs, not the props closed over when this
+    // Read the CURRENT windows via the ref, not the props closed over when this
     // callback was registered with the scanner — the camera-start effect doesn't restart
-    // on a direction change, so the closed-over props could be stale.
-    const dir = directionRef.current;
+    // on a windows change, so the closed-over props could be stale.
     const w = windowsRef.current;
-    if (!isDirectionOpen(w[dir])) {
+    if (!isDirectionOpen(w.onward)) {
       setResult({
         ok: false,
         reason: 'window_closed',
-        error: `${dir === 'onward' ? 'Onward (morning)' : 'Return (evening)'} scanning is open ${formatHM(w[dir].start)}–${formatHM(w[dir].end)} only.`,
+        error: `Scanning is open ${formatHM(w.onward.start)}–${formatHM(w.onward.end)} only.`,
       });
       return;
     }
@@ -98,7 +93,7 @@ export default function ScanDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ token, direction: dir, walkUp }),
+        body: JSON.stringify({ token, direction: 'onward', walkUp }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -167,7 +162,7 @@ export default function ScanDialog({
     }
   }
 
-  // Run the camera only while the dialog is open and the leg is open.
+  // Run the camera only while the dialog is open and the onward window is open.
   useEffect(() => {
     cameraGenRef.current++;
     if (open && legOpen) void startCamera();
@@ -190,14 +185,14 @@ export default function ScanDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Scan boarding pass · {direction === 'onward' ? 'Onward' : 'Return'}</DialogTitle>
+          <DialogTitle>Scan boarding pass</DialogTitle>
         </DialogHeader>
 
         {!legOpen && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <Clock className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              {direction === 'onward' ? 'Onward' : 'Return'} scanning is open {formatHM(win.start)}–{formatHM(win.end)} only.
+              Scanning is open {formatHM(win.start)}–{formatHM(win.end)} only.
             </span>
           </div>
         )}
