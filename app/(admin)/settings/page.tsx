@@ -198,11 +198,39 @@ const SettingsPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Billing automation — the kill switch for the nightly auto-generation cron. */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-gray-900">Automatic bill generation</div>
+                <p className="mt-1 max-w-xl text-xs text-gray-600">
+                  When on, a nightly run (03:00 IST) generates transport bills for every learner
+                  who has become applicable under each ACTIVE fee structure of the current
+                  transport year — the same engine as the manual Generate button, so existing
+                  bills are never duplicated. People already billed by another structure this
+                  year are skipped. Before turning this on, deactivate any test structures:
+                  every active current-year structure will generate.
+                </p>
+              </div>
+              <label className="relative inline-flex shrink-0 cursor-pointer items-center">
+                <input
+                  type="checkbox"
+                  checked={schedulingSettings.autoGenerateBills}
+                  onChange={(e) =>
+                    setSchedulingSettings({ ...schedulingSettings, autoGenerateBills: e.target.checked })
+                  }
+                  className="peer sr-only"
+                />
+                <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300"></div>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
-      
+
       <div className="mt-6">
-        <button 
+        <button
           onClick={() => handleSaveSettings('Scheduling')}
           className="btn-primary flex items-center space-x-2"
         >
