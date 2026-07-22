@@ -10,7 +10,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/detail-view';
 import { istToday, addDays } from '@/lib/booking/window';
-import { getRosterColumns, type RosterStudent, type RosterDirection } from './columns';
+import { getRosterColumns, type RosterStudent } from './columns';
 
 interface RouteInfo { id: string; route_number: string | null; route_name: string | null }
 
@@ -19,9 +19,6 @@ interface RosterData {
   students: RosterStudent[];
   counts: { booked: number; capacity: number };
 }
-
-const statusKey = (d: RosterDirection): 'onward_status' | 'return_status' =>
-  d === 'return' ? 'return_status' : 'onward_status';
 
 const fmtDateLong = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
@@ -87,9 +84,11 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
     return: students.filter((s) => s.return_status === 'present').length,
   }), [students]);
 
-  // Persist a batch of marks for a direction; optimistic with revert on failure.
+  // Persist a batch of onward marks; optimistic with revert on failure.
   // `prev` is captured inside the state updater so it's never a stale closure.
-  const postMarks = async (direction: RosterDirection, marks: { learnerId: string; status: 'present' | 'absent' }[]) => {
+  // Marking is onward-only (see lib/boarding/attendance-window.ts) — the API
+  // rejects direction: 'return' with a 400, so this always sends 'onward'.
+  const postMarks = async (marks: { learnerId: string; status: 'present' | 'absent' }[]) => {
     if (marks.length === 0) return;
     const wanted = new Map(marks.map((m) => [m.learnerId, m.status]));
     let prev: RosterStudent[] = [];
@@ -98,7 +97,7 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
       return list.map((s) => {
         const next = wanted.get(s.id);
         if (!next) return s;
-        return direction === 'return' ? { ...s, return_status: next } : { ...s, onward_status: next };
+        return { ...s, onward_status: next };
       });
     });
     setSaving(true);
@@ -107,7 +106,7 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ routeId, direction, marks }),
+        body: JSON.stringify({ routeId, direction: 'onward', marks }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save');
@@ -119,18 +118,17 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
     }
   };
 
-  const markOne = (learnerId: string, direction: RosterDirection, status: 'present' | 'absent') =>
-    postMarks(direction, [{ learnerId, status }]);
+  const markOne = (learnerId: string, status: 'present' | 'absent') =>
+    postMarks([{ learnerId, status }]);
 
-  const markRemainingAbsent = (direction: RosterDirection) => {
-    const key = statusKey(direction);
-    const remaining = students.filter((s) => s[key] == null).map((s) => ({ learnerId: s.id, status: 'absent' as const }));
+  const markRemainingAbsent = () => {
+    const remaining = students.filter((s) => s.onward_status == null).map((s) => ({ learnerId: s.id, status: 'absent' as const }));
     if (remaining.length === 0) {
-      toast(`No unmarked learners for ${direction}`);
+      toast('No unmarked learners');
       return;
     }
-    if (!confirm(`Mark ${remaining.length} unmarked learner(s) ABSENT for ${direction}?`)) return;
-    postMarks(direction, remaining);
+    if (!confirm(`Mark ${remaining.length} unmarked learner(s) ABSENT?`)) return;
+    postMarks(remaining);
   };
 
   const columns = useMemo(
@@ -230,18 +228,17 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
           pageSize={20}
           filters={[
             { columnId: 'onward', title: 'Onward', options: statusOptions },
-            { columnId: 'return', title: 'Return', options: statusOptions },
           ]}
           enableRowSelection={editable}
           getRowId={(s) => s.id}
           toolbarActions={
             editable
               ? ({ selectedRows, resetSelection }) => {
-                  // With rows selected → bulk-mark the selection per direction.
+                  // With rows selected → bulk-mark the selection.
                   if (selectedRows.length > 0) {
                     const ids = selectedRows.map((s) => s.id);
-                    const bulk = (direction: RosterDirection, status: 'present' | 'absent') => {
-                      postMarks(direction, ids.map((learnerId) => ({ learnerId, status })));
+                    const bulk = (status: 'present' | 'absent') => {
+                      postMarks(ids.map((learnerId) => ({ learnerId, status })));
                       resetSelection();
                     };
                     const btn = (tone: 'present' | 'absent') =>
@@ -252,27 +249,17 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="text-xs font-medium text-gray-600">{selectedRows.length} selected</span>
                         <div className="inline-flex items-center gap-1">
-                          <span className="text-xs text-gray-500">Onward</span>
-                          <button type="button" disabled={saving} onClick={() => bulk('onward', 'present')} className={btn('present')}>Present</button>
-                          <button type="button" disabled={saving} onClick={() => bulk('onward', 'absent')} className={btn('absent')}>Absent</button>
-                        </div>
-                        <div className="inline-flex items-center gap-1">
-                          <span className="text-xs text-gray-500">Return</span>
-                          <button type="button" disabled={saving} onClick={() => bulk('return', 'present')} className={btn('present')}>Present</button>
-                          <button type="button" disabled={saving} onClick={() => bulk('return', 'absent')} className={btn('absent')}>Absent</button>
+                          <button type="button" disabled={saving} onClick={() => bulk('present')} className={btn('present')}>Present</button>
+                          <button type="button" disabled={saving} onClick={() => bulk('absent')} className={btn('absent')}>Absent</button>
                         </div>
                       </div>
                     );
                   }
-                  // Nothing selected → quick "mark remaining absent" per direction.
+                  // Nothing selected → quick "mark remaining absent".
                   return (
                     <div className="flex items-center gap-2">
-                      <span className="hidden text-xs text-gray-500 sm:inline">Mark remaining absent:</span>
-                      <button type="button" disabled={saving} onClick={() => markRemainingAbsent('onward')} className="inline-flex h-[38px] items-center rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-                        Onward
-                      </button>
-                      <button type="button" disabled={saving} onClick={() => markRemainingAbsent('return')} className="inline-flex h-[38px] items-center rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-                        Return
+                      <button type="button" disabled={saving} onClick={() => markRemainingAbsent()} className="inline-flex h-[38px] items-center rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                        Mark remaining absent
                       </button>
                     </div>
                   );

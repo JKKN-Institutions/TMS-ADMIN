@@ -5,7 +5,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 
 export type RosterStatus = 'present' | 'absent' | null;
-export type RosterDirection = 'onward' | 'return';
 
 // Shape of one roster row (a learner allocated to the route + today's status).
 export interface RosterStudent {
@@ -59,15 +58,16 @@ function MarkControl({ status, disabled, onMark }: { status: RosterStatus; disab
 /**
  * Roster columns factory. Takes an `editable` flag (staff can manage AND the
  * roster is for today) + saving state + the mark callback (a roster row marks
- * attendance instead of view/edit/delete). The onward/return columns are
- * filterable (id + accessorFn + filterFn) so the page's `filters` can target
- * them, and render a live mark control when editable, else a read-only pill —
- * which is also how advance-booking (future-date) rosters display.
+ * attendance instead of view/edit/delete). Attendance marking is onward-only
+ * (see lib/boarding/attendance-window.ts); the onward column is filterable
+ * (id + accessorFn + filterFn) so the page's `filters` can target it, and
+ * renders a live mark control when editable, else a read-only pill — which is
+ * also how advance-booking (future-date) rosters display.
  */
 export function getRosterColumns(
   editable: boolean,
   saving: boolean,
-  onMark: (learnerId: string, direction: RosterDirection, status: 'present' | 'absent') => void,
+  onMark: (learnerId: string, status: 'present' | 'absent') => void,
   onSelect: (student: RosterStudent) => void
 ): ColumnDef<RosterStudent>[] {
   const selectColumn: ColumnDef<RosterStudent> = {
@@ -117,21 +117,8 @@ export function getRosterColumns(
       cell: ({ row }) => {
         const s = row.original;
         return editable
-          ? <MarkControl status={s.onward_status} disabled={saving} onMark={(st) => onMark(s.id, 'onward', st)} />
+          ? <MarkControl status={s.onward_status} disabled={saving} onMark={(st) => onMark(s.id, st)} />
           : <StatusPill status={s.onward_status} />;
-      },
-    },
-    {
-      id: 'return',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Return" />,
-      accessorFn: (s) => s.return_status ?? '',
-      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
-      enableSorting: false,
-      cell: ({ row }) => {
-        const s = row.original;
-        return editable
-          ? <MarkControl status={s.return_status} disabled={saving} onMark={(st) => onMark(s.id, 'return', st)} />
-          : <StatusPill status={s.return_status} />;
       },
     },
   ];
