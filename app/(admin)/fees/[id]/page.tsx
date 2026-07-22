@@ -431,6 +431,12 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                       They are not billed while they keep it.
                     </p>
                   )}
+                  {preview.feeMode === 'stop_wise' && (preview.unmatchedInCharge ?? 0) > 0 && (
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                      ⚠️ {preview.unmatchedInCharge} bus in-charge assignment(s) did not match any staff record;
+                      those people WILL be billed.
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={() => setConfirmGen(true)}

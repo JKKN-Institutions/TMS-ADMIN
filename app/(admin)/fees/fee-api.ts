@@ -52,6 +52,7 @@ export interface GeneratePreview {
   unresolvedByReason?: Record<'no_matching_band' | 'no_stop' | 'no_stop_rate', number>;
   stopRateCount?: number | null; // stop_wise only: how many stops currently have a configured rate
   exemptInCharge?: number; // staff skipped because they hold an active bus in-charge role
+  unmatchedInCharge?: number; // active in-charge assignments that matched nobody in the cohort (partial-failure denominator)
   learnerCount: number;
   staffCount: number;
   termsPerPerson: number | null; // null for tiered (varies by band)
