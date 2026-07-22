@@ -16,6 +16,16 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { runAutoGeneration } from '@/lib/fees/auto-generate';
 
 export const dynamic = 'force-dynamic';
+// The first enabled sweep is the heaviest invocation this route ever sees:
+// up to 5 active structures x their full applicable population, with serial
+// inserts per person/term (see lib/fees/generate.ts). The default function
+// timeout would kill it mid-run, and because the engine inserts the run row
+// FIRST and only updates its counts at the end, a kill mid-run leaves that
+// structure's run row without its correcting count update. A mid-run timeout
+// is still SAFE either way — the ledger is idempotent, so the next night's
+// run resumes from wherever this one stopped — but 300s avoids it. Within
+// both the Hobby (fluid compute) and Pro plan limits.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
