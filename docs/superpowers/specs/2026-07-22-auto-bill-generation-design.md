@@ -99,20 +99,34 @@ Mirrors the `booking-reminders` cron pattern exactly:
   behavior); without this, 5 structures × nightly = ~150 no-op rows a month drowning
   the run history.
 
-Runs created by auto have `triggered_by NULL`; the runs UI renders that as "Auto".
+Runs created by auto have `triggered_by NULL` — the convention that distinguishes
+them from manual runs (which always carry a user id). Note: no admin UI currently
+displays generation runs; `tms_fee_generation_run` is a backend audit ledger, so
+NULL-means-auto is a data convention, not a rendering concern.
 
 ### 4. Settings toggle — `autoGenerateBills`, default OFF
 
-- Stored the same way as `autoNotifyPassengers`: a boolean in an `admin_settings`
-  row, `setting_type='fees'`, `settings_data = { autoGenerateBills: boolean }`.
-- New pure module `lib/settings/fees.ts`: `FeesConfig`, `DEFAULT_FEES_CONFIG =
-  { autoGenerateBills: false }`, `parseFeesConfig(raw)` (defaults + type-guards),
-  `loadFeesConfig(svc)` (missing row/table ⇒ defaults). Vitest on the parser.
-- Settings UI: a toggle beside the booking-reminder toggle (same tab), with helper
-  text warning that every ACTIVE current-year structure will generate — including a
-  pointer to deactivate test structures first.
-- Persistence goes through the existing admin settings PUT route (`setting_type:
-  'fees'`); no new API surface.
+*(Amended after code inspection: `autoNotifyPassengers` — the "stored the same way"
+model — actually lives INSIDE the `setting_type='scheduling'` blob, and the whole
+settings pipeline (GET/POST route, `toBlobShape`, both tab UIs) round-trips that one
+blob. A separate `setting_type='fees'` would need a second pipeline for one boolean.)*
+
+- `autoGenerateBills: boolean` becomes a fifth field of the existing scheduling blob.
+  Added to: `SchedulingConfig` + `DEFAULT_SCHEDULING_CONFIG` (false) +
+  `parseSchedulingConfig` in `lib/settings/scheduling.ts`; the blob-shape
+  `SchedulingSettings` + `defaultSchedulingSettings` in `lib/scheduling-config.ts`;
+  `SchedulingSettingsData` + `toBlobShape` in `app/api/admin/settings/route.ts`; and
+  the `SchedulingBlob` interface in `components/admin/notifications-settings.tsx`.
+  **Every carrier of the blob must round-trip the field** — a writer that drops it
+  would silently turn auto-billing off on an unrelated save (fail-safe direction,
+  but still a bug). Vitest on the parser (existing `lib/settings/scheduling.test.ts`).
+- The cron reads it via the existing `loadSchedulingConfig(svc)` — no new loader.
+- Settings UI: a toggle card on the **Scheduling tab** (which owns the blob form and
+  its save button), NOT the Notifications tab — bill generation is not a
+  notification. Helper text warns that every ACTIVE current-year structure will
+  generate and to deactivate test structures first.
+- Persistence goes through the existing `/api/admin/settings` POST; no new API
+  surface.
 
 ## Out of scope (explicit)
 
