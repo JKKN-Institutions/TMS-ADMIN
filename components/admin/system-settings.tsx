@@ -3,16 +3,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Cpu, Database, Loader2, RefreshCw, Server } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { classifyLatency, type SystemInfo } from '@/lib/settings/system-info';
+import { classifyLatency, formatCount, type SystemInfo } from '@/lib/settings/system-info';
 
 /**
  * System tab. Every figure here is MEASURED — package.json version, real
- * process.version / Next.js version, a timed database round-trip, and real
- * admin_activity_log counts. The previous tab fabricated a version, uptime,
- * memory usage, active-session count, and a dozen buttons (Purge CDN,
+ * process.version / installed Next.js version, a timed database round-trip,
+ * and real tms_activity_log counts. The previous tab fabricated a version,
+ * uptime, memory usage, active-session count, and a dozen buttons (Purge CDN,
  * Optimize Database, Maintenance Mode, Schedule Restart…) for capabilities a
  * serverless Next.js app does not have. None of that is reimplemented here —
  * it is simply gone. The only action is a real refetch of this endpoint.
+ *
+ * The activity counts can independently fail to measure even when the probe
+ * above succeeds; a failed count renders as "—" (formatCount()), never "0" —
+ * a fabricated-looking zero would misinform an operator during an outage.
  */
 export function SystemSettings() {
   const [data, setData] = useState<SystemInfo | null>(null);
@@ -86,7 +90,7 @@ export function SystemSettings() {
             <div className="space-y-2 text-sm">
               <Row label="Version" value={data.app.version} />
               <Row label="Environment" value={data.app.environment} />
-              <Row label="Region" value={data.app.region ?? 'local'} />
+              <Row label="Region" value={data.app.region ?? 'unknown'} />
               <Row label="Node.js" value={data.app.nodeVersion} />
               <Row label="Next.js" value={data.app.nextVersion} />
             </div>
@@ -141,11 +145,11 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
       <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-gray-900">{value}</div>
+      <div className="mt-1 text-2xl font-semibold text-gray-900">{formatCount(value)}</div>
     </div>
   );
 }

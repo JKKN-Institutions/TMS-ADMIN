@@ -26,6 +26,14 @@ interface SchedulingBlob {
  * `/api/admin/settings` and always round-trips the WHOLE blob — never just
  * this one key — or a save from this tab would silently wipe the booking
  * window settings configured on the Scheduling tab.
+ *
+ * The toggle re-fetches the blob immediately before POSTing rather than
+ * spreading the copy snapshotted at mount: if another admin changed the
+ * booking cutoff / horizon on the Scheduling tab after this tab loaded, a
+ * save built from the stale mount-time blob would silently revert their
+ * change the moment this toggle is flipped. Re-GETting right before the
+ * write keeps the blast radius of this control to exactly the one flag it
+ * claims to control.
  */
 export function NotificationsSettings() {
   const [blob, setBlob] = useState<SchedulingBlob | null>(null);
@@ -50,16 +58,30 @@ export function NotificationsSettings() {
 
   const toggleReminders = async () => {
     if (!blob) return;
-    const next = { ...blob, autoNotifyPassengers: !blob.autoNotifyPassengers };
+    const targetValue = !blob.autoNotifyPassengers;
     setSaving(true);
     try {
+      // Re-GET the current blob right before writing — do NOT reuse the copy
+      // in state, which may have been snapshotted at mount and gone stale if
+      // another admin edited the booking cutoff / horizon on the Scheduling
+      // tab in the meantime. Only `autoNotifyPassengers` is actually meant to
+      // change here.
+      const freshRes = await fetch('/api/admin/settings', { cache: 'no-store', credentials: 'same-origin' });
+      const freshJson = await freshRes.json();
+      if (!freshRes.ok || !freshJson?.success) {
+        throw new Error(freshJson?.error || 'Failed to load current settings');
+      }
+      const current = freshJson.data.settings as SchedulingBlob;
+      const next = { ...current, autoNotifyPassengers: targetValue };
+
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         // Send the WHOLE blob back — enableBookingTimeWindow, bookingWindowEndHour
-        // and bookingDaysAhead ride along unchanged so this save can't clobber
-        // the live booking cutoff / horizon configured on the Scheduling tab.
+        // and bookingDaysAhead ride along unchanged (from the fresh GET above,
+        // not a stale mount-time snapshot) so this save can't clobber the live
+        // booking cutoff / horizon configured on the Scheduling tab.
         body: JSON.stringify({ settings: next }),
       });
       const json = await res.json();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLatency } from './system-info';
+import { classifyLatency, formatCount } from './system-info';
 
 describe('classifyLatency', () => {
   it('classifies a fast round-trip as good', () => {
@@ -16,5 +16,15 @@ describe('classifyLatency', () => {
   });
   it('treats a negative reading as good rather than throwing', () => {
     expect(classifyLatency(-1)).toBe('good');
+  });
+});
+
+describe('formatCount', () => {
+  it('renders a measured count as its own string, including zero', () => {
+    expect(formatCount(0)).toBe('0');
+    expect(formatCount(42)).toBe('42');
+  });
+  it('renders null (a failed measurement) as an em dash, never "0"', () => {
+    expect(formatCount(null)).toBe('—');
   });
 });

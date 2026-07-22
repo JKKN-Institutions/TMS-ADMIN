@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import type { SystemInfo } from '@/lib/settings/system-info';
+import { ACTIVITY_SAMPLE_LIMIT, type SystemInfo } from '@/lib/settings/system-info';
 import pkg from '@/package.json';
+import nextPkg from 'next/package.json';
 
 /**
  * Real system + activity signals for the Settings > System and Security tabs.
@@ -12,6 +13,11 @@ import pkg from '@/package.json';
  * settings screen, and a settings-only admin must not 403 here. Everything
  * returned is measured — if a probe fails we report that honestly (connected:false,
  * latencyMs:null) instead of substituting a plausible number.
+ *
+ * Every secondary query below is error-checked independently: a failed count
+ * or scan reports `null`, not `0`/`[]`, so the Security/System tabs can tell
+ * "could not measure" apart from a genuine zero/empty reading. See
+ * lib/settings/system-info.ts for the type-level contract.
  */
 export const dynamic = 'force-dynamic';
 
@@ -48,7 +54,7 @@ async function getSystemInfo(auth: AuthContext) {
     const latencyMs = Date.now() - probeStart;
     const connected = !totalRes.error;
 
-    const [res24h, res7d, recentRes] = await Promise.all([
+    const [res24h, res7d, recentRes, distinctRes] = await Promise.all([
       svc.from('tms_activity_log').select('id', { count: 'exact', head: true }).gte('created_at', iso24h),
       svc.from('tms_activity_log').select('id', { count: 'exact', head: true }).gte('created_at', iso7d),
       svc
@@ -57,21 +63,40 @@ async function getSystemInfo(auth: AuthContext) {
         .gte('created_at', iso7d)
         .order('created_at', { ascending: false })
         .limit(10),
+      // Distinct actors / IPs over 7d — derived from a wider slice than
+      // `recent` so the counts aren't silently capped by the 10-row display
+      // limit. Ordered + capped at ACTIVITY_SAMPLE_LIMIT so the sample (and
+      // therefore the count once volume exceeds the cap) is deterministic
+      // rather than an arbitrary unordered page; the UI discloses the cap.
+      svc
+        .from('tms_activity_log')
+        .select('actor_email, ip_address')
+        .gte('created_at', iso7d)
+        .order('created_at', { ascending: false })
+        .limit(ACTIVITY_SAMPLE_LIMIT),
     ]);
 
-    // Distinct actors / IPs over 7d — derived from a wider slice than `recent`
-    // so the counts aren't silently capped by the 10-row display limit.
-    const distinctRes = await svc
-      .from('tms_activity_log')
-      .select('actor_email, ip_address')
-      .gte('created_at', iso7d)
-      .limit(1000);
-    const actors = new Set<string>();
-    const ips = new Set<string>();
-    for (const r of (distinctRes.data ?? []) as { actor_email: string | null; ip_address: string | null }[]) {
-      if (r.actor_email) actors.add(r.actor_email);
-      if (r.ip_address) ips.add(r.ip_address);
+    let distinctActors7d: number | null = null;
+    let distinctIps7d: number | null = null;
+    if (!distinctRes.error) {
+      const actors = new Set<string>();
+      const ips = new Set<string>();
+      for (const r of (distinctRes.data ?? []) as { actor_email: string | null; ip_address: string | null }[]) {
+        if (r.actor_email) actors.add(r.actor_email);
+        if (r.ip_address) ips.add(r.ip_address);
+      }
+      distinctActors7d = actors.size;
+      distinctIps7d = ips.size;
     }
+
+    // Every secondary query is independent of the primary connectivity probe
+    // (`totalRes`/`connected` above) — log each failure so an operator can
+    // tell a partial outage apart from a full one, even though the response
+    // still degrades gracefully to `null` fields rather than a 500.
+    if (res24h.error) console.error('admin/system-info: 24h count query failed', res24h.error);
+    if (res7d.error) console.error('admin/system-info: 7d count query failed', res7d.error);
+    if (recentRes.error) console.error('admin/system-info: recent-activity query failed', recentRes.error);
+    if (distinctRes.error) console.error('admin/system-info: distinct actors/IPs query failed', distinctRes.error);
 
     const data: SystemInfo = {
       app: {
@@ -79,26 +104,31 @@ async function getSystemInfo(auth: AuthContext) {
         environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'unknown',
         region: process.env.VERCEL_REGION ?? null,
         nodeVersion: process.version,
-        nextVersion: pkg.dependencies?.next ?? 'unknown',
+        // The actually-installed Next.js version, not the declared semver
+        // range from package.json (`^16.2.6` is a range, not a version).
+        nextVersion: nextPkg.version,
       },
       database: { connected, latencyMs: connected ? latencyMs : null },
       activity: {
-        last24h: res24h.count ?? 0,
-        last7d: res7d.count ?? 0,
-        total: totalRes.count ?? 0,
+        last24h: res24h.error ? null : (res24h.count ?? 0),
+        last7d: res7d.error ? null : (res7d.count ?? 0),
+        total: totalRes.error ? null : (totalRes.count ?? 0),
       },
       security: {
-        distinctActors7d: actors.size,
-        distinctIps7d: ips.size,
-        recent: ((recentRes.data ?? []) as LogRow[]).map((r) => ({
-          actorEmail: r.actor_email,
-          actorRole: r.actor_role,
-          module: r.module,
-          action: r.action,
-          description: r.description,
-          ipAddress: r.ip_address,
-          createdAt: r.created_at,
-        })),
+        distinctActors7d,
+        distinctIps7d,
+        recentAvailable: !recentRes.error,
+        recent: recentRes.error
+          ? []
+          : ((recentRes.data ?? []) as LogRow[]).map((r) => ({
+              actorEmail: r.actor_email,
+              actorRole: r.actor_role,
+              module: r.module,
+              action: r.action,
+              description: r.description,
+              ipAddress: r.ip_address,
+              createdAt: r.created_at,
+            })),
       },
     };
 

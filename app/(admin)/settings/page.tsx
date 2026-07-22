@@ -22,8 +22,11 @@ import { NotificationsSettings } from '@/components/admin/notifications-settings
 import { SecuritySettings } from '@/components/admin/security-settings';
 import { SystemSettings } from '@/components/admin/system-settings';
 
-// Scheduling settings are the only tab backed by a real API call today — the
-// other tabs (general/notifications/security) are still local-only defaults.
+// Scheduling settings are loaded here via a real API call. Notifications and
+// Security also load real data now (NotificationsSettings/SecuritySettings
+// fetch /api/admin/settings and /api/admin/system-info themselves, below).
+// General is still local-only defaults with no backing API — see
+// handleSaveSettings('General'), which just toasts without persisting.
 async function fetchSchedulingSettings(): Promise<SchedulingSettings> {
   const response = await fetch('/api/admin/settings');
   if (!response.ok) throw new Error('Failed to load settings');

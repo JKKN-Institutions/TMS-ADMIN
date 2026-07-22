@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, ExternalLink, Loader2, ShieldCheck, Users } from 'lucide-react';
-import type { SystemInfo } from '@/lib/settings/system-info';
+import { ACTIVITY_SAMPLE_LIMIT, formatCount, type SystemInfo } from '@/lib/settings/system-info';
 
 /**
  * Security tab. This app does not own authentication — sessions, 2FA,
@@ -17,6 +17,14 @@ import type { SystemInfo } from '@/lib/settings/system-info';
  * What IS real and measurable: the admin activity log. This renders the
  * same signals GET /api/admin/system-info exposes for the System tab's
  * activity block, focused on who has been acting and from where.
+ *
+ * Every count here can independently fail to measure (DB timeout, a specific
+ * query erroring) even when the page itself loads fine — those render as
+ * "—" via formatCount(), and a `database.connected === false` probe result
+ * surfaces as a banner. "No admin activity in the last 7 days" is only ever
+ * shown when the recent-activity query actually succeeded and found nothing
+ * (`security.recentAvailable`); a failed query renders a distinct
+ * "could not load" message instead, never the empty-state string.
  */
 export function SecuritySettings() {
   const [data, setData] = useState<SystemInfo | null>(null);
@@ -70,9 +78,28 @@ export function SecuritySettings() {
 
       {!loading && data && (
         <>
+          {data.database.connected === false && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <strong>Database probe failed.</strong> The activity signals below could not be measured and
+                are shown as "—", not zero — this is not a report of no activity, it is a report that
+                activity could not be checked.
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Distinct admin actors (7d)" value={data.security.distinctActors7d} icon={<Users className="h-4 w-4" />} />
-            <StatCard label="Distinct IP addresses (7d)" value={data.security.distinctIps7d} icon={<ShieldCheck className="h-4 w-4" />} />
+            <StatCard
+              label={`Distinct admin actors (7d, last ${ACTIVITY_SAMPLE_LIMIT} events)`}
+              value={data.security.distinctActors7d}
+              icon={<Users className="h-4 w-4" />}
+            />
+            <StatCard
+              label={`Distinct IP addresses (7d, last ${ACTIVITY_SAMPLE_LIMIT} events)`}
+              value={data.security.distinctIps7d}
+              icon={<ShieldCheck className="h-4 w-4" />}
+            />
             <StatCard label="Admin actions (24h)" value={data.activity.last24h} icon={<Users className="h-4 w-4" />} />
             <StatCard label="Admin actions (7d)" value={data.activity.last7d} icon={<Users className="h-4 w-4" />} />
           </div>
@@ -87,7 +114,11 @@ export function SecuritySettings() {
                 <ExternalLink className="h-3.5 w-3.5" /> View full log
               </Link>
             </div>
-            {data.security.recent.length === 0 ? (
+            {!data.security.recentAvailable ? (
+              <div className="px-5 py-6 text-center text-sm text-gray-500">
+                Could not load recent activity — try reloading the page.
+              </div>
+            ) : data.security.recent.length === 0 ? (
               <div className="px-5 py-6 text-center text-sm text-gray-500">No admin activity in the last 7 days.</div>
             ) : (
               <div className="overflow-x-auto">
@@ -132,14 +163,14 @@ export function SecuritySettings() {
   );
 }
 
-function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+function StatCard({ label, value, icon }: { label: string; value: number | null; icon: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
         {icon}
         {label}
       </div>
-      <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
+      <div className="mt-2 text-2xl font-semibold text-gray-900">{formatCount(value)}</div>
     </div>
   );
 }
