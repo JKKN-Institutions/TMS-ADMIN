@@ -1,19 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Clock, Save, Loader2, Sunrise, Sunset } from 'lucide-react';
+import { Clock, Save, Loader2, Sunrise } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface WinForm { start: string; end: string; enabled: boolean }
 
 /**
- * Admin editor for the boarding attendance scan windows. Onward (morning) and
- * Return (evening) each have a start/end time + an "enforce" toggle. Persists to
- * /api/admin/attendance-windows; the scan flow and scan page read the same config.
+ * Admin editor for the boarding attendance scan window. Attendance is
+ * Onward (morning) only — a single start/end time + an "enforce" toggle.
+ * Persists to /api/admin/attendance-windows; the scan flow and scan page
+ * read the same config.
  */
 export function AttendanceWindowSettings() {
   const [onward, setOnward] = useState<WinForm>({ start: '07:00', end: '09:30', enabled: true });
-  const [ret, setRet] = useState<WinForm>({ start: '16:30', end: '19:00', enabled: true });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -25,7 +25,6 @@ export function AttendanceWindowSettings() {
         if (json?.success) {
           const w = json.data.windows;
           setOnward({ start: w.onward.start, end: w.onward.end, enabled: w.onward.enabled });
-          setRet({ start: w.return.start, end: w.return.end, enabled: w.return.enabled });
         }
       } catch {
         /* keep defaults */
@@ -37,11 +36,9 @@ export function AttendanceWindowSettings() {
 
   const save = async () => {
     // Light client validation; the API re-validates.
-    for (const [label, w] of [['Onward', onward], ['Return', ret]] as const) {
-      if (w.enabled && w.start >= w.end) {
-        toast.error(`${label}: start time must be before end time`);
-        return;
-      }
+    if (onward.enabled && onward.start >= onward.end) {
+      toast.error('Onward: start time must be before end time');
+      return;
     }
     setSaving(true);
     try {
@@ -49,13 +46,13 @@ export function AttendanceWindowSettings() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ onward, return: ret }),
+        body: JSON.stringify({ onward }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save');
-      toast.success('Attendance windows saved');
+      toast.success('Attendance window saved');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save attendance windows');
+      toast.error(e instanceof Error ? e.message : 'Failed to save attendance window');
     } finally {
       setSaving(false);
     }
@@ -64,7 +61,7 @@ export function AttendanceWindowSettings() {
   if (loading) {
     return (
       <div className="flex items-center justify-center gap-2 py-10 text-gray-500">
-        <Loader2 className="h-5 w-5 animate-spin" /> Loading attendance windows…
+        <Loader2 className="h-5 w-5 animate-spin" /> Loading attendance window…
       </div>
     );
   }
@@ -72,10 +69,10 @@ export function AttendanceWindowSettings() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-900">Attendance Scan Windows</h3>
+        <h3 className="text-lg font-semibold text-gray-900">Attendance Scan Window</h3>
         <p className="mt-1 text-sm text-gray-600">
-          Boarding staff can only mark a direction during its window. Outside it, that direction&apos;s
-          scan is disabled — so an evening scan can&apos;t accidentally be recorded as a morning trip.
+          Boarding staff can only mark morning attendance during this window. Outside it, scanning
+          and manual marking are disabled.
         </p>
       </div>
 
@@ -86,19 +83,12 @@ export function AttendanceWindowSettings() {
           value={onward}
           onChange={setOnward}
         />
-        <WindowCard
-          title="Return (evening)"
-          icon={<Sunset className="h-5 w-5 text-indigo-500" />}
-          value={ret}
-          onChange={setRet}
-        />
       </div>
 
       <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
         <Clock className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
-          Turn off <strong>Enforce</strong> to allow a direction to be scanned at any time.
-          The boarding scan page auto-selects the active direction based on the current time.
+          Turn off <strong>Enforce</strong> to allow attendance to be scanned at any time.
         </span>
       </div>
 
@@ -109,7 +99,7 @@ export function AttendanceWindowSettings() {
         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
       >
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-        Save windows
+        Save window
       </button>
     </div>
   );

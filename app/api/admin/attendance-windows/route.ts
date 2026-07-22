@@ -6,10 +6,14 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, hmToMinutes, type AttDirection } from '@/lib/boarding/attendance-window';
 
 /**
- * Admin read/update of the attendance scan windows (onward/return start/end +
- * enable). Gated on .manage (stronger than the scanner's .scan). Persists both
- * directions in one PUT; times are 'HH:MM'. The scan flow + scan page read these
- * via loadAttendanceWindows / the boarding GET endpoint.
+ * Admin read/update of the attendance scan window (onward/morning start/end +
+ * enable). Gated on .manage (stronger than the scanner's .scan). Persists the
+ * onward window in one PUT; times are 'HH:MM'. The scan flow + scan page read
+ * this via loadAttendanceWindows / the boarding GET endpoint.
+ *
+ * A stored `direction='return'` row may still exist in `tms_attendance_window`
+ * from before the evening leg was retired — it is retained for history and is
+ * never read or deleted here, only ignored.
  */
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -48,17 +52,16 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_MANAGE))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    // A `return` key in the body is ignored, not rejected — an old client
+    // still sending the evening window shouldn't 400 on a config write.
     const body = (await request.json().catch(() => ({}))) as { onward?: WindowInput; return?: WindowInput };
     const onward = validate('onward', body.onward ?? {});
     if (typeof onward === 'string') return NextResponse.json({ error: onward }, { status: 400 });
-    const ret = validate('return', body.return ?? {});
-    if (typeof ret === 'string') return NextResponse.json({ error: ret }, { status: 400 });
 
     const svc = createServiceRoleClient();
     const now = new Date().toISOString();
     const rows = [
       { direction: 'onward', start_time: onward.start, end_time: onward.end, enabled: onward.enabled, updated_at: now, updated_by: auth.userId },
-      { direction: 'return', start_time: ret.start, end_time: ret.end, enabled: ret.enabled, updated_at: now, updated_by: auth.userId },
     ];
     const { error } = await svc.from('tms_attendance_window').upsert(rows, { onConflict: 'direction' });
     if (error) {
@@ -70,11 +73,11 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
       module: 'settings',
       action: 'update',
       entityType: 'tms_attendance_window',
-      description: `Updated attendance scan windows — onward ${onward.start}-${onward.end}${onward.enabled ? '' : ' (off)'}, return ${ret.start}-${ret.end}${ret.enabled ? '' : ' (off)'}`,
-      metadata: { onward, return: ret },
+      description: `Updated attendance scan window — onward ${onward.start}-${onward.end}${onward.enabled ? '' : ' (off)'}`,
+      metadata: { onward },
     });
 
-    return NextResponse.json({ success: true, data: { windows: { onward: { direction: 'onward', ...onward }, return: { direction: 'return', ...ret } } } });
+    return NextResponse.json({ success: true, data: { windows: { onward: { direction: 'onward', ...onward } } } });
   } catch (e) {
     console.error('admin attendance-windows PUT error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
