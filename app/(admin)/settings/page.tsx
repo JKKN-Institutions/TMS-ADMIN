@@ -86,16 +86,38 @@ const SettingsPage = () => {
   const handleSaveSettings = async (section: string) => {
     if (section === 'Scheduling') {
       try {
+        // Re-GET the current blob right before writing — do NOT POST the copy
+        // snapshotted at mount (`schedulingSettings`), which may have gone
+        // stale if another admin changed a field on this same blob (e.g. the
+        // Notifications tab's autoNotifyPassengers toggle) since this page
+        // loaded. Only the four fields this tab actually edits
+        // (enableBookingTimeWindow, bookingWindowEndHour, bookingDaysAhead,
+        // autoGenerateBills) are meant to change here — everything else rides
+        // along from the fresh GET so this save can't clobber a concurrent
+        // change made elsewhere. Mirrors components/admin/notifications-settings.tsx.
+        const freshResponse = await fetch('/api/admin/settings', { cache: 'no-store' });
+        if (!freshResponse.ok) throw new Error('Failed to load current settings');
+        const freshJson = await freshResponse.json();
+        const current = freshJson.data.settings as SchedulingSettings;
+        const merged: SchedulingSettings = {
+          ...current,
+          enableBookingTimeWindow: schedulingSettings.enableBookingTimeWindow,
+          bookingWindowEndHour: schedulingSettings.bookingWindowEndHour,
+          bookingDaysAhead: schedulingSettings.bookingDaysAhead,
+          autoGenerateBills: schedulingSettings.autoGenerateBills,
+        };
+
         const response = await fetch('/api/admin/settings', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ settings: schedulingSettings }),
+          body: JSON.stringify({ settings: merged }),
         });
 
         if (response.ok) {
           const data = await response.json();
+          setSchedulingSettings(data.data.settings as SchedulingSettings);
           toast.success('Scheduling settings saved successfully!');
           console.log('Settings saved:', data);
         } else {
