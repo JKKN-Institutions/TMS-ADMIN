@@ -62,16 +62,16 @@ async function getSettings(auth: AuthContext) {
       // Degrade to defaults if the table doesn't exist yet, same fail-safe as
       // loadSchedulingConfig() — any OTHER error still 500s.
       if ((error as { code?: string }).code === '42P01') {
-        return NextResponse.json({ settings: toBlobShape(parseSchedulingConfig(null)), lastUpdated: null });
+        return NextResponse.json({ success: true, data: { settings: toBlobShape(parseSchedulingConfig(null)), lastUpdated: null } });
       }
       console.error('admin/settings GET error:', error);
       return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
     }
     if (data && data.length > 0) {
       const cfg = parseSchedulingConfig(data[0].settings_data);
-      return NextResponse.json({ settings: toBlobShape(cfg), lastUpdated: data[0].updated_at });
+      return NextResponse.json({ success: true, data: { settings: toBlobShape(cfg), lastUpdated: data[0].updated_at } });
     }
-    return NextResponse.json({ settings: toBlobShape(parseSchedulingConfig(null)), lastUpdated: null });
+    return NextResponse.json({ success: true, data: { settings: toBlobShape(parseSchedulingConfig(null)), lastUpdated: null } });
   } catch (e) {
     console.error('admin/settings GET error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -117,10 +117,15 @@ async function saveSettings(request: NextRequest, auth: AuthContext) {
       metadata: settings,
     });
 
+    // Echo the NORMALIZED blob, not the raw stored one, so POST and GET always
+    // return an identical shape (a client-supplied stray key can't leak back out).
     return NextResponse.json({
-      message: 'Settings saved successfully',
-      settings: data[0].settings_data,
-      lastUpdated: data[0].updated_at,
+      success: true,
+      data: {
+        message: 'Settings saved successfully',
+        settings: toBlobShape(parseSchedulingConfig(data[0].settings_data)),
+        lastUpdated: data[0].updated_at,
+      },
     });
   } catch (e) {
     console.error('admin/settings POST error:', e);

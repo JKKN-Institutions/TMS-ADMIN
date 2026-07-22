@@ -37,8 +37,9 @@ import { AttendanceWindowSettings } from '@/components/admin/attendance-window-s
 async function fetchSchedulingSettings(): Promise<SchedulingSettings> {
   const response = await fetch('/api/admin/settings');
   if (!response.ok) throw new Error('Failed to load settings');
-  const data = await response.json();
-  return data.settings as SchedulingSettings;
+  const json = await response.json();
+  // The route returns the project's standard { success, data } envelope.
+  return json.data.settings as SchedulingSettings;
 }
 
 const SettingsPage = () => {
