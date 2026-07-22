@@ -197,3 +197,29 @@ export function mapStaff(row: StaffRow, refs: RefMaps): StaffPassenger {
     assigned: !!row.transport_route_id,
   };
 }
+
+// ── Rider counts per route. ──────────────────────────────────────────────────
+/**
+ * Tally allocated riders per route from already-fetched learner and/or staff
+ * rows. Pass any number of row groups; they sum into one count per route.
+ *
+ * WHY this exists: `tms_route.current_passengers` is a dead denormalized column
+ * — created `default 0` by the tms_route migration and never written by any code
+ * path — so it reads 0 for every route. Any screen showing a rider count must
+ * derive it from real allocation (learners + staff carrying transport_route_id),
+ * which is the same roster definition loadRoutePassengers uses. Kept pure and
+ * import-free here so vitest can cover it; callers do the I/O.
+ */
+export function countRosterByRoute(
+  ...groups: Array<ReadonlyArray<{ transport_route_id: string | null }>>
+): Map<string, number> {
+  const byRoute = new Map<string, number>();
+  for (const group of groups) {
+    for (const row of group) {
+      const routeId = row.transport_route_id;
+      if (!routeId) continue;
+      byRoute.set(routeId, (byRoute.get(routeId) ?? 0) + 1);
+    }
+  }
+  return byRoute;
+}

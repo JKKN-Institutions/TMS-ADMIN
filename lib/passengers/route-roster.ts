@@ -18,6 +18,7 @@ import {
   LEARNER_SELECT,
   STAFF_SELECT,
   ACTIVE_LIFECYCLE_STATUSES,
+  countRosterByRoute,
   mapLearner,
   mapStaff,
   type LearnerRow,
@@ -47,6 +48,51 @@ export async function getRouteStaffRows(
     throw error;
   }
   return (data ?? []) as unknown as StaffRow[];
+}
+
+// A single PostgREST response is capped at 1000 rows (db-max-rows), so any
+// full-table scan must page or it silently truncates.
+const PAGE = 1000;
+
+/**
+ * Allocated rider count per route: active bus-required LEARNERS + STAFF holding
+ * that transport_route_id — the same roster definition loadRoutePassengers uses,
+ * so the admin, driver and boarding screens can never disagree on a route's load.
+ *
+ * `tms_route.current_passengers` deliberately is NOT used: it is a dead
+ * denormalized column (created `default 0`, never written), so it reads 0 for
+ * every route. Learners are PAGED because the bus-required roster is already
+ * ~995 rows against a 1000-row response cap — an unpaged fetch would begin
+ * undercounting, silently, as soon as transport grows past the cap.
+ *
+ * Returns a sparse map: a route with no riders is absent, so read it as
+ * `counts.get(id) ?? 0`.
+ */
+export async function countRouteRoster(
+  svc: SupabaseClient,
+  routeIds: string[]
+): Promise<Map<string, number>> {
+  if (routeIds.length === 0) return new Map();
+
+  const learnerRows: Array<{ transport_route_id: string | null }> = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await svc
+      .from('learners_profiles')
+      .select('transport_route_id')
+      .in('transport_route_id', routeIds)
+      .eq('bus_required', true)
+      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
+      .range(from, from + PAGE - 1);
+    if (error) {
+      if (error.code === '42P01') break; // table absent in this env → no learners
+      throw error;
+    }
+    const page = (data ?? []) as Array<{ transport_route_id: string | null }>;
+    learnerRows.push(...page);
+    if (page.length < PAGE) break;
+  }
+
+  return countRosterByRoute(learnerRows, await getRouteStaffRows(svc, routeIds));
 }
 
 /** One flattened passenger (learner OR staff), tagged by `type`. */

@@ -3,6 +3,8 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { grantBoardingRole, maybeRevokeBoardingRole } from '@/lib/boarding/roles';
+import { countRouteRoster } from '@/lib/passengers/route-roster';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 // Service-role client bypasses RLS, so writes are gated by an explicit
 // tms.drivers.assign check here (defense-in-depth; super admins bypass).
@@ -15,10 +17,41 @@ async function requireAssign(auth: AuthContext): Promise<boolean> {
 }
 
 // Columns of tms_route we surface alongside each assignment (joined in JS).
+// NOTE: current_passengers is intentionally NOT selected — it is a dead column
+// (default 0, never written). The rider count is derived via countRouteRoster.
 const ROUTE_COLS =
-  'id, route_number, route_name, start_location, end_location, departure_time, arrival_time, status, total_capacity, current_passengers';
+  'id, route_number, route_name, start_location, end_location, departure_time, arrival_time, status, total_capacity, vehicle_id';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type RouteRow = { id: string; vehicle_id?: string | null; total_capacity?: number | null };
+
+/**
+ * Seats per route, from the vehicle actually assigned to it. Falls back to
+ * tms_route.total_capacity, which is 0 on 23 of 24 routes, then to null so the
+ * UI can render "—" instead of a bogus 0.
+ */
+async function loadRouteCapacities(
+  supabase: SupabaseClient,
+  routes: unknown[]
+): Promise<Map<string, number>> {
+  const rows = routes as RouteRow[];
+  const vehicleIds = [...new Set(rows.map((r) => r.vehicle_id).filter(Boolean))] as string[];
+  const capByVehicle = new Map<string, number>();
+  if (vehicleIds.length) {
+    const { data, error } = await supabase.from('tms_vehicle').select('id, capacity').in('id', vehicleIds);
+    if (error) console.error('Assignment vehicle-capacity error:', error);
+    for (const v of (data ?? []) as Array<{ id: string; capacity: number | null }>) {
+      if (v.capacity != null) capByVehicle.set(v.id, v.capacity);
+    }
+  }
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    const seats = (r.vehicle_id ? capByVehicle.get(r.vehicle_id) : undefined) ?? r.total_capacity ?? 0;
+    if (seats > 0) out.set(r.id, seats);
+  }
+  return out;
+}
 
 // GET: active staff↔route assignments, each with its embedded tms_route.
 async function getAssignments() {
@@ -47,7 +80,31 @@ async function getAssignments() {
       : { data: [] as Record<string, unknown>[] };
     const routeById = new Map((routes ?? []).map((r) => [r.id as string, r]));
 
-    const assignments = (rows ?? []).map((r) => ({ ...r, routes: routeById.get(r.route_id) ?? null }));
+    // Passenger load: counted live from real allocation, and seats taken from the
+    // route's assigned vehicle. Both tms_route counter columns are unmaintained,
+    // so neither can be trusted (see countRouteRoster). A failure here degrades to
+    // "no count" rather than 500-ing the assignment list, which is the real payload.
+    const [paxByRoute, capacityByRoute] = await Promise.all([
+      countRouteRoster(supabase, routeIds).catch((e) => {
+        console.error('Assignment passenger-count error:', e);
+        return new Map<string, number>();
+      }),
+      loadRouteCapacities(supabase, routes ?? []),
+    ]);
+
+    const assignments = (rows ?? []).map((r) => {
+      const route = routeById.get(r.route_id);
+      return {
+        ...r,
+        routes: route
+          ? {
+              ...route,
+              passenger_count: paxByRoute.get(r.route_id) ?? 0,
+              capacity: capacityByRoute.get(r.route_id) ?? null,
+            }
+          : null,
+      };
+    });
     return NextResponse.json({ success: true, assignments, count: assignments.length });
   } catch (e) {
     console.error('Assignments API error:', e);
