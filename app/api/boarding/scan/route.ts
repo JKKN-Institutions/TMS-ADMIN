@@ -7,7 +7,7 @@ import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
-import { loadAttendanceWindows, isDirectionOpen, activeDirection, formatHM } from '@/lib/boarding/attendance-window';
+import { loadAttendanceWindows, isDirectionOpen, activeDirection, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
 
 /**
  * POST a scanned boarding-pass token → mark the learner present for today.
@@ -82,7 +82,15 @@ async function scan(request: NextRequest, auth: AuthContext) {
     }
 
     const body = (await request.json().catch(() => ({}))) as { token?: string; direction?: string; walkUp?: boolean };
-    const direction = body.direction === 'return' ? 'return' : 'onward';
+    // Attendance is onward-only. A stale client requesting the retired evening
+    // leg must fail loudly rather than silently having its scan recorded as onward.
+    if (body.direction && body.direction !== 'onward') {
+      return NextResponse.json(
+        { ok: false, error: 'Only onward (morning) attendance is supported.' },
+        { status: 400 },
+      );
+    }
+    const direction: AttDirection = 'onward';
 
     const svc = createServiceRoleClient();
 
@@ -93,16 +101,15 @@ async function scan(request: NextRequest, auth: AuthContext) {
     }
     const learnerId = resolved.learnerId;
 
-    // Time-window gate: onward only inside the morning window, return only inside
-    // the evening window (admin-configurable). This is what stops an evening onward
-    // re-scan from silently overwriting the morning record and dropping the return leg.
+    // Time-window gate: scanning is only allowed inside the admin-configurable
+    // morning window. Outside it, the scan is rejected rather than recorded.
     const windows = await loadAttendanceWindows(svc);
     if (!isDirectionOpen(windows[direction])) {
       const w = windows[direction];
       return NextResponse.json({
         ok: false,
         reason: 'window_closed',
-        error: `${direction === 'onward' ? 'Onward (morning)' : 'Return (evening)'} scanning is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+        error: `Onward (morning) scanning is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
         activeDirection: activeDirection(windows),
       }, { status: 409 });
     }

@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { loadAttendanceWindows, isDirectionOpen, formatHM } from '@/lib/boarding/attendance-window';
+import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
 
 /**
  * Manually mark attendance (present/absent) for one or many learners on a route,
@@ -32,8 +32,16 @@ async function mark(request: NextRequest, auth: AuthContext) {
     const body = (await request.json().catch(() => ({}))) as {
       routeId?: string; direction?: string; marks?: MarkInput[];
     };
+    // Attendance is onward-only. A stale client requesting the retired evening
+    // leg must fail loudly rather than silently having its marks recorded as onward.
+    if (body.direction && body.direction !== 'onward') {
+      return NextResponse.json(
+        { error: 'Only onward (morning) attendance is supported.' },
+        { status: 400 },
+      );
+    }
     const routeId = String(body.routeId ?? '');
-    const direction = body.direction === 'return' ? 'return' : 'onward';
+    const direction: AttDirection = 'onward';
     const marks = Array.isArray(body.marks) ? body.marks : [];
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (marks.length === 0) return NextResponse.json({ error: 'No marks provided' }, { status: 400 });
@@ -48,12 +56,12 @@ async function mark(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    // Time-window gate: manual marking follows the same leg window as the scanner.
+    // Time-window gate: manual marking follows the same window as the scanner.
     const windows = await loadAttendanceWindows(svc);
     if (!isDirectionOpen(windows[direction])) {
       const w = windows[direction];
       return NextResponse.json({
-        error: `${direction === 'onward' ? 'Onward (morning)' : 'Return (evening)'} marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+        error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
         reason: 'window_closed',
       }, { status: 409 });
     }
@@ -223,8 +231,16 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = (await request.json().catch(() => ({}))) as ClearInput;
+    // Attendance is onward-only. A stale client requesting the retired evening
+    // leg must fail loudly rather than silently clearing the wrong (or a nonexistent) leg.
+    if (body.direction && body.direction !== 'onward') {
+      return NextResponse.json(
+        { error: 'Only onward (morning) attendance is supported.' },
+        { status: 400 },
+      );
+    }
     const routeId = String(body.routeId ?? '');
-    const direction = body.direction === 'return' ? 'return' : 'onward';
+    const direction: AttDirection = 'onward';
     const learnerIds = Array.isArray(body.learnerIds) ? [...new Set(body.learnerIds.filter(Boolean))] : [];
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (learnerIds.length === 0) return NextResponse.json({ error: 'No learners provided' }, { status: 400 });
