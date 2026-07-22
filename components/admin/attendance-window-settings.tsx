@@ -76,7 +76,7 @@ export function AttendanceWindowSettings() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:max-w-md">
         <WindowCard
           title="Onward (morning)"
           icon={<Sunrise className="h-5 w-5 text-amber-500" />}

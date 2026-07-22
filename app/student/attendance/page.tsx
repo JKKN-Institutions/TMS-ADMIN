@@ -48,7 +48,7 @@ export default function StudentAttendancePage() {
       <header>
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white sm:text-2xl">My Attendance</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Your boarding history across morning and evening trips.
+          Your boarding history — morning trips, plus past evening trips.
         </p>
       </header>
 

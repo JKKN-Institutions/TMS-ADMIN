@@ -63,6 +63,13 @@ function MarkControl({ status, disabled, onMark }: { status: RosterStatus; disab
  * (id + accessorFn + filterFn) so the page's `filters` can target it, and
  * renders a live mark control when editable, else a read-only pill — which is
  * also how advance-booking (future-date) rosters display.
+ *
+ * The `return` column is READ-ONLY, unconditionally, on every path — it never
+ * renders a MarkControl and ignores `editable`. Evening (`return_status`)
+ * writes were retired everywhere upstream (see lib/boarding/attendance-window.ts
+ * and the writers under app/api/boarding/); this column exists solely so
+ * historical `direction='return'` rows already in tms_attendance stay visible
+ * (non-destructive-to-history rule). Do not wire it to `onMark`.
  */
 export function getRosterColumns(
   editable: boolean,
@@ -120,6 +127,16 @@ export function getRosterColumns(
           ? <MarkControl status={s.onward_status} disabled={saving} onMark={(st) => onMark(s.id, st)} />
           : <StatusPill status={s.onward_status} />;
       },
+    },
+    {
+      id: 'return',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Return (retired)" />,
+      accessorFn: (s) => s.return_status ?? '',
+      enableSorting: false,
+      // Unconditionally read-only — never a MarkControl, regardless of
+      // `editable`/`canManage`. Evening marking is retired; this only
+      // displays historical data already stored on the row.
+      cell: ({ row }) => <StatusPill status={row.original.return_status} />,
     },
   ];
 }

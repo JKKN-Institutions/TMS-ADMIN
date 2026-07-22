@@ -32,9 +32,10 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
 /**
  * Booked-students columns for the Attendance page. Route/Status are filterable.
  * The Action column is a single toggle button, shown only when `canMark` (the
- * travel day AND the leg's onward/return window is open). It shows the NEXT
- * action: unmarked/absent → "Present", present → "Absent"; the Status badge shows
- * the current state. Clicking POSTs that status to /api/boarding/attendance.
+ * travel day AND the attendance window is open — onward-only, see
+ * lib/boarding/attendance-window.ts). It shows the NEXT action: unmarked/absent
+ * → "Present", present → "Absent"; the Status badge shows the current state.
+ * Clicking POSTs that status to /api/boarding/attendance.
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
@@ -118,7 +119,7 @@ export function getRosterColumns(opts: {
       size: 120,
       header: () => null,
       cell: ({ row }) => {
-        // Marking is gated to the travel day AND an open leg window; otherwise
+        // Marking is gated to the travel day AND an open attendance window; otherwise
         // no control shows at all (present and absent are both disabled by timing).
         if (!opts.canMark) return null;
         const busy = opts.busyId === row.original.learner_id;

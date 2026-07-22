@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
-  QrCode, Route as RouteIcon, Users, ArrowRight, ArrowLeft, CheckCircle2,
+  QrCode, Route as RouteIcon, Users, ArrowRight, CheckCircle2,
   RefreshCw, ChevronRight, Clock, ListChecks, Activity, GraduationCap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -73,7 +73,6 @@ export default function BoardingDashboardPage() {
   const stats = [
     { title: 'Boarded Today', value: data?.today.total ?? 0, subtitle: 'Marked present', icon: CheckCircle2, color: 'green' as const, href: '/boarding/attendance' },
     { title: 'Onward', value: data?.today.onward ?? 0, subtitle: 'Morning trips', icon: ArrowRight, color: 'blue' as const, href: '/boarding/attendance' },
-    { title: 'Return', value: data?.today.return ?? 0, subtitle: 'Evening trips', icon: ArrowLeft, color: 'purple' as const, href: '/boarding/attendance' },
     { title: 'Students', value: data?.studentsTotal ?? 0, subtitle: data?.routes?.[0]?.route_number ? `Route ${data.routes[0].route_number}` : 'On your route', icon: Users, color: 'indigo' as const, href: '/boarding/routes' },
   ];
 
@@ -200,10 +199,6 @@ export default function BoardingDashboardPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Onward</span>
                   <span className="text-sm font-semibold text-gray-900">{data?.today.onward ?? 0}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Return</span>
-                  <span className="text-sm font-semibold text-gray-900">{data?.today.return ?? 0}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600 flex items-center gap-1.5"><GraduationCap className="w-4 h-4 text-gray-400" /> Students on your routes</span>
