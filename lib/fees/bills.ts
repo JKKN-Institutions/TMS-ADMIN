@@ -20,6 +20,8 @@ export interface TransportBillRow {
   code: string | null;
   institution_id: string | null;
   institution_name: string | null;
+  department_id: string | null;
+  department_name: string | null;
   structure_id: string;
   structure_name: string | null;
   transport_year_id: string;
@@ -120,13 +122,15 @@ async function selectByIds<T = Record<string, unknown>>(
   return out;
 }
 
-// Resolve learner/staff display names + their institution_id in two batch queries.
+// Resolve learner/staff display names + their institution_id + department_id in two
+// batch queries. department_id feeds Bill Management's department-wise analytics.
+type PersonInfo = { name: string; code: string | null; institution_id: string | null; department_id: string | null };
 async function resolvePeople(
   supabase: SupabaseClient,
   learnerIds: string[],
   staffIds: string[]
-): Promise<Map<string, { name: string; code: string | null; institution_id: string | null }>> {
-  const map = new Map<string, { name: string; code: string | null; institution_id: string | null }>();
+): Promise<Map<string, PersonInfo>> {
+  const map = new Map<string, PersonInfo>();
   if (learnerIds.length) {
     const data = await selectByIds<{
       id: string;
@@ -134,12 +138,14 @@ async function resolvePeople(
       last_name: string | null;
       roll_number: string | null;
       institution_id: string | null;
-    }>(supabase, 'learners_profiles', 'id, first_name, last_name, roll_number, institution_id', learnerIds);
+      department_id: string | null;
+    }>(supabase, 'learners_profiles', 'id, first_name, last_name, roll_number, institution_id, department_id', learnerIds);
     for (const r of data) {
       map.set(r.id, {
         name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
         code: r.roll_number ?? null,
         institution_id: r.institution_id ?? null,
+        department_id: r.department_id ?? null,
       });
     }
   }
@@ -150,12 +156,14 @@ async function resolvePeople(
       last_name: string | null;
       staff_id: string | null;
       institution_id: string | null;
-    }>(supabase, 'staff', 'id, first_name, last_name, staff_id, institution_id', staffIds);
+      department_id: string | null;
+    }>(supabase, 'staff', 'id, first_name, last_name, staff_id, institution_id, department_id', staffIds);
     for (const r of data) {
       map.set(r.id, {
         name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
         code: r.staff_id ?? null,
         institution_id: r.institution_id ?? null,
+        department_id: r.department_id ?? null,
       });
     }
   }
@@ -280,12 +288,14 @@ export async function loadTransportBills(
     nameMapFor(supabase, 'tms_transport_year', 'name', yearIds),
   ]);
 
-  // Batch 2: the two lookups that need batch-1 results (institution ids come from
-  // the people rows; academic-year ids from the money rows), also in parallel.
+  // Batch 2: the lookups that need batch-1 results (institution + department ids
+  // come from the people rows; academic-year ids from the money rows), in parallel.
   const instIds = uniq([...peopleMap.values()].map((p) => p.institution_id));
+  const deptIds = uniq([...peopleMap.values()].map((p) => p.department_id));
   const acadYearIds = uniq([...billMap.values()].map((b) => b.academic_year_id));
-  const [instMap, acadYearMap] = await Promise.all([
+  const [instMap, deptMap, acadYearMap] = await Promise.all([
     nameMapFor(supabase, 'institutions', 'name', instIds),
+    nameMapFor(supabase, 'departments', 'department_name', deptIds),
     nameMapFor(supabase, 'academic_years', 'academic_year_name', acadYearIds),
   ]);
 
@@ -295,6 +305,7 @@ export async function loadTransportBills(
     const personType = r.person_type as 'learner' | 'staff';
     const person = peopleMap.get(r.person_id as string);
     const institutionId = person?.institution_id ?? null;
+    const departmentId = person?.department_id ?? null;
     const billRef = r.billing_student_bill_id as string | null;
     const bill = billRef ? billMap.get(billRef) : undefined;
     // Prefer the LIVE money row for amount/due_date so MyJKKN edits reflect; fall back
@@ -336,6 +347,8 @@ export async function loadTransportBills(
       code: person?.code ?? null,
       institution_id: institutionId,
       institution_name: institutionId ? instMap.get(institutionId) ?? null : null,
+      department_id: departmentId,
+      department_name: departmentId ? deptMap.get(departmentId) ?? null : null,
       structure_id: r.fee_structure_id as string,
       structure_name: structureMap.get(r.fee_structure_id as string) ?? null,
       transport_year_id: r.transport_year_id as string,
