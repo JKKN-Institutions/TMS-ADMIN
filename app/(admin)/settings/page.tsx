@@ -238,6 +238,7 @@ const SettingsPage = () => {
               <label className="relative inline-flex shrink-0 cursor-pointer items-center">
                 <input
                   type="checkbox"
+                  aria-label="Automatic bill generation"
                   checked={schedulingSettings.autoGenerateBills}
                   onChange={(e) =>
                     setSchedulingSettings({ ...schedulingSettings, autoGenerateBills: e.target.checked })
