@@ -19,8 +19,10 @@ export interface AutoGenSummary {
 
 /**
  * The nightly auto-billing sweep. Runs the SAME engine as the manual Generate
- * button over every status='active' fee structure of the CURRENT transport
- * year, with autoPolicy on (cross-structure conflict skip + no empty runs).
+ * button over the fee structures of the CURRENT transport year that are BOTH
+ * status='active' AND flagged auto_generate=true, with autoPolicy on
+ * (cross-structure conflict skip + no empty runs). Structures that are active
+ * but not flagged (e.g. a test structure) are never touched by the sweep.
  *
  * dryRun bypasses the autoGenerateBills toggle on purpose: a dry run writes
  * nothing, and previewing what WOULD generate is exactly what an admin needs
@@ -49,10 +51,11 @@ export async function runAutoGeneration(
     .from('tms_fee_structure')
     .select('*')
     .eq('status', 'active')
+    .eq('auto_generate', true)
     .eq('transport_year_id', year.id);
   if (fsErr) return { ...base, skipped: `fee structure lookup failed: ${fsErr.message}` };
   const structures = fsRows ?? [];
-  if (structures.length === 0) return { ...base, skipped: 'no active fee structures for the current year' };
+  if (structures.length === 0) return { ...base, skipped: 'no auto-generate-enabled active fee structures for the current year' };
 
   const results: AutoGenStructureResult[] = [];
   for (const fs of structures) {

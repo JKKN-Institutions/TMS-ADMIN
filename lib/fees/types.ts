@@ -74,6 +74,10 @@ export interface FeeStructureRow {
   total_amount: number;
   split_count: number;
   status: FeeStatus;
+  // Opt-in for the nightly auto-bill sweep (lib/fees/auto-generate.ts). Only
+  // flagged + active + current-year structures auto-generate; manual Generate
+  // ignores this. Default false.
+  auto_generate: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;

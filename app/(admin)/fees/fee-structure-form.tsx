@@ -29,6 +29,7 @@ export interface FeeFormInitial {
   staff_role_keys: string[];
   lifecycle_statuses: string[];
   total_amount: string;
+  auto_generate: boolean;
   notes: string;
   terms: TermRow[];
   bands: Array<{ label: string; study_years: number[]; total_amount: string; terms: TermRow[] }>;
@@ -135,6 +136,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
     staff_role_keys: initial?.staff_role_keys ?? ([] as string[]),
     lifecycle_statuses: initial?.lifecycle_statuses ?? ([] as string[]),
     total_amount: initial?.total_amount ?? '',
+    auto_generate: initial?.auto_generate ?? false,
     notes: initial?.notes ?? '',
   });
   const [terms, setTerms] = useState<TermRow[]>(
@@ -259,6 +261,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         institution_ids: form.institution_ids.length ? form.institution_ids : null,
         staff_role_keys: !isStudent && form.staff_role_keys.length ? form.staff_role_keys : null,
         lifecycle_statuses: isStudent && form.lifecycle_statuses.length ? form.lifecycle_statuses : null,
+        auto_generate: form.auto_generate,
         notes: form.notes.trim() || null,
       };
 
@@ -394,6 +397,24 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
             />
             <p className="mt-1 text-xs text-gray-500">Bills can only be generated from an Active structure.</p>
           </div>
+        </div>
+
+        {/* Nightly auto-generation opt-in */}
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-gray-800/40">
+          <input
+            id="auto_generate"
+            type="checkbox"
+            checked={form.auto_generate}
+            onChange={(e) => set('auto_generate', e.target.checked)}
+            disabled={saving}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-green-600 focus:ring-green-500"
+          />
+          <label htmlFor="auto_generate" className="cursor-pointer text-sm">
+            <span className="font-medium text-gray-700 dark:text-gray-200">Auto-generate bills nightly</span>
+            <span className="mt-0.5 block text-xs text-gray-500">
+              When on, the nightly sweep bills this structure automatically — only while it is Active on the current transport year and the global auto-generation setting is enabled. Leave off for test or manually-billed structures.
+            </span>
+          </label>
         </div>
       </div>
 
