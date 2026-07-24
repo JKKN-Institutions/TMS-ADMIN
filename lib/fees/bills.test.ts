@@ -12,6 +12,8 @@ function row(over: Partial<TransportBillRow> = {}): TransportBillRow {
     code: null,
     institution_id: null,
     institution_name: null,
+    department_id: null,
+    department_name: null,
     structure_id: 's',
     structure_name: null,
     transport_year_id: 'y',
