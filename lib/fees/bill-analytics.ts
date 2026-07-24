@@ -40,7 +40,9 @@ export interface GroupStat {
   pending: number;
 }
 
-const UNASSIGNED_KEY = '∅'; // ∅ — the "no institution / no department" group
+// ∅ — the "no institution / no department" group. Exported so the UI can match a
+// row back to its group when filtering (row.institution_id ?? UNASSIGNED_KEY).
+export const UNASSIGNED_KEY = '∅';
 
 const activeLearnerRows = (rows: TransportBillRow[]) => rows.filter(isActiveLearnerBill);
 

@@ -3,18 +3,27 @@
 // Bill Management → Analytics view. Lazy-loaded (recharts is heavy) from page.tsx.
 // All figures come from `rows`/`summary` already fetched by the module; money math
 // mirrors summarizeBills so charts reconcile with the KPI tiles above.
+//
+// Layout: an Overall section (whole selected year), then a "By institution &
+// department" section with cascading dropdowns. All / All shows the grouped report
+// tables; picking an institution (± department) re-renders the SAME section body
+// scoped to that cohort — client-side row narrowing, no refetch.
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList, Cell,
 } from 'recharts';
 import { CheckCircle2, Clock, AlertTriangle, Wallet, Users } from 'lucide-react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import {
   VIZ_CSS, ChartCard, VizTable, StatTile, Meter, Legend, EmptyState, VizTooltip,
   gridProps, axisTick, axisLine, inr, inrCompact, num,
 } from '../_viz/kit';
-import type { TransportBillRow, BillSummary } from '@/lib/fees/bills';
-import { learnerPaymentBreakdown, termBreakdown, groupByInstitution, groupByDepartment, type GroupStat } from '@/lib/fees/bill-analytics';
+import { summarizeBills, type TransportBillRow, type BillSummary } from '@/lib/fees/bills';
+import {
+  learnerPaymentBreakdown, termBreakdown, groupByInstitution, groupByDepartment,
+  UNASSIGNED_KEY, type GroupStat,
+} from '@/lib/fees/bill-analytics';
 
 // Learner buckets on the reserved good→serious status scale (icon + label, never color-alone).
 const BUCKETS = [
@@ -23,6 +32,9 @@ const BUCKETS = [
   { key: 'unpaid', label: 'Unpaid', color: 'var(--viz-serious)', Icon: AlertTriangle },
 ] as const;
 
+const ALL = 'all'; // Radix Select forbids '' as a value, so "All" is a sentinel.
+const keyOf = (id: string | null) => id ?? UNASSIGNED_KEY;
+
 export default function BillAnalytics({
   rows, summary, yearLabel,
 }: {
@@ -30,38 +42,48 @@ export default function BillAnalytics({
   summary: BillSummary;
   yearLabel?: string;
 }) {
-  const learners = useMemo(() => learnerPaymentBreakdown(rows), [rows]);
-  const terms = useMemo(() => termBreakdown(rows), [rows]);
+  const [inst, setInst] = useState<string>(ALL);
+  const [dept, setDept] = useState<string>(ALL);
+
+  const scope = yearLabel ? `for ${yearLabel}` : 'across all years';
+  const overallLearners = useMemo(() => learnerPaymentBreakdown(rows), [rows]);
+  const hasData = summary.totalBilledAmount > 0 || overallLearners.totalLearners > 0;
+
+  // All institutions/departments that actually have billed learners → dropdown options.
   const institutions = useMemo(() => groupByInstitution(rows), [rows]);
   const departments = useMemo(() => groupByDepartment(rows), [rows]);
 
-  // "Paid" the way the module defines it for the headline: anyone who has paid
-  // something (fully OR partially). The report tables below still break the two
-  // apart, so no detail is lost.
-  const paidInclPartial = learners.fullyPaid + learners.partiallyPaid;
+  // Department options CASCADE: only departments within the picked institution.
+  const rowsForInst = useMemo(
+    () => (inst === ALL ? rows : rows.filter((r) => keyOf(r.institution_id) === inst)),
+    [rows, inst]
+  );
+  const deptGroups = useMemo(() => groupByDepartment(rowsForInst), [rowsForInst]);
 
-  const billed = summary.totalBilledAmount;
-  const collected = summary.collectedAmount;
-  const pending = summary.pendingAmount;
-  const rate = billed > 0 ? (collected / billed) * 100 : 0;
-  const scope = yearLabel ? `for ${yearLabel}` : 'across all years';
-  const hasData = billed > 0 || learners.totalLearners > 0;
+  // If the chosen department isn't offered by the newly chosen institution, clear it.
+  useEffect(() => {
+    if (dept !== ALL && !deptGroups.some((g) => g.key === dept)) setDept(ALL);
+  }, [deptGroups, dept]);
 
-  // Learner status chart rows.
-  const learnerData = BUCKETS.map((b) => ({
-    key: b.key,
-    label: b.label,
-    color: b.color,
-    Icon: b.Icon,
-    count: learners[b.key],
-  }));
+  const filtering = inst !== ALL || dept !== ALL;
+  const scopedRows = useMemo(
+    () => (dept === ALL ? rowsForInst : rowsForInst.filter((r) => keyOf(r.department_id) === dept)),
+    [rowsForInst, dept]
+  );
+  const scopedSummary = useMemo(() => summarizeBills(scopedRows), [scopedRows]);
 
-  // Per-term chart rows (money, stacked collected + pending).
-  const termData = terms.map((t) => ({
-    name: `Term ${t.term_no}`,
-    collected: t.collected,
-    pending: t.pending,
-  }));
+  const instOptions = useMemo(
+    () => [{ value: ALL, label: 'All institutions' }, ...institutions.map((g) => ({ value: g.key, label: g.label }))],
+    [institutions]
+  );
+  const deptOptions = useMemo(
+    () => [{ value: ALL, label: 'All departments' }, ...deptGroups.map((g) => ({ value: g.key, label: g.label }))],
+    [deptGroups]
+  );
+
+  const instLabel = inst === ALL ? null : institutions.find((g) => g.key === inst)?.label ?? 'Selected';
+  const deptLabel = dept === ALL ? null : deptGroups.find((g) => g.key === dept)?.label ?? 'Selected';
+  const cohortLabel = [instLabel, deptLabel].filter(Boolean).join(' · ');
 
   if (!hasData) {
     return (
@@ -73,11 +95,100 @@ export default function BillAnalytics({
   }
 
   return (
-    <div className="viz-scope space-y-6">
+    <div className="viz-scope space-y-8">
       <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
 
-      {/* Headline strip — deliberately NOT repeating the billed/collected/pending
-          amounts already shown in the KPI cards above the toggle. */}
+      {/* ── Overall (whole selected year) ─────────────────────────────────────── */}
+      <section className="space-y-6">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Overall</h3>
+        <AnalyticsSection rows={rows} summary={summary} scope={scope} yearLabel={yearLabel} />
+      </section>
+
+      {/* ── By institution & department (drill-down) ──────────────────────────── */}
+      <section className="space-y-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              By institution &amp; department
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {filtering ? `Showing ${cohortLabel}` : 'Pick an institution or department to drill in'}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="w-full sm:w-56">
+              <SelectMenu value={inst} onValueChange={setInst} options={instOptions} placeholder="All institutions" ariaLabel="Filter by institution" />
+            </div>
+            <div className="w-full sm:w-56">
+              <SelectMenu value={dept} onValueChange={setDept} options={deptOptions} placeholder="All departments" ariaLabel="Filter by department" />
+            </div>
+          </div>
+        </div>
+
+        {filtering ? (
+          <AnalyticsSection rows={scopedRows} summary={scopedSummary} scope={`for ${cohortLabel}`} yearLabel={yearLabel} />
+        ) : (
+          <>
+            <GroupReport
+              title="By institution"
+              subtitle={`Learners and collection per institution ${scope}`}
+              stats={institutions}
+              dimensionHead="Institution"
+              csvName="bill-analytics-by-institution"
+              yearLabel={yearLabel}
+            />
+            <GroupReport
+              title="By department"
+              subtitle={`Learners and collection per department ${scope}`}
+              stats={departments}
+              dimensionHead="Department"
+              csvName="bill-analytics-by-department"
+              yearLabel={yearLabel}
+            />
+          </>
+        )}
+      </section>
+
+      {summary.staffDeferred > 0 && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Users className="h-3.5 w-3.5" />
+          {num(summary.staffDeferred)} staff record(s) are deferred (tracked, not billed) and excluded from the figures above.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// The reusable analytics body: three headline tiles + collection-progress and
+// learner-status charts + the per-term table. Rendered once for Overall and again
+// for a filtered cohort. `rows` may include staff/cancelled rows — every aggregator
+// it calls filters to active learner bills, so the figures stay reconciled.
+function AnalyticsSection({
+  rows, summary, scope, yearLabel,
+}: {
+  rows: TransportBillRow[];
+  summary: BillSummary;
+  scope: string;
+  yearLabel?: string;
+}) {
+  const learners = useMemo(() => learnerPaymentBreakdown(rows), [rows]);
+  const terms = useMemo(() => termBreakdown(rows), [rows]);
+  const paidInclPartial = learners.fullyPaid + learners.partiallyPaid;
+
+  const billed = summary.totalBilledAmount;
+  const collected = summary.collectedAmount;
+  const pending = summary.pendingAmount;
+  const rate = billed > 0 ? (collected / billed) * 100 : 0;
+
+  const learnerData = BUCKETS.map((b) => ({ key: b.key, label: b.label, color: b.color, Icon: b.Icon, count: learners[b.key] }));
+  const termData = terms.map((t) => ({ name: `Term ${t.term_no}`, collected: t.collected, pending: t.pending }));
+
+  if (billed <= 0 && learners.totalLearners === 0) {
+    return <EmptyState message={`No transport billing ${scope} yet.`} />;
+  }
+
+  return (
+    <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Meter label="Collection rate" rate={rate} caption={`${inrCompact(collected)} of ${inrCompact(billed)} collected`} />
         <StatTile
@@ -97,7 +208,7 @@ export default function BillAnalytics({
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {/* Chart 1 — Collection progress (part-to-whole: collected + pending = billed) */}
+        {/* Collection progress (part-to-whole: collected + pending = billed) */}
         <ChartCard
           title="Collection progress"
           subtitle={`Collected vs pending, by amount ${scope}`}
@@ -125,7 +236,7 @@ export default function BillAnalytics({
           }
         />
 
-        {/* Chart 2 — Learner payment status (distinct learners; status scale) */}
+        {/* Learner payment status (distinct learners; status scale) */}
         <ChartCard
           title="Learner payment status"
           subtitle={`${num(learners.totalLearners)} billed learners${learners.overdue ? ` · ${num(learners.overdue)} overdue` : ''}`}
@@ -145,16 +256,11 @@ export default function BillAnalytics({
               </BarChart>
             </ResponsiveContainer>
           }
-          table={
-            <VizTable
-              head={['Status', 'Learners']}
-              rows={learnerData.map((d) => [d.label, num(d.count)])}
-            />
-          }
+          table={<VizTable head={['Status', 'Learners']} rows={learnerData.map((d) => [d.label, num(d.count)])} />}
         />
       </div>
 
-      {/* Chart 3 — Per-term breakdown (money stacked; counts in the table twin) */}
+      {/* Per-term breakdown — distinct learners split + money, counts in the table twin */}
       <ChartCard
         title="By term"
         subtitle={`Collected vs pending per term ${scope}`}
@@ -193,33 +299,6 @@ export default function BillAnalytics({
           rows: terms.map((t) => [t.term_no, t.learners, t.fullyPaidLearners, t.partialLearners, t.unpaidLearners, t.collected, t.pending]),
         }}
       />
-
-      {/* Institution- and department-wise reports — distinct learners split into
-          Fully paid / Partial / Unpaid, plus the money each group accounts for.
-          Same rows + isActiveLearnerBill as the tiles, so they reconcile. */}
-      <GroupReport
-        title="By institution"
-        subtitle={`Learners and collection per institution ${scope}`}
-        stats={institutions}
-        dimensionHead="Institution"
-        csvName="bill-analytics-by-institution"
-        yearLabel={yearLabel}
-      />
-      <GroupReport
-        title="By department"
-        subtitle={`Learners and collection per department ${scope}`}
-        stats={departments}
-        dimensionHead="Department"
-        csvName="bill-analytics-by-department"
-        yearLabel={yearLabel}
-      />
-
-      {summary.staffDeferred > 0 && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Users className="h-3.5 w-3.5" />
-          {num(summary.staffDeferred)} staff record(s) are deferred (tracked, not billed) and excluded from the figures above.
-        </p>
-      )}
     </div>
   );
 }
