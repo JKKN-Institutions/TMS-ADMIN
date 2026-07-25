@@ -6,6 +6,7 @@ import {
   isAlreadyAssigned,
   groupCandidatesByRoute,
   summarizeBulkResults,
+  chunkIds,
   type Candidate,
   type CandidateInput,
   type BulkResult,
@@ -180,5 +181,29 @@ describe('summarizeBulkResults', () => {
 
   it('returns zeroes for an empty batch', () => {
     expect(summarizeBulkResults([])).toEqual({ assigned: 0, skipped: 0, errors: 0 });
+  });
+});
+
+describe('chunkIds', () => {
+  it('returns a single batch when under the size', () => {
+    expect(chunkIds(['a', 'b'], 100)).toEqual([['a', 'b']]);
+  });
+
+  it('splits evenly at the boundary', () => {
+    const ids = Array.from({ length: 4 }, (_, i) => `id${i}`);
+    expect(chunkIds(ids, 2)).toEqual([['id0', 'id1'], ['id2', 'id3']]);
+  });
+
+  it('puts the remainder in a smaller final batch', () => {
+    const ids = Array.from({ length: 5 }, (_, i) => `id${i}`);
+    expect(chunkIds(ids, 2)).toEqual([['id0', 'id1'], ['id2', 'id3'], ['id4']]);
+  });
+
+  it('returns an empty array for no ids', () => {
+    expect(chunkIds([], 100)).toEqual([]);
+  });
+
+  it('throws for a non-positive size', () => {
+    expect(() => chunkIds(['a'], 0)).toThrow();
   });
 });

@@ -125,6 +125,19 @@ export function groupCandidatesByRoute(candidates: Candidate[]): RouteGroup[] {
   );
 }
 
+/**
+ * Splits ids into batches of at most `size`, preserving order. The bulk-assign
+ * page uses this to submit a "select all" larger than the POST route's
+ * MAX_BATCH cap as several sequential requests instead of failing outright
+ * with zero partial progress.
+ */
+export function chunkIds(ids: string[], size: number): string[][] {
+  if (size < 1) throw new Error('chunkIds: size must be at least 1');
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
 export function summarizeBulkResults(results: BulkResult[]): BulkSummary {
   let assigned = 0;
   let skipped = 0;

@@ -60,12 +60,20 @@ const StaffRouteAssignmentsPage = () => {
           <p className="text-gray-600">Assign staff members to routes for monitoring and management</p>
         </div>
         {canManage && (
-          <button
-            onClick={() => router.push('/staff-route-assignments/assign')}
-            className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-          >
-            <Plus className="h-4 w-4" /> Assign Route
-          </button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              onClick={() => router.push('/staff-route-assignments/bulk-assign')}
+              className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg border border-green-600 px-3 text-sm font-medium text-green-700 transition-colors hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-500/10"
+            >
+              <Users className="h-4 w-4" /> Bulk Assign
+            </button>
+            <button
+              onClick={() => router.push('/staff-route-assignments/assign')}
+              className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+            >
+              <Plus className="h-4 w-4" /> Assign Route
+            </button>
+          </div>
         )}
       </div>
 
