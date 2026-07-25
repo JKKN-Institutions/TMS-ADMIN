@@ -1,6 +1,6 @@
 // lib/booking/analytics.ts
 /**
- * Public surface of the booking-analytics pure core. Split across four modules
+ * Public surface of the booking-analytics pure core. Split across five modules
  * by responsibility; import from here.
  */
 export * from './analytics-types';
