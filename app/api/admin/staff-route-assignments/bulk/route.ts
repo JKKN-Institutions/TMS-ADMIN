@@ -7,6 +7,7 @@ import { requireAssign } from '@/lib/staff-assignments/permissions';
 import {
   resolveAssignmentEmail,
   isBulkCandidate,
+  isAlreadyAssigned,
   summarizeBulkResults,
   normalizeEmail,
   type Candidate,
@@ -218,7 +219,7 @@ async function postBulk(request: NextRequest, auth: AuthContext) {
           outcome: 'skipped_route_inactive', message: 'Their route is not active' });
         continue;
       }
-      if (assignedEmails.has(email)) {
+      if (isAlreadyAssigned(s.email, profileEmail, assignedEmails)) {
         results.push({ staffId: id, name, email, routeId: route.id, routeLabel,
           outcome: 'skipped_already_assigned', message: 'Already an active in-charge' });
         continue;
@@ -250,7 +251,14 @@ async function postBulk(request: NextRequest, auth: AuthContext) {
         continue;
       }
 
-      assignedEmails.add(email); // guards a duplicate id inside the same batch
+      // Add BOTH addresses, not just the resolved one — isAlreadyAssigned
+      // tests staff.email and profileEmail independently, so a later row in
+      // this same batch for the same human (diverging addresses) must see
+      // both as taken, not just the one this insert was written under.
+      const staffEmailNorm = normalizeEmail(s.email);
+      const profileEmailNorm = normalizeEmail(profileEmail);
+      if (staffEmailNorm) assignedEmails.add(staffEmailNorm);
+      if (profileEmailNorm) assignedEmails.add(profileEmailNorm);
       await grantBoardingRole(svc, email, auth.userId);
       await logActivity(auth, request, {
         module: 'staff-route-assignments',

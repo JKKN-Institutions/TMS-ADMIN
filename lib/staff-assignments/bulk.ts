@@ -79,19 +79,32 @@ export function resolveAssignmentEmail(
 }
 
 /**
+ * Whether either of a staffer's two addresses is already an active
+ * assignment. `assignedEmails` must hold EVERY active assignment address,
+ * lowercased. Both addresses are tested: 28 of 94 live assignments are
+ * recorded under the profile address only, so testing staff.email alone
+ * would miss them — offering an already-assigned person as a fresh
+ * candidate, or letting a POST insert a second active row for one human.
+ * The single source of this rule; isBulkCandidate delegates to it.
+ */
+export function isAlreadyAssigned(
+  staffEmail: string | null | undefined,
+  profileEmail: string | null | undefined,
+  assignedEmails: Set<string>
+): boolean {
+  const staff = normalizeEmail(staffEmail);
+  const profile = normalizeEmail(profileEmail);
+  return (!!staff && assignedEmails.has(staff)) || (!!profile && assignedEmails.has(profile));
+}
+
+/**
  * Whether a staffer may be offered in the picker.
- *
- * `assignedEmails` must hold EVERY active assignment address, lowercased. The
- * check tests both of the staffer's addresses against it: 28 of 94 live
- * assignments are recorded under the profile address only, so testing
- * staff.email alone would offer already-assigned people and duplicate them.
  */
 export function isBulkCandidate(c: CandidateInput, assignedEmails: Set<string>): boolean {
   const staff = normalizeEmail(c.staffEmail);
   const profile = normalizeEmail(c.profileEmail);
   if (!staff && !profile) return false;
-  if (staff && assignedEmails.has(staff)) return false;
-  if (profile && assignedEmails.has(profile)) return false;
+  if (isAlreadyAssigned(c.staffEmail, c.profileEmail, assignedEmails)) return false;
   if (!c.routeId || !c.routeActive) return false;
   return true;
 }

@@ -3,6 +3,7 @@ import {
   normalizeEmail,
   resolveAssignmentEmail,
   isBulkCandidate,
+  isAlreadyAssigned,
   groupCandidatesByRoute,
   summarizeBulkResults,
   type Candidate,
@@ -54,6 +55,32 @@ describe('resolveAssignmentEmail', () => {
 
   it('lowercases whichever address it picks', () => {
     expect(resolveAssignmentEmail(null, 'K@JKKN.ac.in')).toBe('k@jkkn.ac.in');
+  });
+});
+
+describe('isAlreadyAssigned', () => {
+  it('matches on the staff address alone', () => {
+    expect(isAlreadyAssigned('kamali@jkkn.ac.in', null, new Set(['kamali@jkkn.ac.in']))).toBe(true);
+  });
+
+  it('matches on the profile address alone', () => {
+    expect(isAlreadyAssigned('personal@gmail.com', 'k@jkkn.ac.in', new Set(['k@jkkn.ac.in']))).toBe(true);
+  });
+
+  it('matches case-insensitively', () => {
+    expect(isAlreadyAssigned('Kamali@JKKN.ac.in', null, new Set(['kamali@jkkn.ac.in']))).toBe(true);
+  });
+
+  it('returns false when neither address is present', () => {
+    expect(isAlreadyAssigned(null, null, new Set(['kamali@jkkn.ac.in']))).toBe(false);
+  });
+
+  it('returns false when the set is empty', () => {
+    expect(isAlreadyAssigned('kamali@jkkn.ac.in', 'k@jkkn.ac.in', new Set())).toBe(false);
+  });
+
+  it('returns false when neither address is in the set', () => {
+    expect(isAlreadyAssigned('kamali@jkkn.ac.in', 'k@jkkn.ac.in', new Set(['other@jkkn.ac.in']))).toBe(false);
   });
 });
 
