@@ -95,3 +95,63 @@ describe('aggregateBookings', () => {
     expect(empty.byWeekday.every((d) => d.count === 0)).toBe(true);
   });
 });
+
+// --- Asymmetric top-N: byRoute is the FULL ranked list, topStops caps at 15. ---
+// Generated (not hand-written) so the fixture comfortably clears the cap: 20 distinct
+// routes and 20 distinct stops, with stop counts strictly decreasing (MS0 highest,
+// MS19 lowest) so "the top 15" is a real, checkable claim rather than an arbitrary slice.
+const MANY_ROUTE_COUNT = 20;
+const MANY_STOP_COUNT = 20;
+const manyRoutes = Array.from({ length: MANY_ROUTE_COUNT }, (_, i) => `MR${i}`);
+const manyStops = Array.from({ length: MANY_STOP_COUNT }, (_, i) => `MS${i}`);
+
+const manyLabels: Labels = {
+  routes: new Map(manyRoutes.map((id) => [id, `Route ${id}`])),
+  stops: new Map(manyStops.map((id) => [id, `Stop ${id}`])),
+  institutions: new Map(),
+  departments: new Map(),
+  programs: new Map(),
+};
+
+// MS0 gets 20 bookings, MS1 gets 19, ... MS19 gets 1 — a distinct, descending count
+// per stop. Each stop's bookings cycle through all MANY_ROUTE_COUNT routes so every
+// route is guaranteed to appear at least once (from the MS0 group, which cycles all 20).
+const manyRows: BookingRow[] = manyStops.flatMap((stopId, i) => {
+  const count = MANY_STOP_COUNT - i;
+  return Array.from({ length: count }, (_, n) => ({
+    learner_id: 'LX',
+    travel_date: '2026-07-20',
+    route_id: manyRoutes[n % manyRoutes.length],
+    stop_id: stopId,
+    booked_at: '2026-07-19T04:00:00Z',
+    booked_by: null,
+  }));
+});
+
+describe('aggregateBookings top-N asymmetry (byRoute uncapped, topStops capped)', () => {
+  const out = aggregateBookings(manyRows, learners, manyLabels);
+
+  it('byRoute returns ALL distinct routes — never capped', () => {
+    expect(out.byRoute).toHaveLength(MANY_ROUTE_COUNT);
+    expect(new Set(out.byRoute.map((r) => r.id)).size).toBe(MANY_ROUTE_COUNT);
+    // every entry is labelled, not just echoing the raw id
+    expect(out.byRoute.every((r) => r.label === manyLabels.routes.get(r.id))).toBe(true);
+  });
+
+  it('topStops caps at exactly 15 entries', () => {
+    expect(out.topStops).toHaveLength(15);
+  });
+
+  it('topStops keeps the 15 HIGHEST-count stops, sorted descending — not the lowest or an unsorted slice', () => {
+    // MS0..MS14 carry counts 20..6 and must be exactly what survives, in that order.
+    expect(out.topStops.map((s) => s.id)).toEqual(manyStops.slice(0, 15));
+    expect(out.topStops.map((s) => s.count)).toEqual([20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6]);
+    expect(out.topStops[0]).toEqual({ id: 'MS0', label: 'Stop MS0', count: 20 });
+
+    // The lowest-count stops (MS15..MS19, counts 5..1) must be dropped by the cap.
+    const droppedIds = manyStops.slice(15);
+    for (const id of droppedIds) {
+      expect(out.topStops.some((s) => s.id === id)).toBe(false);
+    }
+  });
+});
