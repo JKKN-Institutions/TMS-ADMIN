@@ -25,6 +25,21 @@ export const control =
   'font-medium text-foreground transition-colors duration-200 hover:bg-muted cursor-pointer ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1';
 
+/**
+ * Dark-mode repair for the shared dropdown chrome, applied per call site.
+ *
+ * components/ui/dropdown-menu.tsx hardcodes `border-gray-200 bg-white` on the
+ * panel and `text-gray-700` on items, with no `dark:` variant — so in dark mode
+ * the panel stays white while its contents render light-on-light. That is a
+ * pre-existing bug in a primitive shared by 26 files, so it is NOT edited here;
+ * `cn()` is `twMerge(clsx())`, so passing the semantic equivalents as className
+ * wins the conflict locally and leaves the other 25 consumers untouched.
+ *
+ * In light mode this is a visual no-op: --popover is pure white, matching bg-white.
+ */
+const popover = 'border-border bg-popover text-popover-foreground';
+const item = 'cursor-pointer text-popover-foreground';
+
 export interface Opt {
   id: string;
   label: string;
@@ -75,7 +90,7 @@ export function MultiSelect({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="max-h-80 w-64 overflow-y-auto"
+        className={`max-h-80 w-64 overflow-y-auto ${popover}`}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         {options.length > searchThreshold && (
@@ -99,7 +114,7 @@ export function MultiSelect({
 
         {selected.length > 0 && (
           <>
-            <DropdownMenuItem onSelect={() => onChange([])} className="cursor-pointer">
+            <DropdownMenuItem onSelect={() => onChange([])} className={item}>
               <X className="h-4 w-4" aria-hidden="true" /> Clear {title.toLowerCase()}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -117,7 +132,7 @@ export function MultiSelect({
                 e.preventDefault(); // keep the menu open across multiple toggles
                 toggle(o.id);
               }}
-              className="cursor-pointer"
+              className={item}
             >
               {o.label}
             </DropdownMenuCheckboxItem>
@@ -147,12 +162,12 @@ export function SingleSelect({
         <span className="truncate">{selected ? selected.label : `${title}: All`}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
-        <DropdownMenuItem onSelect={() => onChange(null)} className="cursor-pointer">
+      <DropdownMenuContent align="start" className={`min-w-44 ${popover}`}>
+        <DropdownMenuItem onSelect={() => onChange(null)} className={item}>
           <Check className={value ? 'opacity-0' : 'opacity-100'} aria-hidden="true" /> {title}: All
         </DropdownMenuItem>
         {options.map((o) => (
-          <DropdownMenuItem key={o.id} onSelect={() => onChange(o.id)} className="cursor-pointer">
+          <DropdownMenuItem key={o.id} onSelect={() => onChange(o.id)} className={item}>
             <Check className={value === o.id ? 'opacity-100' : 'opacity-0'} aria-hidden="true" />
             {o.label}
           </DropdownMenuItem>
