@@ -127,6 +127,13 @@ export function FilterBar({
     onRangeChange(addDays(end, -(days - 1)), end);
   };
 
+  // A preset is active iff the current range is exactly what it would set. Without
+  // this the four buttons render identically whatever the range is, so there is no
+  // way — visually or for a screen reader — to tell which one is in effect.
+  const activePreset = RANGES.find(
+    (r) => to === istToday() && from === addDays(to, -(r.days - 1))
+  )?.id;
+
   // Stops narrow to the selected routes — an unfiltered 479-stop list is unusable.
   const stopOptions =
     filters.routeIds.length > 0
@@ -185,8 +192,13 @@ export function FilterBar({
             <button
               key={r.id}
               type="button"
+              aria-pressed={activePreset === r.id}
               onClick={() => applyPreset(r.days)}
-              className="cursor-pointer rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className={`cursor-pointer rounded-md px-3 py-1.5 text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                activePreset === r.id
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
               {r.label}
             </button>
