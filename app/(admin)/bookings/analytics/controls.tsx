@@ -236,10 +236,17 @@ export function TabNav({
 }) {
   const onKeyDown = (e: React.KeyboardEvent) => {
     const i = tabs.findIndex((t) => t.id === active);
-    if (e.key === 'ArrowRight') onChange(tabs[(i + 1) % tabs.length].id);
-    else if (e.key === 'ArrowLeft') onChange(tabs[(i - 1 + tabs.length) % tabs.length].id);
+    let next: string;
+    if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length].id;
+    else if (e.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length].id;
     else return;
     e.preventDefault();
+    onChange(next);
+    // Roving tabindex only moves which button is TABBABLE; it does not move focus.
+    // Without this the selection changes silently — a screen reader stays on the
+    // old tab and never announces the new one. WAI-ARIA's tabs pattern requires
+    // arrow keys to move focus, so follow the state change with a real focus().
+    document.getElementById(`tab-${next}`)?.focus();
   };
 
   return (
