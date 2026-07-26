@@ -17,26 +17,17 @@ import {
 import type { BookingsBlock } from '@/lib/booking/analytics';
 
 const CHART_TOP_N = 20;
+const COHORT_TOP_N = 15;
 
-export default function BookingsTab({ data }: { data: BookingsBlock }) {
-  const k = data.kpis;
-
-  const perDay = (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data.perDay} margin={{ top: 12, right: 12, bottom: 4, left: 4 }} barCategoryGap="26%">
-        <CartesianGrid {...gridProps} vertical={false} />
-        <XAxis dataKey="date" tick={axisTick} axisLine={axisLine} tickLine={false} minTickGap={24} />
-        <YAxis tick={axisTick} axisLine={false} tickLine={false} allowDecimals={false} width={44} />
-        <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip valueFmt={(v: number) => `${num(v)} bookings`} />} />
-        <Bar dataKey="count" name="Bookings" fill="var(--viz-accent)" radius={[4, 4, 0, 0]} maxBarSize={40} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-
-  const routeRows = data.byRoute.slice(0, CHART_TOP_N);
-  const byRoute = (
-    <ResponsiveContainer width="100%" height={Math.max(220, routeRows.length * 30 + 24)}>
-      <BarChart data={routeRows} layout="vertical" margin={{ top: 4, right: 44, bottom: 4, left: 8 }} barCategoryGap="28%">
+/**
+ * Horizontal magnitude bar over a CountRow[]. Four charts here are identical
+ * apart from their data, so they share one renderer — the height tracks the row
+ * count so a 3-row chart doesn't stretch its bars across 400px.
+ */
+function hbar(rows: { label: string; count: number }[]) {
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(220, rows.length * 30 + 24)}>
+      <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 44, bottom: 4, left: 8 }} barCategoryGap="28%">
         <CartesianGrid {...gridProps} horizontal={false} />
         <XAxis type="number" tick={axisTick} axisLine={axisLine} tickLine={false} allowDecimals={false} />
         <YAxis
@@ -55,6 +46,30 @@ export default function BookingsTab({ data }: { data: BookingsBlock }) {
       </BarChart>
     </ResponsiveContainer>
   );
+}
+
+/** "Top 15 of 27 departments — full list in table view", or just "8 institutions". */
+const capNote = (total: number, cap: number, noun: string) =>
+  total > cap
+    ? `Top ${cap} of ${num(total)} ${noun} — full list in table view`
+    : `${num(total)} ${noun}`;
+
+export default function BookingsTab({ data }: { data: BookingsBlock }) {
+  const k = data.kpis;
+
+  const perDay = (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data.perDay} margin={{ top: 12, right: 12, bottom: 4, left: 4 }} barCategoryGap="26%">
+        <CartesianGrid {...gridProps} vertical={false} />
+        <XAxis dataKey="date" tick={axisTick} axisLine={axisLine} tickLine={false} minTickGap={24} />
+        <YAxis tick={axisTick} axisLine={false} tickLine={false} allowDecimals={false} width={44} />
+        <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip valueFmt={(v: number) => `${num(v)} bookings`} />} />
+        <Bar dataKey="count" name="Bookings" fill="var(--viz-accent)" radius={[4, 4, 0, 0]} maxBarSize={40} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const routeRows = data.byRoute.slice(0, CHART_TOP_N);
 
   const leadTime = (
     <ResponsiveContainer width="100%" height={250}>
@@ -104,29 +119,6 @@ export default function BookingsTab({ data }: { data: BookingsBlock }) {
     </ResponsiveContainer>
   );
 
-  const deptRows = data.byDepartment.slice(0, 15);
-  const byDept = (
-    <ResponsiveContainer width="100%" height={Math.max(220, deptRows.length * 30 + 24)}>
-      <BarChart data={deptRows} layout="vertical" margin={{ top: 4, right: 44, bottom: 4, left: 8 }} barCategoryGap="28%">
-        <CartesianGrid {...gridProps} horizontal={false} />
-        <XAxis type="number" tick={axisTick} axisLine={axisLine} tickLine={false} allowDecimals={false} />
-        <YAxis
-          type="category"
-          dataKey="label"
-          width={150}
-          tick={axisTick}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={(v: string) => (v.length > 22 ? `${v.slice(0, 21)}…` : v)}
-        />
-        <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip />} />
-        <Bar dataKey="count" name="Bookings" fill="var(--viz-accent)" radius={[0, 4, 4, 0]} maxBarSize={18}>
-          <LabelList dataKey="count" position="right" fill="var(--viz-tick)" fontSize={11} />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -151,7 +143,7 @@ export default function BookingsTab({ data }: { data: BookingsBlock }) {
           title="Bookings by route"
           subtitle={data.byRoute.length > CHART_TOP_N ? `Top ${CHART_TOP_N} of ${num(data.byRoute.length)} routes — full list in table view` : `${num(data.byRoute.length)} routes`}
           hasData={data.byRoute.length > 0}
-          chart={byRoute}
+          chart={hbar(routeRows)}
           table={<VizTable head={['Route', 'Bookings']} rows={data.byRoute.map((r) => [r.label, num(r.count)])} />}
           csv={{ filename: 'bookings-by-route.csv', head: ['Route', 'Bookings'], rows: data.byRoute.map((r) => [r.label, r.count]) }}
         />
@@ -183,13 +175,38 @@ export default function BookingsTab({ data }: { data: BookingsBlock }) {
         />
       </div>
 
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <ChartCard
+          title="Bookings by department"
+          subtitle={capNote(data.byDepartment.length, COHORT_TOP_N, 'departments')}
+          hasData={data.byDepartment.length > 0}
+          chart={hbar(data.byDepartment.slice(0, COHORT_TOP_N))}
+          table={<VizTable head={['Department', 'Bookings']} rows={data.byDepartment.map((d) => [d.label, num(d.count)])} />}
+          csv={{ filename: 'bookings-by-department.csv', head: ['Department', 'Bookings'], rows: data.byDepartment.map((d) => [d.label, d.count]) }}
+        />
+        <ChartCard
+          title="Bookings by institution"
+          subtitle={capNote(data.byInstitution.length, COHORT_TOP_N, 'institutions')}
+          hasData={data.byInstitution.length > 0}
+          chart={hbar(data.byInstitution.slice(0, COHORT_TOP_N))}
+          table={<VizTable head={['Institution', 'Bookings']} rows={data.byInstitution.map((i) => [i.label, num(i.count)])} />}
+          csv={{ filename: 'bookings-by-institution.csv', head: ['Institution', 'Bookings'], rows: data.byInstitution.map((i) => [i.label, i.count]) }}
+        />
+      </div>
+
+      {/*
+        topStops is capped to 15 SERVER-side (unlike byRoute/byDepartment/
+        byInstitution, which arrive whole), so the table twin and the CSV are
+        also the top 15 — there is no fuller list to fall back to. The title
+        says "Top" rather than implying a complete ranking.
+      */}
       <ChartCard
-        title="Bookings by department"
-        subtitle={data.byDepartment.length > 15 ? `Top 15 of ${num(data.byDepartment.length)} departments — full list in table view` : `${num(data.byDepartment.length)} departments`}
-        hasData={data.byDepartment.length > 0}
-        chart={byDept}
-        table={<VizTable head={['Department', 'Bookings']} rows={data.byDepartment.map((d) => [d.label, num(d.count)])} />}
-        csv={{ filename: 'bookings-by-department.csv', head: ['Department', 'Bookings'], rows: data.byDepartment.map((d) => [d.label, d.count]) }}
+        title="Top boarding stops"
+        subtitle="The 15 busiest stops in range — which pickup points carry demand"
+        hasData={data.topStops.length > 0}
+        chart={hbar(data.topStops)}
+        table={<VizTable head={['Stop', 'Bookings']} rows={data.topStops.map((s) => [s.label, num(s.count)])} />}
+        csv={{ filename: 'top-boarding-stops.csv', head: ['Stop', 'Bookings'], rows: data.topStops.map((s) => [s.label, s.count]) }}
       />
     </div>
   );
