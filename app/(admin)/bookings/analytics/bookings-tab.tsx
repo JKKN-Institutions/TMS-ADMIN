@@ -125,7 +125,24 @@ export default function BookingsTab({ data }: { data: BookingsBlock }) {
         <StatTile label="Bookings in range" value={num(k.total)} sub={`${num(k.days)} days with bookings`} Icon={CalendarCheck} tone="text-primary" />
         <StatTile label="Distinct learners" value={num(k.learners)} sub={`across ${num(k.routes)} routes`} Icon={Users} tone="text-primary" />
         <StatTile label="Average per booked day" value={num(k.avgPerDay)} sub={k.peakDay ? `peak ${num(k.peakDay.count)} on ${k.peakDay.date}` : 'no bookings yet'} Icon={Clock} tone="text-primary" />
-        <StatTile label="Self-service share" value={`${k.selfPct.toFixed(1)}%`} sub={`${num(data.bookedBy.admin)} booked by admin`} Icon={UserCheck} tone="text-[var(--viz-good)]" />
+        {/*
+          selfPct divides by ALL bookings, and booked_by is null on 560 of 2431
+          rows in prod (23%) — those can be neither self nor admin. Naming the
+          unattributed count keeps the headline from reading as "everything else
+          was admin-entered". The metric itself is left alone: share-of-all is
+          the honest denominator, it just has to admit the third bucket.
+        */}
+        <StatTile
+          label="Self-service share"
+          value={`${k.selfPct.toFixed(1)}%`}
+          sub={
+            data.bookedBy.unknown > 0
+              ? `${num(data.bookedBy.admin)} admin · ${num(data.bookedBy.unknown)} unattributed`
+              : `${num(data.bookedBy.admin)} booked by admin`
+          }
+          Icon={UserCheck}
+          tone="text-[var(--viz-good)]"
+        />
       </div>
 
       <ChartCard
