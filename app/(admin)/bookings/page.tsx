@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarCheck, Download } from 'lucide-react';
+import Link from 'next/link';
+import { BarChart3, CalendarCheck, Download } from 'lucide-react';
 import { DataTable, FilterSelect } from '@/components/ui/data-table';
 import { istToday, addDays } from '@/lib/booking/window';
 import { getBookingColumns } from './columns';
@@ -79,6 +80,12 @@ export default function BookingsPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Bookings</h1>
           <p className="text-gray-600 dark:text-gray-400">Daily bus bookings across all routes — read-only, over the live booking system.</p>
         </div>
+        <Link
+          href="/bookings/analytics"
+          className="inline-flex h-[38px] shrink-0 cursor-pointer items-center gap-2 self-start rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          <BarChart3 className="h-4 w-4" aria-hidden="true" /> Analytics
+        </Link>
       </div>
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
