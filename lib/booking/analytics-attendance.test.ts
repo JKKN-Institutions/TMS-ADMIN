@@ -29,12 +29,33 @@ const at = (
   direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false, ...over,
 });
 
+/**
+ * The unfiltered case: every input at the same depth. Tests that care about a
+ * specific depth override just that field, which makes the distinction being
+ * asserted visible in the test body rather than buried in argument order.
+ */
+const agg = (
+  bookings: BookingRow[],
+  attendance: AttendanceRow[],
+  over: Partial<Parameters<typeof aggregateAttendance>[0]> = {}
+) =>
+  aggregateAttendance({
+    bookings,
+    bookingsForWalkUp: bookings,
+    attendanceAll: attendance,
+    attendanceForJoin: attendance,
+    attendanceForComposition: attendance,
+    learners,
+    labels,
+    ...over,
+  });
+
 describe('aggregateAttendance', () => {
   // 2026-07-09 is scanned; 2026-07-10 has bookings but NO attendance rows.
   const bookings = [bk('L1', '2026-07-09'), bk('L2', '2026-07-09'), bk('L3', '2026-07-09'), bk('L1', '2026-07-10')];
   const attendance = [at('L1', '2026-07-09'), at('L2', '2026-07-09', { status: 'absent' })];
   // No separate record-level filter in these tests, so join and composition share the same array.
-  const out = aggregateAttendance(bookings, attendance, attendance, learners, labels);
+  const out = agg(bookings, attendance);
 
   it('excludes unscanned days from BOTH the numerator and the denominator', () => {
     // 3 bookings on the scanned day; the 2026-07-10 booking is ignored entirely.
@@ -62,7 +83,7 @@ describe('aggregateAttendance', () => {
 
   it('treats a learner present in EITHER direction as boarded, without double counting', () => {
     const both = [at('L1', '2026-07-09'), at('L1', '2026-07-09', { direction: 'return' })];
-    const r = aggregateAttendance([bk('L1', '2026-07-09')], both, both, learners, labels);
+    const r = agg([bk('L1', '2026-07-09')], both);
     expect(r.kpis.boarded).toBe(1);
     expect(r.kpis.records).toBe(2);
     expect(r.kpis.showUpRate).toBe(100);
@@ -70,7 +91,7 @@ describe('aggregateAttendance', () => {
 
   it('counts a present learner with no booking as a walk-up', () => {
     const rows = [at('L9', '2026-07-09')];
-    const r = aggregateAttendance([], rows, rows, learners, labels);
+    const r = agg([], rows);
     expect(r.kpis.walkUps).toBe(1);
     expect(r.kpis.bookedOnScannedDays).toBe(0);
     expect(r.kpis.showUpRate).toBe(0);
@@ -79,13 +100,13 @@ describe('aggregateAttendance', () => {
   it('dedups a walk-up present in both directions to exactly one, and exercises the is_walk_up flag', () => {
     // No booking at all for L9 -> qualifies as a walk-up via the "!bookingKeys.has(...)" branch.
     const bothDirections = [at('L9', '2026-07-09'), at('L9', '2026-07-09', { direction: 'return' })];
-    const r1 = aggregateAttendance([], bothDirections, bothDirections, learners, labels);
+    const r1 = agg([], bothDirections);
     expect(r1.kpis.walkUps).toBe(1);
 
     // L1 HAS a matching booking, so only the explicit is_walk_up flag can make this
     // count as a walk-up -- exercises the other half of the OR.
     const flagged = [at('L1', '2026-07-09', { is_walk_up: true })];
-    const r2 = aggregateAttendance([bk('L1', '2026-07-09')], flagged, flagged, learners, labels);
+    const r2 = agg([bk('L1', '2026-07-09')], flagged);
     expect(r2.kpis.walkUps).toBe(1);
   });
 
@@ -116,7 +137,7 @@ describe('aggregateAttendance', () => {
   });
 
   it('returns a zeroed, non-NaN block for empty input', () => {
-    const empty = aggregateAttendance([], [], [], learners, labels);
+    const empty = agg([], []);
     expect(empty.unavailable).toBe(false);
     expect(empty.kpis.showUpRate).toBe(0);
     expect(empty.kpis.noShows).toBe(0);
@@ -125,14 +146,14 @@ describe('aggregateAttendance', () => {
   });
 
   it('flags unavailable when the caller says the query failed', () => {
-    expect(aggregateAttendance([], [], [], learners, labels, true).unavailable).toBe(true);
+    expect(agg([], [], { unavailable: true }).unavailable).toBe(true);
   });
 
   it('gates on (route, date), not date alone — an unscanned route must not read as 100% no-show', () => {
     // R1 is scanned on 07-09; R2 is not scanned at all, though it has a booking that day.
     const twoRouteBookings = [bk('L1', '2026-07-09', 'R1'), bk('L2', '2026-07-09', 'R2')];
     const onlyR1Attendance = [at('L1', '2026-07-09', { route_id: 'R1' })];
-    const r = aggregateAttendance(twoRouteBookings, onlyR1Attendance, onlyR1Attendance, learners, labels);
+    const r = agg(twoRouteBookings, onlyR1Attendance);
 
     // The R2 booking must be excluded entirely: not in the denominator, and R2 must
     // not appear in noShowByRoute at all (the regression this guards against would
@@ -149,7 +170,7 @@ describe('aggregateAttendance', () => {
     // An attendance row with no route attribution -- can't tell which route it belongs
     // to, so it qualifies the whole date rather than excluding everything on it.
     const unknownRouteAttendance = [at('L9', '2026-07-09', { route_id: null })];
-    const r = aggregateAttendance(twoRouteBookings, unknownRouteAttendance, unknownRouteAttendance, learners, labels);
+    const r = agg(twoRouteBookings, unknownRouteAttendance);
 
     // Neither L1 nor L2 boarded, so both are no-shows, but BOTH still enter the
     // denominator because 2026-07-09 was qualified via the null-route row.
@@ -162,8 +183,8 @@ describe('aggregateAttendance', () => {
     const presentOnly = join.filter((a) => a.status === 'present');
     const bookingsHere = [bk('L1', '2026-07-09'), bk('L2', '2026-07-09')];
 
-    const full = aggregateAttendance(bookingsHere, join, join, learners, labels);
-    const filtered = aggregateAttendance(bookingsHere, join, presentOnly, learners, labels);
+    const full = agg(bookingsHere, join);
+    const filtered = agg(bookingsHere, join, { attendanceForComposition: presentOnly });
 
     // The join array is unchanged, so the boarded/no-show math must be identical
     // regardless of what the composition array was narrowed to.
@@ -174,5 +195,70 @@ describe('aggregateAttendance', () => {
     // Only the composition-fed fields track the narrowed array.
     expect(filtered.kpis.records).toBe(1);
     expect(filtered.byStatus.absent).toBe(0);
+  });
+
+  it('a COHORT filter must not move the show-up denominator either', () => {
+    // The gate asks "was this route-day scanned by anyone?". D2's only learner
+    // (L3) entirely no-showed, so a D2-filtered attendance array is EMPTY —
+    // and if that array drove the gate, 2026-07-09 would read as unscanned and
+    // L3's booking would vanish from the denominator, turning a 100% no-show
+    // cohort into "no data". Prod encodes no-shows as absence, so this is the
+    // common case, not an edge case.
+    const d2Bookings = [bk('L3', '2026-07-09')];
+    const d2Attendance: AttendanceRow[] = []; // nobody in D2 was scanned
+
+    const r = aggregateAttendance({
+      bookings: d2Bookings,
+      bookingsForWalkUp: d2Bookings,
+      attendanceAll: attendance, // full range set — L1/L2 were scanned that day
+      attendanceForJoin: d2Attendance,
+      attendanceForComposition: d2Attendance,
+      learners,
+      labels,
+    });
+
+    expect(r.kpis.bookedOnScannedDays).toBe(1);
+    expect(r.kpis.boarded).toBe(0);
+    expect(r.kpis.noShows).toBe(1);
+    expect(r.kpis.showUpRate).toBe(0);
+  });
+
+  it('a booking-side filter must not turn ordinary boarders into walk-ups', () => {
+    // bookedBy filters bookings only — attendance has no such column. Filtering
+    // to admin-made bookings hides L1's self-made one, so testing walk-ups
+    // against the narrowed set would report L1's boarding as a walk-up.
+    const allBookings = [bk('L1', '2026-07-09'), bk('L2', '2026-07-09')];
+    const adminOnly = [bk('L2', '2026-07-09')]; // L1 booked for themselves
+    const rows = [at('L1', '2026-07-09'), at('L2', '2026-07-09')];
+
+    const r = aggregateAttendance({
+      bookings: adminOnly,
+      bookingsForWalkUp: allBookings, // cohort depth, bookedBy NOT applied
+      attendanceAll: rows,
+      attendanceForJoin: rows,
+      attendanceForComposition: rows,
+      learners,
+      labels,
+    });
+
+    expect(r.kpis.walkUps).toBe(0);
+    // The booking-side filter still narrows what is ANALYSED, just not the
+    // definition of "had a booking".
+    expect(r.kpis.bookedOnScannedDays).toBe(1);
+  });
+
+  it('never reports more scanned routes than the bookings cover', () => {
+    // Coverage is a fraction of the ANALYSED bookings. Counting distinct routes
+    // straight off the attendance array would report "2 of 1" here.
+    const oneRoute = [bk('L1', '2026-07-09', 'R1')];
+    const wideAttendance = [
+      at('L1', '2026-07-09', { route_id: 'R1' }),
+      at('L2', '2026-07-09', { route_id: 'R2' }),
+    ];
+    const r = agg(oneRoute, wideAttendance);
+
+    expect(r.coverage.routesInRange).toBe(1);
+    expect(r.coverage.routesWithAttendance).toBe(1);
+    expect(r.coverage.routesWithAttendance).toBeLessThanOrEqual(r.coverage.routesInRange);
   });
 });

@@ -7,7 +7,8 @@ import { istToday, addDays } from '@/lib/booking/window';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import {
   aggregateAttendance, aggregateBookings, buildFacets, filterAttendance, filterBookings,
-  type AnalyticsFilters, type AttendanceRow, type BookingRow, type Labels, type LearnerDim,
+  type AnalyticsFilters, type AnalyticsPayload, type AttendanceRow, type BookingRow,
+  type Labels, type LearnerDim,
 } from '@/lib/booking/analytics';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -30,8 +31,27 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 }
 
 const isMissingTable = (e: unknown) => (e as { code?: string } | null)?.code === '42P01';
-const isDate = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const IN_CHUNK = 150;
+const MAX_SPAN_DAYS = 366;
+
+/**
+ * Shape AND calendar validity. A shape-only regex accepts '2026-13-45', which
+ * reaches Postgres as a malformed date and comes back as error 22008 — surfacing
+ * to the client as a confusing 500 instead of "you sent a bad date". Round-tripping
+ * through Date.UTC catches the rollover, since an invalid day silently becomes a
+ * different valid one.
+ */
+function isDate(v: string | null): v is string {
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+
+const daysApart = (from: string, to: string) =>
+  Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+  );
 
 const list = (v: string | null): string[] =>
   v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -74,8 +94,32 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
 
     const params = new URL(request.url).searchParams;
     const today = istToday();
-    const to = isDate(params.get('to')) ? (params.get('to') as string) : today;
-    const from = isDate(params.get('from')) ? (params.get('from') as string) : addDays(to, -29);
+    const rawTo = params.get('to');
+    const rawFrom = params.get('from');
+
+    // Bad input is the client's error, not ours — 400 with a reason beats a 500
+    // from Postgres or a silently misleading all-zero 200.
+    if ((rawTo && !isDate(rawTo)) || (rawFrom && !isDate(rawFrom))) {
+      return NextResponse.json(
+        { error: 'from and to must be valid calendar dates in YYYY-MM-DD form' },
+        { status: 400 }
+      );
+    }
+    const to = isDate(rawTo) ? rawTo : today;
+    const from = isDate(rawFrom) ? rawFrom : addDays(to, -29);
+
+    const span = daysApart(from, to);
+    if (span < 0) {
+      return NextResponse.json({ error: 'from must not be after to' }, { status: 400 });
+    }
+    // Everything but the date range is filtered in memory, so an unbounded span
+    // pulls the whole table into the lambda. Cap it rather than let it grow.
+    if (span > MAX_SPAN_DAYS) {
+      return NextResponse.json(
+        { error: `Date range must not exceed ${MAX_SPAN_DAYS} days` },
+        { status: 400 }
+      );
+    }
 
     const filters: AnalyticsFilters = {
       routeIds: list(params.get('route_id')),
@@ -160,34 +204,43 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
 
     const fBookings = filterBookings(bookings, learners, filters);
 
-    // Record-level filters (direction/status/method) must not move the show-up
-    // denominator, so the booked↔boarded join sees attendance filtered on cohort
-    // dimensions only. The composition tallies (records/present/absent/direction/
-    // method) see the full filter set. See aggregateAttendance's docstring.
-    const attendanceForJoin = filterAttendance(attendance, learners, {
+    // Each aggregate input is filtered to a different DEPTH. A filter selects
+    // what you look at; it must never redefine what you measure against.
+    // See AttendanceInput's docstring in lib/booking/analytics-attendance.ts.
+    const cohortOnly = { ...filters, direction: null, attStatus: null, method: null };
+
+    // Cohort depth, minus bookedBy: answers "did this learner have ANY booking
+    // that day?" for the walk-up test. bookedBy has no attendance counterpart,
+    // so letting it narrow this set reports every Self booker's boarding as a
+    // walk-up.
+    const bookingsForWalkUp = filterBookings(bookings, learners, {
       ...filters,
-      direction: null,
-      attStatus: null,
-      method: null,
+      bookedBy: null,
     });
+    const attendanceForJoin = filterAttendance(attendance, learners, cohortOnly);
     const attendanceForComposition = filterAttendance(attendance, learners, filters);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        range: { from, to },
-        facets,
-        bookings: aggregateBookings(fBookings, learners, labels),
-        attendance: aggregateAttendance(
-          fBookings,
-          attendanceForJoin,
-          attendanceForComposition,
-          learners,
-          labels,
-          attUnavailable
-        ),
-      },
-    });
+    const payload: AnalyticsPayload = {
+      range: { from, to },
+      facets,
+      bookings: aggregateBookings(fBookings, learners, labels),
+      attendance: aggregateAttendance({
+        bookings: fBookings,
+        bookingsForWalkUp,
+        // Deliberately the RAW range array — never `attendanceForJoin`. This
+        // drives the scanned-route-day gate, which asks "was this route-day
+        // scanned by anyone?"; any narrowing re-reads it as "was this cohort
+        // scanned?" and drops the fully-no-showed days out of the denominator.
+        attendanceAll: attendance,
+        attendanceForJoin,
+        attendanceForComposition,
+        learners,
+        labels,
+        unavailable: attUnavailable,
+      }),
+    };
+
+    return NextResponse.json({ success: true, data: payload });
   } catch (e) {
     console.error('admin/bookings/analytics error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
