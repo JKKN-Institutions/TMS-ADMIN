@@ -138,6 +138,14 @@ export interface AttendanceBlock {
     boarded: number;
     showUpRate: number;
     noShows: number;
+    /**
+     * Percent of the ANALYSED attendance captured manually rather than scanned.
+     * Deliberately measured over the cohort (non-method-filtered) population,
+     * because it is a data-quality caveat ON the show-up figures — computing it
+     * from the method-filtered records would make `?method=qr_scan` report 0%
+     * and silently retract a warning that is genuinely warranted.
+     */
+    manualSharePct: number;
   };
   perDay: { date: string; booked: number; boarded: number; noShows: number }[];
   noShowByRoute: ShowRow[];

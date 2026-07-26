@@ -219,7 +219,7 @@ export default function BookingsTab({ data }: { data: BookingsBlock }) {
       */}
       <ChartCard
         title="Top boarding stops"
-        subtitle="The 15 busiest stops in range — which pickup points carry demand"
+        subtitle={`The ${num(data.topStops.length)} busiest stops in range — which pickup points carry demand`}
         hasData={data.topStops.length > 0}
         chart={hbar(data.topStops)}
         table={<VizTable head={['Stop', 'Bookings']} rows={data.topStops.map((s) => [s.label, num(s.count)])} />}

@@ -108,7 +108,9 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
     </ResponsiveContainer>
   );
 
-  const manualShare = k.records > 0 ? Math.round((data.byMethod.manual / k.records) * 100) : 0;
+  // From kpis, NOT byMethod/records — those are both method-filtered, so they
+  // move together and `?method=qr_scan` would report 0% and retract the warning.
+  const manualShare = Math.round(k.manualSharePct);
 
   return (
     <div className="space-y-6">
@@ -116,9 +118,20 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile label="Attendance records" value={num(k.records)} sub={`${num(data.coverage.daysWithAttendance)} days scanned`} Icon={ScanLine} tone="text-primary" />
-        <StatTile label="Marked present" value={num(k.present)} sub={`${num(k.walkUps)} walk-ups`} Icon={CheckCircle2} tone="text-[var(--viz-good)]" />
+        {/*
+          `present` is method/status-filtered but `walkUps` is not, so pairing
+          them read as "0 present · 2 walk-ups" under ?att_status=absent — a
+          walk-up is by definition someone who boarded. Each figure now sits
+          with a sub drawn from its OWN population; walk-ups moved to the Meter,
+          which is already the join-population tile.
+        */}
+        <StatTile label="Marked present" value={num(k.present)} sub={`of ${num(k.records)} records`} Icon={CheckCircle2} tone="text-[var(--viz-good)]" />
         <StatTile label="No-shows" value={num(k.noShows)} sub={`of ${num(k.bookedOnScannedDays)} booked on scanned days`} Icon={UserX} tone="text-[var(--viz-serious)]" />
-        <Meter label="Show-up rate" rate={k.showUpRate} caption={`${num(k.boarded)} boarded of ${num(k.bookedOnScannedDays)} booked on scanned days`} />
+        <Meter
+          label="Show-up rate"
+          rate={k.showUpRate}
+          caption={`${num(k.boarded)} boarded of ${num(k.bookedOnScannedDays)} booked on scanned days${k.walkUps > 0 ? ` · ${num(k.walkUps)} walk-ups` : ''}`}
+        />
       </div>
 
       <ChartCard

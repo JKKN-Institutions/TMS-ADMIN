@@ -247,6 +247,70 @@ describe('aggregateAttendance', () => {
     expect(r.kpis.bookedOnScannedDays).toBe(1);
   });
 
+  it('counts a day as scanned only if a BOOKED route was scanned that day', () => {
+    // R2 has bookings but was never scanned. R1 was scanned on 07-09. Under a
+    // route filter selecting only R2, a date-only test would see "07-09 was
+    // scanned" (by R1) and claim the day as covered. Prod scan calendars are
+    // near-disjoint, so any single-route filter hits this.
+    const r2Only = [bk('L1', '2026-07-09', 'R2'), bk('L2', '2026-07-10', 'R2')];
+    const r1Attendance = [at('L3', '2026-07-09', { route_id: 'R1' })];
+    const r = agg(r2Only, r1Attendance);
+
+    expect(r.coverage.routesWithAttendance).toBe(0);
+    expect(r.coverage.daysWithAttendance).toBe(0); // NOT 1 — 07-09 was scanned on R1, not R2
+    expect(r.coverage.daysInRange).toBe(2);
+  });
+
+  it('orders byDepartment by no-shows descending, not alphabetically', () => {
+    // 'Aardvark' sorts first alphabetically but has the FEWEST no-shows. The tab
+    // slices [0,15] off this array under a "Top 15" label, so an alphabetical
+    // order silently turns the chart into "the alphabetically-first 15".
+    const local = new Map<string, LearnerDim>([
+      ['A1', { id: 'A1', profileId: null, institutionId: null, departmentId: 'DA', programId: null }],
+      ['B1', { id: 'B1', profileId: null, institutionId: null, departmentId: 'DB', programId: null }],
+      ['B2', { id: 'B2', profileId: null, institutionId: null, departmentId: 'DB', programId: null }],
+      ['B3', { id: 'B3', profileId: null, institutionId: null, departmentId: 'DB', programId: null }],
+    ]);
+    const localLabels: Labels = {
+      ...labels,
+      departments: new Map([['DA', 'Aardvark Studies'], ['DB', 'Zoology']]),
+    };
+    const rows = [bk('A1', '2026-07-09'), bk('B1', '2026-07-09'), bk('B2', '2026-07-09'), bk('B3', '2026-07-09')];
+    const scan = [at('A1', '2026-07-09')]; // only A1 boarded
+
+    const r = aggregateAttendance({
+      bookings: rows,
+      bookingsForWalkUp: rows,
+      attendanceAll: scan,
+      attendanceForJoin: scan,
+      attendanceForComposition: scan,
+      learners: local,
+      labels: localLabels,
+    });
+
+    expect(r.byDepartment.map((d) => d.label)).toEqual(['Zoology', 'Aardvark Studies']);
+    expect(r.byDepartment[0].noShows).toBe(3);
+  });
+
+  it('measures the manual-capture share over the JOIN population, not the filtered records', () => {
+    // The manual share caveats the show-up figures, which are never
+    // method-filtered. Filtering records to qr_scan must NOT report 0% manual
+    // and retract a warning that still applies.
+    const rows = [bk('L1', '2026-07-09'), bk('L2', '2026-07-09')];
+    const join = [
+      at('L1', '2026-07-09', { method: 'qr_scan' }),
+      at('L2', '2026-07-09', { method: 'manual' }),
+    ];
+    const qrOnly = join.filter((a) => a.method === 'qr_scan');
+
+    const unfiltered = agg(rows, join);
+    const filtered = agg(rows, join, { attendanceForComposition: qrOnly });
+
+    expect(unfiltered.kpis.manualSharePct).toBe(50);
+    expect(filtered.kpis.manualSharePct).toBe(50); // unmoved by the record filter
+    expect(filtered.byMethod).toEqual({ qr_scan: 1, manual: 0 }); // composition still narrows
+  });
+
   it('never reports more scanned routes than the bookings cover', () => {
     // Coverage is a fraction of the ANALYSED bookings. Counting distinct routes
     // straight off the attendance array would report "2 of 1" here.

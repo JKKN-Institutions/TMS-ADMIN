@@ -173,13 +173,19 @@ export function aggregateAttendance({
     coverage: (() => {
       const routes = new Set(bookings.map((b) => b.route_id));
       const days = new Set(bookings.map((b) => b.travel_date));
-      const scannedDates = new Set(attendanceAll.map((a) => a.trip_date));
+      // BOTH sides go through isScanned. A date-only test here would count a day
+      // as scanned because SOME route ran a scanner that day, even under a route
+      // filter selecting a route that has never been scanned — the callout would
+      // read "0 of 1 routes across 6 of 14 booked days" when the honest answer is
+      // 0 days. Scan calendars are near-disjoint in prod, so any single-route
+      // filter hits it.
+      const scannedOnSomeBookedRoute = (d: string) => [...routes].some((r) => isScanned(r, d));
       return {
         routesWithAttendance: [...routes].filter((r) =>
           [...days].some((d) => isScanned(r, d))
         ).length,
         routesInRange: routes.size,
-        daysWithAttendance: [...days].filter((d) => scannedDates.has(d)).length,
+        daysWithAttendance: [...days].filter(scannedOnSomeBookedRoute).length,
         daysInRange: days.size,
       };
     })(),
@@ -192,6 +198,12 @@ export function aggregateAttendance({
       boarded,
       showUpRate: pct(boarded, bookedOnScannedDays),
       noShows: bookedOnScannedDays - boarded,
+      // From the JOIN population, not the composition one — this caveats the
+      // show-up figures, which are themselves never method-filtered.
+      manualSharePct: pct(
+        count(attendanceForJoin, (a) => a.method, 'manual'),
+        attendanceForJoin.length
+      ),
     },
     perDay: [...perDayMap.entries()]
       .map(([date, t]) => ({
@@ -214,8 +226,10 @@ export function aggregateAttendance({
       present: count(attendanceForComposition, (a) => a.status, 'present'),
       absent: count(attendanceForComposition, (a) => a.status, 'absent'),
     },
-    byDepartment: showRows(deptMap, labels.departments).sort(
-      (a, b) => a.label.localeCompare(b.label)
-    ),
+    // Left in showRows' no-shows-DESCENDING order, like noShowByRoute. An
+    // alphabetical re-sort here used to discard the ranking, and the tab slices
+    // [0,15] off this array under a "Top 15" label — so the chart showed the
+    // alphabetically-first 15 with the tallest bar buried mid-list.
+    byDepartment: showRows(deptMap, labels.departments),
   };
 }
