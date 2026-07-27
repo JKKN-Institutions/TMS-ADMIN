@@ -165,21 +165,38 @@ describe('aggregateAttendance', () => {
     ]);
   });
 
-  it('a null-route attendance row conservatively qualifies bookings on that date across ALL routes', () => {
+  it('a null-route attendance row qualifies NOTHING — it must not reopen the (route, date) gate', () => {
     const twoRouteBookings = [bk('L1', '2026-07-09', 'R1'), bk('L2', '2026-07-09', 'R2')];
-    // An attendance row with no route attribution -- can't tell which route it belongs
-    // to, so it qualifies the whole date rather than excluding everything on it.
+    // tms_attendance.route_id is nullable. Such a row cannot be attributed to a
+    // route, and qualifying the whole date on its behalf would fabricate a 100%
+    // no-show for every route that never ran a scanner — the exact defect the
+    // test above guards against, re-entering through the null branch. In prod
+    // that is 20 of 24 routes.
     const unknownRouteAttendance = [at('L9', '2026-07-09', { route_id: null })];
     const r = agg(twoRouteBookings, unknownRouteAttendance);
 
-    // Neither L1 nor L2 boarded, so both are no-shows, but BOTH still enter the
-    // denominator because 2026-07-09 was qualified via the null-route row.
-    expect(r.kpis.bookedOnScannedDays).toBe(2);
-    expect(r.kpis.noShows).toBe(2);
-    // The null-route fallback must reach coverage too — this is the inverse of
-    // the (route, date) tightening, and it was previously unasserted.
-    expect(r.coverage.daysWithAttendance).toBe(1);
-    expect(r.coverage.routesWithAttendance).toBe(2);
+    expect(r.kpis.bookedOnScannedDays).toBe(0);
+    expect(r.kpis.noShows).toBe(0);
+    expect(r.noShowByRoute).toEqual([]);
+    expect(r.coverage.daysWithAttendance).toBe(0);
+    expect(r.coverage.routesWithAttendance).toBe(0);
+  });
+
+  it('a null-route row does not suppress a route that WAS attributed the same day', () => {
+    // Dropping the null-route fallback must not throw away the whole date: rows
+    // carrying a route still qualify their own route-day. Only the unattributable
+    // row contributes nothing.
+    const twoRouteBookings = [bk('L1', '2026-07-09', 'R1'), bk('L2', '2026-07-09', 'R2')];
+    const mixed = [
+      at('L1', '2026-07-09', { route_id: 'R1' }), // attributable
+      at('L9', '2026-07-09', { route_id: null }), // not attributable
+    ];
+    const r = agg(twoRouteBookings, mixed);
+
+    // R1 qualifies via its own row; R2 was never scanned and stays out.
+    expect(r.kpis.bookedOnScannedDays).toBe(1);
+    expect(r.kpis.boarded).toBe(1);
+    expect(r.noShowByRoute.some((row) => row.id === 'R2')).toBe(false);
   });
 
   it('a record-level filter on attendanceForComposition must not move the show-up denominator', () => {

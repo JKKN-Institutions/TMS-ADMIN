@@ -96,21 +96,26 @@ export function aggregateAttendance({
   const key = (learner: string, date: string) => `${learner}:${date}`;
 
   // The show-up gate is (route, date): production attendance covers a minority
-  // of routes (3 of 24), so gating on date alone would let an unscanned route's
-  // bookings enter the denominator with zero boardings and rank at the top of
-  // "worst routes" — naming well-behaved routes as the worst. A route-less
-  // attendance row (route_id null) can't be attributed to a route, so it
-  // conservatively qualifies the whole date instead.
+  // of routes (4 of 24 on 2026-07-27), so gating on date alone would let an
+  // unscanned route's bookings enter the denominator with zero boardings and
+  // rank at the top of "worst routes" — naming well-behaved routes as the worst.
+  //
+  // A route-less row qualifies NOTHING. `tms_attendance.route_id` is nullable,
+  // and such a row cannot be attributed to a route; attributing it to ALL of
+  // them reopens the very hole this gate closes, since one row would qualify all
+  // 24 routes for that date and the ~20 that never ran a scanner would re-enter
+  // the denominator at zero boardings. Dropping it does NOT discard the date —
+  // rows that DO carry a route still qualify their own route-day just below, so
+  // only the unattributable row contributes nothing. Attributing it to no route
+  // under-counts by one row; attributing it to every route fabricates a 100%
+  // no-show for every route that was never scanned.
   const scannedRouteDays = new Set(
     attendanceAll
       .filter((a): a is AttendanceRow & { route_id: string } => a.route_id !== null)
       .map((a) => `${a.route_id}:${a.trip_date}`)
   );
-  const scannedDatesUnknownRoute = new Set(
-    attendanceAll.filter((a) => a.route_id === null).map((a) => a.trip_date)
-  );
   const isScanned = (routeId: string, date: string) =>
-    scannedRouteDays.has(`${routeId}:${date}`) || scannedDatesUnknownRoute.has(date);
+    scannedRouteDays.has(`${routeId}:${date}`);
 
   // (learner, date) pairs that actually boarded — `present` in either direction.
   const boardedKeys = new Set(
