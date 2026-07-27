@@ -242,6 +242,62 @@ neither can be re-sent by accident.
 | Real dangling `stop_id` references | 0 ✅ |
 | Learners whose stop is not on their route | 0 ✅ |
 
+## Phase 4 — route 24 stops serving the corridor
+
+Added 2026-07-27. Goal: route 24 should no longer serve stops 13–21, which route 01
+now covers.
+
+**A hard delete is impossible and was rejected.** Route 24's stops 13–21 are referenced
+by **172 historical bookings** (25 Jun – 25 Jul, none in the future) under a `NO ACTION`
+foreign key, so `DELETE` aborts. Even if it did not, it would `SET NULL` on 62
+attendance rows and `CASCADE` away 18 fee-rate rows. Those bookings and attendance rows
+are the record that students really did board there; a timetable edit must not rewrite
+them.
+
+`tms_route_stop` has **no `is_active` or `deleted_at` column**, so "route serves this
+stop" versus "route no longer serves it" is not expressible in the schema today. Adding
+one was considered and deferred — it would require updating every consumer that lists
+route stops (booking window, roster, boarding scan, route detail, exports), which is a
+larger change than this need justifies.
+
+**What was done instead:** the 3 staff still bound to those stops moved to route 01's
+same-named stops.
+
+| Staff | Stop |
+|---|---|
+| buvaneswari.g@jkkn.ac.in | COLLOUR PATTI |
+| faculty@jkkn.ac.in | COLLOUR PATTI |
+| vignesh_sasikumar@jkkn.a.c.in | KUPPANOOR |
+
+Route 24's stops 13–21 now carry **0 learners and 0 staff**, so the driver skips that
+stretch in practice. The rows remain purely as anchors for past bookings. This is the
+honest representation given the schema: nobody is assigned there, and history still
+resolves.
+
+Implemented in `supabase/migrations/20260727180000_move_corridor_staff_to_route_01.sql`.
+
+### Final state, end of 2026-07-27
+
+| Route | Bus | Seats | Learners | Staff | Total riders |
+|---|---|---|---|---|---|
+| 24 | TN34MB5991 | 60 | 61 | 1 | **62** (2 over) |
+| 01 | TN30BH1040 | 60 | 30 | 3 | **33** |
+
+Route 24 began the day at 90 learners, so this is a 28-rider improvement, but it is
+**still 2 over its 60 seats**. Closing that gap needs either a larger vehicle on route
+24 or moving 2 more riders to route 01, which has 27 spare seats. Left open
+deliberately rather than absorbed silently.
+
+### Phase 4 verification results
+
+| Check | Result |
+|---|---|
+| Route 24 stops 13–21 learners | 0 on all 9 ✅ |
+| Route 24 stops 13–21 staff | 0 on all 9 ✅ |
+| Historical bookings preserved | 172 still resolve ✅ |
+| Attendance rows preserved | 62 still resolve ✅ |
+| Fee-rate rows preserved | 18 intact ✅ |
+
 ## Out of scope
 
 - Latitude/longitude for the new stops — route 24's own copies have none, so there is
