@@ -298,6 +298,73 @@ deliberately rather than absorbed silently.
 | Attendance rows preserved | 62 still resolve ✅ |
 | Fee-rate rows preserved | 18 intact ✅ |
 
+## Phase 5 — route 24 stops listing the corridor (`is_active`)
+
+Added 2026-07-27. Phase 4 emptied route 24's stops 13–21 of riders but left them on the
+timetable. This removes them from it.
+
+The stops still cannot be deleted, for the reasons in phase 4 — 172 historical bookings
+hold them under a `NO ACTION` foreign key. The deferred soft-delete flag was therefore
+built rather than deferred again.
+
+### Schema
+
+```sql
+ALTER TABLE tms_route_stop ADD COLUMN is_active boolean NOT NULL DEFAULT true;
+CREATE INDEX idx_tms_route_stop_route_active
+  ON tms_route_stop (route_id, sequence_order) WHERE is_active;
+```
+
+Route 24's stops **13–21** are set `is_active = false`. Stop 12
+(`JALAKANDAPURAM BUS STOP`) stays active — its 12 learners ride route 24. Stop 22
+(`COLLEGE`) stays active — it is the destination. Route 24 goes from 22 listed stops to
+**13**.
+
+The migration ends with a guard that raises if any retired stop still has a learner or
+staff member allocated, so retiring a stop can never silently strand someone.
+
+### The consumer rule
+
+Every `tms_route_stop` read falls into one of two categories, and getting this wrong in
+either direction is a bug:
+
+| | Filter `is_active`? | Why |
+|---|---|---|
+| **Listing a route's itinerary** | **Yes** | the retired stop is not part of the journey |
+| **Resolving a known stop id** | **No** | the id came from a booking or allocation; filtering makes history render blank |
+
+Filtered (6 sites):
+
+- `app/api/admin/routes/[routeId]/stops/route.ts` — admin timetable
+- `lib/routes/detail.ts` — route list + detail
+- `app/api/student/route/route.ts` — student route view
+- `app/api/boarding/attendance/roster/route.ts` — boarding roster
+- `lib/driver/routes.ts` — driver route view
+- `app/api/admin/routes/search-stops/route.ts` — stop picker (must not offer a retired stop)
+
+Deliberately **not** filtered:
+
+- `app/api/student/transport-context/route.ts` — `.eq('id', stopId)` single lookup
+- `app/api/admin/schedules/manifest/route.ts` — resolves names for existing bookings
+- `app/api/boarding/passengers/route.ts` — builds a sequence map for sorting; filtering
+  would lose ordering for retired stops
+- `app/api/admin/fees/[id]/stop-rates/*` — retired stops keep their fare rows
+- `lib/route-optimization/*`, `app/api/admin/bookings/route.ts` — analysis and history
+
+### Phase 5 verification results
+
+| Check | Result |
+|---|---|
+| Route 24 listed stops | 22 → **13** ✅ |
+| Route 24 retired stops | 9 ✅ |
+| Retired stops elsewhere in the system | 0 — nothing else affected ✅ |
+| Historical bookings on retired stops still resolving | 172 ✅ |
+| Attendance rows on retired stops still resolving | 62 ✅ |
+| Fee-rate rows on retired stops | 18, intact ✅ |
+| Retired stops with a learner or staff still allocated | **0** ✅ |
+| New TypeScript errors from the 6 edits | **0** (the one error in search-stops predates the change — confirmed by stashing) ✅ |
+| `npm run build` | passes ✅ |
+
 ## Out of scope
 
 - Latitude/longitude for the new stops — route 24's own copies have none, so there is

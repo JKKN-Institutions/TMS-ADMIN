@@ -58,6 +58,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       .from('tms_route_stop')
       .select('id, route_id, stop_name, stop_time, evening_time, sequence_order')
       .in('route_id', routeIds)
+      .eq('is_active', true)
       .order('sequence_order', { ascending: true });
     // Resolve each stop's time to the selected leg BEFORE handing to the pure helper.
     const stopsByRoute = new Map<string, OrderedStop[]>();

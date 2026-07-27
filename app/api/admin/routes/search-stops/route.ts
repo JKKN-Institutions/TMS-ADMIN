@@ -36,6 +36,8 @@ export async function GET(request: NextRequest) {
         sequence_order,
         route_id
       `)
+      // Retired stops must not be offered as a destination to copy or assign to.
+      .eq('is_active', true)
       .order('stop_name');
 
     // Exclude the current route if specified

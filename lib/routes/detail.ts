@@ -124,6 +124,7 @@ export async function loadRouteDetails(svc: SupabaseClient, routeIds: string[]):
     .from('tms_route_stop')
     .select('id, route_id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
     .in('route_id', ids)
+    .eq('is_active', true)
     .order('sequence_order', { ascending: true });
   for (const s of (stopData ?? []) as Array<{
     id: string; route_id: string; stop_name: string; stop_time: string | null; evening_time: string | null; sequence_order: number | null; is_major_stop: boolean | null;

@@ -114,6 +114,7 @@ export async function getDriverRoutes(
     .from('tms_route_stop')
     .select(STOP_SELECT)
     .in('route_id', ids)
+    .eq('is_active', true)
     .order('sequence_order', { ascending: true });
   const stopRows = (stopsRes.data ?? []) as StopRowRaw[];
 

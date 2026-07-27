@@ -74,6 +74,7 @@ async function getMyRoute(_request: NextRequest, auth: AuthContext) {
       .from('tms_route_stop')
       .select('id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
       .eq('route_id', route.id)
+      .eq('is_active', true)
       .order('sequence_order', { ascending: true });
     const stops = (stopsRes.data ?? []) as StopRow[];
 

@@ -49,6 +49,7 @@ export async function GET(
       .from('tms_route_stop')
       .select('id, stop_name, stop_time, evening_time, sequence_order, is_major_stop')
       .eq('route_id', routeId)
+      .eq('is_active', true)
       .order('sequence_order');
 
     if (stopsError) {
