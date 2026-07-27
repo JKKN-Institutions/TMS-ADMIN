@@ -190,6 +190,58 @@ Implemented in `supabase/migrations/20260727140000_move_jalakandapuram_learners_
 | Dangling `stop_id` references | 0 ✅ |
 | Learners whose stop is not on their route | 0 on both routes ✅ |
 
+## Phase 3 — JALAKANDAPURAM BUS STOP reverts to route 24
+
+Added 2026-07-27, same day, reversing part of phase 2.
+
+The 12 learners boarding at `JALAKANDAPURAM BUS STOP` are to stay on route 24 after
+all. That stop is removed from route 01 entirely and its learners and bookings go back.
+
+| | Phase 2 | Phase 3 | Seats |
+|---|---|---|---|
+| Route 24 | 49 | **61** | 60 |
+| Route 01 | 42 | **30** | 60 |
+
+**Route 24 is 1 learner over its 60 seats.** Accepted — it started the day at 90, so
+this is still a 29-seat improvement. Flagged rather than silently absorbed; resolving it
+needs either a larger vehicle or moving one more learner, which is a separate decision.
+
+Route 01 reverts to exactly the phase 1 shape: 10 stops beginning at
+`JALAKANDAPURAM SANTHAPETTAI` 07:42, which regains `is_major_stop` as the origin.
+Route 24 is unchanged and still calls at the bus stop at 07:40, so no learner's physical
+boarding point moved in either direction.
+
+Deleting route 01's copy of the stop `CASCADE`s to its 2 `tms_fee_structure_stop_rate`
+rows. That is correct here — route 01 no longer calls there and route 24 keeps its own
+rows — but the delete is guarded so it only runs once no learner, booking, attendance or
+staff row still points at the stop, making the cascade the only side effect.
+
+The other 29 learners from phase 2 stay on route 01. Implemented in
+`supabase/migrations/20260727160000_return_jalakandapuram_bus_stop_to_route_24.sql`.
+
+### Notifications sent
+
+| Notification | Recipients | Purpose |
+|---|---|---|
+| `eff3340f…` "Your bus has changed - now Route 01" | 42 | Phase 2 move |
+| `593cda9b…` "Correction - you stay on Route 24" | 12 | Phase 3 revert |
+
+The 12 phase-3 learners received the phase-2 message before the revert, so the
+correction was required rather than optional. Both carry an `idempotency_key`, so
+neither can be re-sent by accident.
+
+### Phase 3 verification results
+
+| Check | Result |
+|---|---|
+| Learners back on route 24's bus stop | 12 ✅ |
+| Route 01 stop row removed | gone, 0 orphan fee rows ✅ |
+| Route 24's own bus-stop fee rows | 2, intact ✅ |
+| Route 01 shape | 10 stops, origin SANTHAPETTAI 07:42 ✅ |
+| Bookings whose stop belongs to another route | 0 ✅ |
+| Real dangling `stop_id` references | 0 ✅ |
+| Learners whose stop is not on their route | 0 ✅ |
+
 ## Out of scope
 
 - Latitude/longitude for the new stops — route 24's own copies have none, so there is
