@@ -8,3 +8,4 @@ export * from './analytics-dims';
 export * from './analytics-filters';
 export * from './analytics-bookings';
 export * from './analytics-attendance';
+export * from './analytics-forward';

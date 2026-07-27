@@ -9,7 +9,7 @@ import React, { Suspense, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
-  AlertTriangle, ArrowLeft, CalendarCheck, Loader2, RefreshCw, ScanLine,
+  AlertTriangle, ArrowLeft, CalendarCheck, CalendarClock, Loader2, RefreshCw, ScanLine,
 } from 'lucide-react';
 import Link from 'next/link';
 import { VIZ_CSS, num } from '../../_viz/kit';
@@ -17,11 +17,14 @@ import { TabNav } from './controls';
 import { FilterBar, parseFilters, serializeFilters } from './filter-bar';
 import BookingsTab from './bookings-tab';
 import AttendanceTab from './attendance-tab';
+import UpcomingTab from './upcoming-tab';
+import TodayStrip from './today-strip';
 import type { AnalyticsPayload } from '@/lib/booking/analytics';
 
 const TABS = [
   { id: 'bookings', label: 'Bookings', Icon: CalendarCheck },
   { id: 'attendance', label: 'Attendance', Icon: ScanLine },
+  { id: 'upcoming', label: 'Upcoming', Icon: CalendarClock },
 ];
 
 async function fetchAnalytics(qs: string): Promise<AnalyticsPayload> {
@@ -58,11 +61,15 @@ function AnalyticsInner() {
     staleTime: 30_000,
   });
 
-  const resultLabel = data
-    ? `${num(data.bookings.kpis.total)} bookings · ${num(data.attendance.kpis.records)} attendance records · ${data.range.from} → ${data.range.to}`
-    : isError
+  // The Upcoming tab ignores the selected range, so echoing that range back
+  // while it is active would describe a window its figures do not come from.
+  const resultLabel = !data
+    ? isError
       ? 'Failed to load'
-      : 'Loading…';
+      : 'Loading…'
+    : tab === 'upcoming'
+      ? `${num(data.upcoming.kpis.total)} booked ahead · ${data.upcoming.from} → ${data.upcoming.to}`
+      : `${num(data.bookings.kpis.total)} bookings · ${num(data.attendance.kpis.records)} attendance records · ${data.range.from} → ${data.range.to}`;
 
   const body = isError ? (
     // A calendar-invalid date, an inverted range, or a >366-day span all come
@@ -94,11 +101,9 @@ function AnalyticsInner() {
     // Hold the previous render at reduced opacity during a refetch rather than
     // flashing a skeleton — the frame stays stable while filters change.
     <div className={isFetching ? 'pointer-events-none opacity-60 transition-opacity' : 'transition-opacity'}>
-      {tab === 'bookings' ? (
-        <BookingsTab data={data.bookings} />
-      ) : (
-        <AttendanceTab data={data.attendance} />
-      )}
+      {tab === 'bookings' && <BookingsTab data={data.bookings} />}
+      {tab === 'attendance' && <AttendanceTab data={data.attendance} />}
+      {tab === 'upcoming' && <UpcomingTab data={data.upcoming} />}
     </div>
   );
 
@@ -138,8 +143,14 @@ function AnalyticsInner() {
         to={to}
         onRangeChange={(f, t) => push(serializeFilters(filters, f, t))}
         showAttendanceFilters={tab === 'attendance'}
+        // The Upcoming tab runs on a FIXED forward horizon, not the selected
+        // range, so leaving the range picker live there would imply a control
+        // that changes nothing on screen.
+        showRange={tab !== 'upcoming'}
         resultLabel={resultLabel}
       />
+
+      {data && <TodayStrip data={data.today} />}
 
       <TabNav tabs={TABS} active={tab} onChange={setTab} />
 

@@ -6,7 +6,8 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { istToday, addDays } from '@/lib/booking/window';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import {
-  aggregateAttendance, aggregateBookings, buildFacets, filterAttendance, filterBookings,
+  aggregateAttendance, aggregateBookings, aggregateToday, aggregateUpcoming,
+  buildFacets, filterAttendance, filterBookings,
   type AnalyticsFilters, type AnalyticsPayload, type AttendanceRow, type BookingRow,
   type Labels, type LearnerDim,
 } from '@/lib/booking/analytics';
@@ -33,6 +34,9 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 const isMissingTable = (e: unknown) => (e as { code?: string } | null)?.code === '42P01';
 const IN_CHUNK = 150;
 const MAX_SPAN_DAYS = 366;
+// Forward horizon, matching the /bookings list page's today..today+92 default so
+// the two screens agree on what "upcoming" means.
+const FORWARD_DAYS = 92;
 
 /**
  * Shape AND calendar validity. A shape-only regex accepts '2026-13-45', which
@@ -135,7 +139,13 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    const [bookingRes, attRes] = await Promise.all([
+    // The selected range ENDS at today by default, but bookings run ahead of it
+    // — 693 of 2,450 rows currently carry a future travel_date. So today and the
+    // forward horizon are fetched separately rather than being carved out of the
+    // range, and they stay fixed while the range picker moves.
+    const horizonEnd = addDays(today, FORWARD_DAYS);
+
+    const [bookingRes, attRes, forwardRes, todayAttRes, routeRes] = await Promise.all([
       svc
         .from('tms_booking')
         // No `id`, no `status` — the live table has neither.
@@ -147,6 +157,20 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         .select('learner_id, trip_date, route_id, stop_id, direction, status, method, is_walk_up')
         .gte('trip_date', from)
         .lte('trip_date', to),
+      // today .. today+FORWARD_DAYS, sliced below into "today" and "upcoming".
+      svc
+        .from('tms_booking')
+        .select('learner_id, travel_date, route_id, stop_id, booked_at, booked_by')
+        .gte('travel_date', today)
+        .lte('travel_date', horizonEnd),
+      svc
+        .from('tms_attendance')
+        .select('learner_id, trip_date, route_id, stop_id, direction, status, method, is_walk_up')
+        .eq('trip_date', today),
+      // Capacity comes from the ASSIGNED VEHICLE. tms_route.total_capacity is
+      // never written (0/null on 23 of 24 routes) — reading it would show every
+      // route at zero seats and therefore infinitely over capacity.
+      svc.from('tms_route').select('id, vehicle_id'),
     ]);
 
     if (bookingRes.error && !isMissingTable(bookingRes.error)) {
@@ -160,8 +184,23 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
     if (attUnavailable) console.error('admin/bookings/analytics attendance error:', attRes.error);
     const attendance = attUnavailable ? [] : ((attRes.data ?? []) as AttendanceRow[]);
 
+    // The forward blocks degrade independently: a failure here must not take out
+    // the retrospective tabs, which are the page's primary content.
+    if (forwardRes.error) console.error('admin/bookings/analytics forward error:', forwardRes.error);
+    const forward = (forwardRes.data ?? []) as BookingRow[];
+    const todayBookings = forward.filter((b) => b.travel_date === today);
+    const upcomingBookings = forward.filter((b) => b.travel_date > today);
+
+    if (todayAttRes.error) console.error('admin/bookings/analytics today-att error:', todayAttRes.error);
+    const todayAttendance = (todayAttRes.data ?? []) as AttendanceRow[];
+
     const learnerIds = [
-      ...new Set([...bookings.map((b) => b.learner_id), ...attendance.map((a) => a.learner_id)]),
+      ...new Set([
+        ...bookings.map((b) => b.learner_id),
+        ...attendance.map((a) => a.learner_id),
+        ...forward.map((b) => b.learner_id),
+        ...todayAttendance.map((a) => a.learner_id),
+      ]),
     ];
     const learners = new Map<string, LearnerDim>();
     for (const l of await fetchByIds<LearnerRow>(
@@ -183,9 +222,40 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       institutionIds: [...learners.values()].map((l) => l.institutionId),
       departmentIds: [...learners.values()].map((l) => l.departmentId),
       programIds: [...learners.values()].map((l) => l.programId),
-      routeIds: [...bookings.map((b) => b.route_id), ...attendance.map((a) => a.route_id)],
-      stopIds: [...bookings.map((b) => b.stop_id), ...attendance.map((a) => a.stop_id)],
+      // Forward routes/stops included, or every upcoming row renders as a raw UUID.
+      routeIds: [
+        ...bookings.map((b) => b.route_id),
+        ...attendance.map((a) => a.route_id),
+        ...forward.map((b) => b.route_id),
+        ...todayAttendance.map((a) => a.route_id),
+      ],
+      stopIds: [
+        ...bookings.map((b) => b.stop_id),
+        ...attendance.map((a) => a.stop_id),
+        ...forward.map((b) => b.stop_id),
+      ],
     });
+
+    // route id → seats, via the assigned vehicle. Routes with no vehicle, or a
+    // vehicle with no capacity recorded, are ABSENT from this map rather than
+    // present with 0 — the aggregation renders absent as "unknown" and a real 0
+    // as "no seats", and conflating them would mark every such route overloaded.
+    const capacities = new Map<string, number>();
+    if (routeRes.error) {
+      console.error('admin/bookings/analytics route error:', routeRes.error);
+    } else {
+      const routeRows = (routeRes.data ?? []) as { id: string; vehicle_id: string | null }[];
+      const vehicleIds = [...new Set(routeRows.map((r) => r.vehicle_id).filter((v): v is string => !!v))];
+      const seats = new Map(
+        (await fetchByIds<{ id: string; capacity: number | null }>(
+          svc, 'tms_vehicle', 'id, capacity', vehicleIds
+        )).map((v) => [v.id, v.capacity])
+      );
+      for (const r of routeRows) {
+        const cap = r.vehicle_id ? seats.get(r.vehicle_id) : null;
+        if (cap && cap > 0) capacities.set(r.id, cap);
+      }
+    }
 
     const labels: Labels = {
       // loadPassengerRefs returns routes as { routeNumber, routeName }; flatten to
@@ -238,6 +308,24 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         labels,
         unavailable: attUnavailable,
       }),
+      // Today's marking progress. Bookings take the full booking filters, but
+      // attendance takes cohortOnly: narrowing it by att_status would report
+      // every ABSENT learner as still-unmarked and send someone to re-scan a
+      // bus that was already finished.
+      today: aggregateToday(
+        today,
+        filterBookings(todayBookings, learners, filters),
+        filterAttendance(todayAttendance, learners, cohortOnly),
+        labels
+      ),
+      upcoming: aggregateUpcoming(
+        addDays(today, 1),
+        horizonEnd,
+        filterBookings(upcomingBookings, learners, filters),
+        learners,
+        labels,
+        capacities
+      ),
     };
 
     return NextResponse.json({ success: true, data: payload });

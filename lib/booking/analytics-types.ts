@@ -155,9 +155,83 @@ export interface AttendanceBlock {
   byDepartment: ShowRow[];
 }
 
+/** One route's upcoming load measured against its assigned vehicle's seats. */
+export interface CapacityRow extends CountRow {
+  /** Busiest single upcoming day for this route. */
+  peakDay: { date: string; count: number } | null;
+  /**
+   * Seats on the route's assigned vehicle, or null when unknown.
+   * NOTE: read from tms_vehicle.capacity via tms_route.vehicle_id, NOT from
+   * tms_route.total_capacity — that column is never written (0/null on 23 of 24
+   * routes) and rendering it would show every route at 0 seats. 18 of 24 routes
+   * currently resolve to a real capacity; the rest must render as "unknown"
+   * rather than as a fabricated 0.
+   */
+  capacity: number | null;
+  /** peakDay.count as a percent of capacity; null whenever capacity is null. */
+  peakUtilization: number | null;
+}
+
+/** A specific upcoming route-day whose bookings exceed the vehicle's seats. */
+export interface OverCapacityRow {
+  routeId: string;
+  label: string;
+  date: string;
+  booked: number;
+  capacity: number;
+}
+
+/** Forward-looking demand. No attendance: none can exist for a future date. */
+export interface UpcomingBlock {
+  from: string;
+  to: string;
+  kpis: {
+    total: number;
+    learners: number;
+    routes: number;
+    days: number;
+    peakDay: { date: string; count: number } | null;
+    routesOverCapacity: number;
+    /** Routes whose utilization is unknowable — no vehicle or no capacity on record. */
+    routesWithoutCapacity: number;
+  };
+  perDay: { date: string; count: number }[];
+  byRoute: CapacityRow[];
+  byDepartment: CountRow[];
+  topStops: CountRow[];
+  overCapacity: OverCapacityRow[];
+}
+
+export interface TodayRouteRow extends FacetOption {
+  booked: number;
+  marked: number;
+  present: number;
+  absent: number;
+  unmarked: number;
+}
+
+/**
+ * Live marking progress for one date. Operational, not analytical: it answers
+ * "who still needs scanning right now", so `unmarked` is the headline rather
+ * than a rate. present + absent + unmarked === booked, by construction.
+ */
+export interface TodayBlock {
+  date: string;
+  booked: number;
+  marked: number;
+  present: number;
+  absent: number;
+  unmarked: number;
+  markedPct: number;
+  /** Routes booked today, least-marked first — the operational worklist. */
+  byRoute: TodayRouteRow[];
+}
+
 export interface AnalyticsPayload {
   range: { from: string; to: string };
   facets: Facets;
   bookings: BookingsBlock;
   attendance: AttendanceBlock;
+  today: TodayBlock;
+  upcoming: UpcomingBlock;
 }

@@ -7,10 +7,14 @@ import type {
   BookingRow, BookingsBlock, CountRow, LabelMap, Labels, LeadBucket, LearnerDim,
 } from './analytics-types';
 
-const bump = <K>(m: Map<K, number>, k: K) => m.set(k, (m.get(k) ?? 0) + 1);
+export const bump = <K>(m: Map<K, number>, k: K) => m.set(k, (m.get(k) ?? 0) + 1);
 
-/** Map → labelled rows, ranked by count then label. `top` trims the tail. */
-function countRows(m: Map<string, number>, labelMap: LabelMap, top?: number): CountRow[] {
+/**
+ * Map → labelled rows, ranked by count then label. `top` trims the tail.
+ * Exported so the forward-looking aggregation ranks and labels identically —
+ * two ranking conventions across one page is how a "Top 15" ends up alphabetical.
+ */
+export function countRows(m: Map<string, number>, labelMap: LabelMap, top?: number): CountRow[] {
   const out = [...m.entries()]
     .map(([id, count]) => ({ id, label: labelMap.get(id) ?? id, count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));

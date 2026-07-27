@@ -108,7 +108,8 @@ const dateInput =
   'transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 export function FilterBar({
-  facets, filters, onFiltersChange, from, to, onRangeChange, showAttendanceFilters, resultLabel,
+  facets, filters, onFiltersChange, from, to, onRangeChange, showAttendanceFilters,
+  showRange = true, resultLabel,
 }: {
   facets: Facets;
   filters: AnalyticsFilters;
@@ -117,6 +118,12 @@ export function FilterBar({
   to: string;
   onRangeChange: (from: string, to: string) => void;
   showAttendanceFilters: boolean;
+  /**
+   * The Upcoming tab runs on a fixed forward horizon rather than the selected
+   * range, so it hides these controls instead of offering a picker that would
+   * change nothing on screen.
+   */
+  showRange?: boolean;
   resultLabel: string;
 }) {
   const set = <K extends keyof AnalyticsFilters>(k: K, v: AnalyticsFilters[K]) =>
@@ -183,7 +190,7 @@ export function FilterBar({
       className="space-y-3 rounded-xl border border-border bg-card p-4"
       aria-label="Analytics filters"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={`flex-wrap items-center gap-2 ${showRange ? 'flex' : 'hidden'}`}>
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <CalendarRange className="h-3.5 w-3.5" aria-hidden="true" /> Range
         </span>
