@@ -365,6 +365,58 @@ Deliberately **not** filtered:
 | New TypeScript errors from the 6 edits | **0** (the one error in search-stops predates the change — confirmed by stashing) ✅ |
 | `npm run build` | passes ✅ |
 
+## Phase 6 — completing the sweep, and resequencing
+
+Added 2026-07-27. Phase 5's consumer sweep was **incomplete**: the corridor still showed
+on the admin route detail page. Five sites were missed.
+
+The admin route detail page calls `/api/admin/routes/[routeId]`, not `lib/routes/detail.ts`
+— the latter serves the *boarding* portal. Filtering `detail.ts` in phase 5 therefore
+fixed a different surface than the one being looked at.
+
+Sites added to the filtered set:
+
+| Site | Why it matters |
+|---|---|
+| `app/api/admin/routes/[routeId]/route.ts` | **the admin route detail page's actual source** |
+| `app/api/admin/routes/route.ts` (embedded `route_stops`) | retired stops inflated the per-route stop count on the list |
+| `app/api/admin/routes/route.ts` (stops GET) | second stops fetch in the same file |
+| `app/api/admin/routes/[routeId]/learners/route.ts` | roster stop grouping |
+| `app/api/admin/routes/[routeId]/staff/route.ts` | roster stop grouping |
+| `app/api/admin/enrollment-requests/route.ts` (picker) | must not offer a retired stop when allocating |
+| `app/api/admin/enrollment-requests/route.ts` (validation) | without it an admin could allocate a learner to a retired stop, which the phase 5 migration guard forbids |
+
+The lesson: grepping for the table name lists the *files*, but only reading each call
+site tells you whether it lists an itinerary or resolves an id. The file list was
+gathered in phase 5; the reading was not finished.
+
+### Resequencing
+
+`sequence_order` is the stop's position in the journey and the detail page renders it
+verbatim (`s.sequence_order ?? i + 1`). After retirement route 24 ran 1–12 then jumped to
+**22**, displaying a stop numbered 22 straight after 12.
+
+Route 24's active stops are now **1–13** contiguous, and its 9 retired stops are parked at
+**901–909** — they hold no position in the journey, and parking them frees 13 for COLLEGE
+without two rows sharing a number. Relative order is preserved in case one is restored.
+Scoped to route 24; other routes may have gaps, but renumbering all 477 stops is unrelated.
+
+The migration ends by asserting the renumber left `stop_time` still ascending, so a
+resequence can never silently reorder a journey.
+
+### Phase 6 verification results
+
+| Check | Result |
+|---|---|
+| Route 24 active stops | 13, sequences 1–13, no gaps or duplicates ✅ |
+| Route 24 timetable ends at | COLLEGE, seq 13 ✅ |
+| Retired stops parked | 901–909, relative order preserved ✅ |
+| Morning times still ascending after renumber | asserted in-migration ✅ |
+| Historical bookings on retired stops | 172, still resolving ✅ |
+| Attendance on retired stops | 62, still resolving ✅ |
+| Stranded learners/staff on retired stops | 0 ✅ |
+| `npm run build` | passes ✅ |
+
 ## Out of scope
 
 - Latitude/longitude for the new stops — route 24's own copies have none, so there is

@@ -59,7 +59,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       supabase
         .from('tms_route_stop')
         .select('id, stop_name, stop_time, evening_time, sequence_order')
-        .eq('route_id', routeId),
+        .eq('route_id', routeId)
+        .eq('is_active', true),
       supabase
         .from('staff')
         .select('first_name, last_name, staff_id, designation, phone, email, status, transport_stop_id')

@@ -25,6 +25,8 @@ async function getRoutes() {
     const { data: routes, error } = await supabase
       .from('tms_route')
       .select('*, route_stops:tms_route_stop(id)')
+      // Retired stops must not inflate the per-route stop count on the list.
+      .eq('route_stops.is_active', true)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -135,6 +137,7 @@ async function getRouteStops(routeId: string) {
       .from('tms_route_stop')
       .select('*')
       .eq('route_id', routeId)
+      .eq('is_active', true)
               .order('sequence_order', { ascending: true });
 
     if (error) {

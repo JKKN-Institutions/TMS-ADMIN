@@ -86,6 +86,7 @@ async function handleGet(_request: NextRequest, auth: AuthContext) {
           .from('tms_route_stop')
           .select('id, route_id, stop_name, sequence_order')
           .in('route_id', routeIds)
+          .eq('is_active', true)
           .order('sequence_order', { ascending: true })
       : { data: [] as StopRow[] };
     const stops = (stopsRes.data ?? []) as StopRow[];
@@ -162,6 +163,8 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
       .select('id')
       .eq('id', body.stopId)
       .eq('route_id', body.routeId)
+      // A retired stop is not a valid allocation target — the route no longer calls there.
+      .eq('is_active', true)
       .maybeSingle();
     if (!stopChk.data) {
       return NextResponse.json({ error: 'Selected stop does not belong to the route' }, { status: 400 });

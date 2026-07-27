@@ -43,6 +43,7 @@ export async function GET(
         .from('tms_route_stop')
         .select('*')
         .eq('route_id', routeId)
+        .eq('is_active', true)
         .order('sequence_order', { ascending: true }),
       // Learner + staff rider counts, each using the same filter as its roster
       // drill-down. The staff table may be absent in some environments (42P01) —
