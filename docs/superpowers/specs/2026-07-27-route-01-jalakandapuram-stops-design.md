@@ -137,6 +137,59 @@ fails loudly rather than orphaning data.
 - Learner `a739f21d` still has a non-null `transport_stop_id` pointing at route 01 stop 1
 - Route 01 renders correctly on `/routes/87217217-1cea-408b-a786-941778bf54ef`
 
+## Phase 2 — rebalance passengers off route 24
+
+Added 2026-07-27, after phase 1 landed.
+
+Route 24 was carrying **90 learners on a 60-seat bus** (TN34MB5991) while route 01,
+now running the same corridor on TN30BH1040 (also 60 seats), carried 1. Phase 2 moves
+the corridor learners across.
+
+`JALAKANDAPURAM BUS STOP` (route 24 seq 12, 12 learners) was not part of the phase 1
+corridor but is a Jalakandapuram stop, and including it is what actually gets route 24
+under capacity. It joins route 01 as the **new stop 1** (07:40 / 17:48, ₹20,900 copied
+from route 24) and becomes the route origin, so `JALAKANDAPURAM SANTHAPETTAI` drops from
+`is_major_stop` to an ordinary stop and route 01 grows to 11 stops. Route header
+`start_location` → `JALAKANDAPURAM BUS STOP`, `departure_time` → 07:40.
+
+| | Before | After | Seats |
+|---|---|---|---|
+| Route 24 | 90 | **49** | 60 |
+| Route 01 | 1 | **42** | 60 |
+
+**41 learners** move (12+8+6+1+4+4+3+3). Each lands on route 01's stop of the *same
+name*, so no one's physical boarding point changes — only which bus collects them.
+
+**107 upcoming bookings** (2026-07-27 → 2026-10-08) are re-pointed to route 01 so the
+booked seat follows the learner. All 107 belong to moving learners; none belong to
+anyone else. **242 past bookings** (2026-06-25 → 2026-07-25) stay on route 24 — they
+record travel that actually happened. The cutover date is a literal (`2026-07-27`)
+rather than `current_date`, so a replay reproduces exactly this split.
+
+Two things deliberately left alone:
+
+- **Route 24 keeps all 22 stops.** This is a reallocation of passengers, not a
+  withdrawal of service; route 24 still serves the whole corridor.
+- **The 3 staff** who board at corridor stops stay on route 24, for the same reason.
+
+Billing needs no work: `billing_student_bills` has no `route_id` or `stop_id` — bills
+key off learner + `transport_year_id` with the amount snapshotted — and phase 1 gave
+route 01 fares identical to route 24's, so future generation matches too.
+
+Implemented in `supabase/migrations/20260727140000_move_jalakandapuram_learners_to_route_01.sql`.
+
+### Phase 2 verification results
+
+| Check | Result |
+|---|---|
+| Route 24 learners | 90 → 49, 11 spare seats ✅ |
+| Route 01 learners | 1 → 42, 18 spare seats ✅ |
+| Upcoming bookings moved | 107 on route 01, 0 left in route 24's corridor ✅ |
+| Past bookings preserved | 242 still on route 24 (25 Jun – 25 Jul) ✅ |
+| Bookings whose stop belongs to another route | 0 ✅ |
+| Dangling `stop_id` references | 0 ✅ |
+| Learners whose stop is not on their route | 0 on both routes ✅ |
+
 ## Out of scope
 
 - Latitude/longitude for the new stops — route 24's own copies have none, so there is
