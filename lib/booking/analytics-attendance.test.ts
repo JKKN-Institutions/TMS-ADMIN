@@ -176,6 +176,10 @@ describe('aggregateAttendance', () => {
     // denominator because 2026-07-09 was qualified via the null-route row.
     expect(r.kpis.bookedOnScannedDays).toBe(2);
     expect(r.kpis.noShows).toBe(2);
+    // The null-route fallback must reach coverage too — this is the inverse of
+    // the (route, date) tightening, and it was previously unasserted.
+    expect(r.coverage.daysWithAttendance).toBe(1);
+    expect(r.coverage.routesWithAttendance).toBe(2);
   });
 
   it('a record-level filter on attendanceForComposition must not move the show-up denominator', () => {
@@ -309,6 +313,34 @@ describe('aggregateAttendance', () => {
     expect(unfiltered.kpis.manualSharePct).toBe(50);
     expect(filtered.kpis.manualSharePct).toBe(50); // unmoved by the record filter
     expect(filtered.byMethod).toEqual({ qr_scan: 1, manual: 0 }); // composition still narrows
+  });
+
+  it('scopes the manual-capture share to the COHORT, not the whole fleet', () => {
+    // The assertion above cannot tell attendanceForJoin from attendanceAll — the
+    // helper defaults them to the same array, so it passes with either denominator.
+    // Here the cohort is all-manual inside a fleet that is half-manual: only a
+    // join-scoped denominator yields 100. A refactor to attendanceAll gives 50.
+    const cohortBooking = [bk('L1', '2026-07-09')];
+    const cohortAttendance = [at('L1', '2026-07-09', { method: 'manual' })];
+    const fleetAttendance = [
+      ...cohortAttendance,
+      at('L2', '2026-07-09', { method: 'qr_scan' }),
+      at('L3', '2026-07-09', { method: 'qr_scan' }),
+    ];
+
+    const r = aggregateAttendance({
+      bookings: cohortBooking,
+      bookingsForWalkUp: cohortBooking,
+      attendanceAll: fleetAttendance, // 1 of 3 manual = 33% fleet-wide
+      attendanceForJoin: cohortAttendance, // 1 of 1 manual = 100% for this cohort
+      attendanceForComposition: cohortAttendance,
+      learners,
+      labels,
+    });
+
+    // The user is reading THIS cohort's show-up rate, so the caveat must describe
+    // this cohort. A fleet-wide 33% would under-warn about the figure on screen.
+    expect(r.kpis.manualSharePct).toBe(100);
   });
 
   it('never reports more scanned routes than the bookings cover', () => {

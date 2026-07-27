@@ -116,6 +116,23 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
     <div className="space-y-6">
       <CoverageCallout {...data.coverage} />
 
+      {/*
+        This caveat sits WITH the figures it qualifies, not in the composition
+        panel it used to headline. Two reasons. It is measured over the join
+        population, while that panel's body counts the composition one — under
+        ?direction=return (prod has 181 onward, 0 return) the panel rendered
+        "no records" beneath a subtitle claiming 49% of records were manual.
+        And gating it on records > 0, the obvious fix, would have hidden a
+        warning that still applies to the show-up rate — suppressing a true
+        warning is the failure mode this whole module keeps guarding against.
+      */}
+      {manualShare >= 40 && (
+        <p className="text-xs text-muted-foreground" role="note">
+          <span className="font-medium text-foreground">{manualShare}% of attendance was entered manually</span>{' '}
+          rather than scanned — boarding figures below are only as reliable as that manual entry.
+        </p>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile label="Attendance records" value={num(k.records)} sub={`${num(data.coverage.daysWithAttendance)} days scanned`} Icon={ScanLine} tone="text-primary" />
         {/*
@@ -160,9 +177,7 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
           <div className="mb-4">
             <h3 className="text-base font-semibold text-foreground">Record composition</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {manualShare >= 40
-                ? `${manualShare}% of records were entered manually — a high manual share weakens the figures above.`
-                : 'How attendance was captured and which leg it covers.'}
+              How attendance was captured and which leg it covers.
             </p>
           </div>
           {k.records === 0 ? (
