@@ -51,10 +51,19 @@ export default function BoardingAttendancePage() {
 
   const { data: winData } = useQuery({ queryKey: ['boarding-attendance-window'], queryFn: fetchWindows });
   const windows = winData?.windows ?? DEFAULT_WINDOWS;
+  const legOpen = isDirectionOpen(windows.onward);
+  const canMark = isToday && legOpen;
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['boarding-roster', date, direction],
     queryFn: () => fetchRoster(date, direction),
+    // A route can have a dozen staff splitting this roster, and the global
+    // defaults (staleTime 60s, refetchOnWindowFocus false, no interval) mean a
+    // page held open on a moving bus never shows a colleague's marks at all.
+    // Poll only while marking is actually possible — a historical day cannot
+    // change, so polling it is pure load.
+    refetchInterval: canMark ? 15_000 : false,
+    refetchOnWindowFocus: true,
   });
   useEffect(() => {
     if (isError) toast.error(error instanceof Error ? error.message : 'Failed to load roster');
@@ -73,9 +82,6 @@ export default function BoardingAttendancePage() {
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0 };
 
-  const legOpen = isDirectionOpen(windows.onward);
-  const canMark = isToday && legOpen;
-
   const mark = useCallback(
     async (row: RosterRow, status: 'present' | 'absent') => {
       setBusyId(row.learner_id);
@@ -87,8 +93,18 @@ export default function BoardingAttendancePage() {
           body: JSON.stringify({ routeId: row.route_id, direction, marks: [{ learnerId: row.learner_id, status }] }),
         });
         const json = await res.json();
+        // 409 = a colleague owns this mark. The roster is polled, not live, so
+        // this is reachable from a stale screen even though the button was
+        // rendered — refetch so the row redraws as Locked.
+        if (res.status === 409 && json?.reason === 'locked') {
+          toast.error(json.error || 'Another staff member has already marked this student.');
+          qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+          return;
+        }
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark attendance');
-        toast.success(`Marked ${row.name} ${status}`);
+        toast.success(
+          json.updated === 0 ? `${row.name} was already marked ${status}` : `Marked ${row.name} ${status}`,
+        );
         qc.invalidateQueries({ queryKey: ['boarding-roster'] });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to mark attendance');
@@ -110,10 +126,14 @@ export default function BoardingAttendancePage() {
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Status', 'Method', 'Marked At'];
+    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Status', 'Method', 'Marked At', 'Marked By'];
     const lines = [header.map(esc).join(',')];
     for (const r of rowsToExport) {
-      lines.push([r.name, r.roll, r.route_number, r.stop_name, r.status, r.method, r.scanned_at].map(esc).join(','));
+      lines.push(
+        [r.name, r.roll, r.route_number, r.stop_name, r.status, r.method, r.scanned_at, r.marked_by_name]
+          .map(esc)
+          .join(','),
+      );
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -128,7 +148,10 @@ export default function BoardingAttendancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
-        <p className="text-gray-600 mt-1 text-sm">Today&apos;s booked students — scan or mark them present.</p>
+        <p className="text-gray-600 mt-1 text-sm">
+          Today&apos;s booked students — scan or mark them present. Your route&apos;s other in-charges
+          share this list, so you only need to mark the students they haven&apos;t.
+        </p>
       </div>
 
       {/* Analytics tiles + day picker */}
