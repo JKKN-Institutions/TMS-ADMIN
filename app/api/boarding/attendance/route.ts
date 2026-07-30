@@ -226,6 +226,10 @@ async function mark(request: NextRequest, auth: AuthContext) {
         l.markedByName = (l.markedBy && names.get(l.markedBy)) || 'another staff member';
       }
     }
+    // Both clients render markedByName only — the raw profiles.id is an
+    // internal detail used to resolve it above, not something either
+    // consumes. Strip it before it leaves the server.
+    const publicLocked = locked.map(({ markedBy: _markedBy, ...rest }) => rest);
 
     if (rows.length === 0) {
       // A single locked mark with nothing else in the batch is the common case
@@ -240,7 +244,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
           {
             error: `Already marked ${first.status} by ${first.markedByName}. Only they or the transport office can change it.`,
             reason: 'locked',
-            locked,
+            locked: publicLocked,
           },
           { status: 409 },
         );
@@ -248,7 +252,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
       // Everything requested was already true, or already true plus one or
       // more locked rows. Nothing to write either way.
       if (skipped > 0 || locked.length > 0) {
-        return NextResponse.json({ success: true, updated: 0, skipped, locked });
+        return NextResponse.json({ success: true, updated: 0, skipped, locked: publicLocked });
       }
       return NextResponse.json({ error: 'No valid learners for this route' }, { status: 400 });
     }
@@ -280,7 +284,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     });
     // A partially locked batch still succeeds: one taken row must not fail the
     // other nineteen. `locked` tells the client which ones to redraw.
-    return NextResponse.json({ success: true, updated: rows.length, skipped, locked });
+    return NextResponse.json({ success: true, updated: rows.length, skipped, locked: publicLocked });
   } catch (e) {
     console.error('boarding manual mark error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
