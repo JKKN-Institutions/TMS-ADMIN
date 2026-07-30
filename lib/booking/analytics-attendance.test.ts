@@ -15,6 +15,7 @@ const labels: Labels = {
   institutions: new Map([['I1', 'Engineering']]),
   departments: new Map([['D1', 'CSE'], ['D2', 'ECE']]),
   programs: new Map(),
+  staff: new Map(),
 };
 
 const bk = (learner: string, date: string, route = 'R1'): BookingRow => ({
@@ -26,7 +27,7 @@ const at = (
   learner: string, date: string, over: Partial<AttendanceRow> = {}
 ): AttendanceRow => ({
   learner_id: learner, trip_date: date, route_id: 'R1', stop_id: null,
-  direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false, ...over,
+  direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false, scanned_by: null, ...over,
 });
 
 /**
@@ -373,5 +374,87 @@ describe('aggregateAttendance', () => {
     expect(r.coverage.routesInRange).toBe(1);
     expect(r.coverage.routesWithAttendance).toBe(1);
     expect(r.coverage.routesWithAttendance).toBeLessThanOrEqual(r.coverage.routesInRange);
+  });
+});
+
+describe('aggregateAttendance — who marked', () => {
+  // Minimal builders: this block only exercises the marker tally, so bookings and
+  // the join population stay empty.
+  const att = (learner: string, scanned_by: string | null, status: 'present' | 'absent' = 'present') =>
+    ({
+      learner_id: learner,
+      trip_date: '2026-07-29',
+      route_id: 'r16',
+      stop_id: null,
+      direction: 'onward' as const,
+      status,
+      method: 'manual' as const,
+      is_walk_up: false,
+      scanned_by,
+    });
+
+  const labels = {
+    routes: new Map(), stops: new Map(), institutions: new Map(),
+    departments: new Map(), programs: new Map(),
+    staff: new Map([['p1', 'Saranya G'], ['p2', 'Govindharaj S']]),
+  };
+
+  const run = (rows: ReturnType<typeof att>[], assignedStaffEmails: string[], markerEmailById: Map<string, string>) =>
+    aggregateAttendance({
+      bookings: [],
+      bookingsForWalkUp: [],
+      attendanceAll: rows,
+      attendanceForJoin: rows,
+      attendanceForComposition: rows,
+      learners: new Map(),
+      labels,
+      assignedStaffEmails,
+      markerEmailById,
+    });
+
+  it('tallies marks per staff member, busiest first, with present/absent split', () => {
+    const out = run(
+      [att('l1', 'p1'), att('l2', 'p1'), att('l3', 'p1', 'absent'), att('l4', 'p2')],
+      [],
+      new Map(),
+    );
+    expect(out.markedByStaff).toEqual([
+      { id: 'p1', label: 'Saranya G', marks: 3, present: 2, absent: 1 },
+      { id: 'p2', label: 'Govindharaj S', marks: 1, present: 1, absent: 0 },
+    ]);
+  });
+
+  it('ignores rows with no marker rather than inventing an "unknown" staff member', () => {
+    const out = run([att('l1', null), att('l2', 'p1')], [], new Map());
+    expect(out.markedByStaff.map((s) => s.id)).toEqual(['p1']);
+  });
+
+  it('counts assigned staff who marked nothing', () => {
+    // 3 assigned in-charges; only p1 (saranya@x) marked.
+    const out = run(
+      [att('l1', 'p1')],
+      ['saranya@x', 'govind@x', 'sathya@x'],
+      new Map([['p1', 'saranya@x']]),
+    );
+    expect(out.assignedStaffTotal).toBe(3);
+    expect(out.staffWithNoMarks).toBe(2);
+  });
+
+  // A super admin can mark without holding a route assignment. They belong in the
+  // per-staff tally but must not make the assigned-staff arithmetic go negative.
+  it('does not let a marker outside the assignment list distort the no-marks count', () => {
+    const out = run(
+      [att('l1', 'p1'), att('l2', 'p2')],
+      ['saranya@x'],
+      new Map([['p1', 'saranya@x'], ['p2', 'superadmin@x']]),
+    );
+    expect(out.assignedStaffTotal).toBe(1);
+    expect(out.staffWithNoMarks).toBe(0);
+    expect(out.markedByStaff).toHaveLength(2);
+  });
+
+  it('falls back to the raw id when a marker has no resolved label', () => {
+    const out = run([att('l1', 'p9')], [], new Map());
+    expect(out.markedByStaff[0].label).toBe('p9');
   });
 });

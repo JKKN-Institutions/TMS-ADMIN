@@ -24,6 +24,8 @@ export interface AttendanceRow {
   status: 'present' | 'absent';
   method: 'qr_scan' | 'manual';
   is_walk_up: boolean;
+  /** profiles.id of the staff member who marked it. Nullable: `on delete set null`. */
+  scanned_by: string | null;
 }
 
 /** The learner attributes analytics slices by. */
@@ -43,6 +45,8 @@ export interface Labels {
   institutions: LabelMap;
   departments: LabelMap;
   programs: LabelMap;
+  /** Attendance markers, by profiles.id. */
+  staff: LabelMap;
 }
 
 export interface AnalyticsFilters {
@@ -119,6 +123,13 @@ export interface BookingsBlock {
   topStops: CountRow[];
 }
 
+/** One boarding staff member's marking output over the filtered range. */
+export interface MarkerRow extends FacetOption {
+  marks: number;
+  present: number;
+  absent: number;
+}
+
 export interface AttendanceBlock {
   unavailable: boolean;
   coverage: {
@@ -153,6 +164,15 @@ export interface AttendanceBlock {
   byMethod: { qr_scan: number; manual: number };
   byStatus: { present: number; absent: number };
   byDepartment: ShowRow[];
+  /**
+   * Who did the marking, busiest first. Routes commonly have 4-12 in-charges
+   * sharing one roster (route 16 has 12), so this is the only place the office
+   * can see how few of them actually mark.
+   */
+  markedByStaff: MarkerRow[];
+  /** Assigned in-charges on the in-scope routes with zero marks in the range. */
+  staffWithNoMarks: number;
+  assignedStaffTotal: number;
 }
 
 /** One route's upcoming load measured against its assigned vehicle's seats. */
