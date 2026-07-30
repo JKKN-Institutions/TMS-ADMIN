@@ -9,15 +9,26 @@ export const metadata: Metadata = {
   title: "MYJKKN TMS - Admin Portal",
   description: "Transportation Management System - Admin Portal",
   applicationName: "JKKN TMS",
-  // Favicon comes from the app/icon.png file convention (JKKN logo) — Next
-  // generates the <link rel="icon"> tags automatically. The manifest is
-  // auto-linked from app/manifest.ts.
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "JKKN TMS",
   },
+  // GOTCHA: declaring `icons` at all DISABLES the app/icon.png file convention.
+  // Next only injects file-convention icons when metadata.icons is undefined
+  // (resolve-metadata.js: `if (!resolvedMetadata.icons)`), so it replaces rather
+  // than merges — an `icons` block with only `apple` silently drops the favicon.
+  // Every icon we want must therefore be listed here explicitly.
+  //
+  // These all derive from the app/icon.png master via scripts/generate-pwa-icons.js
+  // and are precached by public/sw.js. We point at the 192/512 variants rather than
+  // the raw /icon.png route because the master is 1080x1080 (~141 KB) — far too
+  // heavy to ship as a tab icon on every cold load.
   icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
     apple: "/icons/apple-touch-icon.png",
   },
 };
