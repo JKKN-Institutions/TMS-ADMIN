@@ -99,6 +99,14 @@ export interface AttendanceInput {
    * Defaults false so the caveat-bearing note stays hidden unless a caller opts in.
    */
   rangeIncludesToday?: boolean;
+  /**
+   * True when a filter OTHER than route narrows the attendance population. The
+   * assignment roster can only be scoped by route, so under any other filter the
+   * numerator is a slice while the denominator stays whole — and an assignment-based
+   * "who marked nothing" claim stops being meaningful. Defaults true so a caller that
+   * forgets it suppresses the claim rather than overstating it.
+   */
+  numeratorFiltered?: boolean;
 }
 
 export function aggregateAttendance({
@@ -113,6 +121,7 @@ export function aggregateAttendance({
   assignedStaffEmails = [],
   markerEmailById = new Map(),
   rangeIncludesToday = false,
+  numeratorFiltered = true,
 }: AttendanceInput): AttendanceBlock {
   const key = (learner: string, date: string) => `${learner}:${date}`;
 
@@ -297,5 +306,6 @@ export function aggregateAttendance({
     staffWithNoMarks: assigned.size - assignedWhoMarked.size,
     assignedStaffTotal: assigned.size,
     rangeIncludesToday,
+    numeratorFiltered,
   };
 }

@@ -112,6 +112,11 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
   // move together and `?method=qr_scan` would report 0% and retract the warning.
   const manualShare = Math.round(k.manualSharePct);
 
+  // The assignment roster can only be scoped by route, so an "X of Y in-charges"
+  // claim is only meaningful when the marks being counted aren't narrowed by some
+  // other dimension, and when the range reaches today (the roster is a snapshot).
+  const assignmentClaimHonest = data.rangeIncludesToday && !data.numeratorFiltered;
+
   return (
     <div className="space-y-6">
       <CoverageCallout {...data.coverage} />
@@ -212,7 +217,7 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
             Who marked attendance
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {data.assignedStaffTotal > 0
+            {assignmentClaimHonest && data.assignedStaffTotal > 0
               ? `${num(data.assignedStaffTotal - data.staffWithNoMarks)} of ${num(data.assignedStaffTotal)} currently assigned in-charges marked at least once.`
               : 'Marks in this range, by the staff member who recorded them.'}
           </p>
@@ -228,11 +233,14 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
             {/* Routes carry 4-12 in-charges each, so silence from most of them is
                 the finding — state it rather than leaving it to be inferred from
                 a short table. `assignedStaffTotal` is always "assigned AS OF NOW"
-                (the roster has no effective-dating), so this note is gated to
-                ranges that reach today — a historical range would otherwise
-                accuse someone of marking nothing across dates before they were
-                even assigned. The table above still renders in full either way. */}
-            {data.staffWithNoMarks > 0 && data.rangeIncludesToday && (
+                (the roster has no effective-dating) and can only be scoped by
+                route, so this note is gated on `assignmentClaimHonest`: the range
+                must reach today, AND no non-route filter may be narrowing the
+                marks counted — otherwise it would accuse someone of marking
+                nothing outside a slice they were never measured against, or
+                across dates before they were even assigned. The table above
+                still renders in full either way. */}
+            {data.staffWithNoMarks > 0 && assignmentClaimHonest && (
               <p className="mt-3 text-xs text-muted-foreground" role="note">
                 <span className="font-medium text-foreground">
                   {num(data.staffWithNoMarks)} of {num(data.assignedStaffTotal)} currently assigned in-charges

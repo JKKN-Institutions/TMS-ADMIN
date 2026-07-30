@@ -475,4 +475,22 @@ describe('aggregateAttendance — who marked', () => {
     expect(aggregateAttendance(base).rangeIncludesToday).toBe(false);
     expect(aggregateAttendance({ ...base, rangeIncludesToday: true }).rangeIncludesToday).toBe(true);
   });
+
+  // The assignment roster can only be scoped by route, so any OTHER filter
+  // (stop/academic/direction/status/method) narrows the marks counted without
+  // narrowing the roster being counted against. Defaulting true keeps a caller
+  // that forgets this from overstating an assignment claim that no longer holds.
+  it('defaults numeratorFiltered to true, and surfaces false when the caller opts out', () => {
+    const base = {
+      bookings: [],
+      bookingsForWalkUp: [],
+      attendanceAll: [],
+      attendanceForJoin: [],
+      attendanceForComposition: [],
+      learners: new Map(),
+      labels,
+    };
+    expect(aggregateAttendance(base).numeratorFiltered).toBe(true);
+    expect(aggregateAttendance({ ...base, numeratorFiltered: false }).numeratorFiltered).toBe(false);
+  });
 });
