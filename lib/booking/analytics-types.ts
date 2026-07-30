@@ -173,6 +173,8 @@ export interface AttendanceBlock {
   /** Assigned in-charges on the in-scope routes with zero marks in the range. */
   staffWithNoMarks: number;
   assignedStaffTotal: number;
+  /** True when the selected range reaches today, so the current roster is a fair denominator. */
+  rangeIncludesToday: boolean;
 }
 
 /** One route's upcoming load measured against its assigned vehicle's seats. */

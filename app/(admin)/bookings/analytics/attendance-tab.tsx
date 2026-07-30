@@ -213,7 +213,7 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {data.assignedStaffTotal > 0
-              ? `${num(data.assignedStaffTotal - data.staffWithNoMarks)} of ${num(data.assignedStaffTotal)} assigned in-charges marked at least once in this range.`
+              ? `${num(data.assignedStaffTotal - data.staffWithNoMarks)} of ${num(data.assignedStaffTotal)} currently assigned in-charges marked at least once.`
               : 'Marks in this range, by the staff member who recorded them.'}
           </p>
         </div>
@@ -227,11 +227,15 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
             />
             {/* Routes carry 4-12 in-charges each, so silence from most of them is
                 the finding — state it rather than leaving it to be inferred from
-                a short table. */}
-            {data.staffWithNoMarks > 0 && (
+                a short table. `assignedStaffTotal` is always "assigned AS OF NOW"
+                (the roster has no effective-dating), so this note is gated to
+                ranges that reach today — a historical range would otherwise
+                accuse someone of marking nothing across dates before they were
+                even assigned. The table above still renders in full either way. */}
+            {data.staffWithNoMarks > 0 && data.rangeIncludesToday && (
               <p className="mt-3 text-xs text-muted-foreground" role="note">
                 <span className="font-medium text-foreground">
-                  {num(data.staffWithNoMarks)} of {num(data.assignedStaffTotal)} assigned in-charges
+                  {num(data.staffWithNoMarks)} of {num(data.assignedStaffTotal)} currently assigned in-charges
                 </span>{' '}
                 marked nothing in this range.
               </p>

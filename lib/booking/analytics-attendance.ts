@@ -92,6 +92,13 @@ export interface AttendanceInput {
   assignedStaffEmails?: string[];
   /** Marker profiles.id → their lowercased email, for the intersection below. */
   markerEmailById?: Map<string, string>;
+  /**
+   * Whether the analysed range extends to today. The assignment roster has no
+   * effective-dating, so `assignedStaffTotal` is always "who is assigned NOW" —
+   * only honest to headline as a per-range figure when the range reaches today.
+   * Defaults false so the caveat-bearing note stays hidden unless a caller opts in.
+   */
+  rangeIncludesToday?: boolean;
 }
 
 export function aggregateAttendance({
@@ -105,6 +112,7 @@ export function aggregateAttendance({
   unavailable = false,
   assignedStaffEmails = [],
   markerEmailById = new Map(),
+  rangeIncludesToday = false,
 }: AttendanceInput): AttendanceBlock {
   const key = (learner: string, date: string) => `${learner}:${date}`;
 
@@ -288,5 +296,6 @@ export function aggregateAttendance({
     markedByStaff,
     staffWithNoMarks: assigned.size - assignedWhoMarked.size,
     assignedStaffTotal: assigned.size,
+    rangeIncludesToday,
   };
 }

@@ -457,4 +457,22 @@ describe('aggregateAttendance — who marked', () => {
     const out = run([att('l1', 'p9')], [], new Map());
     expect(out.markedByStaff[0].label).toBe('p9');
   });
+
+  // The assignment roster has no effective-dating, so `assignedStaffTotal` is
+  // always "assigned AS OF NOW" — only a fair denominator when the analysed
+  // range reaches today. Defaulting false keeps a historical range from
+  // silently borrowing today's roster as if it applied throughout the past.
+  it('defaults rangeIncludesToday to false, and surfaces true when the caller opts in', () => {
+    const base = {
+      bookings: [],
+      bookingsForWalkUp: [],
+      attendanceAll: [],
+      attendanceForJoin: [],
+      attendanceForComposition: [],
+      learners: new Map(),
+      labels,
+    };
+    expect(aggregateAttendance(base).rangeIncludesToday).toBe(false);
+    expect(aggregateAttendance({ ...base, rangeIncludesToday: true }).rangeIncludesToday).toBe(true);
+  });
 });

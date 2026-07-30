@@ -353,6 +353,7 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         unavailable: attUnavailable,
         assignedStaffEmails,
         markerEmailById,
+        rangeIncludesToday: to >= today,
       }),
       // Today's marking progress. Bookings take the full booking filters, but
       // attendance takes cohortOnly: narrowing it by att_status would report
