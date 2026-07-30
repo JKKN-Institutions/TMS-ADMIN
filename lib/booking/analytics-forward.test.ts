@@ -15,6 +15,7 @@ const labels: Labels = {
   institutions: new Map([['I1', 'Engineering']]),
   departments: new Map([['D1', 'CSE'], ['D2', 'ECE']]),
   programs: new Map(),
+  staff: new Map(),
 };
 
 const bk = (learner: string, date: string, route = 'R1', stop: string | null = null): BookingRow => ({
@@ -24,7 +25,7 @@ const bk = (learner: string, date: string, route = 'R1', stop: string | null = n
 
 const at = (learner: string, date: string, over: Partial<AttendanceRow> = {}): AttendanceRow => ({
   learner_id: learner, trip_date: date, route_id: 'R1', stop_id: null,
-  direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false, ...over,
+  direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false, scanned_by: null, ...over,
 });
 
 const TODAY = '2026-07-27';

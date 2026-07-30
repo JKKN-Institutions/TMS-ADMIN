@@ -54,8 +54,21 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
+    // Authority for the lock, resolved ONCE for the whole roster (also reused
+    // below to widen the all-routes fallback). requirePerm already returns true
+    // for super admins, so isSuperAdmin is passed separately only to keep
+    // decideMark's inputs explicit.
+    const viewer = {
+      actorId: auth.userId,
+      isOverrideHolder: await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE),
+      isSuperAdmin: auth.isSuperAdmin,
+    };
+
     let routeIds = await getAssignedRouteIdsForUser(auth);
-    if (routeIds.length === 0 && auth.isSuperAdmin) {
+    // An override holder (transport_head) needs to SEE every route's marks to
+    // correct them, not just be allowed to write once they somehow get there —
+    // without this they are assigned to nothing and see an empty roster.
+    if (routeIds.length === 0 && (auth.isSuperAdmin || viewer.isOverrideHolder)) {
       const { data } = await svc.from('tms_route').select('id');
       routeIds = ((data ?? []) as { id: string }[]).map((r) => r.id);
     }
@@ -117,15 +130,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       });
     }
 
-    // Authority for the lock, resolved ONCE for the whole roster. requirePerm
-    // already returns true for super admins, so isSuperAdmin is passed separately
-    // only to keep decideMark's inputs explicit.
-    const viewer = {
-      actorId: auth.userId,
-      isOverrideHolder: await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE),
-      isSuperAdmin: auth.isSuperAdmin,
-    };
-
+    // viewer was already resolved above, ahead of the all-routes fallback.
     const rows: RosterRow[] = [];
     for (const rt of routes) {
       const { riders } = await loadBookedRoster(svc, rt.id, date);

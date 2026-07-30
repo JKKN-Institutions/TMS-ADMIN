@@ -14,6 +14,7 @@ const labels: Labels = {
   institutions: new Map([['I1', 'Engineering']]),
   departments: new Map([['D1', 'CSE'], ['D2', 'ECE']]),
   programs: new Map(),
+  staff: new Map(),
 };
 
 // 2026-07-20 is a Monday; 2026-07-21 a Tuesday.
@@ -111,6 +112,7 @@ const manyLabels: Labels = {
   institutions: new Map(),
   departments: new Map(),
   programs: new Map(),
+  staff: new Map(),
 };
 
 // MS0 gets 20 bookings, MS1 gets 19, ... MS19 gets 1 — a distinct, descending count

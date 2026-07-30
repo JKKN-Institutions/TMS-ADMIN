@@ -141,12 +141,15 @@ export function getRosterColumns(opts: {
         // statement of who owns it. `can_edit` comes from the server; this is
         // presentation, and the write route re-decides regardless.
         if (!r.can_edit) {
+          const lockedTitle = `Marked ${r.status === 'present' ? 'Present' : 'Absent'} by ${
+            r.marked_by_name ?? 'another staff member'
+          }${r.scanned_at ? ` at ${fmtTime(r.scanned_at)}` : ''}. Only they or the transport office can change it.`;
           return (
             <span
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-              title={`Marked ${r.status === 'present' ? 'Present' : 'Absent'} by ${
-                r.marked_by_name ?? 'another staff member'
-              }${r.scanned_at ? ` at ${fmtTime(r.scanned_at)}` : ''}. Only they or the transport office can change it.`}
+              role="status"
+              aria-label={lockedTitle}
+              title={lockedTitle}
+              className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
             >
               <Lock className="h-3.5 w-3.5" /> Locked
             </span>

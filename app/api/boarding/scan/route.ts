@@ -207,14 +207,18 @@ async function scan(request: NextRequest, auth: AuthContext) {
       overCapacity = seats <= 0;
     }
 
+    // Hoisted out of the object literal below — an `await` inside `&&` inside a
+    // ternary inside an object literal was hard to read in the branch's most
+    // security-relevant file.
+    let previousByName: string | null = null;
+    if (decision.action === 'override' && decision.previousBy) {
+      previousByName = (await loadMarkerNames(svc, [decision.previousBy])).get(decision.previousBy) ?? null;
+    }
     const overrode =
       decision.action === 'override'
         ? {
             from: decision.from,
-            by:
-              (decision.previousBy &&
-                (await loadMarkerNames(svc, [decision.previousBy])).get(decision.previousBy)) ||
-              'another staff member',
+            by: previousByName || 'another staff member',
             at: existingRow?.scanned_at ?? null,
           }
         : null;

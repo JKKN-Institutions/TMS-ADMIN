@@ -14,6 +14,7 @@ const labels: Labels = {
   institutions: new Map([['I1', 'Engineering'], ['I2', 'Pharmacy']]),
   departments: new Map([['D1', 'CSE'], ['D2', 'Pharm.D']]),
   programs: new Map([['G1', 'B.E. CSE'], ['G2', 'Pharm.D']]),
+  staff: new Map(),
 };
 
 const bookings: BookingRow[] = [
@@ -23,8 +24,8 @@ const bookings: BookingRow[] = [
 ];
 
 const attendance: AttendanceRow[] = [
-  { learner_id: 'L1', trip_date: '2026-07-09', route_id: 'R1', stop_id: 'S1', direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false },
-  { learner_id: 'L2', trip_date: '2026-07-09', route_id: 'R2', stop_id: 'S2', direction: 'return', status: 'absent', method: 'manual', is_walk_up: false },
+  { learner_id: 'L1', trip_date: '2026-07-09', route_id: 'R1', stop_id: 'S1', direction: 'onward', status: 'present', method: 'qr_scan', is_walk_up: false, scanned_by: null },
+  { learner_id: 'L2', trip_date: '2026-07-09', route_id: 'R2', stop_id: 'S2', direction: 'return', status: 'absent', method: 'manual', is_walk_up: false, scanned_by: null },
 ];
 
 describe('matchesLearner', () => {
