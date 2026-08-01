@@ -1,407 +1,208 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import { MapPin, Users, Activity, Clock, RefreshCw, Filter, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Bus } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { cn } from '@/lib/utils';
+import { FleetList } from './fleet-list';
+import type { FleetResponse, FleetRoute } from './types';
+import type { MapBus } from '@/components/live-tracking-map';
 
-// Dynamically import the map component to avoid SSR issues
 const LiveTrackingMap = dynamic(() => import('@/components/live-tracking-map'), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-96 bg-gray-100 rounded-lg">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Loading map...</p>
-      </div>
+    <div className="flex h-full items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
+      <span className="text-sm text-gray-500">Loading map…</span>
     </div>
-  )
+  ),
 });
 
-interface DriverLocation {
-  id: string;
-  name: string;
-  current_latitude: number;
-  current_longitude: number;
-  location_accuracy: number | null;
-  location_timestamp: string;
-  last_location_update: string;
-  location_sharing_enabled: boolean;
-  is_live?: boolean;
-  location_tracking_status: string;
-  route_id: string | null;
-  route_number: string | null;
-  route_name: string | null;
-  vehicle_id: string | null;
-  registration_number: string | null;
-  gps_status?: string;
-  time_since_update?: number | null;
-  location_status?: string;
-  status_message?: string;
+type NudgeState = { state: 'idle' | 'sending' | 'sent' | 'cooldown'; cooldownMin: number | null };
+
+async function fetchFleet(): Promise<FleetResponse> {
+  const res = await fetch('/api/admin/track-all/routes', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Failed to load fleet');
+  return (await res.json()) as FleetResponse;
+}
+
+function toMapBus(r: FleetRoute): MapBus | null {
+  if (!r.position) return null;
+  return {
+    routeId: r.routeId,
+    routeNumber: r.routeNumber,
+    routeName: r.routeName,
+    driverName: r.driver?.name ?? null,
+    registrationNumber: r.vehicle?.registrationNumber ?? null,
+    lat: r.position.lat,
+    lng: r.position.lng,
+    heading: r.heading,
+    accuracyM: r.accuracyM,
+    state: r.state,
+    reason: r.reason,
+  };
 }
 
 export default function TrackAllPage() {
-  const [driverLocations, setDriverLocations] = useState<DriverLocation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [filterEnabled, setFilterEnabled] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [freshestUpdate, setFreshestUpdate] = useState<string | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [nudges, setNudges] = useState<Record<string, NudgeState>>({});
 
-  const fetchDriverLocations = async () => {
-    try {
-      setRefreshing(true);
-      const response = await fetch('/api/admin/track-all/drivers', { cache: 'no-store' });
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch driver locations');
-      }
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['track-all-fleet'],
+    queryFn: fetchFleet,
+    // Poll fast only while something is actually moving. With no bus reporting —
+    // the normal case on this fleet — a 5s poll is pure waste.
+    refetchInterval: (q) => ((q.state.data?.summary.reporting ?? 0) > 0 ? 5_000 : 30_000),
+    refetchIntervalInBackground: false,
+  });
 
-      const data = await response.json();
-      
-      if (data.success) {
-        setDriverLocations(data.drivers);
-        setFreshestUpdate(data.freshest_update ?? null);
-        setLastUpdate(new Date());
-      } else {
-        throw new Error(data.error || 'Failed to fetch driver locations');
-      }
-    } catch (error) {
-      console.error('Error fetching driver locations:', error);
-      toast.error('Failed to fetch driver locations');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const routes = useMemo(() => data?.routes ?? [], [data]);
+  const buses = useMemo(
+    () => routes.map(toMapBus).filter((b): b is MapBus => b !== null),
+    [routes],
+  );
 
+  // Drop-out decision (requirement 3): if the selected route stops reporting and
+  // leaves `buses`, the map's selection card hides on its own (it looks the bus up
+  // by id each render) but its drawn road line and "Locating…" address would linger
+  // until the selection changes, because the map only clears those when
+  // `selectedRouteId` itself changes — not when the underlying bus disappears. We
+  // resolve that here by clearing the selection ourselves, so the artifact never
+  // shows. The dependency is a plain boolean computed at render time, not the
+  // `buses` array itself, so this stays clean under requirement 1.
+  const selectedRouteStillPresent = selectedRouteId
+    ? buses.some((b) => b.routeId === selectedRouteId)
+    : true;
   useEffect(() => {
-    fetchDriverLocations();
+    if (selectedRouteId && !selectedRouteStillPresent) {
+      setSelectedRouteId(null);
+    }
+  }, [selectedRouteId, selectedRouteStillPresent]);
 
-    // Auto-refresh every 5 seconds (the map glides the marker between polls).
-    const interval = setInterval(fetchDriverLocations, 5000);
+  const handleRefresh = useCallback(async () => {
+    const res = await refetch();
+    if (res.error) toast.error("Couldn't refresh — check your connection");
+    else toast.success('Fleet refreshed');
+  }, [refetch]);
 
-    return () => clearInterval(interval);
+  const handleNudge = useCallback(async (routeId: string) => {
+    setNudges((p) => ({ ...p, [routeId]: { state: 'sending', cooldownMin: null } }));
+    try {
+      const res = await fetch('/api/admin/track-all/nudge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routeId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        setNudges((p) => ({
+          ...p,
+          [routeId]: { state: 'cooldown', cooldownMin: json?.retryAfterMin ?? null },
+        }));
+        return;
+      }
+      if (!res.ok) throw new Error(json?.error ?? 'Failed');
+      setNudges((p) => ({ ...p, [routeId]: { state: 'sent', cooldownMin: null } }));
+      toast.success('Reminder sent to the driver');
+    } catch {
+      setNudges((p) => ({ ...p, [routeId]: { state: 'idle', cooldownMin: null } }));
+      toast.error("Couldn't send the reminder");
+    }
   }, []);
 
-  const handleRefresh = () => {
-    fetchDriverLocations();
-    toast.success('Driver locations refreshed');
-  };
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600" />
+      </div>
+    );
+  }
 
-  const filteredDrivers = filterEnabled 
-    ? driverLocations.filter(driver => driver.location_sharing_enabled)
-    : driverLocations;
+  if (error || !data) {
+    return (
+      <div className="max-w-xl rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
+          <AlertTriangle className="h-6 w-6" />
+        </div>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Couldn&apos;t load the fleet</h2>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          Something went wrong reading route and vehicle data.
+        </p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'text-green-600 bg-green-50 border-green-200';
-      case 'paused': return 'text-amber-600 bg-amber-50 border-amber-200';
-      case 'inactive': return 'text-red-600 bg-red-50 border-red-200';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'active': return <Activity className="w-4 h-4" />;
-      case 'paused': return <Clock className="w-4 h-4" />;
-      case 'inactive': return <Clock className="w-4 h-4" />;
-      default: return <Clock className="w-4 h-4" />;
-    }
-  };
-
-  const getGPSStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'text-green-600 bg-green-50 border-green-200';
-      case 'recent': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'offline': return 'text-red-600 bg-red-50 border-red-200';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
-    }
-  };
-
-  const getGPSStatusIcon = (status: string) => {
-    switch (status) {
-      case 'online': return <Activity className="w-4 h-4" />;
-      case 'recent': return <Clock className="w-4 h-4" />;
-      case 'offline': return <WifiOff className="w-4 h-4" />;
-      default: return <Wifi className="w-4 h-4" />;
-    }
-  };
-
-  const getLocationIssueMessage = (locationStatus?: string) => {
-    switch (locationStatus) {
-      case 'sharing_disabled':
-        return 'Location sharing disabled';
-      case 'no_route':
-        return 'No route assigned';
-      case 'no_vehicle':
-        return 'No vehicle assigned';
-      case 'no_location':
-        return 'No location data';
-      default:
-        return 'Location unavailable';
-    }
-  };
-
-  const formatTimeSince = (dateString: string) => {
-    if (!dateString) return 'Never';
-    
-    const now = new Date();
-    const updateTime = new Date(dateString);
-    const diffMs = now.getTime() - updateTime.getTime();
-    const diffMinutes = Math.floor(diffMs / 60000);
-    
-    if (diffMinutes === 0) return 'Just now';
-    if (diffMinutes === 1) return '1 minute ago';
-    if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
-    
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours === 1) return '1 hour ago';
-    if (diffHours < 24) return `${diffHours} hours ago`;
-    
-    return updateTime.toLocaleDateString();
-  };
+  const s = data.summary;
+  const notSetUp = s.noVehicle + s.noDriver + s.unconfigured;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Track All Drivers</h1>
-          <p className="text-gray-600">Real-time location tracking for all drivers</p>
-        </div>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setFilterEnabled(!filterEnabled)}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg border transition-colors ${
-              filterEnabled 
-                ? 'bg-blue-50 border-blue-200 text-blue-700' 
-                : 'bg-gray-50 border-gray-200 text-gray-700'
-            }`}
-          >
-            <Filter className="w-4 h-4" />
-            <span>{filterEnabled ? 'Show All' : 'Show Active Only'}</span>
-          </button>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Users className="w-6 h-6 text-blue-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Total Drivers</p>
-              <p className="text-2xl font-bold text-gray-900">{driverLocations.length}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <Activity className="w-6 h-6 text-green-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Active Tracking</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {driverLocations.filter(d => d.is_live).length}
-              </p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-yellow-100 rounded-lg">
-              <MapPin className="w-6 h-6 text-yellow-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">On Route</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {driverLocations.filter(d => d.route_id).length}
-              </p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Clock className="w-6 h-6 text-purple-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Last Update</p>
-              <p className="text-sm font-bold text-gray-900">
-                {freshestUpdate ? formatTimeSince(freshestUpdate) : 'No live fixes'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Map */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Live Driver Locations</h2>
-          <p className="text-sm text-gray-600">
-            Showing {filteredDrivers.length} driver{filteredDrivers.length !== 1 ? 's' : ''} 
-            {filterEnabled && ' with active location sharing'}
+    <div className="space-y-5">
+      {/* Coverage header — the honest headline the old stat cards never gave. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Live Tracking</h1>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            <span className="font-semibold text-gray-900 dark:text-white">
+              {s.reporting} of {s.trackable}
+            </span>{' '}
+            buses reporting right now
+            {notSetUp > 0 && (
+              <span className="text-gray-500 dark:text-gray-500">
+                {' '}· {notSetUp} route{notSetUp === 1 ? '' : 's'} not set up
+              </span>
+            )}
           </p>
         </div>
-        <div className="h-[600px] relative">
-          {loading ? (
-            <div className="flex items-center justify-center h-full bg-gray-50">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">Loading driver locations...</p>
-              </div>
-            </div>
-          ) : (
-            <LiveTrackingMap driverLocations={filteredDrivers} />
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => void handleRefresh()}
+          disabled={isFetching}
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
+          {isFetching ? 'Refreshing…' : 'Refresh'}
+        </button>
       </div>
 
-      {/* Driver List */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Driver Details</h2>
+      {/* List and map. Stacks on mobile, side by side from lg up. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
+        <div className="min-w-0 lg:max-h-[calc(100vh-13rem)]">
+          <FleetList
+            routes={routes}
+            summary={s}
+            selectedRouteId={selectedRouteId}
+            onSelectRoute={setSelectedRouteId}
+            onNudge={(id) => void handleNudge(id)}
+            nudges={nudges}
+          />
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Driver
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Route
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Vehicle
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Last Update
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Location
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredDrivers.map((driver) => (
-                <tr key={driver.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0 h-10 w-10">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          <span className="text-sm font-medium text-blue-600">
-                            {driver.name.split(' ').map(n => n[0]).join('').toUpperCase()}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">{driver.name}</div>
-                        <div className="text-sm text-gray-500">ID: {driver.id.slice(0, 8)}...</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {driver.route_name ? (
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          Route {driver.route_number}
-                        </div>
-                        <div className="text-sm text-gray-500">{driver.route_name}</div>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-500">Not assigned</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {driver.registration_number ? (
-                      <span className="text-sm text-gray-900">{driver.registration_number}</span>
-                    ) : (
-                      <span className="text-sm text-gray-500">Not assigned</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="space-y-2">
-                      {/* Tracking Status */}
-                      <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(driver.location_tracking_status)}`}>
-                        {getStatusIcon(driver.location_tracking_status)}
-                        <span className="ml-1 capitalize">{driver.location_tracking_status}</span>
-                      </div>
-                      {/* GPS Status */}
-                      <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getGPSStatusColor(driver.gps_status || 'offline')}`}>
-                        {getGPSStatusIcon(driver.gps_status || 'offline')}
-                        <span className="ml-1 capitalize">{driver.gps_status || 'offline'}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {driver.last_location_update ? (
-                      <div>
-                        <div>{formatTimeSince(driver.last_location_update)}</div>
-                        {driver.time_since_update !== null && (
-                          <div className="text-xs text-gray-400">
-                            {driver.time_since_update} min ago
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400">Never</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {driver.current_latitude && driver.current_longitude ? (
-                      <div>
-                        <div>{driver.current_latitude.toFixed(6)}</div>
-                        <div>{driver.current_longitude.toFixed(6)}</div>
-                        {driver.location_accuracy && (
-                          <div className="text-xs text-gray-400">
-                            ±{Math.round(driver.location_accuracy)}m
-                          </div>
-                        )}
-                        {driver.status_message && (
-                          <div className="text-xs text-blue-600 mt-1">
-                            {driver.status_message}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-gray-400">
-                        <div className="flex items-center space-x-1">
-                          <AlertCircle className="w-3 h-3" />
-                          <span>{getLocationIssueMessage(driver.location_status)}</span>
-                        </div>
-                        {driver.status_message && (
-                          <div className="text-xs text-gray-500 mt-1">
-                            {driver.status_message}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        <div className="min-w-0">
+          {buses.length === 0 ? (
+            <div className="flex h-[45vh] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-300 text-center dark:border-gray-700 lg:h-[calc(100vh-13rem)]">
+              <Bus className="h-8 w-8 text-gray-300 dark:text-gray-600" />
+              <p className="text-sm font-medium text-gray-900 dark:text-white">No bus has a position yet</p>
+              <p className="max-w-xs text-xs text-gray-500 dark:text-gray-400">
+                Buses appear here once a driver goes on duty and their phone sends a GPS fix.
+              </p>
+            </div>
+          ) : (
+            <div className="h-[45vh] overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-800 lg:h-[calc(100vh-13rem)]">
+              <LiveTrackingMap
+                buses={buses}
+                selectedRouteId={selectedRouteId}
+                onSelectRoute={setSelectedRouteId}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
