@@ -53,6 +53,13 @@ interface MarkerState {
   anim: LatLng;
   from: LatLng;
   to: LatLng;
+  /**
+   * The last RAW fix this marker was retargeted to. Tracked separately from `to`
+   * because the snap pass overwrites `to` with the road-snapped point — so for
+   * exactly the live buses that animate, `to` is NOT a record of the last position
+   * we saw, and comparing against it could never detect "nothing actually moved".
+   */
+  rawTarget: LatLng;
   start: number;
   bus: MapBus;   // latest data for this marker, read by the click handler
 }
@@ -200,6 +207,14 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
     routeLineRef.current = null;
   };
 
+  // The one place "which bus is selected" is resolved — used by the enrichment effect
+  // below and by the selection card. Read from the PROP, not markersRef: a ref read
+  // during render does not re-render when the poll brings new data, and on the commit
+  // that first adds a bus the ref is still holding the previous frame's map.
+  const selectedBus = selectedRouteId
+    ? (buses ?? []).find((b) => b.routeId === selectedRouteId) ?? null
+    : null;
+
   // Mirror the selected-route prop into a ref so in-flight enrichment can still cancel
   // itself, and drop the previous route's line/address immediately — otherwise the old
   // road line hangs on the map until the new route's OSRM call resolves.
@@ -210,14 +225,26 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
   }, [selectedRouteId]);
 
   // Draw the road line + address for whichever route the parent has selected.
-  // `buses` is deliberately NOT a dependency: this effect must fire once per selection,
-  // not once per 5s poll, or it would hammer OSRM and redraw the line under the user.
+  //
+  // The deps are the route id plus the PRESENCE of its bus — deliberately not `buses`
+  // itself, and deliberately not the id alone:
+  //   - depending on `buses` would re-fire the OSRM fetch every 5s poll and redraw the
+  //     line under the user;
+  //   - depending on the id alone strands a route selected while it had no position.
+  //     The fleet list can select a route that is not reporting — that is the whole
+  //     point of this feature — and when it later starts reporting, the effect would
+  //     never retry, leaving the card stuck on "Locating…" until the user deselected
+  //     and reselected.
+  // `selectedBus != null` flips exactly once when the bus appears, so the effect
+  // self-heals without costing a fetch per poll while the bus is present.
+  const hasSelectedBus = selectedBus != null;
   useEffect(() => {
-    if (!selectedRouteId) return;
-    const bus = (buses ?? []).find((b) => b.routeId === selectedRouteId);
-    if (!bus) return;
-    void fetchEnrichment(bus.lat, bus.lng, { route: true, address: true }).then((e) => {
-      if (!e || selectedIdRef.current !== selectedRouteId) return;
+    if (!selectedBus) return;
+    // Captured by value: `routeId` is `string` here, where `selectedRouteId` is
+    // `string | null`, and they are equal by construction.
+    const { routeId, lat, lng } = selectedBus;
+    void fetchEnrichment(lat, lng, { route: true, address: true }).then((e) => {
+      if (!e || selectedIdRef.current !== routeId) return;
       const map = mapInstanceRef.current;
       if (map && e.route) {
         clearRouteLine();
@@ -227,8 +254,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
       }
       if (e.snapped) {
         // Cache the snap so the diffing effect's snap pass keeps this bus on-road each poll.
-        enrichRef.current.set(selectedRouteId, { at: { lat: bus.lat, lng: bus.lng }, snapped: e.snapped });
-        const cur = markersRef.current.get(selectedRouteId);
+        enrichRef.current.set(routeId, { at: { lat, lng }, snapped: e.snapped });
+        const cur = markersRef.current.get(routeId);
         if (cur) { cur.from = { ...cur.anim }; cur.to = e.snapped; cur.start = performance.now(); }
       }
       setEnrichment({
@@ -238,7 +265,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRouteId]);
+  }, [selectedRouteId, hasSelectedBus]);
 
   // Initialise the map once, and run ONE animation loop that glides every marker.
   useEffect(() => {
@@ -332,15 +359,24 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
           existing.circle = null;
         }
 
-        if (shouldSnap(existing.anim, target)) {
-          existing.anim = target;
-          existing.from = target;
-          existing.to = target;
-          existing.marker.setLatLng([target.lat, target.lng]);
-        } else {
-          existing.from = { ...existing.anim };
-          existing.to = target;
-          existing.start = performance.now();
+        // Only restart the glide when the bus actually reported a NEW position.
+        // This effect re-runs on any change of `buses` identity — which for an
+        // unmemoized parent is every render, including every selection click. A
+        // bare retarget would reset `start` each time, so the marker would re-glide
+        // whatever distance remained over a fresh GLIDE_MS and crawl without ever
+        // arriving. shouldSnap cannot rescue it: it only fires above 2 km.
+        if (target.lat !== existing.rawTarget.lat || target.lng !== existing.rawTarget.lng) {
+          existing.rawTarget = target;
+          if (shouldSnap(existing.anim, target)) {
+            existing.anim = target;
+            existing.from = target;
+            existing.to = target;
+            existing.marker.setLatLng([target.lat, target.lng]);
+          } else {
+            existing.from = { ...existing.anim };
+            existing.to = target;
+            existing.start = performance.now();
+          }
         }
       } else {
         const marker = L.marker([target.lat, target.lng], { icon }).addTo(map);
@@ -349,7 +385,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
           ? L.circle([target.lat, target.lng], { radius: bus.accuracyM, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
           : null;
         const st: MarkerState = {
-          marker, circle, anim: target, from: target, to: target, start: performance.now(), bus,
+          marker, circle, anim: target, from: target, to: target, rawTarget: target,
+          start: performance.now(), bus,
         };
         markersRef.current.set(bus.routeId, st);
         // Bind ONCE and never unbind: marker.off('click') would also strip the handler
@@ -409,13 +446,6 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
       hasFitRef.current = true;
     }
   }, [buses]);
-
-  // Read the card's bus from the PROP, not markersRef: a ref read during render does
-  // not re-render when the poll brings new data, and on the commit that first adds a
-  // bus the ref is still holding the previous frame's map.
-  const selectedBus = selectedRouteId
-    ? (buses ?? []).find((b) => b.routeId === selectedRouteId) ?? null
-    : null;
 
   return (
     <div className="relative h-full min-h-[420px] w-full">
