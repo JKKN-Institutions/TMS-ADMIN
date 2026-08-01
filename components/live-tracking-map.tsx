@@ -6,7 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/lib/gps/interpolate';
 import { shouldUseSnap } from '@/lib/geo/osrm';
 import { CAMPUS } from '@/lib/gps/campus';
-import { haversineKm } from '@/lib/gps/distance';
+import type { TrackingState } from '@/lib/gps/route-status';
 
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -16,35 +16,37 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-interface DriverLocation {
-  id: string;
-  name: string;
-  current_latitude: number;
-  current_longitude: number;
-  location_accuracy: number | null;
-  location_timestamp: string;
-  last_location_update: string;
-  location_sharing_enabled: boolean;
-  location_tracking_status: string;
-  route_id: string | null;
-  route_number: string | null;
-  route_name: string | null;
-  vehicle_id: string | null;
-  registration_number: string | null;
-  gps_status?: string;
-  time_since_update?: number | null;
-  heading?: number | null;
+/**
+ * One plottable bus, keyed by ROUTE — a route is the thing an admin tracks, and the
+ * driver on it can change. The parent builds these from FleetRoute and only sends
+ * routes that actually have a position; a route with no fix has nothing to draw.
+ */
+export interface MapBus {
+  routeId: string;
+  routeNumber: string | null;
+  routeName: string | null;
+  driverName: string | null;
+  registrationNumber: string | null;
+  lat: number;
+  lng: number;
+  heading: number | null;
+  accuracyM: number | null;
+  state: TrackingState;
+  reason: string;
 }
 
 interface LiveTrackingMapProps {
-  driverLocations: DriverLocation[];
+  buses: MapBus[];
+  /** Selection is owned by the parent so the fleet list and the map stay in step. */
+  selectedRouteId: string | null;
+  onSelectRoute: (routeId: string | null) => void;
 }
 
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
 const GLIDE_MS = 4500;
 const DEFAULT_CENTER: [number, number] = [11.4444567, 77.730258]; // Tamil Nadu area
 
-// Per-driver marker + the segment it is currently animating along.
+// Per-route marker + the segment it is currently animating along.
 interface MarkerState {
   marker: L.Marker;
   circle: L.Circle | null;
@@ -52,7 +54,7 @@ interface MarkerState {
   from: LatLng;
   to: LatLng;
   start: number;
-  driver: DriverLocation;   // latest data for this marker, read by the click handler
+  bus: MapBus;   // latest data for this marker, read by the click handler
 }
 
 interface Enrichment {
@@ -90,74 +92,79 @@ async function fetchEnrichment(
   }
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  online: '#10B981',
-  recent: '#F59E0B',
-  offline: '#EF4444',
-  inactive: '#6B7280',
+const STATE_COLORS: Record<TrackingState, string> = {
+  live: '#10B981',
+  recent: '#10B981',
+  paused: '#F59E0B',
+  stuck: '#EF4444',
+  off: '#6B7280',
+  no_vehicle: '#6B7280',
+  no_driver: '#6B7280',
+  unconfigured: '#6B7280',
 };
 
-function createCustomIcon(
-  status: string, isActive: boolean, routeNumber: string | null, heading: number | null | undefined,
-): L.DivIcon {
-  const color = isActive ? STATUS_COLORS[status] || STATUS_COLORS.inactive : STATUS_COLORS.inactive;
-  const displayText = routeNumber || '?';
-  const pointer = heading == null || Number.isNaN(heading)
-    ? ''
-    : `<div style="position:absolute;inset:0;transform:rotate(${heading}deg);">
-         <div style="position:absolute;top:-6px;left:50%;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid ${color};"></div>
-       </div>`;
+/** Stale buses ghost back so a marker from 10 hours ago doesn't read as present. */
+const STALE_STATES: ReadonlySet<TrackingState> = new Set<TrackingState>(['paused', 'stuck']);
+
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+};
+
+/** Route/driver names are free text from the DB and Leaflet renders popup HTML raw. */
+function esc(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
+}
+
+function createBusIcon(bus: MapBus): L.DivIcon {
+  const color = STATE_COLORS[bus.state];
+  const stale = STALE_STATES.has(bus.state);
+  const opacity = stale ? 0.45 : 1;
+  const displayText = bus.routeNumber || '?';
+  // A stale fix's heading is as old as the fix, so don't imply a current direction.
+  const pointer =
+    stale || bus.heading == null || Number.isNaN(bus.heading)
+      ? ''
+      : `<div style="position:absolute;inset:0;transform:rotate(${bus.heading}deg);">
+           <div style="position:absolute;top:-6px;left:50%;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid ${color};"></div>
+         </div>`;
   return L.divIcon({
     className: 'custom-marker',
     html: `
-      <div style="position:relative;width:30px;height:30px;">
+      <div style="position:relative;width:30px;height:30px;opacity:${opacity};">
         ${pointer}
         <div style="
           position:absolute;top:3px;left:3px;background:${color};width:24px;height:24px;border-radius:50%;
           border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);
           display:flex;align-items:center;justify-content:center;
           color:white;font-weight:bold;font-size:11px;font-family:Arial,sans-serif;
-        ">${displayText}</div>
+        ">${esc(displayText)}</div>
       </div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
 }
 
-function buildPopup(driver: DriverLocation): string {
-  const status = driver.gps_status || 'offline';
-  const dot = STATUS_COLORS[status] || STATUS_COLORS.offline;
+function buildPopup(bus: MapBus): string {
+  const color = STATE_COLORS[bus.state];
+  const title = `Route ${esc(bus.routeNumber ?? '?')}${bus.routeName ? ` · ${esc(bus.routeName)}` : ''}`;
   return `
-    <div style="min-width: 250px; font-family: system-ui, -apple-system, sans-serif;">
-      <div style="margin-bottom: 12px;">
-        <h3 style="margin: 0 0 8px 0; color: #111827; font-size: 16px; font-weight: 600;">${driver.name}</h3>
-        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-          <div style="width: 8px; height: 8px; border-radius: 50%; background: ${dot};"></div>
-          <span style="font-size: 12px; color: #6B7280; text-transform: capitalize;">
-            ${status} ${driver.location_sharing_enabled ? '(Active)' : '(Inactive)'}
-          </span>
-        </div>
+    <div style="min-width:220px;font-family:system-ui,-apple-system,sans-serif;">
+      <h3 style="margin:0 0 8px 0;color:#111827;font-size:15px;font-weight:600;">${title}</h3>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${color};"></div>
+        <span style="font-size:12px;color:#6B7280;">${esc(bus.reason)}</span>
       </div>
-      <div style="font-size: 13px; color: #374151;">
-        ${driver.route_name ? `<div style="margin-bottom: 6px;"><strong>Route:</strong> ${driver.route_number} - ${driver.route_name}</div>` : ''}
-        ${driver.registration_number ? `<div style="margin-bottom: 6px;"><strong>Vehicle:</strong> ${driver.registration_number}</div>` : ''}
-        <div style="margin-bottom: 6px;"><strong>Last Update:</strong> ${
-          driver.time_since_update != null ? `${driver.time_since_update} min ago` : 'Never'
-        }</div>
-        ${driver.location_accuracy ? `<div style="margin-bottom: 6px;"><strong>Accuracy:</strong> ±${Math.round(driver.location_accuracy)}m</div>` : ''}
-        <div style="margin-bottom: 6px;"><strong>To campus:</strong> ${
-          driver.current_latitude != null && driver.current_longitude != null
-            ? `${haversineKm({ lat: driver.current_latitude, lng: driver.current_longitude }, CAMPUS).toFixed(1)} km`
-            : '—'
-        }</div>
-        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #E5E7EB;">
-          <div style="font-size: 11px; color: #9CA3AF;">${driver.current_latitude.toFixed(6)}, ${driver.current_longitude.toFixed(6)}</div>
-        </div>
+      <div style="font-size:13px;color:#374151;">
+        ${bus.registrationNumber ? `<div style="margin-bottom:4px;"><strong>Bus:</strong> ${esc(bus.registrationNumber)}</div>` : ''}
+        ${bus.driverName ? `<div><strong>Driver:</strong> ${esc(bus.driverName)}</div>` : ''}
       </div>
     </div>`;
 }
 
-const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) => {
+const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteId, onSelectRoute }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, MarkerState>>(new Map());
@@ -165,11 +172,20 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
   const hasFitRef = useRef(false);
   const enrichRef = useRef<Map<string, { at: LatLng; snapped: LatLng | null }>>(new Map());
   const selectedIdRef = useRef<string | null>(null);
-  const [selected, setSelected] = useState<{
-    id: string; name: string; route: string | null; address: string | null;
-    distanceKm: number | null; durationMin: number | null;
-  } | null>(null);
   const routeLineRef = useRef<L.Polyline | null>(null);
+  const [enrichment, setEnrichment] = useState<{
+    address: string | null;
+    distanceKm: number | null;
+    durationMin: number | null;
+  } | null>(null);
+
+  // Marker click handlers are bound exactly once (see the diffing effect) so Leaflet's
+  // own popup handler survives. They reach the callback through this ref so a parent
+  // that passes a fresh arrow each render can never leave a marker calling a stale one.
+  const onSelectRouteRef = useRef(onSelectRoute);
+  useEffect(() => {
+    onSelectRouteRef.current = onSelectRoute;
+  }, [onSelectRoute]);
 
   const fitToMarkers = () => {
     const map = mapInstanceRef.current;
@@ -184,19 +200,24 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     routeLineRef.current = null;
   };
 
-  const selectBus = (d: DriverLocation) => {
+  // Mirror the selected-route prop into a ref so in-flight enrichment can still cancel
+  // itself, and drop the previous route's line/address immediately — otherwise the old
+  // road line hangs on the map until the new route's OSRM call resolves.
+  useEffect(() => {
+    selectedIdRef.current = selectedRouteId;
     clearRouteLine();
-    selectedIdRef.current = d.id;
-    setSelected({
-      id: d.id,
-      name: d.name,
-      route: d.route_name ? `${d.route_number ?? ''} · ${d.route_name}`.trim() : null,
-      address: null,
-      distanceKm: null,
-      durationMin: null,
-    });
-    void fetchEnrichment(d.current_latitude, d.current_longitude, { route: true, address: true }).then((e) => {
-      if (!e || selectedIdRef.current !== d.id) return;
+    setEnrichment(null);
+  }, [selectedRouteId]);
+
+  // Draw the road line + address for whichever route the parent has selected.
+  // `buses` is deliberately NOT a dependency: this effect must fire once per selection,
+  // not once per 5s poll, or it would hammer OSRM and redraw the line under the user.
+  useEffect(() => {
+    if (!selectedRouteId) return;
+    const bus = (buses ?? []).find((b) => b.routeId === selectedRouteId);
+    if (!bus) return;
+    void fetchEnrichment(bus.lat, bus.lng, { route: true, address: true }).then((e) => {
+      if (!e || selectedIdRef.current !== selectedRouteId) return;
       const map = mapInstanceRef.current;
       if (map && e.route) {
         clearRouteLine();
@@ -205,25 +226,19 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
         }).addTo(map);
       }
       if (e.snapped) {
-        // Cache the snap so Task 5's snap pass keeps this bus on-road each poll.
-        enrichRef.current.set(d.id, {
-          at: { lat: d.current_latitude, lng: d.current_longitude },
-          snapped: e.snapped,
-        });
-        const st = markersRef.current.get(d.id);
-        if (st) { st.from = { ...st.anim }; st.to = e.snapped; st.start = performance.now(); }
+        // Cache the snap so the diffing effect's snap pass keeps this bus on-road each poll.
+        enrichRef.current.set(selectedRouteId, { at: { lat: bus.lat, lng: bus.lng }, snapped: e.snapped });
+        const cur = markersRef.current.get(selectedRouteId);
+        if (cur) { cur.from = { ...cur.anim }; cur.to = e.snapped; cur.start = performance.now(); }
       }
-      setSelected((prev) => (prev && prev.id === d.id
-        ? { ...prev, address: e.address, distanceKm: e.route?.distanceKm ?? null, durationMin: e.route?.durationMin ?? null }
-        : prev));
+      setEnrichment({
+        address: e.address,
+        distanceKm: e.route?.distanceKm ?? null,
+        durationMin: e.route?.durationMin ?? null,
+      });
     });
-  };
-
-  const clearSelection = () => {
-    selectedIdRef.current = null;
-    clearRouteLine();
-    setSelected(null);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRouteId]);
 
   // Initialise the map once, and run ONE animation loop that glides every marker.
   useEffect(() => {
@@ -268,8 +283,13 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     rafRef.current = requestAnimationFrame(stepAll);
 
     return () => {
+      // Reset EVERY ref this effect owns. React Strict Mode remounts in dev, and any
+      // ref left populated makes the second mount silently skip the layer it guards.
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
       markersRef.current.clear();
+      enrichRef.current.clear();
+      hasFitRef.current = false;
       routeLineRef.current?.remove();
       routeLineRef.current = null;
       map.remove();
@@ -283,31 +303,29 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    const withLoc = (driverLocations || []).filter(
-      (d) => d.current_latitude && d.current_longitude
-    );
+    const list = buses ?? [];
     const seen = new Set<string>();
 
-    for (const d of withLoc) {
-      seen.add(d.id);
-      const target: LatLng = { lat: d.current_latitude, lng: d.current_longitude };
-      const icon = createCustomIcon(d.gps_status || 'offline', d.location_sharing_enabled, d.route_number, d.heading);
-      const popup = buildPopup(d);
-      const existing = markersRef.current.get(d.id);
+    for (const bus of list) {
+      seen.add(bus.routeId);
+      const target: LatLng = { lat: bus.lat, lng: bus.lng };
+      const icon = createBusIcon(bus);
+      const popup = buildPopup(bus);
+      const existing = markersRef.current.get(bus.routeId);
 
       if (existing) {
         existing.marker.setIcon(icon);
-        existing.driver = d;
+        existing.bus = bus;
         const p = existing.marker.getPopup();
         if (p) p.setContent(popup);
         else existing.marker.bindPopup(popup);
 
-        if (d.location_accuracy != null && d.location_accuracy > 0) {
+        if (bus.accuracyM != null && bus.accuracyM > 0) {
           if (!existing.circle) {
-            existing.circle = L.circle(target, { radius: d.location_accuracy, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map);
+            existing.circle = L.circle(target, { radius: bus.accuracyM, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map);
           } else {
             existing.circle.setLatLng(target);
-            existing.circle.setRadius(d.location_accuracy);
+            existing.circle.setRadius(bus.accuracyM);
           }
         } else if (existing.circle) {
           existing.circle.remove();
@@ -327,14 +345,17 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       } else {
         const marker = L.marker([target.lat, target.lng], { icon }).addTo(map);
         marker.bindPopup(popup);
-        const circle = d.location_accuracy != null && d.location_accuracy > 0
-          ? L.circle([target.lat, target.lng], { radius: d.location_accuracy, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
+        const circle = bus.accuracyM != null && bus.accuracyM > 0
+          ? L.circle([target.lat, target.lng], { radius: bus.accuracyM, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
           : null;
         const st: MarkerState = {
-          marker, circle, anim: target, from: target, to: target, start: performance.now(), driver: d,
+          marker, circle, anim: target, from: target, to: target, start: performance.now(), bus,
         };
-        markersRef.current.set(d.id, st);
-        marker.on('click', () => selectBus(st.driver));
+        markersRef.current.set(bus.routeId, st);
+        // Bind ONCE and never unbind: marker.off('click') would also strip the handler
+        // bindPopup installs, and popups would silently stop opening. `st.bus` is
+        // mutated each poll so this handler always reads the current route.
+        marker.on('click', () => onSelectRouteRef.current(st.bus.routeId));
       }
     }
 
@@ -342,29 +363,29 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
     // the RAW fix each poll). For each fresh bus we (1) re-apply its cached snapped
     // point so the raw retarget doesn't undo it, and (2) (re)fetch a snap when the
     // bus is new or has moved > REENRICH_M. The selected bus's snap is owned by the
-    // selection effect (Task 6), which writes the same enrichRef cache.
-    for (const d of withLoc) {
-      const fresh = d.gps_status === 'online' || d.gps_status === 'recent';
+    // selection effect, which writes the same enrichRef cache.
+    for (const bus of list) {
+      const fresh = bus.state === 'live' || bus.state === 'recent';
       if (!fresh) continue;
-      const here: LatLng = { lat: d.current_latitude, lng: d.current_longitude };
-      const prev = enrichRef.current.get(d.id);
+      const here: LatLng = { lat: bus.lat, lng: bus.lng };
+      const prev = enrichRef.current.get(bus.routeId);
       const movedFar = !prev || haversineMeters(prev.at, here) >= REENRICH_M;
 
       // (1) Keep the marker on its cached snapped point — but NOT if it just teleported
       //     far (a stale snap would misplace it until the refetch resolves).
       if (prev?.snapped && !movedFar) {
-        const st = markersRef.current.get(d.id);
+        const st = markersRef.current.get(bus.routeId);
         if (st) st.to = prev.snapped;
       }
 
       // (2) Non-selected buses: refetch a snap only when new or moved far.
-      if (selectedIdRef.current === d.id) continue;
+      if (selectedIdRef.current === bus.routeId) continue;
       if (!movedFar) continue;
-      enrichRef.current.set(d.id, { at: here, snapped: prev?.snapped ?? null });
+      enrichRef.current.set(bus.routeId, { at: here, snapped: prev?.snapped ?? null });
       void fetchEnrichment(here.lat, here.lng, { route: false, address: false }).then((e) => {
         if (!e) return;
-        enrichRef.current.set(d.id, { at: here, snapped: e.snapped });
-        const st = markersRef.current.get(d.id);
+        enrichRef.current.set(bus.routeId, { at: here, snapped: e.snapped });
+        const st = markersRef.current.get(bus.routeId);
         if (st && e.snapped) {
           st.from = { ...st.anim };
           st.to = e.snapped;
@@ -387,57 +408,51 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ driverLocations }) =>
       fitToMarkers();
       hasFitRef.current = true;
     }
-  }, [driverLocations]);
+  }, [buses]);
+
+  // Read the card's bus from the PROP, not markersRef: a ref read during render does
+  // not re-render when the poll brings new data, and on the commit that first adds a
+  // bus the ref is still holding the previous frame's map.
+  const selectedBus = selectedRouteId
+    ? (buses ?? []).find((b) => b.routeId === selectedRouteId) ?? null
+    : null;
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '600px' }}>
-      <div ref={mapRef} style={{ width: '100%', height: '100%', minHeight: '600px' }} />
+    <div className="relative h-full min-h-[420px] w-full">
+      <div ref={mapRef} className="h-full min-h-[420px] w-full" />
       <button
         type="button"
         onClick={fitToMarkers}
-        style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          zIndex: 1000,
-          background: 'white',
-          border: '1px solid #D1D5DB',
-          borderRadius: 8,
-          padding: '6px 12px',
-          fontSize: 13,
-          fontWeight: 600,
-          color: '#374151',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
-          cursor: 'pointer',
-        }}
+        className="absolute right-2.5 top-2.5 z-[1000] rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
       >
         Recenter
       </button>
-      {selected && (
-        <div
-          style={{
-            position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
-            background: 'white', border: '1px solid #E5E7EB', borderRadius: 10,
-            padding: '10px 12px', maxWidth: 320, boxShadow: '0 2px 10px rgba(0,0,0,0.15)',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'start' }}>
-            <div style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>{selected.name}</div>
-            <button
-              type="button" onClick={clearSelection} aria-label="Clear selection"
-              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#6B7280', fontSize: 16, lineHeight: 1 }}
-            >×</button>
-          </div>
-          {selected.route && <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>{selected.route}</div>}
-          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>
-            📍 {selected.address ?? 'Locating…'}
-          </div>
-          {(selected.distanceKm != null) && (
-            <div style={{ fontSize: 12, color: '#2563eb', marginTop: 4 }}>
-              🚌 {selected.distanceKm.toFixed(1)} km to campus
-              {selected.durationMin != null ? ` · ~${selected.durationMin} min` : ''}
+      {selectedBus && (
+        <div className="absolute bottom-3 left-3 z-[1000] max-w-[320px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                Route {selectedBus.routeNumber ?? '?'}
+                {selectedBus.routeName ? ` · ${selectedBus.routeName}` : ''}
+              </p>
             </div>
+            <button
+              type="button"
+              onClick={() => onSelectRoute(null)}
+              aria-label="Clear selection"
+              className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              ×
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            📍 {enrichment?.address ?? 'Locating…'}
+          </p>
+          {enrichment?.distanceKm != null && (
+            <p className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+              🚌 {enrichment.distanceKm.toFixed(1)} km to campus
+              {enrichment.durationMin != null ? ` · ~${enrichment.durationMin} min` : ''}
+            </p>
           )}
         </div>
       )}
