@@ -110,8 +110,14 @@ const STATE_COLORS: Record<TrackingState, string> = {
   unconfigured: '#6B7280',
 };
 
-/** Stale buses ghost back so a marker from 10 hours ago doesn't read as present. */
-const STALE_STATES: ReadonlySet<TrackingState> = new Set<TrackingState>(['paused', 'stuck']);
+/**
+ * Only live/recent fixes are trustworthy as "present"; everything else ghosts back —
+ * including `off`/`no_driver`/etc, whose vehicle row can still carry a days- or
+ * weeks-old `current_latitude/longitude` that nothing ever clears. Deriving
+ * staleness from freshness (rather than enumerating the stale states) also means a
+ * future `TrackingState` can't land in the un-ghosted set by omission.
+ */
+const FRESH_STATES: ReadonlySet<TrackingState> = new Set<TrackingState>(['live', 'recent']);
 
 const HTML_ESCAPES: Record<string, string> = {
   '&': '&amp;',
@@ -127,7 +133,7 @@ function esc(s: string): string {
 
 function createBusIcon(bus: MapBus): L.DivIcon {
   const color = STATE_COLORS[bus.state];
-  const stale = STALE_STATES.has(bus.state);
+  const stale = !FRESH_STATES.has(bus.state);
   const opacity = stale ? 0.45 : 1;
   const displayText = bus.routeNumber || '?';
   // A stale fix's heading is as old as the fix, so don't imply a current direction.

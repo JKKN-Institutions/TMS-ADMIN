@@ -48,7 +48,7 @@ function Stat({ icon: Icon, label, value }: {
 }
 
 export function RouteRow({
-  route, expanded, selected, onToggle, onNudge, nudgeState, cooldownMin,
+  route, expanded, selected, onToggle, onNudge, nudgeState, cooldownMin, rowRef,
 }: {
   route: FleetRoute;
   expanded: boolean;
@@ -57,6 +57,8 @@ export function RouteRow({
   onNudge: () => void;
   nudgeState: 'idle' | 'sending' | 'sent' | 'cooldown';
   cooldownMin: number | null;
+  /** Lets the list scroll this row into view when it becomes selected (e.g. a marker click). */
+  rowRef?: (el: HTMLLIElement | null) => void;
 }) {
   // Reverse-geocoded address, fetched only when the row is opened. Raw lat/lng is
   // never shown — it is not information an admin can act on.
@@ -76,6 +78,7 @@ export function RouteRow({
 
   return (
     <li
+      ref={rowRef}
       className={cn(
         'border-b border-gray-100 last:border-0 dark:border-gray-800',
         selected && 'bg-blue-50/60 dark:bg-blue-950/20',

@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { RefreshCw, AlertTriangle, Bus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
+import { humanizeAge } from '@/lib/gps/route-status';
 import { FleetList } from './fleet-list';
 import type { FleetResponse, FleetRoute } from './types';
 import type { MapBus } from '@/components/live-tracking-map';
@@ -48,7 +49,7 @@ export default function TrackAllPage() {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [nudges, setNudges] = useState<Record<string, NudgeState>>({});
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
+  const { data, isLoading, error, isError, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['track-all-fleet'],
     queryFn: fetchFleet,
     // Poll fast only while something is actually moving. With no bus reporting —
@@ -56,6 +57,26 @@ export default function TrackAllPage() {
     refetchInterval: (q) => ((q.state.data?.summary.reporting ?? 0) > 0 ? 5_000 : 30_000),
     refetchIntervalInBackground: false,
   });
+
+  // Same cadence the query above uses, mirrored here (not read back from the query)
+  // purely to judge how stale the on-screen snapshot is — see the banner below.
+  const pollMs = (data?.summary.reporting ?? 0) > 0 ? 5_000 : 30_000;
+
+  // Ticks so the staleness banner's age advances on screen instead of freezing at
+  // whatever render happened to run when the poll last failed or the tab was hidden.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // A background poll can fail (endpoint down, flapping network) or simply not have
+  // run yet (tab was hidden — refetchIntervalInBackground is false, and
+  // query-provider.tsx disables refetchOnWindowFocus globally) while the page keeps
+  // asserting server-computed `reason` strings ("Updated 45s ago") that never tick
+  // on their own. Surface it rather than let a stale snapshot read as current.
+  const dataAgeMs = dataUpdatedAt > 0 ? now - dataUpdatedAt : 0;
+  const showStale = dataUpdatedAt > 0 && (isError || dataAgeMs > pollMs * 2);
 
   const routes = useMemo(() => data?.routes ?? [], [data]);
   const buses = useMemo(
@@ -157,6 +178,14 @@ export default function TrackAllPage() {
 
   return (
     <div className="space-y-5">
+      {showStale && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          Showing data from {humanizeAge(dataAgeMs)} ago
+          {isError ? " — couldn't reach the server." : '.'}
+        </div>
+      )}
+
       {/* Coverage header — the honest headline the old stat cards never gave. */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">

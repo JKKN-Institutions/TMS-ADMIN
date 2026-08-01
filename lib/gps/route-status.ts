@@ -105,8 +105,6 @@ export function classifyRouteStatus(input: RouteStatusInput): RouteStatus {
   }
 
   // 5-8. Sharing is on, so the only question left is how fresh the fix is.
-  // Delegate the 2- and 5-minute boundaries to gpsFreshness so this module can
-  // never drift from the student, boarding and driver readers.
   const fixMs = lastFixAt ? Date.parse(lastFixAt) : NaN;
   if (!Number.isFinite(fixMs)) {
     return {
@@ -120,10 +118,16 @@ export function classifyRouteStatus(input: RouteStatusInput): RouteStatus {
 
   const ageMs = nowMs - fixMs;
 
-  // These are the SAME 2-/5-minute boundaries as lib/gps/freshness.ts, deliberately
-  // re-declared rather than imported. gpsFreshness() reads Date.now() internally, so
+  // Nominally the same 2-/5-minute boundaries as lib/gps/freshness.ts, deliberately
+  // re-declared rather than imported: gpsFreshness() reads Date.now() internally, so
   // calling it here would make this function impure and its boundary tests
-  // non-deterministic. Keep these two constants in step with that file.
+  // non-deterministic. "Nominally" because they are not exactly equivalent —
+  // gpsFreshness floors to whole minutes (`minutes <= 2` admits ages up to 2 m 59 s)
+  // while this function compares exact milliseconds (`ageMs <= 120000`), so a fix
+  // aged between roughly 2:00 and 2:59 (or 5:00-5:59) can classify as `recent` there
+  // and `live`/`paused` here. The divergence is bounded under a minute and harmless
+  // in practice — but it is real, so don't describe these as identical. Keep the two
+  // constants below in step with that file.
   const ONLINE_MAX_MS = 2 * 60_000;
   const RECENT_MAX_MS = 5 * 60_000;
 

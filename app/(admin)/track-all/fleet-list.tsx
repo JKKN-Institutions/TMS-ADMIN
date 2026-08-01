@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Inbox } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { RouteRow } from './route-row';
@@ -84,6 +84,41 @@ export function FleetList({
     onSelectRoute(next);
   };
 
+  // DOM nodes for the currently rendered rows, keyed by route id — populated by the
+  // ref callback handed to each RouteRow's <li>. Read (never iterated as a dep) by
+  // the scroll effect below.
+  const rowNodesRef = useRef<Map<string, HTMLLIElement>>(new Map());
+  const setRowNode = (routeId: string, el: HTMLLIElement | null) => {
+    if (el) rowNodesRef.current.set(routeId, el);
+    else rowNodesRef.current.delete(routeId);
+  };
+
+  // Clicking a marker (or anything else that selects a route) should scroll that
+  // row into view — the list shows ~8-10 of 24 rows, so a below-the-fold selection
+  // otherwise looks like the list didn't react (I-3). Keyed on the id alone (a
+  // primitive) so this never fires on the 5s poll.
+  useEffect(() => {
+    if (!selectedRouteId) return;
+    rowNodesRef.current.get(selectedRouteId)?.scrollIntoView({ block: 'nearest' });
+  }, [selectedRouteId]);
+
+  // If the search box or a filter chip hides the expanded row, collapse it — otherwise
+  // its detail panel keeps rendering for a row no longer in the list (deferred #7).
+  const expandedStillVisible = expandedId ? visible.some((r) => r.routeId === expandedId) : true;
+  useEffect(() => {
+    if (!expandedStillVisible) setExpandedId(null);
+  }, [expandedStillVisible]);
+
+  // Same idea for the selected route: if it's filtered out, clear the selection too,
+  // otherwise the map keeps its road line/address card pinned to a route with no
+  // corresponding row to scroll back to (the other half of deferred #7 / I-3). Kept
+  // separate from the expanded-row effect above because the two can point at
+  // different routes — a marker click selects without expanding.
+  const selectedStillVisible = selectedRouteId ? visible.some((r) => r.routeId === selectedRouteId) : true;
+  useEffect(() => {
+    if (!selectedStillVisible) onSelectRoute(null);
+  }, [selectedStillVisible, onSelectRoute]);
+
   return (
     <div className="flex min-h-0 flex-col rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
       <div className="space-y-3 border-b border-gray-100 p-4 dark:border-gray-800">
@@ -149,6 +184,7 @@ export function FleetList({
               onNudge={() => onNudge(r.routeId)}
               nudgeState={nudges[r.routeId]?.state ?? 'idle'}
               cooldownMin={nudges[r.routeId]?.cooldownMin ?? null}
+              rowRef={(el) => setRowNode(r.routeId, el)}
             />
           ))}
         </ul>
