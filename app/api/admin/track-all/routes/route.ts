@@ -5,6 +5,7 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { classifyRouteStatus, type TrackingState } from '@/lib/gps/route-status';
 import { haversineKm } from '@/lib/gps/distance';
 import { CAMPUS } from '@/lib/gps/campus';
+import type { FleetRoute, FleetSummary, FleetResponse } from '@/app/(admin)/track-all/types';
 
 /**
  * GET /api/admin/track-all/routes — the admin fleet-health read.
@@ -94,6 +95,8 @@ async function handler(_request: NextRequest, auth: AuthContext) {
         )
         .in('id', vehicleIds.length ? vehicleIds : [NONE]),
     ]);
+    if (staffRes.error) throw staffRes.error;
+    if (vehRes.error) throw vehRes.error;
     const staffById = new Map(((staffRes.data ?? []) as StaffRow[]).map((s) => [s.id, s]));
     const vehById = new Map(((vehRes.data ?? []) as VehRow[]).map((v) => [v.id, v]));
 
@@ -117,7 +120,7 @@ async function handler(_request: NextRequest, auth: AuthContext) {
 
     const nowMs = Date.now();
 
-    const result = routes.map((r) => {
+    const result: FleetRoute[] = routes.map((r) => {
       const d = driverByRoute.get(r.id) ?? null;
       const veh = r.vehicle_id ? vehById.get(r.vehicle_id) ?? null : null;
       const s = d?.staff_id ? staffById.get(d.staff_id) : undefined;
@@ -171,7 +174,7 @@ async function handler(_request: NextRequest, auth: AuthContext) {
     });
 
     const count = (st: TrackingState) => result.filter((x) => x.state === st).length;
-    const summary = {
+    const summary: FleetSummary = {
       total: result.length,
       trackable: result.filter((x) => x.driver !== null && x.vehicle !== null).length,
       reporting: count('live') + count('recent'),
@@ -185,7 +188,8 @@ async function handler(_request: NextRequest, auth: AuthContext) {
       unconfigured: count('unconfigured'),
     };
 
-    return NextResponse.json({ success: true, summary, routes: result });
+    const response: FleetResponse = { success: true, summary, routes: result };
+    return NextResponse.json(response);
   } catch (error) {
     console.error('track-all/routes GET error:', error);
     return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
