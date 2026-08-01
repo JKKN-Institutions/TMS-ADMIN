@@ -201,8 +201,6 @@ Expected: FAIL — `Failed to resolve import "./route-status"`
 Create `lib/gps/route-status.ts`:
 
 ```ts
-import { gpsFreshness } from './freshness';
-
 /**
  * Why a route is or is not being tracked right now.
  *
@@ -324,9 +322,15 @@ export function classifyRouteStatus(input: RouteStatusInput): RouteStatus {
   }
 
   const ageMs = nowMs - fixMs;
-  const fresh = gpsFreshness(lastFixAt);
 
-  if (fresh.status === 'online') {
+  // These are the SAME 2-/5-minute boundaries as lib/gps/freshness.ts, deliberately
+  // re-declared rather than imported. gpsFreshness() reads Date.now() internally, so
+  // calling it here would make this function impure and its boundary tests
+  // non-deterministic. Keep these two constants in step with that file.
+  const ONLINE_MAX_MS = 2 * 60_000;
+  const RECENT_MAX_MS = 5 * 60_000;
+
+  if (ageMs <= ONLINE_MAX_MS) {
     return {
       state: 'live',
       label: 'Live',
@@ -335,7 +339,7 @@ export function classifyRouteStatus(input: RouteStatusInput): RouteStatus {
       canNudge: false,
     };
   }
-  if (fresh.status === 'recent') {
+  if (ageMs <= RECENT_MAX_MS) {
     return {
       state: 'recent',
       label: 'Live',
@@ -365,36 +369,7 @@ export function classifyRouteStatus(input: RouteStatusInput): RouteStatus {
 }
 ```
 
-**Note on `gpsFreshness`:** it calls `Date.now()` internally rather than taking an injected clock. The tests above build `lastFixAt` relative to a fixed `NOW` that is in the past relative to the real clock, which would break the online/recent assertions. Fix this in Step 3 by having `classifyRouteStatus` compute the bands from the injected `nowMs` itself rather than calling `gpsFreshness`. Replace the `const fresh = gpsFreshness(lastFixAt);` block and its two `if` statements with:
-
-```ts
-  // Same 2-/5-minute boundaries as gpsFreshness, but measured against the injected
-  // clock so this stays a pure function. ONLINE_MAX_MS / RECENT_MAX_MS below must
-  // stay in step with lib/gps/freshness.ts.
-  const ONLINE_MAX_MS = 2 * 60_000;
-  const RECENT_MAX_MS = 5 * 60_000;
-
-  if (ageMs <= ONLINE_MAX_MS) {
-    return {
-      state: 'live',
-      label: 'Live',
-      reason: `Updated ${humanizeAge(ageMs)} ago`,
-      tone: 'green',
-      canNudge: false,
-    };
-  }
-  if (ageMs <= RECENT_MAX_MS) {
-    return {
-      state: 'recent',
-      label: 'Live',
-      reason: `Updated ${humanizeAge(ageMs)} ago`,
-      tone: 'green',
-      canNudge: false,
-    };
-  }
-```
-
-and delete the now-unused `import { gpsFreshness } from './freshness';` line.
+**Why this file does not import `gpsFreshness`:** `gpsFreshness()` reads `Date.now()` internally rather than taking an injected clock, so calling it here would make `classifyRouteStatus` impure and its boundary tests non-deterministic — the tests build `lastFixAt` relative to a fixed `NOW` in the past. The 2- and 5-minute constants are therefore re-declared locally with a comment tying them back. Write the file exactly as given above; do not add a `freshness` import.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
