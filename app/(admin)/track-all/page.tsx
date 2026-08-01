@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { RefreshCw, AlertTriangle, Bus } from 'lucide-react';
@@ -63,22 +63,25 @@ export default function TrackAllPage() {
     [routes],
   );
 
-  // Drop-out decision (requirement 3): if the selected route stops reporting and
-  // leaves `buses`, the map's selection card hides on its own (it looks the bus up
-  // by id each render) but its drawn road line and "Locating…" address would linger
-  // until the selection changes, because the map only clears those when
-  // `selectedRouteId` itself changes — not when the underlying bus disappears. We
-  // resolve that here by clearing the selection ourselves, so the artifact never
-  // shows. The dependency is a plain boolean computed at render time, not the
-  // `buses` array itself, so this stays clean under requirement 1.
+  // Drop-out decision (requirement 3, revised after review): keep the user's
+  // selection in PAGE state exactly as they made it — including selecting a route
+  // that has no position yet, which is deliberately reachable: FleetList lets the
+  // user open/select ANY row, not just positioned ones, and
+  // components/live-tracking-map.tsx depends on `selectedRouteId` surviving that
+  // gap so its self-heal (`selectedBus != null` flipping once the bus appears)
+  // can fire at all. Clearing page state here would make that unreachable.
+  //
+  // Only the MAP needs "nothing to draw" when its selected route currently has no
+  // position: the map only clears its road line + address when its
+  // `selectedRouteId` PROP changes, so we hand it null while the bus is absent
+  // (clearing the artifact immediately) and the real id back the instant the bus
+  // reports (re-arming the self-heal). `selectedRouteStillPresent` is a plain
+  // boolean computed at render time — never `buses` itself — so no object/array
+  // reaches a dependency array, and no effect is needed at all.
   const selectedRouteStillPresent = selectedRouteId
     ? buses.some((b) => b.routeId === selectedRouteId)
     : true;
-  useEffect(() => {
-    if (selectedRouteId && !selectedRouteStillPresent) {
-      setSelectedRouteId(null);
-    }
-  }, [selectedRouteId, selectedRouteStillPresent]);
+  const mapSelectedRouteId = selectedRouteStillPresent ? selectedRouteId : null;
 
   const handleRefresh = useCallback(async () => {
     const res = await refetch();
@@ -119,7 +122,11 @@ export default function TrackAllPage() {
     );
   }
 
-  if (error || !data) {
+  // Only replace the page with the error card when there is genuinely nothing to
+  // show. TanStack sets `error` on a background refetch failure too, while keeping
+  // `data` from the last success — treating that as fatal would unmount the map
+  // (losing the admin's pan/zoom to its own re-fit) on every transient blip.
+  if (error && !data) {
     return (
       <div className="max-w-xl rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
@@ -139,6 +146,11 @@ export default function TrackAllPage() {
       </div>
     );
   }
+
+  // Not an error, but genuinely nothing to show yet (e.g. the query hasn't settled
+  // for some reason `isLoading` didn't catch). Practically unreachable once loaded,
+  // but keeps `data` below narrowed instead of risking a crash on `data.summary`.
+  if (!data) return null;
 
   const s = data.summary;
   const notSetUp = s.noVehicle + s.noDriver + s.unconfigured;
@@ -174,7 +186,7 @@ export default function TrackAllPage() {
 
       {/* List and map. Stacks on mobile, side by side from lg up. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <div className="min-w-0 lg:max-h-[calc(100vh-13rem)]">
+        <div className="min-w-0 lg:grid lg:h-[calc(100vh-13rem)]">
           <FleetList
             routes={routes}
             summary={s}
@@ -198,7 +210,7 @@ export default function TrackAllPage() {
             <div className="h-[45vh] overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-800 lg:h-[calc(100vh-13rem)]">
               <LiveTrackingMap
                 buses={buses}
-                selectedRouteId={selectedRouteId}
+                selectedRouteId={mapSelectedRouteId}
                 onSelectRoute={setSelectedRouteId}
               />
             </div>
