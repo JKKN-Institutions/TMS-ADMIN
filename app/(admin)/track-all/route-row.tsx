@@ -7,10 +7,10 @@ import { cn } from '@/lib/utils';
 import type { FleetRoute } from './types';
 
 const DOT: Record<FleetRoute['tone'], string> = {
-  green: 'bg-green-500',
-  amber: 'bg-amber-500',
-  red: 'bg-red-500',
-  gray: 'bg-gray-400',
+  green: 'bg-green-500 dark:bg-green-400',
+  amber: 'bg-amber-500 dark:bg-amber-400',
+  red: 'bg-red-500 dark:bg-red-400',
+  gray: 'bg-gray-400 dark:bg-gray-500',
 };
 
 const CHIP: Record<FleetRoute['tone'], string> = {
@@ -72,7 +72,7 @@ export function RouteRow({
       .then((j) => { if (!cancelled) setAddress(j?.address ?? 'Location unavailable'); })
       .catch(() => { if (!cancelled) setAddress('Location unavailable'); });
     return () => { cancelled = true; };
-  }, [expanded, route.position, address]);
+  }, [expanded, route.position?.lat, route.position?.lng, address]);
 
   return (
     <li
@@ -106,7 +106,7 @@ export function RouteRow({
         </span>
         <ChevronDown
           className={cn(
-            'mt-1 h-4 w-4 shrink-0 text-gray-400 transition-transform',
+            'mt-1 h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500 transition-transform',
             expanded && 'rotate-180',
           )}
         />
