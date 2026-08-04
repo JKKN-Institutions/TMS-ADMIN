@@ -16,6 +16,9 @@ import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from './types';
 
 export type StaffBillTerm = { term_no: number; amount: number; due_date: string };
 
+/** Staff bills are either a coverage record (cron) or a real payable bill (admin run). */
+export type StaffBillStatus = 'staff_deferred' | 'generated';
+
 export interface StaffFeeBillRow {
   generation_run_id: string | null;
   fee_structure_id: string;
@@ -27,7 +30,7 @@ export interface StaffFeeBillRow {
   due_date: string;
   billing_category_id: string | null;
   billing_student_bill_id: null;
-  status: 'staff_deferred';
+  status: StaffBillStatus;
 }
 
 export interface BuildStaffFeeBillRowInput {
@@ -37,6 +40,8 @@ export interface BuildStaffFeeBillRowInput {
   staffId: string;
   categoryId: string | null;
   term: StaffBillTerm;
+  /** Defaults to 'staff_deferred' so the in-charge enforcement cron is unchanged. */
+  status?: StaffBillStatus;
 }
 
 /** Pure: the exact row the fees generate route writes for a staff member. */
@@ -52,7 +57,7 @@ export function buildStaffFeeBillRow(input: BuildStaffFeeBillRowInput): StaffFee
     due_date: input.term.due_date,
     billing_category_id: input.categoryId,
     billing_student_bill_id: null,
-    status: 'staff_deferred',
+    status: input.status ?? 'staff_deferred',
   };
 }
 

@@ -48,6 +48,18 @@ describe('buildStaffFeeBillRow', () => {
   it('carries the generation run id when present', () => {
     expect(buildStaffFeeBillRow({ ...base, runId: 'run-9' }).generation_run_id).toBe('run-9');
   });
+
+  it('defaults to staff_deferred when no status is given', () => {
+    expect(buildStaffFeeBillRow(base).status).toBe('staff_deferred');
+  });
+
+  it('writes a payable generated row when status is given', () => {
+    expect(buildStaffFeeBillRow({ ...base, status: 'generated' }).status).toBe('generated');
+  });
+
+  it('keeps billing_student_bill_id null even for a payable row', () => {
+    expect(buildStaffFeeBillRow({ ...base, status: 'generated' }).billing_student_bill_id).toBeNull();
+  });
 });
 
 type Result = { data?: unknown; error?: unknown };
