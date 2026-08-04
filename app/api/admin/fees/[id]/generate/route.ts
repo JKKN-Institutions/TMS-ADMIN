@@ -58,7 +58,18 @@ async function generate(request: NextRequest, auth: AuthContext) {
     const mode: 'dry_run' | 'generate' = body?.mode === 'generate' ? 'generate' : 'dry_run';
 
     // Optional explicit subset. Applied as an INTERSECTION after applicability
-    // and the in-charge exemption, so it can only narrow the cohort.
+    // and the in-charge exemption, so it can only narrow the cohort. An
+    // EXPLICIT empty array is rejected outright: intersectPersonIds reads "no
+    // usable ids" as "no scoping applied" (by design, for the absent-field
+    // case), so a selection UI that serialises "nothing selected" as []
+    // would otherwise silently bill the ENTIRE cohort instead of nobody. An
+    // absent personIds field keeps meaning "bill everyone".
+    if (Array.isArray(body?.personIds) && body.personIds.length === 0) {
+      return NextResponse.json(
+        { error: 'personIds was provided but empty. Omit personIds to bill everyone, or include at least one id.' },
+        { status: 400 }
+      );
+    }
     const requestedPersonIds: string[] | null = Array.isArray(body?.personIds)
       ? (body.personIds as unknown[]).map((v) => String(v))
       : null;
@@ -547,71 +558,102 @@ async function generate(request: NextRequest, auth: AuthContext) {
     }
 
     // ── Notify each staff member whose bill this run created ────────────────
-    // Best-effort: a notification failure must never undo a generated bill, so
-    // failures are counted and reported, never thrown. Every .in() is chunked to
-    // <=150 and error-checked — an unchecked gateway 400 reads as an empty set,
-    // which would silently notify nobody while reporting success.
+    // Best-effort in TWO senses: (1) a delivery failure must never undo a
+    // generated bill, so notifyProfile's own boolean result is the only thing
+    // consulted; (2) the whole block is wrapped so ANY throw here — a rejected
+    // network call, a malformed due_date — still lets the run-counter update
+    // and activity log below execute. Every .in() is chunked to <=150 and
+    // error-checked — an unchecked gateway 400 reads as an empty set, which
+    // would silently notify nobody while reporting success.
     let notified = 0;
-    if (billedStaff.length) {
-      const { data: tyRow } = await supabase
-        .from('tms_transport_year')
-        .select('name')
-        .eq('id', fs.transport_year_id)
-        .maybeSingle();
-      const yearName = (tyRow as { name?: string } | null)?.name ?? 'this year';
-
-      const staffIds = billedStaff.map((b) => b.staffId);
-      const profileIdByStaff = new Map<string, string | null>();
-      const stopIdByStaff = new Map<string, string | null>();
-      const CHUNK_NOTIFY = 150;
-      let lookupFailed = false;
-      for (let i = 0; i < staffIds.length; i += CHUNK_NOTIFY) {
-        const { data: rows, error: sErr } = await supabase
-          .from('staff')
-          .select('id, profile_id, transport_stop_id')
-          .in('id', staffIds.slice(i, i + CHUNK_NOTIFY));
-        if (sErr) { lookupFailed = true; break; }
-        for (const r of (rows ?? []) as Array<{ id: string; profile_id: string | null; transport_stop_id: string | null }>) {
-          profileIdByStaff.set(r.id, r.profile_id);
-          stopIdByStaff.set(r.id, r.transport_stop_id);
+    try {
+      // Group per-term rows into ONE notice per staffer: without this, a
+      // multi-term structure sends one notice per term, each quoting a
+      // fraction of the real total while the wording says "your fee is ₹X".
+      // Sum the amounts; use the EARLIEST due date across their terms.
+      const billedByStaff = new Map<string, { amount: number; dueDate: string }>();
+      for (const b of billedStaff) {
+        const agg = billedByStaff.get(b.staffId);
+        if (!agg) {
+          billedByStaff.set(b.staffId, { amount: b.amount, dueDate: b.dueDate });
+        } else {
+          agg.amount += b.amount;
+          if (b.dueDate < agg.dueDate) agg.dueDate = b.dueDate;
         }
       }
 
-      const stopNameById = new Map<string, string>();
-      const stopIds = [...new Set([...stopIdByStaff.values()].filter((v): v is string => !!v))];
-      for (let i = 0; i < stopIds.length && !lookupFailed; i += CHUNK_NOTIFY) {
-        const { data: rows, error: stErr } = await supabase
-          .from('tms_route_stop')
-          .select('id, stop_name')
-          .in('id', stopIds.slice(i, i + CHUNK_NOTIFY));
-        if (stErr) break; // stop name is cosmetic — degrade to no stop clause
-        for (const r of (rows ?? []) as Array<{ id: string; stop_name: string | null }>) {
-          if (r.stop_name) stopNameById.set(r.id, r.stop_name);
-        }
-      }
+      if (billedByStaff.size) {
+        const { data: tyRow } = await supabase
+          .from('tms_transport_year')
+          .select('name')
+          .eq('id', fs.transport_year_id)
+          .maybeSingle();
+        const yearName = (tyRow as { name?: string } | null)?.name ?? 'this year';
 
-      if (!lookupFailed) {
-        for (const b of billedStaff) {
-          const profileId = profileIdByStaff.get(b.staffId);
-          if (!profileId) continue; // no login identity — nothing to notify
-          const stopId = stopIdByStaff.get(b.staffId);
-          const note = buildStaffBillNotification({
-            amount: b.amount,
-            dueDate: b.dueDate,
-            stopName: stopId ? stopNameById.get(stopId) ?? null : null,
-            yearName,
-          });
-          await notifyProfile(supabase, {
-            profileId,
-            actorId: auth.userId,
-            title: note.title,
-            body: note.body,
-            category: note.category,
-            url: note.url,
-          });
-          notified++;
+        const staffIds = [...billedByStaff.keys()];
+        const profileIdByStaff = new Map<string, string | null>();
+        const stopIdByStaff = new Map<string, string | null>();
+        const CHUNK_NOTIFY = 150;
+        let lookupFailed = false;
+        for (let i = 0; i < staffIds.length; i += CHUNK_NOTIFY) {
+          const { data: rows, error: sErr } = await supabase
+            .from('staff')
+            .select('id, profile_id, transport_stop_id')
+            .in('id', staffIds.slice(i, i + CHUNK_NOTIFY));
+          if (sErr) {
+            // Logged, not silent: already-billed rows are skipped on retry, so
+            // a lookup failure here means these notices can never be re-sent —
+            // this is the only trace of why nobody was notified.
+            console.error('Fee generation: staff notification lookup failed', sErr);
+            lookupFailed = true;
+            break;
+          }
+          for (const r of (rows ?? []) as Array<{ id: string; profile_id: string | null; transport_stop_id: string | null }>) {
+            profileIdByStaff.set(r.id, r.profile_id);
+            stopIdByStaff.set(r.id, r.transport_stop_id);
+          }
+        }
+
+        const stopNameById = new Map<string, string>();
+        const stopIds = [...new Set([...stopIdByStaff.values()].filter((v): v is string => !!v))];
+        for (let i = 0; i < stopIds.length && !lookupFailed; i += CHUNK_NOTIFY) {
+          const { data: rows, error: stErr } = await supabase
+            .from('tms_route_stop')
+            .select('id, stop_name')
+            .in('id', stopIds.slice(i, i + CHUNK_NOTIFY));
+          if (stErr) break; // stop name is cosmetic — degrade to no stop clause
+          for (const r of (rows ?? []) as Array<{ id: string; stop_name: string | null }>) {
+            if (r.stop_name) stopNameById.set(r.id, r.stop_name);
+          }
+        }
+
+        if (!lookupFailed) {
+          for (const [staffId, agg] of billedByStaff) {
+            const profileId = profileIdByStaff.get(staffId);
+            if (!profileId) continue; // no login identity — nothing to notify
+            const stopId = stopIdByStaff.get(staffId);
+            const note = buildStaffBillNotification({
+              amount: agg.amount,
+              dueDate: agg.dueDate,
+              stopName: stopId ? stopNameById.get(stopId) ?? null : null,
+              yearName,
+            });
+            // notifyProfile never throws — it swallows and returns false, so
+            // `notified` counts actual deliveries, not attempts.
+            const delivered = await notifyProfile(supabase, {
+              profileId,
+              actorId: auth.userId,
+              title: note.title,
+              body: note.body,
+              category: note.category,
+              url: note.url,
+            });
+            if (delivered) notified++;
+          }
         }
       }
+    } catch (e) {
+      console.error('Fee generation: staff notification block failed (bills already committed)', e);
     }
 
     if (runId) {
@@ -619,6 +661,12 @@ async function generate(request: NextRequest, auth: AuthContext) {
       if (errors > 0) noteParts.push(`${errors} row(s) errored`);
       if (exemptInCharge > 0) {
         noteParts.push(`${exemptInCharge} staff exempt (active bus in-charge)`);
+      }
+      // Visible even when 0: a staff run that billed people but notified
+      // nobody is exactly the failure mode that needs to surface here, since
+      // a retry can never re-send (already-billed rows are skipped).
+      if (staffDeferred > 0) {
+        noteParts.push(`${notified} staff notified`);
       }
       if (isStopWise) {
         // Stop-wise can be unresolved for three different reasons, and the operator
@@ -652,7 +700,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
       entityId: id,
       entityLabel: fs.name,
       description: `Generated transport bills for ${fs.name}: ${learnerBilled} learner bill(s), ${staffDeferred} staff deferred, ${skipped} skipped, ${unresolved} unresolved`,
-      metadata: { runId, learnerBilled, staffDeferred, skipped, unresolved, errors, feeMode: fs.fee_mode },
+      metadata: { runId, learnerBilled, staffDeferred, skipped, unresolved, errors, feeMode: fs.fee_mode, notified },
     });
 
     return NextResponse.json({

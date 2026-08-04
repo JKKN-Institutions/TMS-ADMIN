@@ -19,7 +19,7 @@ type Svc = ReturnType<typeof createServiceRoleClient>;
 export async function notifyProfile(
   svc: Svc,
   opts: { profileId: string; actorId: string; title: string; body: string; category?: string; url?: string },
-): Promise<void> {
+): Promise<boolean> {
   try {
     await dispatchNotification(svc, {
       title: opts.title,
@@ -29,8 +29,10 @@ export async function notifyProfile(
       createdBy: opts.actorId,
       targeting: { type: 'users', user_ids: [opts.profileId] },
     });
+    return true;
   } catch (e) {
     console.error('notifyProfile (non-fatal):', e);
+    return false;
   }
 }
 
