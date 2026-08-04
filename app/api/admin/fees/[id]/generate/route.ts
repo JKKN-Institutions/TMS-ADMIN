@@ -14,6 +14,9 @@ import {
 } from '@/lib/fees/resolve-terms';
 import { buildStaffFeeBillRow } from '@/lib/fees/staff-bill';
 import { filterOutInCharges } from '@/lib/fees/incharge-exemption';
+import { intersectPersonIds } from '@/lib/fees/person-scope';
+import { buildStaffBillNotification } from '@/lib/fees/staff-bill-notification';
+import { notifyProfile } from '@/lib/notifications/notify';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -53,6 +56,12 @@ async function generate(request: NextRequest, auth: AuthContext) {
 
     const body = await request.json().catch(() => ({}));
     const mode: 'dry_run' | 'generate' = body?.mode === 'generate' ? 'generate' : 'dry_run';
+
+    // Optional explicit subset. Applied as an INTERSECTION after applicability
+    // and the in-charge exemption, so it can only narrow the cohort.
+    const requestedPersonIds: string[] | null = Array.isArray(body?.personIds)
+      ? (body.personIds as unknown[]).map((v) => String(v))
+      : null;
     const supabase = createServiceRoleClient();
 
     const { data: fs } = await supabase.from('tms_fee_structure').select('*').eq('id', id).maybeSingle();
@@ -276,6 +285,11 @@ async function generate(request: NextRequest, auth: AuthContext) {
       people = filtered.kept;
     }
 
+    // Explicit subset, applied LAST so applicability, the in-charge exemption and
+    // (below) stop-rate resolution all still gate who can be billed.
+    const scope = intersectPersonIds(people, requestedPersonIds);
+    people = scope.kept;
+
     // Resolve each person to the terms that apply to them. Unresolvable people
     // are skipped + reported, never guessed. See lib/fees/resolve-terms.ts.
     const resolved: Resolved[] = [];
@@ -377,6 +391,9 @@ async function generate(request: NextRequest, auth: AuthContext) {
       unresolvedByReason,
       exemptInCharge,
       unmatchedInCharge,
+      scopeRequested: scope.requested,
+      scopeMatched: scope.matched,
+      scopeUnknown: scope.unknownIds,
       stopRateCount: isStopWise ? stopRateByStopId.size : null,
       learnerCount,
       staffCount,
@@ -445,6 +462,9 @@ async function generate(request: NextRequest, auth: AuthContext) {
       .single();
     const runId = run?.id ?? null;
 
+    // Staff whose bill was actually inserted by this run — the notification list.
+    const billedStaff: Array<{ staffId: string; amount: number; dueDate: string }> = [];
+
     let learnerBilled = 0;
     let staffDeferred = 0;
     let skipped = 0;
@@ -501,8 +521,11 @@ async function generate(request: NextRequest, auth: AuthContext) {
           if (ledErr) { errors++; continue; }
           learnerBilled++;
         } else {
-          // staff: coverage-only ledger row (no billing target in v1).
-          // Row shape is shared with the in-charge enforcement loop.
+          // staff: a real payable bill. tms_fee_bill is the authoritative staff
+          // ledger — staff can never be written to billing_student_bills, whose
+          // student_id is NOT NULL with an FK to learners_profiles. The
+          // in-charge enforcement cron still writes 'staff_deferred' via the
+          // parameter default.
           const { error: ledErr } = await supabase.from('tms_fee_bill').insert([
             buildStaffFeeBillRow({
               runId,
@@ -511,10 +534,82 @@ async function generate(request: NextRequest, auth: AuthContext) {
               staffId: p.person_id,
               categoryId,
               term: { term_no: t.term_no, amount, due_date: t.due_date },
+              status: 'generated',
             }),
           ]);
           if (ledErr) { errors++; continue; }
           staffDeferred++;
+          // Notify only for rows THIS run inserted, so a re-run — which inserts
+          // nothing thanks to tms_fee_bill_idem_unique — notifies nobody.
+          billedStaff.push({ staffId: p.person_id, amount, dueDate: t.due_date });
+        }
+      }
+    }
+
+    // ── Notify each staff member whose bill this run created ────────────────
+    // Best-effort: a notification failure must never undo a generated bill, so
+    // failures are counted and reported, never thrown. Every .in() is chunked to
+    // <=150 and error-checked — an unchecked gateway 400 reads as an empty set,
+    // which would silently notify nobody while reporting success.
+    let notified = 0;
+    if (billedStaff.length) {
+      const { data: tyRow } = await supabase
+        .from('tms_transport_year')
+        .select('name')
+        .eq('id', fs.transport_year_id)
+        .maybeSingle();
+      const yearName = (tyRow as { name?: string } | null)?.name ?? 'this year';
+
+      const staffIds = billedStaff.map((b) => b.staffId);
+      const profileIdByStaff = new Map<string, string | null>();
+      const stopIdByStaff = new Map<string, string | null>();
+      const CHUNK_NOTIFY = 150;
+      let lookupFailed = false;
+      for (let i = 0; i < staffIds.length; i += CHUNK_NOTIFY) {
+        const { data: rows, error: sErr } = await supabase
+          .from('staff')
+          .select('id, profile_id, transport_stop_id')
+          .in('id', staffIds.slice(i, i + CHUNK_NOTIFY));
+        if (sErr) { lookupFailed = true; break; }
+        for (const r of (rows ?? []) as Array<{ id: string; profile_id: string | null; transport_stop_id: string | null }>) {
+          profileIdByStaff.set(r.id, r.profile_id);
+          stopIdByStaff.set(r.id, r.transport_stop_id);
+        }
+      }
+
+      const stopNameById = new Map<string, string>();
+      const stopIds = [...new Set([...stopIdByStaff.values()].filter((v): v is string => !!v))];
+      for (let i = 0; i < stopIds.length && !lookupFailed; i += CHUNK_NOTIFY) {
+        const { data: rows, error: stErr } = await supabase
+          .from('tms_route_stop')
+          .select('id, stop_name')
+          .in('id', stopIds.slice(i, i + CHUNK_NOTIFY));
+        if (stErr) break; // stop name is cosmetic — degrade to no stop clause
+        for (const r of (rows ?? []) as Array<{ id: string; stop_name: string | null }>) {
+          if (r.stop_name) stopNameById.set(r.id, r.stop_name);
+        }
+      }
+
+      if (!lookupFailed) {
+        for (const b of billedStaff) {
+          const profileId = profileIdByStaff.get(b.staffId);
+          if (!profileId) continue; // no login identity — nothing to notify
+          const stopId = stopIdByStaff.get(b.staffId);
+          const note = buildStaffBillNotification({
+            amount: b.amount,
+            dueDate: b.dueDate,
+            stopName: stopId ? stopNameById.get(stopId) ?? null : null,
+            yearName,
+          });
+          await notifyProfile(supabase, {
+            profileId,
+            actorId: auth.userId,
+            title: note.title,
+            body: note.body,
+            category: note.category,
+            url: note.url,
+          });
+          notified++;
         }
       }
     }
@@ -562,8 +657,8 @@ async function generate(request: NextRequest, auth: AuthContext) {
 
     return NextResponse.json({
       success: true,
-      data: { mode: 'generate', runId, applicable: resolved.length, learnerBilled, staffDeferred, skipped, unresolved, errors },
-      message: `Generated ${learnerBilled} learner bill(s); ${staffDeferred} staff deferred; ${skipped} already billed (skipped)${unresolved ? `; ${unresolved} unresolved` : ''}.`,
+      data: { mode: 'generate', runId, applicable: resolved.length, learnerBilled, staffDeferred, skipped, unresolved, errors, notified },
+      message: `Generated ${learnerBilled} learner bill(s); ${staffDeferred} staff bill(s); ${notified} staff notified; ${skipped} already billed (skipped)${unresolved ? `; ${unresolved} unresolved` : ''}.`,
     });
   } catch (e) {
     console.error('Fee generation error:', e);
