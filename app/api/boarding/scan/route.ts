@@ -3,7 +3,8 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { verifyPass, matchPassCode } from '@/lib/boarding/pass';
-import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
+import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
+import { decideMark } from '@/lib/boarding/attendance-ownership';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
@@ -141,6 +142,51 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const today = istToday();
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
 
+    // What is already recorded for this learner today. This is read BEFORE the
+    // booking gate on purpose: a learner already marked present has, by
+    // definition, boarded, so the walk-up prompt must not fire for them — they
+    // may well have been added as a walk-up on the first scan.
+    const { data: existingRow, error: exErr } = await svc
+      .from('tms_attendance')
+      .select('status, scanned_by, scanned_at')
+      .eq('learner_id', learner.id)
+      .eq('trip_date', today)
+      .eq('direction', direction)
+      .maybeSingle();
+    if (exErr) {
+      console.error('boarding scan existing-read error:', exErr);
+      return NextResponse.json({ ok: false, error: 'Could not verify existing attendance' }, { status: 500 });
+    }
+    const existingStatus =
+      existingRow?.status === 'present' || existingRow?.status === 'absent' ? existingRow.status : null;
+
+    // viaScan: a scanned pass is physical proof of boarding, so it opens a
+    // colleague's lock. It only ever requests 'present', so this can only ever be
+    // absent → present — a scan can never mark someone absent.
+    const decision = decideMark({
+      existing: existingStatus ? { status: existingStatus, scannedBy: existingRow!.scanned_by } : null,
+      requestedStatus: 'present',
+      actorId: auth.userId,
+      isOverrideHolder: false,
+      isSuperAdmin: auth.isSuperAdmin,
+      viaScan: true,
+    });
+
+    // Already present. Write nothing: a re-scan must not reassign credit for the
+    // mark to whoever happened to scan last.
+    if (decision.action === 'noop') {
+      const names = await loadMarkerNames(svc, [existingRow!.scanned_by]);
+      return NextResponse.json({
+        ok: true,
+        learner: { name, rollNumber: learner.roll_number },
+        direction,
+        alreadyMarked: {
+          by: (existingRow!.scanned_by && names.get(existingRow!.scanned_by)) || 'another staff member',
+          at: existingRow!.scanned_at,
+        },
+      });
+    }
+
     // Booking gate: a learner must have booked today, unless staff explicitly add
     // them as a walk-up. Over-capacity walk-ups are ALLOWED (warning-only) — the
     // seat count is advisory, not a hard block. Booked learners skip this entirely.
@@ -161,6 +207,22 @@ async function scan(request: NextRequest, auth: AuthContext) {
       overCapacity = seats <= 0;
     }
 
+    // Hoisted out of the object literal below — an `await` inside `&&` inside a
+    // ternary inside an object literal was hard to read in the branch's most
+    // security-relevant file.
+    let previousByName: string | null = null;
+    if (decision.action === 'override' && decision.previousBy) {
+      previousByName = (await loadMarkerNames(svc, [decision.previousBy])).get(decision.previousBy) ?? null;
+    }
+    const overrode =
+      decision.action === 'override'
+        ? {
+            from: decision.from,
+            by: previousByName || 'another staff member',
+            at: existingRow?.scanned_at ?? null,
+          }
+        : null;
+
     const up = await svc
       .from('tms_attendance')
       .upsert(
@@ -175,6 +237,9 @@ async function scan(request: NextRequest, auth: AuthContext) {
           is_walk_up: isWalkUp,
           scanned_by: auth.userId,
           scanned_at: new Date().toISOString(),
+          previous_status: decision.action === 'override' ? decision.from : null,
+          previous_scanned_by: decision.action === 'override' ? decision.previousBy : null,
+          previous_scanned_at: decision.action === 'override' ? existingRow?.scanned_at ?? null : null,
         },
         { onConflict: 'learner_id,trip_date,direction' }
       )
@@ -192,8 +257,16 @@ async function scan(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_attendance',
       entityId: learner.id,
       entityLabel: learner.roll_number ?? name,
-      description: `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}`,
-      metadata: { learnerId: learner.id, direction, rollNumber: learner.roll_number, walkUp: isWalkUp },
+      description:
+        `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}` +
+        (overrode ? ` — corrected an earlier "${overrode.from}" mark` : ''),
+      metadata: {
+        learnerId: learner.id,
+        direction,
+        rollNumber: learner.roll_number,
+        walkUp: isWalkUp,
+        ...(overrode ? { reason: 'override', overrodeFrom: overrode.from, overrodePreviousBy: decision.action === 'override' ? decision.previousBy : null } : {}),
+      },
     });
     return NextResponse.json({
       ok: true,
@@ -201,6 +274,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       direction,
       walkUp: isWalkUp,
       overCapacity: overCapacity || undefined,
+      overrode: overrode ?? undefined,
     });
   } catch (e) {
     console.error('boarding scan error:', e);

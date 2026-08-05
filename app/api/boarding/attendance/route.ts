@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
+import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
+import { decideMark, canClearMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
 
@@ -23,6 +24,37 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 interface MarkInput { learnerId: string; status: 'present' | 'absent' }
 interface StudentLite { id: string; transport_route_id: string | null; transport_stop_id: string | null }
 
+interface ExistingRow {
+  learner_id: string;
+  status: string | null;
+  scanned_by: string | null;
+  scanned_at: string | null;
+}
+
+interface AttendanceUpsert {
+  learner_id: string;
+  route_id: string;
+  stop_id: string | null;
+  trip_date: string;
+  direction: AttDirection;
+  status: MarkStatus;
+  method: 'manual';
+  scanned_by: string;
+  scanned_at: string;
+  previous_status: MarkStatus | null;
+  previous_scanned_by: string | null;
+  previous_scanned_at: string | null;
+}
+
+/** A mark this request could not write because a colleague owns it. */
+interface LockedMark {
+  learnerId: string;
+  status: MarkStatus;
+  markedBy: string | null;
+  markedByName: string;
+  markedAt: string | null;
+}
+
 async function mark(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_MANAGE))) {
@@ -30,7 +62,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     }
 
     const body = (await request.json().catch(() => ({}))) as {
-      routeId?: string; direction?: string; marks?: MarkInput[];
+      routeId?: string; direction?: string; marks?: MarkInput[]; date?: string;
     };
     // Attendance is onward-only. A stale client requesting the retired evening
     // leg must fail loudly rather than silently having its marks recorded as onward.
@@ -46,8 +78,18 @@ async function mark(request: NextRequest, auth: AuthContext) {
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (marks.length === 0) return NextResponse.json({ error: 'No marks provided' }, { status: 400 });
 
-    // Authority: staff may only mark for routes they're assigned to.
-    if (!auth.isSuperAdmin) {
+    // Resolved once, early. An override holder (tms.attendance.override —
+    // transport_head, plus super admins) is the designated correction path for
+    // a colleague's mark, and decideMark below already lets them overwrite one.
+    // Without exempting them from the two gates that follow, that permission
+    // grants nothing reachable: its sole holder isn't assigned to most routes,
+    // and corrections are needed exactly when the window has already closed.
+    const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
+
+    // Authority: staff may only mark for routes they're assigned to — override
+    // holders are exempt, since correcting a route they don't work is the
+    // entire point of the permission.
+    if (!auth.isSuperAdmin && !isOverrideHolder) {
       const assigned = await getAssignedRouteIdsForUser(auth);
       if (!assigned.includes(routeId)) {
         return NextResponse.json({ error: 'You are not assigned to this route' }, { status: 403 });
@@ -56,14 +98,18 @@ async function mark(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    // Time-window gate: manual marking follows the same window as the scanner.
-    const windows = await loadAttendanceWindows(svc);
-    if (!isDirectionOpen(windows[direction])) {
-      const w = windows[direction];
-      return NextResponse.json({
-        error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
-        reason: 'window_closed',
-      }, { status: 409 });
+    // Time-window gate: manual marking follows the same window as the scanner —
+    // except for override holders, who exist specifically to fix a mark AFTER
+    // the window closes (the only time a wrong mark is otherwise unfixable).
+    if (!auth.isSuperAdmin && !isOverrideHolder) {
+      const windows = await loadAttendanceWindows(svc);
+      if (!isDirectionOpen(windows[direction])) {
+        const w = windows[direction];
+        return NextResponse.json({
+          error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+          reason: 'window_closed',
+        }, { status: 409 });
+      }
     }
 
     // Verify each learner actually belongs to this route; grab their stop id.
@@ -77,11 +123,86 @@ async function mark(request: NextRequest, auth: AuthContext) {
       if (s.transport_route_id === routeId) stopByLearner.set(s.id, s.transport_stop_id ?? null);
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    // Date: override-only. An ordinary staffer's marks are always for today —
+    // letting them pass a date would let a stale client mark a day they have
+    // no standing over. The format is validated regardless of role so a
+    // malformed value fails loudly instead of silently defaulting to today.
+    let today = new Date().toISOString().slice(0, 10);
+    if (body.date !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+        return NextResponse.json({ error: 'date must be YYYY-MM-DD' }, { status: 400 });
+      }
+      if (auth.isSuperAdmin || isOverrideHolder) today = body.date;
+    }
     const now = new Date().toISOString();
-    const rows = marks
-      .filter((m) => stopByLearner.has(m.learnerId) && (m.status === 'present' || m.status === 'absent'))
-      .map((m) => ({
+
+    // What is ALREADY marked. This route's upsert has no guard of its own, so
+    // without reading first, any of route 16's twelve in-charges silently flips a
+    // colleague's mark. A failed read must NEVER be treated as "nothing is
+    // marked" — that is the overwrite this whole change exists to stop.
+    const { data: existingRows, error: exErr } = await svc
+      .from('tms_attendance')
+      .select('learner_id, status, scanned_by, scanned_at')
+      .eq('trip_date', today)
+      .eq('direction', direction)
+      .in('learner_id', learnerIds);
+    if (exErr) {
+      console.error('boarding manual mark existing-read error:', exErr);
+      return NextResponse.json({ error: 'Could not verify existing marks' }, { status: 500 });
+    }
+    const existingByLearner = new Map<
+      string,
+      { status: MarkStatus; scannedBy: string | null; scannedAt: string | null }
+    >();
+    for (const r of (existingRows ?? []) as ExistingRow[]) {
+      if (r.status === 'present' || r.status === 'absent') {
+        existingByLearner.set(r.learner_id, {
+          status: r.status,
+          scannedBy: r.scanned_by,
+          scannedAt: r.scanned_at,
+        });
+      }
+    }
+
+    // isOverrideHolder was already resolved above, ahead of the assignment and
+    // window gates; isSuperAdmin is passed to decideMark separately only to
+    // keep its inputs explicit.
+    const rows: AttendanceUpsert[] = [];
+    const locked: LockedMark[] = [];
+    let skipped = 0;
+    let overrides = 0;
+
+    for (const m of marks) {
+      if (!stopByLearner.has(m.learnerId)) continue;
+      if (m.status !== 'present' && m.status !== 'absent') continue;
+
+      const existing = existingByLearner.get(m.learnerId) ?? null;
+      const decision = decideMark({
+        existing: existing ? { status: existing.status, scannedBy: existing.scannedBy } : null,
+        requestedStatus: m.status,
+        actorId: auth.userId,
+        isOverrideHolder,
+        isSuperAdmin: auth.isSuperAdmin,
+        viaScan: false,
+      });
+
+      if (decision.action === 'noop') {
+        skipped += 1;
+        continue;
+      }
+      if (decision.action === 'deny') {
+        locked.push({
+          learnerId: m.learnerId,
+          status: existing!.status,
+          markedBy: existing!.scannedBy,
+          markedByName: 'another staff member',
+          markedAt: existing!.scannedAt,
+        });
+        continue;
+      }
+
+      if (decision.action === 'override') overrides += 1;
+      rows.push({
         learner_id: m.learnerId,
         route_id: routeId,
         stop_id: stopByLearner.get(m.learnerId) ?? null,
@@ -91,9 +212,48 @@ async function mark(request: NextRequest, auth: AuthContext) {
         method: 'manual',
         scanned_by: auth.userId,
         scanned_at: now,
-      }));
+        previous_status: decision.action === 'override' ? decision.from : null,
+        previous_scanned_by: decision.action === 'override' ? decision.previousBy : null,
+        previous_scanned_at: decision.action === 'override' ? existing!.scannedAt : null,
+      });
+    }
+
+    // Name the owners so the client can say WHO holds the mark, not just that
+    // something is locked.
+    if (locked.length > 0) {
+      const names = await loadMarkerNames(svc, locked.map((l) => l.markedBy));
+      for (const l of locked) {
+        l.markedByName = (l.markedBy && names.get(l.markedBy)) || 'another staff member';
+      }
+    }
+    // Both clients render markedByName only — the raw profiles.id is an
+    // internal detail used to resolve it above, not something either
+    // consumes. Strip it before it leaves the server.
+    const publicLocked = locked.map(({ markedBy: _markedBy, ...rest }) => rest);
 
     if (rows.length === 0) {
+      // A single locked mark with nothing else in the batch is the common case
+      // (one tap on a stale screen) and deserves a 409 the client can turn into
+      // a named message. 403 would be wrong: this staffer MAY use the endpoint,
+      // this one row is taken. But when the rest of the batch was already
+      // correct (skipped > 0), the batch as a whole did what was asked — 19
+      // rows needing nothing done must not read as a failure over 1 locked row.
+      if (locked.length > 0 && skipped === 0) {
+        const first = locked[0];
+        return NextResponse.json(
+          {
+            error: `Already marked ${first.status} by ${first.markedByName}. Only they or the transport office can change it.`,
+            reason: 'locked',
+            locked: publicLocked,
+          },
+          { status: 409 },
+        );
+      }
+      // Everything requested was already true, or already true plus one or
+      // more locked rows. Nothing to write either way.
+      if (skipped > 0 || locked.length > 0) {
+        return NextResponse.json({ success: true, updated: 0, skipped, locked: publicLocked });
+      }
       return NextResponse.json({ error: 'No valid learners for this route' }, { status: 400 });
     }
 
@@ -109,10 +269,22 @@ async function mark(request: NextRequest, auth: AuthContext) {
       module: 'boarding',
       action: 'mark',
       entityType: 'tms_attendance',
-      description: `Manually marked attendance for ${rows.length} learner(s) on route ${routeId} (${direction})`,
-      metadata: { routeId, direction, count: rows.length },
+      description:
+        `Manually marked attendance for ${rows.length} learner(s) on route ${routeId} (${direction})` +
+        (overrides > 0 ? ` — ${overrides} overrode an earlier mark` : ''),
+      metadata: {
+        routeId,
+        direction,
+        count: rows.length,
+        overrides,
+        skipped,
+        locked: locked.length,
+        ...(overrides > 0 ? { reason: 'override' } : {}),
+      },
     });
-    return NextResponse.json({ success: true, updated: rows.length });
+    // A partially locked batch still succeeds: one taken row must not fail the
+    // other nineteen. `locked` tells the client which ones to redraw.
+    return NextResponse.json({ success: true, updated: rows.length, skipped, locked: publicLocked });
   } catch (e) {
     console.error('boarding manual mark error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -219,7 +391,7 @@ async function getHistory(request: NextRequest, auth: AuthContext) {
   }
 }
 
-interface ClearInput { routeId?: string; direction?: string; learnerIds?: string[] }
+interface ClearInput { routeId?: string; direction?: string; learnerIds?: string[]; date?: string }
 
 /* ── Clear marks (DELETE) ───────────────────────────────────────────────────
  * Revert one or many learners to "Unmarked" for today + a direction by deleting
@@ -245,8 +417,15 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (learnerIds.length === 0) return NextResponse.json({ error: 'No learners provided' }, { status: 400 });
 
-    // Authority: staff may only clear for routes they're assigned to.
-    if (!auth.isSuperAdmin) {
+    // Resolved once, early — same reasoning as the POST handler above: an
+    // override holder must be exempt from the assignment gate and the
+    // today-only ceiling below, or the correction path they hold cannot reach
+    // a colleague's mark on a route they aren't assigned to.
+    const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
+
+    // Authority: staff may only clear for routes they're assigned to — override
+    // holders are exempt, for the same reason as the POST handler.
+    if (!auth.isSuperAdmin && !isOverrideHolder) {
       const assigned = await getAssignedRouteIdsForUser(auth);
       if (!assigned.includes(routeId)) {
         return NextResponse.json({ error: 'You are not assigned to this route' }, { status: 403 });
@@ -254,14 +433,64 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
-    const today = new Date().toISOString().slice(0, 10);
+    // Date: override-only, same rule as POST — an ordinary staffer stays
+    // pinned to today; a malformed value always fails loudly.
+    let today = new Date().toISOString().slice(0, 10);
+    if (body.date !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+        return NextResponse.json({ error: 'date must be YYYY-MM-DD' }, { status: 400 });
+      }
+      if (auth.isSuperAdmin || isOverrideHolder) today = body.date;
+    }
+
+    // Same ownership rule as marking. This endpoint is currently unreachable from
+    // the UI (row-level Undo was removed in PR #9) but it is still exposed, and
+    // today it lets ANY assigned staff wipe ANY mark on the route.
+    const { data: existingRows, error: exErr } = await svc
+      .from('tms_attendance')
+      .select('learner_id, status, scanned_by')
+      .eq('route_id', routeId)
+      .eq('trip_date', today)
+      .eq('direction', direction)
+      .in('learner_id', learnerIds);
+    if (exErr) {
+      console.error('boarding clear mark existing-read error:', exErr);
+      return NextResponse.json({ error: 'Could not verify existing marks' }, { status: 500 });
+    }
+
+    const clearable: string[] = [];
+    let blocked = 0;
+    for (const r of (existingRows ?? []) as ExistingRow[]) {
+      const existing =
+        r.status === 'present' || r.status === 'absent'
+          ? { status: r.status as MarkStatus, scannedBy: r.scanned_by }
+          : null;
+      if (canClearMark({ existing, actorId: auth.userId, isOverrideHolder, isSuperAdmin: auth.isSuperAdmin })) {
+        clearable.push(r.learner_id);
+      } else {
+        blocked += 1;
+      }
+    }
+
+    if (clearable.length === 0) {
+      return NextResponse.json(
+        {
+          error: blocked > 0
+            ? 'Those marks belong to another staff member. Only they or the transport office can clear them.'
+            : 'Nothing to clear',
+          reason: blocked > 0 ? 'locked' : 'not_found',
+        },
+        { status: blocked > 0 ? 409 : 404 },
+      );
+    }
+
     const { data, error } = await svc
       .from('tms_attendance')
       .delete()
       .eq('route_id', routeId)
       .eq('trip_date', today)
       .eq('direction', direction)
-      .in('learner_id', learnerIds)
+      .in('learner_id', clearable)
       .select('learner_id');
     if (error) {
       console.error('boarding clear mark error:', error);
@@ -274,9 +503,9 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       action: 'unmark',
       entityType: 'tms_attendance',
       description: `Cleared attendance for ${cleared} learner(s) on route ${routeId} (${direction})`,
-      metadata: { routeId, direction, count: cleared },
+      metadata: { routeId, direction, count: cleared, blocked },
     });
-    return NextResponse.json({ success: true, cleared });
+    return NextResponse.json({ success: true, cleared, blocked });
   } catch (e) {
     console.error('boarding clear mark error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

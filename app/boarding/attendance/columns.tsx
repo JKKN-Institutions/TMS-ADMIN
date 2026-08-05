@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Lock } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -101,16 +101,29 @@ export function getRosterColumns(opts: {
     {
       accessorKey: 'scanned_at',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Marked" />,
-      size: 110,
-      cell: ({ row }) =>
-        row.original.status !== 'unmarked' ? (
-          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
-            {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
-            {fmtTime(row.original.scanned_at)}
-          </span>
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
+      size: 170,
+      cell: ({ row }) => {
+        const r = row.original;
+        if (r.status === 'unmarked') return <span className="text-gray-400">—</span>;
+        return (
+          <div className="leading-tight">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
+              {r.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
+              {fmtTime(r.scanned_at)}
+            </span>
+            {/* A route can have a dozen staff splitting one roster, so an
+                unattributed mark tells nobody who actually did the work. */}
+            <span className="block text-xs text-gray-400">by {r.marked_by_name ?? '—'}</span>
+            {r.previous_status && (
+              <span className="block text-xs text-amber-600 dark:text-amber-400">
+                was {r.previous_status === 'present' ? 'Present' : 'Absent'}
+                {r.previous_by_name ? ` · ${r.previous_by_name}` : ''}
+                {r.previous_at ? ` · ${fmtTime(r.previous_at)}` : ''}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       id: 'action',
@@ -119,16 +132,37 @@ export function getRosterColumns(opts: {
       size: 120,
       header: () => null,
       cell: ({ row }) => {
-        // Marking is gated to the travel day AND an open attendance window; otherwise
-        // no control shows at all (present and absent are both disabled by timing).
+        // Marking is gated to the travel day AND an open attendance window; outside
+        // that no control shows at all (present and absent are both disabled by timing).
         if (!opts.canMark) return null;
-        const busy = opts.busyId === row.original.learner_id;
+        const r = row.original;
+
+        // Somebody else's mark. First mark wins, so there is no button — only a
+        // statement of who owns it. `can_edit` comes from the server; this is
+        // presentation, and the write route re-decides regardless.
+        if (!r.can_edit) {
+          const lockedTitle = `Marked ${r.status === 'present' ? 'Present' : 'Absent'} by ${
+            r.marked_by_name ?? 'another staff member'
+          }${r.scanned_at ? ` at ${fmtTime(r.scanned_at)}` : ''}. Only they or the transport office can change it.`;
+          return (
+            <span
+              role="status"
+              aria-label={lockedTitle}
+              title={lockedTitle}
+              className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            >
+              <Lock className="h-3.5 w-3.5" /> Locked
+            </span>
+          );
+        }
+
+        const busy = opts.busyId === r.learner_id;
         // Single toggle showing the NEXT action: present → mark Absent, else → mark Present.
-        const next: 'present' | 'absent' = row.original.status === 'present' ? 'absent' : 'present';
+        const next: 'present' | 'absent' = r.status === 'present' ? 'absent' : 'present';
         return next === 'present' ? (
           <button
             type="button"
-            onClick={() => opts.onMark(row.original, 'present')}
+            onClick={() => opts.onMark(r, 'present')}
             disabled={busy}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
           >
@@ -137,7 +171,7 @@ export function getRosterColumns(opts: {
         ) : (
           <button
             type="button"
-            onClick={() => opts.onMark(row.original, 'absent')}
+            onClick={() => opts.onMark(r, 'absent')}
             disabled={busy}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
           >

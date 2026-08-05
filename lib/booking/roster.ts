@@ -5,6 +5,9 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { bookedCount, routeCapacity } from './repo';
+// The ownership rule lives with the boarding domain that enforces it, so the
+// roster's `can_edit` flag and the API routes' write gate can never disagree.
+import { decideMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
 
 export interface RosterRider {
   learner_id: string;
@@ -140,6 +143,37 @@ export interface RosterRow {
   status: 'present' | 'absent' | 'unmarked';
   method: string | null;
   scanned_at: string | null;
+  /** Who marked this row (tms_attendance.scanned_by); null when unmarked or orphaned. */
+  marked_by_id: string | null;
+  marked_by_name: string | null;
+  /**
+   * Whether THIS viewer may change the row. A rendering hint only — the write
+   * routes re-decide server-side, so a client that ignores it is still denied.
+   */
+  can_edit: boolean;
+  /** Set only when this mark replaced an earlier one (scan or transport-head override). */
+  previous_status: 'present' | 'absent' | null;
+  previous_by_name: string | null;
+  previous_at: string | null;
+}
+
+/** One learner's attendance for the leg, with marker names already resolved. */
+export interface RosterAttendance {
+  status: string;
+  method: string | null;
+  scanned_at: string | null;
+  scanned_by: string | null;
+  marked_by_name: string | null;
+  previous_status: string | null;
+  previous_by_name: string | null;
+  previous_at: string | null;
+}
+
+/** The signed-in staff member the rows are being rendered for. */
+export interface RosterViewer {
+  actorId: string;
+  isOverrideHolder: boolean;
+  isSuperAdmin: boolean;
 }
 
 /**
@@ -148,12 +182,17 @@ export interface RosterRow {
  * (stop_time onward / evening_time return) and `attendanceByLearner` already
  * filtered to that leg. Riders sort by stop order then roll/name (numeric-aware);
  * riders with a null/unknown stop fall into a trailing "Stop not set" bucket.
+ *
+ * `viewer` is REQUIRED rather than optional on purpose: an omitted viewer would
+ * have to default to something, and any default that unlocks rows silently
+ * disables the lock for every caller that forgets it.
  */
 export function buildRosterRows(
   riders: RosterRider[],
   route: { id: string; route_number: string | null },
   orderedStops: OrderedStop[],
-  attendanceByLearner: Map<string, { status: string; method: string | null; scanned_at: string | null }>,
+  attendanceByLearner: Map<string, RosterAttendance>,
+  viewer: RosterViewer,
 ): RosterRow[] {
   const byId = new Map(orderedStops.map((s) => [s.id, s] as const));
   const orderOf = (stopId: string | null) =>
@@ -166,6 +205,24 @@ export function buildRosterRows(
     const status: RosterRow['status'] =
       att?.status === 'present' ? 'present' : att?.status === 'absent' ? 'absent' : 'unmarked';
     const marked = status !== 'unmarked';
+
+    // The row's toggle offers the OPPOSITE status, so that is the write whose
+    // permission decides whether a control renders at all.
+    const canEdit = !marked
+      ? true
+      : decideMark({
+          existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
+          requestedStatus: status === 'present' ? 'absent' : 'present',
+          actorId: viewer.actorId,
+          isOverrideHolder: viewer.isOverrideHolder,
+          isSuperAdmin: viewer.isSuperAdmin,
+          viaScan: false,
+        }).action !== 'deny';
+
+    const prev = marked && (att!.previous_status === 'present' || att!.previous_status === 'absent')
+      ? (att!.previous_status as 'present' | 'absent')
+      : null;
+
     return {
       learner_id: rider.learner_id,
       name: rider.name,
@@ -178,6 +235,12 @@ export function buildRosterRows(
       status,
       method: marked ? att!.method : null,
       scanned_at: marked ? att!.scanned_at : null,
+      marked_by_id: marked ? att!.scanned_by : null,
+      marked_by_name: marked ? att!.marked_by_name : null,
+      can_edit: canEdit,
+      previous_status: prev,
+      previous_by_name: prev ? att!.previous_by_name : null,
+      previous_at: prev ? att!.previous_at : null,
     };
   });
 

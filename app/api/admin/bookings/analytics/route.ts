@@ -9,7 +9,7 @@ import {
   aggregateAttendance, aggregateBookings, aggregateToday, aggregateUpcoming,
   buildFacets, filterAttendance, filterBookings,
   type AnalyticsFilters, type AnalyticsPayload, type AttendanceRow, type BookingRow,
-  type Labels, type LearnerDim,
+  type LabelMap, type Labels, type LearnerDim,
 } from '@/lib/booking/analytics';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -154,7 +154,7 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         .lte('travel_date', to),
       svc
         .from('tms_attendance')
-        .select('learner_id, trip_date, route_id, stop_id, direction, status, method, is_walk_up')
+        .select('learner_id, trip_date, route_id, stop_id, direction, status, method, is_walk_up, scanned_by')
         .gte('trip_date', from)
         .lte('trip_date', to),
       // today .. today+FORWARD_DAYS, sliced below into "today" and "upcoming".
@@ -165,7 +165,7 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         .lte('travel_date', horizonEnd),
       svc
         .from('tms_attendance')
-        .select('learner_id, trip_date, route_id, stop_id, direction, status, method, is_walk_up')
+        .select('learner_id, trip_date, route_id, stop_id, direction, status, method, is_walk_up, scanned_by')
         .eq('trip_date', today),
       // Capacity comes from the ASSIGNED VEHICLE. tms_route.total_capacity is
       // never written (0/null on 23 of 24 routes) — reading it would show every
@@ -218,6 +218,49 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       });
     }
 
+    // Marker identities: their labels for the per-staff table, and their emails
+    // for the "who marked nothing" intersection. fetchByIds keys on `id`, which is
+    // exactly what we have — no email-side .in() is involved, which matters
+    // because 6 profiles carry uppercase emails while every staff_email is
+    // lowercase, so an email .in() would silently drop those staff.
+    const markerIds = [
+      ...new Set(
+        [...attendance, ...todayAttendance]
+          .map((a) => a.scanned_by)
+          .filter((v): v is string => !!v),
+      ),
+    ];
+    const markerRows = await fetchByIds<{ id: string; full_name: string | null; email: string | null }>(
+      svc, 'profiles', 'id, full_name, email', markerIds,
+    );
+    const staffLabels: LabelMap = new Map(
+      markerRows.map((p) => [p.id, (p.full_name ?? '').trim() || p.email || 'Staff']),
+    );
+    const markerEmailById = new Map(
+      markerRows.map((p) => [p.id, (p.email ?? '').toLowerCase()]),
+    );
+
+    // Active in-charges on the in-scope routes — the denominator for "marked
+    // nothing". Degrades to an empty list on failure: the tab then reports 0 of 0
+    // rather than fabricating absentees.
+    let assignedStaffEmails: string[] = [];
+    const { data: asgRows, error: asgErr } = await svc
+      .from('tms_staff_route_assignment')
+      .select('staff_email, route_id')
+      .eq('is_active', true);
+    if (asgErr) {
+      console.error('admin/bookings/analytics assignment error:', asgErr);
+    } else {
+      const scopedRoutes = filters.routeIds.length ? new Set(filters.routeIds) : null;
+      assignedStaffEmails = [
+        ...new Set(
+          ((asgRows ?? []) as { staff_email: string; route_id: string | null }[])
+            .filter((a) => !scopedRoutes || (a.route_id !== null && scopedRoutes.has(a.route_id)))
+            .map((a) => a.staff_email.toLowerCase()),
+        ),
+      ];
+    }
+
     const refs = await loadPassengerRefs(svc, {
       institutionIds: [...learners.values()].map((l) => l.institutionId),
       departmentIds: [...learners.values()].map((l) => l.departmentId),
@@ -267,6 +310,7 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       institutions: refs.institutions,
       departments: refs.departments,
       programs: refs.programs,
+      staff: staffLabels,
     };
 
     // Facets BEFORE filtering — see the module docstring.
@@ -307,6 +351,17 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         learners,
         labels,
         unavailable: attUnavailable,
+        assignedStaffEmails,
+        markerEmailById,
+        rangeIncludesToday: to >= today,
+        numeratorFiltered:
+          filters.stopIds.length > 0 ||
+          filters.institutionIds.length > 0 ||
+          filters.departmentIds.length > 0 ||
+          filters.programIds.length > 0 ||
+          filters.direction !== null ||
+          filters.attStatus !== null ||
+          filters.method !== null,
       }),
       // Today's marking progress. Bookings take the full booking filters, but
       // attendance takes cohortOnly: narrowing it by att_status would report
