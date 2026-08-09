@@ -60,6 +60,7 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
           staff_role_keys: data.staff_role_keys ?? [],
           lifecycle_statuses: data.lifecycle_statuses ?? [],
           total_amount: data.total_amount != null ? String(data.total_amount) : '',
+          auto_generate: data.auto_generate ?? false,
           notes: data.notes ?? '',
           terms: (data.terms ?? []).map((t) => ({
             term_label: t.term_label ?? `Term ${t.term_no}`,

@@ -23,6 +23,14 @@ const PUBLIC_PATH_PREFIXES = [
   '/sw.', // covers /sw.js (unified service worker)
   '/icons/',
   '/offline.html', // PWA offline fallback — fetchable before auth
+  // Vercel Cron endpoints. Cron requests carry NO session cookie — only
+  // `Authorization: Bearer $CRON_SECRET` — so the session gate below would 401
+  // them before their own auth ever ran (which is exactly what happened in
+  // production: zero successful cron executions ever). CONTRACT: every route
+  // under /api/cron/ MUST verify CRON_SECRET as its FIRST act and fail closed
+  // (401) when the env var is unset — being listed here removes the session
+  // gate, so that in-route check is the ONLY thing protecting these endpoints.
+  '/api/cron/',
 ];
 
 // Identity headers the proxy stamps on the authenticated request so downstream

@@ -10,6 +10,7 @@ interface SchedulingBlob {
   bookingWindowEndHour: number;
   bookingDaysAhead: number;
   autoNotifyPassengers: boolean;
+  autoGenerateBills: boolean;
 }
 
 /**
@@ -137,6 +138,7 @@ export function NotificationsSettings() {
           <label className="relative inline-flex shrink-0 cursor-pointer items-center">
             <input
               type="checkbox"
+              aria-label="Automatic booking reminders"
               checked={blob.autoNotifyPassengers}
               disabled={saving}
               onChange={toggleReminders}
