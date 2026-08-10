@@ -1,23 +1,27 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { bookableDates, cutoffFor } from './window';
+import { addDays, bookableDates, cutoffFor, istToday } from './window';
+import { loadExceptions } from './calendar';
 import { loadSchedulingConfig } from '../settings/scheduling';
+import { term1PaidLearnerIds } from '../fees/term1';
 import { dispatchNotification } from '../notifications/dispatch';
 import { reminderCopy } from './reminder-copy';
+import { reminderTargets, type LearnerRow } from './reminder-targets';
 
 // Re-exported so callers have one import site for the reminder API; the pure
-// implementations live in ./reminder-copy (see that file for why).
+// implementations live in ./reminder-copy and ./reminder-targets (see those
+// files for why they are kept import-free).
 export { formatCutoffHour, reminderCopy } from './reminder-copy';
+export { reminderTargets, type LearnerRow } from './reminder-targets';
 
 export interface ReminderSummary {
-  date: string;
+  /** The travel date reminded for — null when no working day is open. */
+  date: string | null;
   reminded: number;
   candidates: number;
   /** Non-null when the run intentionally did nothing (e.g. reminders disabled). */
   skipped: string | null;
   dryRun: boolean;
 }
-
-interface LearnerRow { id: string; profile_id: string | null }
 
 /**
  * Notify every transport learner who has NOT booked tomorrow yet.
@@ -33,20 +37,35 @@ export async function sendBookingReminders(
 ): Promise<ReminderSummary> {
   const dryRun = opts.dryRun === true;
   const cfg = await loadSchedulingConfig(svc);
-  const date = bookableDates()[0]; // tomorrow
+
+  // The reminder run is route-agnostic (one date for the whole cohort), so it
+  // reads ALL-ROUTES exceptions only. A holiday declared for a single route does
+  // not shift the date; those learners still get the nudge and are blocked at
+  // booking time by the per-route check in the route handler.
+  const today = istToday();
+  const exceptions = await loadExceptions(svc, null, addDays(today, 1), addDays(today, 21));
+  const cutoffHour = cfg.enableBookingTimeWindow ? cfg.cutoffHour : 24;
+  const date = bookableDates(new Date(), {
+    cutoffHour,
+    daysAhead: 1,
+    offDates: new Set(exceptions.keys()),
+  })[0] ?? null;
+
   const base: ReminderSummary = { date, reminded: 0, candidates: 0, skipped: null, dryRun };
 
   if (!cfg.autoNotifyPassengers) {
     return { ...base, skipped: 'autoNotifyPassengers is off' };
+  }
+  if (!date) {
+    return { ...base, skipped: 'no working day is open within the next 21 days' };
   }
 
   // The EFFECTIVE cutoff, not the raw stored hour: when the daily time window is
   // disabled there is no deadline today, so the copy must not announce one.
   const effectiveCutoff = cfg.enableBookingTimeWindow ? cfg.cutoffHour : null;
 
-  // Never send a "book by X" nudge after X has already passed. The cron fires at a
-  // FIXED time (17:00 IST) but the cutoff is admin-configurable 0..23, so an earlier
-  // cutoff would otherwise produce a reminder for a window that already closed.
+  // bookableDates() already excludes a date whose cutoff has passed, so this is
+  // now a belt-and-braces guard rather than the primary check.
   if (effectiveCutoff !== null && Date.now() >= cutoffFor(date, effectiveCutoff).getTime()) {
     return { ...base, skipped: `cutoff ${effectiveCutoff}:00 IST already passed for ${date}` };
   }
@@ -84,9 +103,17 @@ export async function sendBookingReminders(
     for (const r of (recs ?? []) as { user_id: string }[]) notifiedProfiles.add(r.user_id);
   }
 
-  const targetProfiles = all
-    .filter((l) => !bookedIds.has(l.id) && l.profile_id && !notifiedProfiles.has(l.profile_id))
-    .map((l) => l.profile_id as string);
+  // Only learners who can actually book. The bus_required cohort includes
+  // hundreds blocked on an unpaid Term 1, who must not be nagged to book.
+  const { data: yearRow } = await svc
+    .from('tms_transport_year')
+    .select('id')
+    .eq('is_current', true)
+    .maybeSingle();
+  const yearId = (yearRow as { id: string } | null)?.id ?? null;
+  const term1Paid = yearId ? await term1PaidLearnerIds(svc, yearId) : null;
+
+  const targetProfiles = reminderTargets(all, bookedIds, notifiedProfiles, term1Paid);
 
   const summary = { ...base, candidates: targetProfiles.length };
   if (targetProfiles.length === 0) return summary;
