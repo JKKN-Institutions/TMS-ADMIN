@@ -22,17 +22,17 @@ describe('parseSchedulingConfig', () => {
     });
   });
 
-  it('clamps cutoffHour to 0..23 and daysAhead to 1..14', () => {
+  it('clamps cutoffHour to 0..23 and daysAhead to 1..10', () => {
     expect(parseSchedulingConfig({ bookingWindowEndHour: 99 }).cutoffHour).toBe(23);
     expect(parseSchedulingConfig({ bookingWindowEndHour: -5 }).cutoffHour).toBe(0);
-    expect(parseSchedulingConfig({ bookingDaysAhead: 99 }).daysAhead).toBe(14);
+    expect(parseSchedulingConfig({ bookingDaysAhead: 99 }).daysAhead).toBe(10);
     expect(parseSchedulingConfig({ bookingDaysAhead: 0 }).daysAhead).toBe(1);
   });
 
   it('falls back to defaults for missing / non-numeric fields', () => {
     const cfg = parseSchedulingConfig({ enableBookingTimeWindow: true });
     expect(cfg.cutoffHour).toBe(20);
-    expect(cfg.daysAhead).toBe(6);
+    expect(cfg.daysAhead).toBe(1);
     expect(cfg.autoNotifyPassengers).toBe(true);
   });
 
@@ -41,9 +41,9 @@ describe('parseSchedulingConfig', () => {
     let cfg = parseSchedulingConfig({ bookingWindowEndHour: 'late' });
     expect(cfg.cutoffHour).toBe(20);
 
-    // null for bookingDaysAhead → daysAhead falls back to 6
+    // null for bookingDaysAhead → daysAhead falls back to 1
     cfg = parseSchedulingConfig({ bookingDaysAhead: null });
-    expect(cfg.daysAhead).toBe(6);
+    expect(cfg.daysAhead).toBe(1);
 
     // String for autoNotifyPassengers → falls back to true
     cfg = parseSchedulingConfig({ autoNotifyPassengers: 'true' });
@@ -53,9 +53,9 @@ describe('parseSchedulingConfig', () => {
     cfg = parseSchedulingConfig({ bookingWindowEndHour: NaN });
     expect(cfg.cutoffHour).toBe(20);
 
-    // Array for bookingDaysAhead → daysAhead falls back to 6
+    // Array for bookingDaysAhead → daysAhead falls back to 1
     cfg = parseSchedulingConfig({ bookingDaysAhead: [5] as unknown });
-    expect(cfg.daysAhead).toBe(6);
+    expect(cfg.daysAhead).toBe(1);
 
     // Object for autoNotifyPassengers → falls back to true
     cfg = parseSchedulingConfig({ autoNotifyPassengers: {} as unknown });
@@ -65,9 +65,14 @@ describe('parseSchedulingConfig', () => {
     cfg = parseSchedulingConfig({ bookingWindowEndHour: Infinity });
     expect(cfg.cutoffHour).toBe(20);
 
-    // -Infinity for bookingDaysAhead → daysAhead falls back to 6
+    // -Infinity for bookingDaysAhead → daysAhead falls back to 1
     cfg = parseSchedulingConfig({ bookingDaysAhead: -Infinity });
-    expect(cfg.daysAhead).toBe(6);
+    expect(cfg.daysAhead).toBe(1);
+  });
+
+  it('accepts the top of the working-day range', () => {
+    expect(parseSchedulingConfig({ bookingDaysAhead: 10 }).daysAhead).toBe(10);
+    expect(parseSchedulingConfig({ bookingDaysAhead: 11 }).daysAhead).toBe(10);
   });
 });
 
@@ -83,7 +88,7 @@ describe('toWindowOpts', () => {
   });
 
   it('disabling the time window never widens or narrows the horizon, whatever daysAhead is set to', () => {
-    for (const daysAhead of [1, 6, 14]) {
+    for (const daysAhead of [1, 5, 10]) {
       const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false });
       const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false });
       expect(disabled.daysAhead).toBe(enabled.daysAhead);

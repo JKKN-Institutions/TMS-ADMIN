@@ -4,14 +4,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export interface SchedulingConfig {
   enableBookingTimeWindow: boolean;
   cutoffHour: number;         // 0..23 IST (from stored bookingWindowEndHour)
-  daysAhead: number;          // 1..14 (from stored bookingDaysAhead)
+  daysAhead: number;          // 1..10 WORKING days (from stored bookingDaysAhead)
   autoNotifyPassengers: boolean;
 }
 
 export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
   enableBookingTimeWindow: true,
   cutoffHour: 20,
-  daysAhead: 6,
+  daysAhead: 1,
   autoNotifyPassengers: true,
 };
 
@@ -32,7 +32,7 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
   return {
     enableBookingTimeWindow: boolOr(b.enableBookingTimeWindow, DEFAULT_SCHEDULING_CONFIG.enableBookingTimeWindow),
     cutoffHour: clampInt(b.bookingWindowEndHour, 0, 23, DEFAULT_SCHEDULING_CONFIG.cutoffHour),
-    daysAhead: clampInt(b.bookingDaysAhead, 1, 14, DEFAULT_SCHEDULING_CONFIG.daysAhead),
+    daysAhead: clampInt(b.bookingDaysAhead, 1, 10, DEFAULT_SCHEDULING_CONFIG.daysAhead),
     autoNotifyPassengers: boolOr(b.autoNotifyPassengers, DEFAULT_SCHEDULING_CONFIG.autoNotifyPassengers),
   };
 }
@@ -42,7 +42,8 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
  * When the daily time-window is disabled we pass hour 24 — a deliberate sentinel that
  * makes cutoffFor() land on 00:00 IST of the travel date, i.e. booking stays open
  * through the whole prior day. The horizon / Sunday / service-calendar gates are
- * unaffected: daysAhead is always passed through unchanged.
+ * unaffected: daysAhead — now a count of WORKING days — is always passed through
+ * unchanged.
  */
 export function toWindowOpts(cfg: SchedulingConfig): { cutoffHour: number; daysAhead: number } {
   return {
