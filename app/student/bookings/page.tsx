@@ -9,6 +9,7 @@ import { BookingCalendar, type DayCell } from '@/components/booking/booking-cale
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { addMonth, istMonth } from '@/lib/booking/month';
 import { bookableDates } from '@/lib/booking/window';
+import { formatCutoffHour } from '@/lib/booking/reminder-copy';
 
 interface MonthResp {
   routeLabel: string | null;
@@ -17,6 +18,9 @@ interface MonthResp {
   month: string;
   cells: DayCell[];
   maxBookableDate?: string;
+  nextBookableDate?: string | null;
+  /** Effective cutoff hour (0..23 IST), or null when the daily window is off. */
+  cutoffHour?: number | null;
 }
 
 async function fetchMonth(month: string): Promise<MonthResp> {
@@ -120,6 +124,16 @@ export default function StudentBookingsPage() {
         </p>
       </header>
 
+      {data && data.nextBookableDate === null && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <CalendarOff className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm text-amber-800 dark:text-amber-300">
+            No travel day is open for booking right now. This happens over a long holiday block —
+            the next working day will open automatically.
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
         {/* Summary + guidance (sticky on desktop, stacks on mobile) */}
         <aside className="space-y-3 lg:sticky lg:top-4">
@@ -143,13 +157,20 @@ export default function StudentBookingsPage() {
 
           <div className="space-y-2.5 rounded-2xl border border-gray-200 bg-white p-4 text-xs text-muted-foreground shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <Hint icon={<CalendarRange className="h-4 w-4 text-blue-500" />}>
-              You can book <span className="font-medium text-foreground">this week&apos;s days, up to Saturday</span>. Next week opens on Saturday.
+              {data?.nextBookableDate ? (
+                <>Booking is open for <span className="font-medium text-foreground">{formatLong(data.nextBookableDate)}</span> — the next travel day.</>
+              ) : (
+                <>You can book <span className="font-medium text-foreground">one working day at a time</span> — each day opens on the previous working day.</>
+              )}
             </Hint>
-            <Hint icon={<Clock className="h-4 w-4 text-blue-500" />}>
-              Booking closes at <span className="font-medium text-foreground">8 PM the day before</span> travel.
-            </Hint>
+            {typeof data?.cutoffHour === 'number' && (
+              <Hint icon={<Clock className="h-4 w-4 text-blue-500" />}>
+                Booking closes at{' '}
+                <span className="font-medium text-foreground">{formatCutoffHour(data.cutoffHour)} the day before</span> travel.
+              </Hint>
+            )}
             <Hint icon={<CalendarOff className="h-4 w-4 text-slate-400" />}>
-              <span className="font-medium text-foreground">Sundays are a weekly holiday</span> — no bus service, so they can&apos;t be booked.
+              <span className="font-medium text-foreground">Sundays and declared holidays</span> have no bus service — the next open day skips over them.
             </Hint>
           </div>
         </aside>
@@ -185,7 +206,7 @@ export default function StudentBookingsPage() {
         description={
           confirm
             ? confirm.action === 'cancel'
-              ? (<>Release your seat for <strong>{formatLong(confirm.date)}</strong>? You can rebook before 8&nbsp;PM the day before travel.</>)
+              ? (<>Release your seat for <strong>{formatLong(confirm.date)}</strong>?{typeof data?.cutoffHour === 'number' ? <> You can rebook before {formatCutoffHour(data.cutoffHour)} the day before travel.</> : null}</>)
               : (<>Reserve a seat for <strong>{formatLong(confirm.date)}</strong>? This covers both trips that day{data?.routeLabel ? <> on <strong>{data.routeLabel}</strong></> : null}.</>)
             : null
         }

@@ -20,6 +20,10 @@ interface Access {
   overdue_count: number;
   total_owed: number;
   terms: Term[];
+  term1_paid: boolean;
+  term1_status: string | null;
+  term1_due_date: string | null;
+  term1_balance: number;
 }
 
 async function fetchAccess(): Promise<Access> {
@@ -111,10 +115,26 @@ export default function StudentFeesPage() {
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
             <div>
               <p className="font-semibold text-red-800 dark:text-red-300">Portal access restricted</p>
-              <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
-                You have <strong>{data.overdue_count}</strong> overdue transport term{data.overdue_count === 1 ? '' : 's'} totalling{' '}
-                <strong>{inr(data.total_owed)}</strong>. Please clear the overdue amount at the transport office to restore access to the rest of the portal.
-              </p>
+              {data.reason === 'term1_unpaid' ? (
+                <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
+                  Your <strong>first term</strong> transport fee of <strong>{inr(data.term1_balance)}</strong>
+                  {data.term1_due_date ? <> (due {fmtDate(data.term1_due_date)})</> : null} is not fully paid.
+                  Clear it at the transport office to unlock bus booking and the rest of the portal.
+                </p>
+              ) : data.reason === 'term1_not_billed' ? (
+                // Distinct from term1_unpaid on purpose: paying cannot fix this,
+                // so the learner must be told to contact the office instead.
+                <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
+                  Your transport fee for this year has not been generated yet, so bus booking is
+                  locked. Please contact the transport office — there is nothing to pay until they
+                  raise your bill.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
+                  You have <strong>{data.overdue_count}</strong> overdue transport term{data.overdue_count === 1 ? '' : 's'} totalling{' '}
+                  <strong>{inr(data.total_owed)}</strong>. Please clear the overdue amount at the transport office to restore access to the rest of the portal.
+                </p>
+              )}
             </div>
           </div>
         </div>

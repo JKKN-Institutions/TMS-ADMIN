@@ -164,18 +164,20 @@ const SettingsPage = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Booking days available (days ahead)
+                  Booking window (working days ahead)
                 </label>
                 <input
                   type="number"
                   value={schedulingSettings.bookingDaysAhead}
                   onChange={(e) => setSchedulingSettings({ ...schedulingSettings, bookingDaysAhead: parseInt(e.target.value) })}
                   min="1"
-                  max="14"
+                  max="10"
                   className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
                 <p className="text-sm text-gray-600 mt-1">
-                  How many days ahead learners can book (Sunday is always a holiday)
+                  How many <strong>working</strong> days ahead learners can book. Sundays and dates
+                  marked as holidays in the service calendar are skipped over, not counted. Set to 1
+                  so each travel day opens on the previous working day.
                 </p>
               </div>
             </div>
@@ -192,7 +194,7 @@ const SettingsPage = () => {
                        schedulingSettings.bookingWindowEndHour === 12 ? '12:00 PM' :
                        `${schedulingSettings.bookingWindowEndHour-12}:00 PM`} the day before the trip</li>
                     <li>• Each schedule must be individually approved by admin</li>
-                    <li>• Booking opens for the next {schedulingSettings.bookingDaysAhead} day(s); Sundays remain closed</li>
+                    <li>• Booking opens for the next {schedulingSettings.bookingDaysAhead} working day(s); Sundays and service-calendar holidays are skipped</li>
                   </ul>
                 </div>
               </div>

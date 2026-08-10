@@ -26,6 +26,12 @@ export interface TransportAccess {
   overdue_count: number;
   total_owed: number;
   terms: TransportTerm[];
+  /** True when the learner's FIRST term is fully paid — the precondition for portal access. */
+  term1_paid: boolean;
+  /** The Term-1 money-row status, or null when Term 1 was never billed. */
+  term1_status: string | null;
+  term1_due_date: string | null;
+  term1_balance: number;
 }
 
 async function fetchTransportAccess(): Promise<TransportAccess> {
