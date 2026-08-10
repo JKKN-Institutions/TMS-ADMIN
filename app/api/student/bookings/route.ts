@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getLearnerRowForUser } from '@/lib/student/identity';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { bookableDates, cutoffFor, dayStatus, isCancelable, isSunday } from '@/lib/booking/window';
+import { addDays, bookableDates, cutoffFor, dayStatus, isCancelable, isSunday, istToday } from '@/lib/booking/window';
 import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
 import { isOverCapacity } from '@/lib/booking/capacity';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
@@ -34,7 +34,15 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
     // See toWindowOpts() in lib/settings/scheduling.ts for the cutoffHour: 24
     // sentinel semantics used when the daily time-window is disabled.
     const winOpts = toWindowOpts(cfg);
-    const dates = bookableDates(new Date(), cfg.daysAhead);
+    // The walk needs to know which days are NOT service days before it can pick
+    // the next WORKING day, so load the service calendar across the whole 21-day
+    // search cap — not just the month being viewed.
+    const today = istToday();
+    const horizonExceptions = await loadExceptions(
+      svc, learner.transport_route_id ?? null, addDays(today, 1), addDays(today, 21)
+    );
+    const offDates = new Set(horizonExceptions.keys());
+    const dates = bookableDates(new Date(), { ...winOpts, offDates });
 
     let routeLabel: string | null = null;
     let stopLabel: string | null = null;
@@ -101,7 +109,7 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
         attendance.set(r.trip_date, list);
       }
 
-      const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows, cutoffHour: winOpts.cutoffHour, daysAhead: winOpts.daysAhead }).map((c) => ({
+      const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows, cutoffHour: winOpts.cutoffHour, daysAhead: winOpts.daysAhead, offDates }).map((c) => ({
         ...c,
         cutoff: c.status === 'open' || c.status === 'booked'
           ? (windows.get(c.date)?.deadline ?? cutoffFor(c.date, winOpts.cutoffHour).toISOString())
@@ -118,6 +126,10 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
           month: monthParam,
           cells,
           maxBookableDate: dates[dates.length - 1] ?? null,
+          nextBookableDate: dates[0] ?? null,
+          // The EFFECTIVE cutoff hour, so the UI can state the real deadline
+          // instead of hardcoding one. null = the daily time window is disabled.
+          cutoffHour: cfg.enableBookingTimeWindow ? cfg.cutoffHour : null,
         },
       });
     }
@@ -138,7 +150,7 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
 
     const days = dates.map((date) => ({
       date,
-      status: dayStatus(booked.has(date), date, new Date(), winOpts),
+      status: dayStatus(booked.has(date), date, new Date(), { ...winOpts, offDates }),
       cutoff: cutoffFor(date, winOpts.cutoffHour).toISOString(),
     }));
 
@@ -150,6 +162,8 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
         assigned: !!learner.transport_route_id,
         days,
         maxBookableDate: dates[dates.length - 1] ?? null,
+        nextBookableDate: dates[0] ?? null,
+        cutoffHour: cfg.enableBookingTimeWindow ? cfg.cutoffHour : null,
       },
     });
   } catch (e) {
@@ -188,14 +202,23 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       if (isSunday(travelDate)) {
         return NextResponse.json({ error: 'Sunday is a weekly holiday — buses do not run that day' }, { status: 409 });
       }
+      // Load the service calendar across the walk's 21-day cap. The horizon now
+      // SKIPS holidays, so a holiday date is simply absent from bookableDates —
+      // this check must run BEFORE effectiveOpen or the specific "that date is a
+      // holiday" message would be masked by the generic "booking is closed".
+      const today = istToday();
+      const horizonExceptions = await loadExceptions(
+        svc, learner.transport_route_id, addDays(today, 1), addDays(today, 21)
+      );
+      if (horizonExceptions.has(travelDate)) {
+        return NextResponse.json({ error: 'That date is a holiday / no-service day' }, { status: 409 });
+      }
+      const offDates = new Set(horizonExceptions.keys());
+
       const winMap = await loadWindows(svc, learner.transport_route_id, travelDate, travelDate);
-      const openOpts = { window: winMap.get(travelDate), ...winOpts };
+      const openOpts = { window: winMap.get(travelDate), ...winOpts, offDates };
       if (!effectiveOpen(travelDate, openOpts)) {
         return NextResponse.json({ error: 'Booking is closed for that date' }, { status: 409 });
-      }
-      const blocking = await loadExceptions(svc, learner.transport_route_id, travelDate, travelDate);
-      if (blocking.has(travelDate)) {
-        return NextResponse.json({ error: 'That date is a holiday / no-service day' }, { status: 409 });
       }
       // Capacity is advisory: an over-capacity booking is ALLOWED and only flagged
       // (warning), never blocked. Overflow is intentional. Compute the flag only
@@ -240,15 +263,11 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       });
     }
 
-    // cancel — uses the SAME cfg-derived winOpts (toWindowOpts(cfg)) as book()
-    // above, so the two paths cannot diverge on the admin-configured cutoff/
-    // horizon. NOTE: this does not cover a per-date tms_booking_window.deadline
-    // override — book() honours that via effectiveOpen(), but isCancelable()
-    // takes no window param, so a deadline set later than the standard cutoff
-    // can still leave a bookable date not (yet) cancelable. Pre-existing gap,
-    // tracked separately; not addressed here.
-    // isCancelable() deliberately does not gate on Sunday (a pre-existing Sunday
-    // booking must stay cancelable), so no isSunday() check is added here.
+    // cancel — isCancelable() deliberately does NOT consult the booking horizon.
+    // With a single-working-day window, a horizon-scoped rule would strand every
+    // pre-existing forward booking with no way to release the seat. A booking is
+    // cancellable while its travel date is future and its cutoff is still open.
+    // Sunday is not gated: a pre-existing Sunday booking must stay cancellable.
     if (!isCancelable(travelDate, new Date(), winOpts)) {
       return NextResponse.json({ error: 'Cancellation is closed for that date' }, { status: 409 });
     }
