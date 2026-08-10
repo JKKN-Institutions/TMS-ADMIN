@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { monthDays, cellStatus, buildMonthCells, effectiveOpen } from './calendar';
 
-// Frozen clock: now + 5:30 IST => IST today = 2026-06-22 (Monday), so the service
-// week closes on Saturday 06-27 and bookable = 06-23..06-27.
+// Frozen clock: now + 5:30 IST => IST today = 2026-06-22 (Monday). With the
+// default 1-working-day horizon, the only bookable date is Tuesday 06-23.
 const NOW = new Date('2026-06-22T03:00:00Z');
 
 describe('monthDays', () => {
@@ -26,9 +26,9 @@ describe('cellStatus', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, now: NOW })).toBe('open');
     expect(cellStatus('2026-06-23', { hasBooking: true, now: NOW })).toBe('booked');
   });
-  it('a date within this week is open; beyond the week is out_of_horizon', () => {
-    // NOW is Monday 2026-06-22; the week window is 06-23..06-27 (Sat)
-    expect(cellStatus('2026-06-26', { hasBooking: false, now: NOW })).toBe('open');          // in-week (Fri)
+  it('the single working day ahead is open; everything beyond is out_of_horizon', () => {
+    // NOW is Monday 2026-06-22; the horizon is exactly 06-23 (Tue)
+    expect(cellStatus('2026-06-26', { hasBooking: false, now: NOW })).toBe('out_of_horizon'); // Fri, beyond the 1-day horizon
     expect(cellStatus('2026-06-30', { hasBooking: false, now: NOW })).toBe('out_of_horizon'); // next week
     expect(cellStatus('2026-12-01', { hasBooking: false, now: NOW })).toBe('out_of_horizon'); // far future
     expect(cellStatus('2026-06-10', { hasBooking: true, now: NOW })).toBe('locked');          // past booking
@@ -44,7 +44,7 @@ describe('buildMonthCells', () => {
     });
     const by = (d: string) => cells.find((c) => c.date === d)!;
     expect(by('2026-06-23').status).toBe('open');
-    expect(by('2026-06-24').status).toBe('booked');
+    expect(by('2026-06-24').status).toBe('locked'); // booked, but past the 1-day horizon
     expect(by('2026-06-25').status).toBe('holiday');
     expect(by('2026-06-25').note).toBe('Test');
     expect(by('2026-06-22').status).toBe('out_of_horizon'); // today
@@ -52,7 +52,7 @@ describe('buildMonthCells', () => {
 });
 
 describe('booking-window overrides', () => {
-  const NOW2 = new Date('2026-06-22T03:00:00Z'); // IST today 2026-06-22 (Mon) => bookable 06-23..27
+  const NOW2 = new Date('2026-06-22T03:00:00Z'); // IST today 2026-06-22 (Mon) => bookable 06-23 only
   it('a disabled window closes an otherwise-open date', () => {
     expect(cellStatus('2026-06-23', { hasBooking: false, window: { enabled: false, deadline: null, capacityOverride: null }, now: NOW2 })).toBe('closed');
   });
@@ -69,7 +69,7 @@ describe('booking-window overrides', () => {
 });
 
 describe('Sunday weekly holiday', () => {
-  // 2026-06-28 is a Sunday and within the open horizon from NOW (IST 2026-06-22)
+  // 2026-06-28 is a Sunday — never bookable, whatever the horizon
   it('marks an unbooked Sunday as weekly_off', () => {
     expect(cellStatus('2026-06-28', { hasBooking: false, now: NOW })).toBe('weekly_off');
   });
@@ -81,6 +81,45 @@ describe('Sunday weekly holiday', () => {
   });
   it('keeps booking closed on a Sunday even with an enabled window', () => {
     expect(effectiveOpen('2026-06-28', { window: { enabled: true, deadline: null, capacityOverride: null }, now: NOW })).toBe(false);
+  });
+});
+
+describe('offDates threading', () => {
+  it('effectiveOpen rejects a service-calendar off day', () => {
+    const now = new Date('2026-06-26T03:00:00Z'); // Friday
+    expect(effectiveOpen('2026-06-27', { now })).toBe(true); // working Saturday
+    expect(effectiveOpen('2026-06-27', { now, offDates: new Set(['2026-06-27']) })).toBe(false);
+  });
+
+  it('effectiveOpen opens the Monday once Saturday is marked off', () => {
+    const now = new Date('2026-06-26T03:00:00Z');
+    expect(effectiveOpen('2026-06-29', { now, offDates: new Set(['2026-06-27']) })).toBe(true);
+  });
+
+  it('cellStatus labels a cutoff-passed horizon day "closed", not "out_of_horizon"', () => {
+    // Monday 20:01 IST: Tuesday closed, Wednesday now open
+    const now = new Date('2026-06-22T14:31:00Z');
+    expect(cellStatus('2026-06-23', { hasBooking: false, now })).toBe('closed');
+    expect(cellStatus('2026-06-24', { hasBooking: false, now })).toBe('open');
+  });
+
+  it('cellStatus marks a far-future day out_of_horizon, and locked if booked', () => {
+    const now = new Date('2026-06-22T03:00:00Z');
+    expect(cellStatus('2026-07-15', { hasBooking: false, now })).toBe('out_of_horizon');
+    expect(cellStatus('2026-07-15', { hasBooking: true, now })).toBe('locked');
+  });
+
+  it('buildMonthCells forwards offDates to the gate', () => {
+    const cells = buildMonthCells('2026-06', {
+      bookedDates: new Set<string>(),
+      exceptions: new Map(),
+      offDates: new Set(['2026-06-27']),
+      now: new Date('2026-06-26T03:00:00Z'),
+    });
+    const sat = cells.find((c) => c.date === '2026-06-27');
+    const mon = cells.find((c) => c.date === '2026-06-29');
+    expect(sat?.status).toBe('out_of_horizon');
+    expect(mon?.status).toBe('open');
   });
 });
 

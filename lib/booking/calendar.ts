@@ -4,7 +4,7 @@
  * The builder is pure + unit-tested; loadExceptions wraps the DB for the API.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { bookableDates, cutoffFor, dayStatus, isSunday } from './window';
+import { bookableDates, horizonDates, isSunday } from './window';
 
 export type CalendarStatus =
   | 'open' | 'booked' | 'locked' | 'closed'
@@ -36,19 +36,29 @@ export function monthDays(monthStr: string): string[] {
   return out;
 }
 
-/** Is booking open for a date, honoring an optional window override + injected config? */
+/**
+ * Is booking open for a date, honoring an optional per-date window override plus
+ * the injected config? The horizon walk already applies Sunday, the service
+ * calendar and the standard cutoff.
+ *
+ * KNOWN GAP (pre-existing, out of scope): a per-date `deadline` set LATER than
+ * the standard cutoff cannot rescue a date the walk has already dropped. The
+ * override can only tighten the window, not widen it.
+ */
 export function effectiveOpen(
   date: string,
-  opts: { window?: WindowOverride; now?: Date; cutoffHour?: number; daysAhead?: number }
+  opts: { window?: WindowOverride; now?: Date; cutoffHour?: number; daysAhead?: number; offDates?: Set<string> }
 ): boolean {
   const now = opts.now ?? new Date();
-  if (isSunday(date)) return false; // weekly holiday — never bookable
   if (opts.window && !opts.window.enabled) return false;
-  if (!bookableDates(now, opts.daysAhead).includes(date)) return false;
-  const deadlineMs = opts.window?.deadline
-    ? new Date(opts.window.deadline).getTime()
-    : cutoffFor(date, opts.cutoffHour).getTime();
-  return now.getTime() < deadlineMs;
+  const inWindow = bookableDates(now, {
+    cutoffHour: opts.cutoffHour,
+    daysAhead: opts.daysAhead,
+    offDates: opts.offDates,
+  }).includes(date);
+  if (!inWindow) return false;
+  if (opts.window?.deadline) return now.getTime() < new Date(opts.window.deadline).getTime();
+  return true;
 }
 
 /** Status for ONE date. A service-calendar exception wins over everything. */
@@ -61,19 +71,24 @@ export function cellStatus(
     now?: Date;
     cutoffHour?: number;
     daysAhead?: number;
+    offDates?: Set<string>;
   }
 ): CalendarStatus {
   if (opts.exception) return opts.exception.kind; // 'holiday' | 'no_service'
   if (isSunday(date)) return opts.hasBooking ? 'locked' : 'weekly_off';
+
   const now = opts.now ?? new Date();
-  if (!bookableDates(now, opts.daysAhead).includes(date)) return opts.hasBooking ? 'locked' : 'out_of_horizon';
-  if (opts.window) {
-    const open = effectiveOpen(date, { window: opts.window, now, cutoffHour: opts.cutoffHour, daysAhead: opts.daysAhead });
-    if (opts.hasBooking) return open ? 'booked' : 'locked';
-    return open ? 'open' : 'closed';
+  const walkOpts = { cutoffHour: opts.cutoffHour, daysAhead: opts.daysAhead, offDates: opts.offDates };
+
+  if (effectiveOpen(date, { window: opts.window, now, ...walkOpts })) {
+    return opts.hasBooking ? 'booked' : 'open';
   }
-  const s = dayStatus(opts.hasBooking, date, now, { cutoffHour: opts.cutoffHour, daysAhead: opts.daysAhead });
-  return s === 'not_booked' ? 'open' : s;
+  // Inside the labelled horizon but not open => the cutoff passed (or an admin
+  // disabled the date). Distinct from a day that was never in range at all.
+  if (horizonDates(now, walkOpts).includes(date)) {
+    return opts.hasBooking ? 'locked' : 'closed';
+  }
+  return opts.hasBooking ? 'locked' : 'out_of_horizon';
 }
 
 /** Build all cells for a month from the learner's bookings + the gate. */
@@ -86,6 +101,7 @@ export function buildMonthCells(
     now?: Date;
     cutoffHour?: number;
     daysAhead?: number;
+    offDates?: Set<string>;
   }
 ): DayCell[] {
   return monthDays(monthStr).map((date) => {
@@ -99,6 +115,7 @@ export function buildMonthCells(
         now: opts.now,
         cutoffHour: opts.cutoffHour,
         daysAhead: opts.daysAhead,
+        offDates: opts.offDates,
       }),
       note: exception?.note ?? null,
     };
