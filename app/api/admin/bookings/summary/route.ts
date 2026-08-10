@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { bookableDates } from '@/lib/booking/window';
+import { addDays, bookableDates, istToday } from '@/lib/booking/window';
+import { loadExceptions } from '@/lib/booking/calendar';
+import { loadSchedulingConfig, toWindowOpts } from '@/lib/settings/scheduling';
 
 /**
  * Per-route booked-vs-capacity load for a date (default: tomorrow). Read-only
@@ -23,9 +25,27 @@ async function getSummary(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const qp = new URL(request.url).searchParams.get('date') ?? '';
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(qp) ? qp : bookableDates()[0]; // default tomorrow
-
     const svc = createServiceRoleClient();
+
+    // Default to the next WORKING day, not blind tomorrow — otherwise the admin
+    // summary reports on a Sunday or an admin-declared holiday, for which no
+    // learner could have booked. routeId null = ALL-ROUTES exceptions only, which
+    // is right for a fleet-wide summary. Falls back to tomorrow if the 21-day walk
+    // finds no service day at all, so the response always carries a date.
+    let date = qp;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const today = istToday();
+      const [exceptions, cfg] = await Promise.all([
+        loadExceptions(svc, null, addDays(today, 1), addDays(today, 21)),
+        loadSchedulingConfig(svc),
+      ]);
+      date =
+        bookableDates(new Date(), {
+          ...toWindowOpts(cfg),
+          daysAhead: 1,
+          offDates: new Set(exceptions.keys()),
+        })[0] ?? addDays(today, 1);
+    }
 
     const capMap = new Map<string, number | null>();
     const winRes = await svc.from('tms_booking_window').select('route_id, capacity_override').eq('travel_date', date);
