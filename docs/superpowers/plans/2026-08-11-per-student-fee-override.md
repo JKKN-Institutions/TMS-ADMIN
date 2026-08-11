@@ -862,7 +862,16 @@ where fb.person_type = 'learner'
   and coalesce(b.status, '') <> 'cancelled';
 ```
 
-Expected: `2272 | 6130150.00 | 1890500.00 | 4239650.00`.
+**Do not compare this against a hardcoded figure — record whatever it returns as your
+baseline.** These totals move continuously: real payments land throughout the day, which
+shifts Collected up and Pending down without changing Billed. (Measured 2026-08-11
+morning: `2272 | 6130150.00 | 1890500.00 | 4239650.00`; measured again a few hours later:
+`2272 | 6130150.00 | 1901500.00 | 4228650.00` — ₹11,000 of Pending had become Collected in
+between.)
+
+Sanity-check only that `bills` is 2272 and that Billed − Collected − Pending is exactly
+`0.00`. Step 6 verifies the change as a **delta from this captured baseline**, not against
+an absolute number.
 
 ```sql
 -- (c) Portal access
@@ -1049,7 +1058,17 @@ voided by status, exactly as the vacate RPC voids bills.
 
 Re-run query (b) from Step 1.
 
-Expected: `2271 | 6125150.00 | 1885500.00 | 4239650.00`.
+Expected, **relative to the baseline you captured in Step 1(b)** — not an absolute figure:
+
+| Column | Change | Why |
+|---|---|---|
+| `bills` | **−1** | Term 2 is cancelled, so it drops out of the filter |
+| `billed` | **−5,000** | ₹2,500 off Term 1 (3,000 → 500) + ₹2,500 of Term 2 removed |
+| `collected` | **−5,000** | Both bills had `balance_amount = 0`, so collected fell by the same amount as billed |
+| `pending` | **unchanged** | Neither bill carried a balance |
+
+If Pending moved at all, something outside this correction changed concurrently — re-run
+Step 1(b) and recompute the deltas before concluding anything is wrong.
 
 Then assert the invariant explicitly:
 
