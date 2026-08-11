@@ -30,6 +30,7 @@ export interface FeeFormInitial {
   lifecycle_statuses: string[];
   total_amount: string;
   notes: string;
+  auto_generate?: boolean;
   terms: TermRow[];
   bands: Array<{ label: string; study_years: number[]; total_amount: string; terms: TermRow[] }>;
   stop_terms?: FeeStructureStopTerm[];
@@ -136,6 +137,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
     lifecycle_statuses: initial?.lifecycle_statuses ?? ([] as string[]),
     total_amount: initial?.total_amount ?? '',
     notes: initial?.notes ?? '',
+    auto_generate: initial?.auto_generate ?? false,
   });
   const [terms, setTerms] = useState<TermRow[]>(
     initial?.terms && initial.terms.length ? initial.terms : [blankTerm(1)]
@@ -260,6 +262,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         staff_role_keys: !isStudent && form.staff_role_keys.length ? form.staff_role_keys : null,
         lifecycle_statuses: isStudent && form.lifecycle_statuses.length ? form.lifecycle_statuses : null,
         notes: form.notes.trim() || null,
+        auto_generate: form.auto_generate,
       };
 
       const payload: Record<string, unknown> = isTiered
@@ -393,6 +396,26 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
               disabled={saving}
             />
             <p className="mt-1 text-xs text-gray-500">Bills can only be generated from an Active structure.</p>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Automation</label>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="auto_generate"
+                checked={form.auto_generate}
+                onChange={(e) => set('auto_generate', e.target.checked)}
+                disabled={saving}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="auto_generate" className="ml-2 text-sm text-gray-600">
+                Auto-generate bills for this structure
+              </label>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              When the global Scheduling setting is on, people matching this structure are
+              billed automatically every 15 minutes. The manual Generate button ignores this flag.
+            </p>
           </div>
         </div>
       </div>

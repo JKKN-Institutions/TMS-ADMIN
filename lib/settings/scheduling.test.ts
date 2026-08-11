@@ -19,6 +19,7 @@ describe('parseSchedulingConfig', () => {
       cutoffHour: 19,
       daysAhead: 3,
       autoNotifyPassengers: false,
+      autoGenerateBills: false,
     });
   });
 
@@ -76,21 +77,46 @@ describe('parseSchedulingConfig', () => {
   });
 });
 
+describe('autoGenerateBills', () => {
+  it('defaults to false when the key is absent — automation is opt-in', () => {
+    // This is the LIVE blob shape as of 2026-08-11; the key is not in it.
+    const cfg = parseSchedulingConfig({
+      bookingDaysAhead: 1,
+      autoNotifyPassengers: true,
+      bookingWindowEndHour: 19,
+      enableBookingTimeWindow: true,
+    });
+    expect(cfg.autoGenerateBills).toBe(false);
+  });
+
+  it('reads a stored true', () => {
+    expect(parseSchedulingConfig({ autoGenerateBills: true }).autoGenerateBills).toBe(true);
+  });
+
+  it('ignores a non-boolean and falls back to false', () => {
+    expect(parseSchedulingConfig({ autoGenerateBills: 'yes' }).autoGenerateBills).toBe(false);
+  });
+
+  it('defaults to false for a malformed blob', () => {
+    expect(parseSchedulingConfig(null).autoGenerateBills).toBe(false);
+  });
+});
+
 describe('toWindowOpts', () => {
   it('enabled: passes cutoffHour and daysAhead through unchanged', () => {
-    const cfg = { enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true };
+    const cfg = { enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false };
     expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 18, daysAhead: 4 });
   });
 
   it('disabled: cutoffHour becomes the 24 sentinel, but daysAhead is STILL passed through unchanged', () => {
-    const cfg = { enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true };
+    const cfg = { enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false };
     expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 24, daysAhead: 4 });
   });
 
   it('disabling the time window never widens or narrows the horizon, whatever daysAhead is set to', () => {
     for (const daysAhead of [1, 5, 10]) {
-      const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false });
-      const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false });
+      const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false });
+      const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false });
       expect(disabled.daysAhead).toBe(enabled.daysAhead);
       expect(disabled.daysAhead).toBe(daysAhead);
     }

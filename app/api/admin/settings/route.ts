@@ -10,6 +10,7 @@ interface SchedulingSettingsData {
   bookingWindowEndHour: number;
   bookingDaysAhead: number;
   autoNotifyPassengers: boolean;
+  autoGenerateBills: boolean;
 }
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -31,6 +32,7 @@ function toBlobShape(cfg: ReturnType<typeof parseSchedulingConfig>): SchedulingS
     bookingWindowEndHour: cfg.cutoffHour,
     bookingDaysAhead: cfg.daysAhead,
     autoNotifyPassengers: cfg.autoNotifyPassengers,
+    autoGenerateBills: cfg.autoGenerateBills,
   };
 }
 

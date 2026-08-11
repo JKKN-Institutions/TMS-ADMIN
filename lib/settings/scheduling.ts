@@ -6,6 +6,8 @@ export interface SchedulingConfig {
   cutoffHour: number;         // 0..23 IST (from stored bookingWindowEndHour)
   daysAhead: number;          // 1..10 WORKING days (from stored bookingDaysAhead)
   autoNotifyPassengers: boolean;
+  /** Master switch for the automatic bill generation sweep. Opt-in. */
+  autoGenerateBills: boolean;
 }
 
 export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
@@ -13,6 +15,7 @@ export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
   cutoffHour: 20,
   daysAhead: 1,
   autoNotifyPassengers: true,
+  autoGenerateBills: false,
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -34,6 +37,7 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
     cutoffHour: clampInt(b.bookingWindowEndHour, 0, 23, DEFAULT_SCHEDULING_CONFIG.cutoffHour),
     daysAhead: clampInt(b.bookingDaysAhead, 1, 10, DEFAULT_SCHEDULING_CONFIG.daysAhead),
     autoNotifyPassengers: boolOr(b.autoNotifyPassengers, DEFAULT_SCHEDULING_CONFIG.autoNotifyPassengers),
+    autoGenerateBills: boolOr(b.autoGenerateBills, DEFAULT_SCHEDULING_CONFIG.autoGenerateBills),
   };
 }
 

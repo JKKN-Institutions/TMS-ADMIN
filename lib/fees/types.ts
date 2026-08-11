@@ -75,6 +75,7 @@ export interface FeeStructureRow {
   split_count: number;
   status: FeeStatus;
   notes: string | null;
+  auto_generate: boolean; // NOT NULL DEFAULT false; the per-structure automation opt-in
   created_at: string;
   updated_at: string;
   created_by: string | null;
