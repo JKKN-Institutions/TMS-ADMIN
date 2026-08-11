@@ -177,3 +177,82 @@ describe('generateBills — orphan compensation', () => {
     expect(deletes).toHaveLength(1);
   });
 });
+
+describe('generateBills — auto-only policies', () => {
+  function conflictFixture() {
+    return makeFakeSupabase({
+      tms_fee_structure: [{
+        id: 'fs1', name: 'T', status: 'active', audience: 'student', fee_mode: 'flat',
+        transport_year_id: 'ty1', institution_ids: null, staff_role_keys: null, lifecycle_statuses: null,
+      }],
+      tms_transport_year: [{ start_date: '2026-06-01', name: '2026-2027' }],
+      tms_fee_structure_term: [
+        { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
+      ],
+      learners_profiles: [
+        { id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null },
+        { id: 'L2', institution_id: 'i1', admission_year_id: null, academic_year_id: null },
+      ],
+      admission_years: [],
+      tms_fee_override: [],
+      // Both the ledger read and the conflict read hit this table. Returning a
+      // row for L1 with a DIFFERENT structure id makes L1 a cross-structure
+      // conflict while leaving them unbilled by fs1.
+      tms_fee_bill: [{ person_id: 'L1', term_no: 99 }],
+      billing_categories: [{ id: 'cat1' }],
+      academic_years: [],
+    });
+  }
+
+  it('reports conflicts but still bills them when skipConflicts is off (current manual behaviour)', async () => {
+    const res = await generateBills(conflictFixture() as never, {
+      feeStructureId: 'fs1', mode: 'dry_run', actorId: 'admin-1',
+    });
+    if (!res.ok) throw new Error('expected ok');
+    const p = res.data as Record<string, unknown>;
+    expect(p.conflictCount).toBe(1);
+    expect(p.applicable).toBe(2);       // L1 is NOT removed
+  });
+
+  it('removes conflicted people from the cohort when skipConflicts is on', async () => {
+    const res = await generateBills(conflictFixture() as never, {
+      feeStructureId: 'fs1', mode: 'dry_run', actorId: null, skipConflicts: true,
+    });
+    if (!res.ok) throw new Error('expected ok');
+    const p = res.data as Record<string, unknown>;
+    expect(p.conflictsSkipped).toBe(1);
+    expect(p.applicable).toBe(1);       // only L2 remains
+  });
+
+  it('writes no generation-run row when there is nothing to bill and skipEmptyRun is on', async () => {
+    const svc = makeFakeSupabase({
+      tms_fee_structure: [{
+        id: 'fs1', name: 'T', status: 'active', audience: 'student', fee_mode: 'flat',
+        transport_year_id: 'ty1', institution_ids: null, staff_role_keys: null, lifecycle_statuses: null,
+      }],
+      tms_transport_year: [{ start_date: '2026-06-01', name: '2026-2027' }],
+      tms_fee_structure_term: [
+        { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
+      ],
+      learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+      admission_years: [],
+      tms_fee_override: [],
+      tms_fee_bill: [{ person_id: 'L1', term_no: 1 }],   // already billed
+      billing_categories: [{ id: 'cat1' }],
+      academic_years: [],
+    });
+
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'generate', actorId: null, skipEmptyRun: true,
+    });
+    if (!res.ok) throw new Error('expected ok');
+    const out = res.data as { runId: string | null; learnerBilled: number };
+    expect(out.learnerBilled).toBe(0);
+    expect(out.runId).toBeNull();
+
+    const runInserts = svc.calls.filter(
+      (c) => c.table === 'tms_fee_generation_run' && c.ops.some(([op]) => op === 'insert')
+    );
+    expect(runInserts).toHaveLength(0);
+  });
+});

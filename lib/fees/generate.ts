@@ -55,6 +55,7 @@ export interface GenerateOutcome {
   feeMode: string;
   structureName: string;
   bornOverdue: number;
+  conflictsSkipped: number;
 }
 
 export type GeneratePreview = Record<string, unknown>;
@@ -411,6 +412,7 @@ export async function generateBills(
     // double-billing would go unflagged in BOTH dry-run and generate. Chunk the id
     // list to <=150 and FAIL LOUD on error.
     let conflictCount = 0;
+    let conflictsSkipped = 0;
     if (resolvedIds.length) {
       const conflicted = new Set<string>();
       const CHUNK = 150;
@@ -427,6 +429,18 @@ export async function generateBills(
         for (const r of (other ?? []) as Array<{ person_id: string }>) conflicted.add(r.person_id);
       }
       conflictCount = conflicted.size;
+
+      // Auto-only: a person already billed by ANOTHER structure this year is
+      // removed from the cohort rather than billed a second time. The manual
+      // path deliberately keeps them — an operator can see the conflict count
+      // in the dry run and decide. An unattended run has no such judgement, and
+      // double-charging is the worse failure.
+      if (opts.skipConflicts && conflicted.size) {
+        conflictsSkipped = conflicted.size;
+        for (let i = resolved.length - 1; i >= 0; i--) {
+          if (conflicted.has(resolved[i].person.person_id)) resolved.splice(i, 1);
+        }
+      }
     }
 
     let toGenerate = 0;
@@ -484,6 +498,7 @@ export async function generateBills(
       alreadyBilledPairs: alreadyBilled,
       toGeneratePairs: toGenerate,
       conflictCount,
+      conflictsSkipped,
       bornOverdue: projectedBornOverdue,
       totalPerPerson: isTiered ? null : flatTerms.reduce((s, t) => s + Number(t.amount), 0),
       staffDeferred: fs.audience === 'staff',
@@ -531,6 +546,31 @@ export async function generateBills(
       for (const a of (ays ?? []) as Array<{ id: string; academic_year_name: string | null }>) {
         if (a.academic_year_name) acadYearNameById.set(a.id, a.academic_year_name);
       }
+    }
+
+    // Auto-only: at a 15-minute cadence across 3 structures an unconditional run
+    // row would add ~288 empty rows per day, burying the runs that actually did
+    // something. Nothing to bill means nothing to record.
+    if (opts.skipEmptyRun && toGenerate === 0) {
+      return {
+        ok: true,
+        data: {
+          mode: 'generate',
+          runId: null,
+          applicable: resolved.length,
+          learnerBilled: 0,
+          staffDeferred: 0,
+          skipped: alreadyBilled,
+          unresolved,
+          overridden,
+          errors: 0,
+          notified: 0,
+          bornOverdue: 0,
+          conflictsSkipped,
+          feeMode: fs.fee_mode,
+          structureName: fs.name,
+        } satisfies GenerateOutcome,
+      };
     }
 
     const { data: run } = await svc
@@ -809,6 +849,7 @@ export async function generateBills(
         feeMode: fs.fee_mode,
         structureName: fs.name,
         bornOverdue,
+        conflictsSkipped,
       },
     };
   } catch (e) {
