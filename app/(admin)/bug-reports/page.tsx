@@ -1,18 +1,28 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Bug, AlertCircle, Clock, CheckCircle2, Info } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bug, AlertCircle, Clock, CheckCircle2, Info, RefreshCw } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
 import { type BugReportRow } from '@/lib/bug-reports/shared';
 import { getBugColumns } from './columns';
 
-async function fetchList(): Promise<{ rows: BugReportRow[]; configured: boolean }> {
+async function fetchList(): Promise<{
+  rows: BugReportRow[];
+  configured: boolean;
+  indexedFrom: string | null;
+}> {
   const res = await fetch('/api/admin/bug-reports', { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to load');
   const json = await res.json();
-  return { rows: (json.data ?? []) as BugReportRow[], configured: json.configured !== false };
+  return {
+    rows: (json.data ?? []) as BugReportRow[],
+    configured: json.configured !== false,
+    indexedFrom: (json.indexedFrom as string | null) ?? null,
+  };
 }
 
 function StatCard({
@@ -39,8 +49,79 @@ function StatCard({
   );
 }
 
+/**
+ * Walk the sync endpoint chunk by chunk.
+ *
+ * The reporter platform only answers "reports by THIS one address", so recovering
+ * history means asking about every address we know (~6.4k profiles). That can't
+ * fit in one serverless request, so the server hands back a `nextOffset` and we
+ * keep going until it's null — reporting progress as we do, because this takes
+ * minutes rather than seconds.
+ */
+// Annotated explicitly: `offset` is reassigned from the response, so without this
+// TypeScript can't infer the response type without referring to itself (TS7022).
+interface SyncChunkResponse {
+  scanned?: number;
+  upserted?: number;
+  errors?: number;
+  totalCandidates?: number;
+  nextOffset?: number | null;
+  writeError?: string;
+  error?: string;
+}
+
+async function runSync(onProgress: (scanned: number, total: number, found: number) => void) {
+  let offset: number | null = 0;
+  let scanned = 0;
+  let found = 0;
+  let errors = 0;
+
+  while (offset !== null) {
+    const res: Response = await fetch('/api/admin/bug-reports/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ offset }),
+    });
+    const json: SyncChunkResponse = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Sync failed');
+    if (json.writeError) throw new Error(`Couldn't save results: ${json.writeError}`);
+
+    scanned += json.scanned ?? 0;
+    found += json.upserted ?? 0;
+    errors += json.errors ?? 0;
+    onProgress(scanned, json.totalCandidates ?? 0, found);
+    offset = json.nextOffset ?? null;
+  }
+  return { scanned, found, errors };
+}
+
 export default function BugReportsPage() {
   const router = useRouter();
+  const qc = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState<{ scanned: number; total: number; found: number } | null>(null);
+
+  const onSync = async () => {
+    setSyncing(true);
+    setProgress({ scanned: 0, total: 0, found: 0 });
+    try {
+      const { scanned, found, errors } = await runSync((s, total, f) =>
+        setProgress({ scanned: s, total, found: f })
+      );
+      await qc.invalidateQueries({ queryKey: ['admin-bug-reports'] });
+      toast.success(
+        `Synced ${found} report${found === 1 ? '' : 's'} from ${scanned.toLocaleString()} addresses` +
+          (errors ? ` (${errors} lookups failed)` : '')
+      );
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSyncing(false);
+      setProgress(null);
+    }
+  };
+
   const { data, isLoading, error } = useQuery({ queryKey: ['admin-bug-reports'], queryFn: fetchList });
   const list = useMemo(() => data?.rows ?? [], [data]);
   const configured = data?.configured ?? true;
@@ -62,12 +143,43 @@ export default function BugReportsPage() {
 
   return (
     <div className="space-y-5 p-4">
-      <div>
-        <h1 className="text-xl font-semibold">Bug Reports</h1>
-        <p className="text-sm text-muted-foreground">
-          Reports submitted from every portal (admin, student, driver, boarding) via the in-app reporter, in one place.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold">Bug Reports</h1>
+          <p className="text-sm text-muted-foreground">
+            Reports submitted from every portal (admin, student, driver, boarding) via the in-app reporter, in one place.
+          </p>
+        </div>
+        {configured && (
+          <Button onClick={onSync} disabled={syncing} variant="outline" className="shrink-0">
+            <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing
+              ? progress && progress.total
+                ? `Syncing ${progress.scanned.toLocaleString()}/${progress.total.toLocaleString()} — ${progress.found} found`
+                : 'Syncing…'
+              : 'Sync from platform'}
+          </Button>
+        )}
       </div>
+
+      {/* The reporter platform can only answer "reports by ONE address", so this
+          list is assembled locally: new reports are captured as they're submitted
+          (app/api/v1/public/[...path]/route.ts) and older ones are recovered by
+          Sync, which asks the platform about every address we know. Only show the
+          prompt when the list is actually empty — once synced it's just noise. */}
+      {configured && list.length === 0 && !isLoading && (
+        <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
+          <Info className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <p className="font-medium">No reports here yet.</p>
+            <p className="mt-0.5">
+              The reporter platform returns bugs one reporter at a time, so this console builds its own list.
+              New reports land here automatically as they&apos;re submitted — press{' '}
+              <span className="font-medium">Sync from platform</span> to pull in everything reported earlier.
+            </p>
+          </div>
+        </div>
+      )}
 
       {!configured && (
         <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">

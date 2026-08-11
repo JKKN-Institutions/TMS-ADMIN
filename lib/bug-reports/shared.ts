@@ -80,3 +80,70 @@ export const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export const categoryLabel = (c?: string | null) => CATEGORY_LABEL[c ?? ''] ?? c ?? '—';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Platform-shape normalisation.
+//
+// These live here (not in the admin route) because TWO callers must agree on
+// them: the admin console reading a report, and the relay recording a freshly
+// submitted one into tms_bug_report_index. If they drifted, an indexed row's
+// title/status would disagree with the same report's detail view.
+//
+// The deployed public API nests the user-entered title and the reporter's
+// name/email inside `metadata` — NOT at the top level the SDK's BugReport type
+// advertises. Read from there first, fall back to any top-level values (in case
+// the API shape changes again), and finally to the description / a generic label
+// so a row is never blank.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The subset of the platform's BugReport these helpers actually touch. */
+export interface RawBugReport {
+  title?: string | null;
+  description?: string | null;
+  status?: string | null;
+  reporter_name?: string | null;
+  reporter_email?: string | null;
+  metadata?: {
+    title?: string | null;
+    reporter_name?: string | null;
+    reporter_email?: string | null;
+  } | null;
+}
+
+export function readMeta(b: RawBugReport): NonNullable<RawBugReport['metadata']> {
+  return b.metadata ?? {};
+}
+
+export function firstLine(s?: string | null, max = 80): string {
+  const line = (s ?? '').split('\n')[0].trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+export function pickTitle(b: RawBugReport, meta = readMeta(b)): string {
+  return (meta.title || b.title || firstLine(b.description) || 'Untitled report').trim();
+}
+
+export function pickReporter(
+  b: RawBugReport,
+  meta = readMeta(b)
+): { name: string; email: string | null } {
+  // Lowercased because both identity authorities (profiles.email and the
+  // notification targeting) compare lowercase, and the platform now matches
+  // reporter_email literally.
+  const raw = meta.reporter_email || b.reporter_email || null;
+  const email = raw ? raw.trim().toLowerCase() || null : null;
+  return { name: meta.reporter_name || b.reporter_name || email || 'Anonymous', email };
+}
+
+/**
+ * The platform's lifecycle stamps fresh reports `new` (and `reopened` when
+ * re-opened); our UI vocabulary is open|in_progress|resolved|closed. Fold those
+ * active states into `open` so the "Open" stat, the status filter and the badge
+ * all count and label them correctly instead of falling through to a grey
+ * "unknown".
+ */
+export function normalizeStatus(status?: string | null): string {
+  const s = (status ?? '').toLowerCase();
+  if (s === 'new' || s === 'reopened') return 'open';
+  return s;
+}

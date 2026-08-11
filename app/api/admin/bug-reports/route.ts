@@ -1,20 +1,42 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { isBugReporterConfigured, listBugReports, getBugReport } from '@/lib/bug-reports/client';
+import { isBugReporterConfigured, getBugReport } from '@/lib/bug-reports/client';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { dispatchNotification } from '@/lib/notifications/dispatch';
 import { buildReplyNotification } from '@/lib/bug-reports/notify';
-import { derivePortal, type BugReportRow, type BugReportDetail } from '@/lib/bug-reports/shared';
-import type { BugReport, GetBugReportDetailsResponse } from '@boobalan_jkkn/bug-reporter-sdk';
+import {
+  normalizeStatus,
+  pickReporter,
+  pickTitle,
+  readMeta,
+  type BugPortal,
+  type BugReportRow,
+  type BugReportDetail,
+} from '@/lib/bug-reports/shared';
+import type { GetBugReportDetailsResponse } from '@boobalan_jkkn/bug-reporter-sdk';
 
 /**
- * Admin cross-portal Bug Reports console. Read + reply only — proxies the JKKN
- * Bug Reporter platform's public API (which has no status/assign endpoint), so
- * there is intentionally no PATCH here.
- *   GET        -> list all reports (across admin/student/driver/boarding)
- *   GET ?id=X  -> one report + message thread
+ * Admin cross-portal Bug Reports console. Read + reply only — the JKKN Bug
+ * Reporter platform's public API has no status/assign endpoint, so there is
+ * intentionally no PATCH here.
+ *   GET        -> list all indexed reports (across admin/student/driver/boarding)
+ *   GET ?id=X  -> one report + message thread (fetched live from the platform)
  *   POST {id, message} -> post an admin reply to the reporter
+ *
+ * WHERE THE LIST COMES FROM
+ * The platform's public API no longer exposes an application-wide read: its only
+ * list endpoint requires a `reporter_email` and returns just that reporter's
+ * reports, and nothing enumerates reporters. So the list is served from our own
+ * tms_bug_report_index, which the same-origin relay populates as each report is
+ * submitted (app/api/v1/public/[...path]/route.ts). The platform remains the
+ * system of record for descriptions, screenshots, logs and message threads —
+ * we fetch those live, per report, using the reporter_email we stored.
+ *
+ * Consequence: the list can only contain reports submitted after the index was
+ * deployed. Historical reports cannot be backfilled — enumerating them is
+ * exactly the capability the platform removed. `indexedFrom` in the GET payload
+ * lets the page tell the user how far back the list actually reaches.
  */
 
 // Gate on the existing system-admin permission (avoids a permission-seeding
@@ -39,59 +61,38 @@ interface RawMessage {
   user?: Array<{ full_name?: string | null; email?: string | null }>;
 }
 
-// The deployed public Bug Reporter API nests the user-entered title and the
-// reporter's name/email inside `metadata` — NOT at the top level the SDK's
-// BugReport type advertises. Read them from there defensively, falling back to
-// any top-level values (in case the API shape changes) and finally to the
-// description / a generic label so a row is never blank.
-interface BugReportMeta {
-  title?: string | null;
-  reporter_name?: string | null;
-  reporter_email?: string | null;
-}
-function readMeta(b: BugReport): BugReportMeta {
-  return (b as unknown as { metadata?: BugReportMeta | null }).metadata ?? {};
-}
-function firstLine(s?: string | null, max = 80): string {
-  const line = (s ?? '').split('\n')[0].trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-}
-function pickTitle(b: BugReport, meta: BugReportMeta): string {
-  return (meta.title || b.title || firstLine(b.description) || 'Untitled report').trim();
-}
-function pickReporter(b: BugReport, meta: BugReportMeta): { name: string; email: string | null } {
-  const email = meta.reporter_email || b.reporter_email || null;
-  return { name: meta.reporter_name || b.reporter_name || email || 'Anonymous', email };
-}
-// The platform's lifecycle stamps fresh reports `new` (and `reopened` when
-// re-opened); our UI vocabulary is open|in_progress|resolved|closed. Fold those
-// active states into `open` so the "Open" stat, the status filter and the badge
-// all count and label them correctly instead of falling through to a grey
-// "unknown".
-function normalizeStatus(status?: string | null): string {
-  const s = (status ?? '').toLowerCase();
-  if (s === 'new' || s === 'reopened') return 'open';
-  return s;
+/** A row as stored in tms_bug_report_index. */
+interface IndexRow {
+  id: string;
+  display_id: string | null;
+  title: string;
+  category: string | null;
+  priority: string | null;
+  status: string;
+  portal: string;
+  page_url: string | null;
+  reporter_email: string;
+  reporter_name: string | null;
+  created_at: string | null;
+  indexed_at: string;
 }
 
-function toRow(b: BugReport): BugReportRow {
-  const meta = readMeta(b);
-  const reporter = pickReporter(b, meta);
+function toRow(r: IndexRow): BugReportRow {
   return {
-    id: b.id,
-    title: pickTitle(b, meta),
-    category: b.category,
-    priority: b.priority,
-    status: normalizeStatus(b.status),
-    portal: derivePortal(b.page_url),
-    pageUrl: b.page_url,
-    reporterName: reporter.name,
-    reporterEmail: reporter.email,
-    createdAt: b.created_at,
+    id: r.id,
+    title: r.title,
+    category: r.category ?? 'other',
+    priority: r.priority ?? 'medium',
+    status: r.status,
+    portal: r.portal as BugPortal,
+    pageUrl: r.page_url ?? '',
+    reporterName: r.reporter_name || r.reporter_email,
+    reporterEmail: r.reporter_email,
+    createdAt: r.created_at ?? r.indexed_at,
   };
 }
 
-function toDetail(res: GetBugReportDetailsResponse): BugReportDetail {
+function toDetail(res: GetBugReportDetailsResponse, indexed: IndexRow): BugReportDetail {
   const b = res.bug_report;
   const meta = readMeta(b);
   const reporter = pickReporter(b, meta);
@@ -103,14 +104,14 @@ function toDetail(res: GetBugReportDetailsResponse): BugReportDetail {
     category: b.category,
     priority: b.priority,
     status: normalizeStatus(b.status),
-    portal: derivePortal(b.page_url),
+    portal: indexed.portal as BugPortal,
     pageUrl: b.page_url,
     screenshotUrl: b.screenshot_url ?? null,
     consoleLogs: b.console_logs ?? null,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
     reporterName: reporter.name,
-    reporterEmail: reporter.email,
+    reporterEmail: reporter.email ?? indexed.reporter_email,
     messages: rawMsgs.map((m) => ({
       id: m.id,
       message: m.message,
@@ -124,6 +125,23 @@ function toDetail(res: GetBugReportDetailsResponse): BugReportDetail {
   };
 }
 
+/** Look up the index row that carries the platform join key (reporter_email). */
+async function loadIndexRow(
+  svc: ReturnType<typeof createServiceRoleClient>,
+  id: string
+): Promise<IndexRow | null> {
+  const { data, error } = await svc
+    .from('tms_bug_report_index')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    console.error('bug-reports index read error:', error.code, error.message);
+    return null;
+  }
+  return (data as IndexRow | null) ?? null;
+}
+
 async function handleGet(request: NextRequest, auth: AuthContext) {
   if (!(await requirePerm(auth, PERM))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -131,32 +149,86 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
 
   const sp = new URL(request.url).searchParams;
   const id = sp.get('id');
+  const svc = createServiceRoleClient();
 
-  if (!isBugReporterConfigured()) {
-    // Empty-but-OK for the list so the page can render a setup notice; explicit
-    // 503 for a detail request (nothing to show).
-    return id
-      ? NextResponse.json({ error: 'Bug Reporter is not configured' }, { status: 503 })
-      : NextResponse.json({ success: true, data: [], configured: false });
-  }
-
-  try {
-    if (id) {
-      const res = await getBugReport(id);
-      return NextResponse.json({ success: true, data: toDetail(res) });
+  // ── Detail: our index supplies the reporter_email the platform now demands ──
+  if (id) {
+    if (!isBugReporterConfigured()) {
+      return NextResponse.json({ error: 'Bug Reporter is not configured' }, { status: 503 });
     }
-    const res = await listBugReports({
-      limit: 100,
-      status: sp.get('status') || undefined,
-      category: sp.get('category') || undefined,
-      search: sp.get('search') || undefined,
-    });
-    const rows = (res.bug_reports ?? []).map(toRow);
-    return NextResponse.json({ success: true, data: rows, configured: true, count: rows.length });
-  } catch (e) {
-    console.error('bug-reports GET error:', e);
-    return NextResponse.json({ error: (e as Error).message || 'Failed to load bug reports' }, { status: 502 });
+    const indexed = await loadIndexRow(svc, id);
+    if (!indexed) {
+      return NextResponse.json(
+        {
+          error:
+            "This report isn't in the local index, so there's no reporter address to look it up with. Only reports submitted since the index was added can be opened.",
+        },
+        { status: 404 }
+      );
+    }
+    try {
+      const res = await getBugReport(id, indexed.reporter_email);
+      const detail = toDetail(res, indexed);
+      // The platform owns the live status/title; refresh our snapshot so the list
+      // converges on the truth as reports get triaged. Best-effort — a stale row
+      // must never block showing the report.
+      const { error } = await svc
+        .from('tms_bug_report_index')
+        .update({ status: detail.status, title: detail.title, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) console.error('bug-reports index refresh failed:', error.code, error.message);
+      return NextResponse.json({ success: true, data: detail });
+    } catch (e) {
+      console.error('bug-reports GET detail error:', e);
+      return NextResponse.json(
+        { error: (e as Error).message || 'Failed to load the report' },
+        { status: 502 }
+      );
+    }
   }
+
+  // ── List: served entirely from our own index, no platform call ──
+  let q = svc
+    .from('tms_bug_report_index')
+    .select('*')
+    .order('created_at', { ascending: false, nullsFirst: false })
+    .limit(500);
+
+  const status = sp.get('status');
+  const category = sp.get('category');
+  const portal = sp.get('portal');
+  const search = sp.get('search')?.trim();
+  if (status) q = q.eq('status', status);
+  if (category) q = q.eq('category', category);
+  if (portal) q = q.eq('portal', portal);
+  if (search) q = q.or(`title.ilike.%${search}%,reporter_email.ilike.%${search}%`);
+
+  const { data, error } = await q;
+  if (error) {
+    // Table not created yet (migration not applied) — render an empty console
+    // instead of a 500, matching the tms_ route convention.
+    if (error.code === '42P01') {
+      return NextResponse.json({ success: true, data: [], configured: isBugReporterConfigured(), indexedFrom: null, count: 0 });
+    }
+    console.error('bug-reports list error:', error.code, error.message);
+    return NextResponse.json({ error: 'Failed to load bug reports' }, { status: 500 });
+  }
+
+  const rows = ((data ?? []) as IndexRow[]).map(toRow);
+  // Oldest indexed_at = how far back this list can possibly reach, so the page
+  // can say so rather than implying it shows everything ever reported.
+  const indexedFrom = ((data ?? []) as IndexRow[]).reduce<string | null>(
+    (min, r) => (!min || r.indexed_at < min ? r.indexed_at : min),
+    null
+  );
+
+  return NextResponse.json({
+    success: true,
+    data: rows,
+    configured: isBugReporterConfigured(),
+    indexedFrom,
+    count: rows.length,
+  });
 }
 
 async function handlePost(request: NextRequest, auth: AuthContext) {
@@ -169,43 +241,32 @@ async function handlePost(request: NextRequest, auth: AuthContext) {
   if (!id || !message) {
     return NextResponse.json({ error: 'id and message are required' }, { status: 400 });
   }
-  if (!isBugReporterConfigured()) {
-    return NextResponse.json({ error: 'Bug Reporter is not configured' }, { status: 503 });
-  }
 
-  // Resolve the recipient from the AUTHORITATIVE platform record (read works),
-  // never from the client — so a reply can't be aimed at another student. The
-  // platform's own /messages write is unusable here: it requires a NOT NULL
+  // Resolve the recipient from our OWN index, never from the client — so a reply
+  // can't be aimed at another student. The index is authoritative for this because
+  // the relay wrote it from the platform's own response at submit time.
+  //
+  // The platform's /messages write stays unusable here: it requires a NOT NULL
   // sender_user_id that our API-key auth has no user for. We route the reply to
   // the reporter's TMS notification inbox instead.
-  let reporterEmail: string | null;
-  let displayId: string | null;
-  try {
-    const b = (await getBugReport(id)).bug_report;
-    reporterEmail = pickReporter(b, readMeta(b)).email?.toLowerCase() ?? null;
-    displayId = (b as unknown as { display_id?: string | null }).display_id ?? null;
-  } catch (e) {
-    console.error('bug-reports reply: load report failed:', e);
+  const svc = createServiceRoleClient();
+  const indexed = await loadIndexRow(svc, id);
+  if (!indexed) {
     return NextResponse.json(
-      { error: "Couldn't load the report to find the reporter." },
-      { status: 502 },
+      { error: "Couldn't find that report in the local index, so there's no reporter to reply to." },
+      { status: 404 }
     );
   }
 
-  if (!reporterEmail) {
-    return NextResponse.json({ success: true, delivered: false, reason: 'no_email' });
-  }
-
-  const { title, body: notifBody } = buildReplyNotification(displayId, message);
+  const { title, body: notifBody } = buildReplyNotification(indexed.display_id, message);
   try {
-    const svc = createServiceRoleClient();
     const { recipientCount } = await dispatchNotification(svc, {
       title,
       body: notifBody,
       category: 'general',
       url: null,
       createdBy: auth.userId,
-      targeting: { type: 'emails', emails: [reporterEmail] },
+      targeting: { type: 'emails', emails: [indexed.reporter_email] },
     });
     return recipientCount > 0
       ? NextResponse.json({ success: true, delivered: true, recipientCount })
@@ -214,7 +275,7 @@ async function handlePost(request: NextRequest, auth: AuthContext) {
     console.error('bug-reports reply: notify failed:', e);
     return NextResponse.json(
       { error: (e as Error).message || 'Failed to notify the reporter' },
-      { status: 502 },
+      { status: 502 }
     );
   }
 }

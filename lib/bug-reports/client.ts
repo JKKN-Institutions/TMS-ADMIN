@@ -8,8 +8,8 @@
 // module intentionally offers just list / detail / reply.
 
 import type {
-  GetMyBugReportsResponse,
   GetBugReportDetailsResponse,
+  GetMyBugReportsResponse,
 } from '@boobalan_jkkn/bug-reporter-sdk';
 
 const API_URL = process.env.NEXT_PUBLIC_BUG_REPORTER_API_URL;
@@ -55,27 +55,54 @@ async function request<T>(endpoint: string, init?: RequestInit): Promise<T> {
   }
 }
 
-export interface ListParams {
-  page?: number;
-  limit?: number;
-  status?: string;
-  category?: string;
-  search?: string;
+// ─────────────────────────────────────────────────────────────────────────────
+// BREAKING PLATFORM CHANGE (observed 2026-08-10)
+//
+// Both read endpoints now REQUIRE a `reporter_email` query param and return only
+// that reporter's reports. Omitting it is a hard 400:
+//   {"code":"VALIDATION_ERROR",
+//    "message":"reporter_email is required. This endpoint returns only the bugs
+//               submitted by that reporter."}
+// It is matched literally — no wildcard (`*` returns 0 rows) — and there is no
+// application-wide alternative: GET /api/v1/public/bug-reports is 405 (POST
+// only, "Use /api/v1/public/bug-reports/me instead") and no /all, /stats or
+// /applications endpoint exists.
+//
+// SDK v1.3.2's getMyBugReports()/getBugReportById() predate this and send no
+// such param, so mirroring them verbatim is what broke. `reporterEmail` is now a
+// REQUIRED argument here so a caller cannot reintroduce the 400 by omission.
+//
+// Because the platform can no longer answer "all reports", the admin console
+// lists from our own tms_bug_report_index instead and uses these functions only
+// to fetch one known report. See lib/bug-reports/index-row.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Reports submitted by ONE reporter. The platform offers no cross-reporter list,
+ * so the admin console does NOT call this to build its list — it reads
+ * tms_bug_report_index instead. This exists for the SYNC sweep, which asks about
+ * one known address at a time (see lib/bug-reports/sync.ts).
+ */
+export function listBugReportsFor(
+  reporterEmail: string,
+  limit = 100
+): Promise<GetMyBugReportsResponse> {
+  const qs = new URLSearchParams({
+    reporter_email: reporterEmail.trim().toLowerCase(),
+    limit: String(limit),
+  });
+  return request<GetMyBugReportsResponse>(`/api/v1/public/bug-reports/me?${qs.toString()}`);
 }
 
-export function listBugReports(params: ListParams = {}): Promise<GetMyBugReportsResponse> {
-  const qs = new URLSearchParams();
-  if (params.page) qs.set('page', String(params.page));
-  if (params.limit) qs.set('limit', String(params.limit));
-  if (params.status) qs.set('status', params.status);
-  if (params.category) qs.set('category', params.category);
-  if (params.search) qs.set('search', params.search);
-  const q = qs.toString();
-  return request<GetMyBugReportsResponse>(`/api/v1/public/bug-reports/me${q ? `?${q}` : ''}`);
-}
-
-export function getBugReport(id: string): Promise<GetBugReportDetailsResponse> {
-  return request<GetBugReportDetailsResponse>(`/api/v1/public/bug-reports/${encodeURIComponent(id)}`);
+/** One report + its message thread. `reporterEmail` comes from our index row. */
+export function getBugReport(
+  id: string,
+  reporterEmail: string
+): Promise<GetBugReportDetailsResponse> {
+  const qs = new URLSearchParams({ reporter_email: reporterEmail.trim().toLowerCase() });
+  return request<GetBugReportDetailsResponse>(
+    `/api/v1/public/bug-reports/${encodeURIComponent(id)}?${qs.toString()}`
+  );
 }
 
 // NOTE: currently UNUSED. The platform's /messages insert requires a NOT NULL
