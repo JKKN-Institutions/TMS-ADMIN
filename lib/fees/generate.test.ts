@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeFakeSupabase } from './__testing__/fake-supabase';
 import { generateBills } from './generate';
 
@@ -32,6 +32,17 @@ function flatFixture(overrides: Record<string, unknown[]> = {}) {
 }
 
 describe('generateBills — flat dry run (characterization)', () => {
+  // Pinned so `p.bornOverdue` below stays deterministic: the fixture's terms
+  // are due 2026-07-31 and 2026-08-31, so the assertion only holds while
+  // today falls between those two dates. Pin rather than weaken it.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T06:00:00Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('previews every applicable learner against every term', async () => {
     const svc = flatFixture();
     const res = await generateBills(svc as never, {
@@ -58,6 +69,8 @@ describe('generateBills — flat dry run (characterization)', () => {
     expect(p.alreadyBilledPairs).toBe(0);
     expect(p.conflictCount).toBe(0);
     expect(p.staffDeferred).toBe(false);
+    // Term 1 (2026-07-31) is past; Term 2 (2026-08-31) is not. 2 learners.
+    expect(p.bornOverdue).toBe(2);
   });
 
   it('counts already-billed pairs instead of re-billing them', async () => {

@@ -25,6 +25,8 @@ import { intersectPersonIds } from './person-scope';
 import type { TermOverride } from './overrides';
 import { buildStaffBillNotification } from './staff-bill-notification';
 import { notifyProfile } from '@/lib/notifications/notify';
+import { countBornOverdue } from './born-overdue';
+import { istToday } from '@/lib/booking/window';
 
 export interface GenerateOptions {
   feeStructureId: string;
@@ -52,6 +54,7 @@ export interface GenerateOutcome {
   notified: number;
   feeMode: string;
   structureName: string;
+  bornOverdue: number;
 }
 
 export type GeneratePreview = Record<string, unknown>;
@@ -448,6 +451,19 @@ export async function generateBills(
         }))
       : null;
 
+    // Bills that would be (or were) created already past due. Due dates are
+    // copied verbatim from the structure — this is a report, not a correction.
+    const today = istToday();
+    const projectedBornOverdue = resolved.reduce(
+      (n, r) =>
+        n +
+        countBornOverdue(
+          r.terms.filter((t) => !billedKey.has(`${r.person.person_id}:${t.term_no}`)),
+          today
+        ),
+      0
+    );
+
     const preview = {
       mode,
       audience: fs.audience,
@@ -468,6 +484,7 @@ export async function generateBills(
       alreadyBilledPairs: alreadyBilled,
       toGeneratePairs: toGenerate,
       conflictCount,
+      bornOverdue: projectedBornOverdue,
       totalPerPerson: isTiered ? null : flatTerms.reduce((s, t) => s + Number(t.amount), 0),
       staffDeferred: fs.audience === 'staff',
       bands: bandSummary,
@@ -536,6 +553,7 @@ export async function generateBills(
     let staffDeferred = 0;
     let skipped = 0;
     let errors = 0;
+    let bornOverdue = 0;
 
     for (const r of resolved) {
       const p = r.person;
@@ -606,6 +624,7 @@ export async function generateBills(
             continue;
           }
           learnerBilled++;
+          if (t.due_date < today) bornOverdue++;
         } else {
           // staff: a real payable bill. tms_fee_bill is the authoritative staff
           // ledger — staff can never be written to billing_student_bills, whose
@@ -625,6 +644,7 @@ export async function generateBills(
           ]);
           if (ledErr) { errors++; continue; }
           staffDeferred++;
+          if (t.due_date < today) bornOverdue++;
           // Notify only for rows THIS run inserted, so a re-run — which inserts
           // nothing thanks to tms_fee_bill_idem_unique — notifies nobody.
           billedStaff.push({ staffId: p.person_id, amount, dueDate: t.due_date });
@@ -760,6 +780,9 @@ export async function generateBills(
         // exactly the note they always have.
         noteParts.push(`${unresolved} learner(s) unresolved (no admission year / no matching band)`);
       }
+      if (bornOverdue > 0) {
+        noteParts.push(`${bornOverdue} bill(s) created already overdue`);
+      }
       await svc.from('tms_fee_generation_run').update({
         applicable_count: resolved.length,
         learner_billed_count: learnerBilled,
@@ -785,6 +808,7 @@ export async function generateBills(
         notified,
         feeMode: fs.fee_mode,
         structureName: fs.name,
+        bornOverdue,
       },
     };
   } catch (e) {
