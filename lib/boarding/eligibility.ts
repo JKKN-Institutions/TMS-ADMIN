@@ -25,7 +25,18 @@ export async function getStaffBoardingEligibility(
   profileId: string
 ): Promise<StaffBoardingEligibility> {
   try {
-    const { data } = await supabase.rpc('tms_staff_boarding_eligibility', { p_profile_id: profileId });
+    const { data, error } = await supabase.rpc('tms_staff_boarding_eligibility', { p_profile_id: profileId });
+    // Fail-closed is deliberate (below), but an error must not be INDISTINGUISHABLE
+    // from a genuine "not eligible" — that is precisely how a revoked EXECUTE grant
+    // (42501) silently locked bus_required staff out of login for weeks. Deny, but say why.
+    if (error) {
+      console.error(
+        '[boarding/eligibility] tms_staff_boarding_eligibility failed for %s: %s %s',
+        profileId,
+        error.code,
+        error.message
+      );
+    }
     const row = (data ?? {}) as {
       eligible?: boolean;
       assigned_route_count?: number;

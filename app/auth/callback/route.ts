@@ -94,9 +94,23 @@ export async function GET(request: NextRequest) {
     // Bus_required staff have no area permission until they accept the in-charge
     // duty. Admit them via the eligibility oracle so they reach /boarding/in-charge.
     if (!hasAnyTms) {
-      const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
-        p_profile_id: data.user.id,
-      });
+      const { data: elig, error: eligError } = await supabase.rpc(
+        'tms_staff_boarding_eligibility',
+        { p_profile_id: data.user.id }
+      );
+      // Still fail-closed, but never SILENT. This fallback is the ONLY way in for a
+      // bus_required staffer holding no area permission, so an infrastructure fault
+      // here — e.g. the EXECUTE grant to `authenticated` going missing, which happened
+      // in production and returned 42501 — denies login with the generic no_tms_access
+      // screen and leaves no other trace. Log the cause so it is diagnosable.
+      if (eligError) {
+        console.error(
+          '[auth/callback] tms_staff_boarding_eligibility failed for %s: %s %s',
+          data.user.id,
+          eligError.code,
+          eligError.message
+        );
+      }
       const e = elig as { eligible?: boolean; assigned_route_count?: number } | null;
       if (e?.eligible) {
         hasAnyTms = true;

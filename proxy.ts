@@ -182,9 +182,19 @@ export async function proxy(request: NextRequest) {
     // eligibility, paid only on the boarding deny path (the brief pre-assignment
     // window; the hot path already holds the permission and never reaches this RPC).
     if (!hasAccess && area === 'boarding') {
-      const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
-        p_profile_id: user.id,
-      });
+      const { data: elig, error: eligError } = await supabase.rpc(
+        'tms_staff_boarding_eligibility',
+        { p_profile_id: user.id }
+      );
+      // Fail-closed but not silent — see app/auth/callback/route.ts for why.
+      if (eligError) {
+        console.error(
+          '[proxy] tms_staff_boarding_eligibility failed for %s: %s %s',
+          user.id,
+          eligError.code,
+          eligError.message
+        );
+      }
       if ((elig as { eligible?: boolean } | null)?.eligible) hasAccess = true;
     }
 
@@ -210,9 +220,18 @@ export async function proxy(request: NextRequest) {
           // fires for them. Same RPC + cast idiom as the OAuth callback
           // (app/auth/callback/route.ts). Runs ONLY on this (rare) area-gate-denied
           // redirect path, never the hot path.
-          const { data: elig } = await supabase.rpc('tms_staff_boarding_eligibility', {
-            p_profile_id: user.id,
-          });
+          const { data: elig, error: eligError } = await supabase.rpc(
+            'tms_staff_boarding_eligibility',
+            { p_profile_id: user.id }
+          );
+          if (eligError) {
+            console.error(
+              '[proxy] tms_staff_boarding_eligibility failed for %s: %s %s',
+              user.id,
+              eligError.code,
+              eligError.message
+            );
+          }
           const e = elig as { eligible?: boolean; assigned_route_count?: number } | null;
           if (e?.eligible && (e.assigned_route_count ?? 0) === 0) home = '/boarding/in-charge';
         }
