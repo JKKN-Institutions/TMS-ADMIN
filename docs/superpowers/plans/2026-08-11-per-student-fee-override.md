@@ -924,7 +924,12 @@ declare
 begin
   -- Resolve by email, not by a hardcoded uuid, so this fails loudly rather than
   -- silently doing nothing if run against a database where the learner is absent.
-  select count(*), min(id) into v_n, v_learner
+  --
+  -- Counted and fetched in TWO statements on purpose: PostgreSQL has no min()/max()
+  -- aggregate for uuid, so `select count(*), min(id)` fails with 42883. Casting via
+  -- min(id::text)::uuid would compile, but it would quietly pick a row by TEXT order
+  -- if the exactly-one guard below were ever relaxed. Assert first, then fetch.
+  select count(*) into v_n
   from public.learners_profiles
   where lower(college_email) = 'sooriyab2024eee@jkkn.ac.in';
 
@@ -932,6 +937,10 @@ begin
     raise exception
       'Expected exactly 1 learner for sooriyab2024eee@jkkn.ac.in, found %', v_n;
   end if;
+
+  select id into v_learner
+  from public.learners_profiles
+  where lower(college_email) = 'sooriyab2024eee@jkkn.ac.in';
 
   -- 1. The durable rule. ON CONFLICT DO NOTHING so re-running is harmless.
   insert into public.tms_fee_override
