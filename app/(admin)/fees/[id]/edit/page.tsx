@@ -61,6 +61,7 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
           lifecycle_statuses: data.lifecycle_statuses ?? [],
           total_amount: data.total_amount != null ? String(data.total_amount) : '',
           notes: data.notes ?? '',
+          auto_generate: data.auto_generate ?? false,
           terms: (data.terms ?? []).map((t) => ({
             term_label: t.term_label ?? `Term ${t.term_no}`,
             amount: String(t.amount),

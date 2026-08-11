@@ -11,11 +11,14 @@ export const NUM_FIELDS = ['total_amount', 'split_count'] as const;
 // Array (uuid[] / text[]) condition fields; empty -> null = "any".
 // lifecycle_statuses empty -> null, which applicability reads as ['active'].
 export const ARRAY_FIELDS = ['institution_ids', 'staff_role_keys', 'lifecycle_statuses'] as const;
+// Boolean flags. Written explicitly (not via truthiness) so that `false` is
+// persisted rather than dropped — otherwise the toggle could never be cleared.
+export const BOOL_FIELDS = ['auto_generate'] as const;
 
 // Every column the API will write (whitelist). Audit columns (created_by,
 // updated_by), the PK, and child term rows are NOT listed here.
 export const EDITABLE: readonly string[] = [
-  ...TEXT_FIELDS, ...ENUM_FIELDS, ...UUID_FIELDS, ...NUM_FIELDS, ...ARRAY_FIELDS,
+  ...TEXT_FIELDS, ...ENUM_FIELDS, ...UUID_FIELDS, ...NUM_FIELDS, ...ARRAY_FIELDS, ...BOOL_FIELDS,
 ];
 
 // Normalise a snake_case body into a typed tms_fee_structure payload. Only keys
@@ -36,6 +39,7 @@ export function buildFeeStructurePayload(
       out[k] = Array.isArray(v) && v.length ? v.map(String) : null; // empty -> null ("any")
     }
   }
+  for (const k of BOOL_FIELDS) if (has(k)) out[k] = body[k] === true;
 
   return out;
 }
