@@ -33,7 +33,8 @@ export interface ActivityEntry {
   metadata?: Record<string, unknown> | null;
 }
 
-function clientInfo(request: NextRequest) {
+function clientInfo(request: NextRequest | null) {
+  if (!request) return { ip_address: null, user_agent: null };
   const fwd = request.headers.get('x-forwarded-for');
   return {
     ip_address: fwd ? fwd.split(',')[0].trim() : request.headers.get('x-real-ip'),
@@ -43,7 +44,7 @@ function clientInfo(request: NextRequest) {
 
 async function insertLog(
   actor: { id: string | null; email: string | null; role: string | null },
-  request: NextRequest,
+  request: NextRequest | null,
   entry: ActivityEntry
 ): Promise<void> {
   try {
@@ -103,4 +104,14 @@ export async function logActivityFromHeaders(
     }
   }
   await insertLog({ id, email, role }, request, entry);
+}
+
+/**
+ * For SCHEDULED work with no human actor and no inbound request — e.g. the
+ * automatic bill generation sweep. tms_activity_log.actor_id is nullable, and a
+ * null actor is what distinguishes an automated entry from a hand-clicked one.
+ * There is no request, so ip_address / user_agent are null.
+ */
+export async function logSystemActivity(entry: ActivityEntry): Promise<void> {
+  await insertLog({ id: null, email: null, role: 'system' }, null, entry);
 }
