@@ -124,3 +124,43 @@ describe('generateBills — flat dry run (characterization)', () => {
     expect(res.error).toContain('override');
   });
 });
+
+describe('generateBills — orphan compensation', () => {
+  it('deletes the money bill when the ledger insert fails', async () => {
+    const svc = makeFakeSupabase(
+      {
+        tms_fee_structure: [{
+          id: 'fs1', name: 'T', status: 'active', audience: 'student', fee_mode: 'flat',
+          transport_year_id: 'ty1', institution_ids: null, staff_role_keys: null, lifecycle_statuses: null,
+        }],
+        tms_transport_year: [{ start_date: '2026-06-01', name: '2026-2027' }],
+        tms_fee_structure_term: [
+          { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
+        ],
+        learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+        admission_years: [],
+        tms_fee_override: [],
+        tms_fee_bill: [],
+        billing_categories: [{ id: 'cat1' }],
+        academic_years: [],
+      },
+      { insertErrors: { tms_fee_bill: { message: 'duplicate key', code: '23505' } } }
+    );
+
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1',
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const out = res.data as { errors: number; learnerBilled: number };
+    expect(out.learnerBilled).toBe(0);
+    expect(out.errors).toBe(1);
+
+    // The compensating delete must have been issued against the money table.
+    const deletes = svc.calls.filter(
+      (c) => c.table === 'billing_student_bills' && c.ops.some(([op]) => op === 'delete')
+    );
+    expect(deletes).toHaveLength(1);
+  });
+});

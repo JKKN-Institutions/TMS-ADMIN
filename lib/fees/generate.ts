@@ -585,7 +585,26 @@ export async function generateBills(
             billing_student_bill_id: bill.id,
             status: 'generated',
           }]);
-          if (ledErr) { errors++; continue; }
+          if (ledErr) {
+            // The money row is already committed. Leaving it would orphan a real
+            // bill: MyJKKN would show a charge that tms_fee_bill knows nothing
+            // about, breaking the Billed == Collected + Pending reconciliation.
+            // Compensate by removing it. If the delete ALSO fails there is
+            // nothing further we can do from here, so log loudly — this is the
+            // only trace an operator will get.
+            const { error: cleanupErr } = await svc
+              .from('billing_student_bills')
+              .delete()
+              .eq('id', bill.id);
+            if (cleanupErr) {
+              console.error(
+                '[fees] ORPHANED BILL: ledger insert failed and cleanup failed',
+                { billId: bill.id, personId: p.person_id, termNo: t.term_no, ledErr, cleanupErr }
+              );
+            }
+            errors++;
+            continue;
+          }
           learnerBilled++;
         } else {
           // staff: a real payable bill. tms_fee_bill is the authoritative staff
