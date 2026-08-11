@@ -15,6 +15,7 @@ import {
 import { buildStaffFeeBillRow } from '@/lib/fees/staff-bill';
 import { filterOutInCharges } from '@/lib/fees/incharge-exemption';
 import { intersectPersonIds } from '@/lib/fees/person-scope';
+import type { TermOverride } from '@/lib/fees/overrides';
 import { buildStaffBillNotification } from '@/lib/fees/staff-bill-notification';
 import { notifyProfile } from '@/lib/notifications/notify';
 
@@ -301,20 +302,60 @@ async function generate(request: NextRequest, auth: AuthContext) {
     const scope = intersectPersonIds(people, requestedPersonIds);
     people = scope.kept;
 
+    // Per-person fee exceptions for this transport year (scholarships, concessions).
+    // Filtered by YEAR ONLY, never by person id: overrides are exceptional and few,
+    // so one small query replaces an .in() over ~1,000 UUIDs — which overflows the
+    // Supabase gateway (HTTP 400) and, unchecked, reads as "no overrides exist".
+    const { data: overrideRows, error: overrideErr } = await supabase
+      .from('tms_fee_override')
+      .select('person_id, term_no, billable, amount')
+      .eq('transport_year_id', fs.transport_year_id);
+    if (overrideErr) {
+      // Fail loud. Treating this as "no overrides" would bill a scholarship
+      // student the FULL amount — a silent overcharge is the worst outcome here,
+      // and it would be invisible in both the dry run and the generated bills.
+      console.error('Fee generation: failed to load fee overrides', overrideErr);
+      return NextResponse.json(
+        { error: 'Failed to load per-person fee overrides.' },
+        { status: 500 }
+      );
+    }
+    const overridesByPerson = new Map<string, TermOverride[]>();
+    for (const row of (overrideRows ?? []) as Array<{
+      person_id: string;
+      term_no: number;
+      billable: boolean;
+      amount: number | string | null;
+    }>) {
+      const list = overridesByPerson.get(row.person_id) ?? [];
+      // Postgres `numeric` arrives as a STRING over PostgREST. Left unconverted it
+      // would flow into billing_student_bills.final_amount as text and into
+      // arithmetic as a concatenation.
+      list.push({
+        term_no: row.term_no,
+        billable: row.billable,
+        amount: row.amount === null ? null : Number(row.amount),
+      });
+      overridesByPerson.set(row.person_id, list);
+    }
+
     // Resolve each person to the terms that apply to them. Unresolvable people
     // are skipped + reported, never guessed. See lib/fees/resolve-terms.ts.
     const resolved: Resolved[] = [];
     let unresolved = 0;
+    let overridden = 0;
     const unresolvedByReason: Record<UnresolvedReason, number> = {
       no_matching_band: 0,
       no_stop: 0,
       no_stop_rate: 0,
     };
     for (const person of people) {
+      const personOverrides = overridesByPerson.get(person.person_id) ?? [];
       const outcome = resolvePersonTerms(
         {
           admission_year: person.admission_year,
           transport_stop_id: isStopWise ? stopByPerson.get(person.person_id) ?? null : null,
+          overrides: personOverrides,
         },
         {
           feeMode: fs.fee_mode,
@@ -330,6 +371,9 @@ async function generate(request: NextRequest, auth: AuthContext) {
         unresolvedByReason[outcome.reason]++;
         continue;
       }
+      // Counted only for people who actually resolved — an override on an
+      // unresolved person changes nothing and must not be reported as applied.
+      if (personOverrides.length) overridden++;
       resolved.push({ person, terms: outcome.terms, band: outcome.band as Band | null });
     }
 
@@ -399,6 +443,7 @@ async function generate(request: NextRequest, auth: AuthContext) {
       feeMode: fs.fee_mode,
       applicable: resolved.length,
       unresolved, // tiered: no admission year / year matches no band
+      overridden, // people billed a per-person override instead of structure config
       unresolvedByReason,
       exemptInCharge,
       unmatchedInCharge,
@@ -700,12 +745,12 @@ async function generate(request: NextRequest, auth: AuthContext) {
       entityId: id,
       entityLabel: fs.name,
       description: `Generated transport bills for ${fs.name}: ${learnerBilled} learner bill(s), ${staffDeferred} staff deferred, ${skipped} skipped, ${unresolved} unresolved`,
-      metadata: { runId, learnerBilled, staffDeferred, skipped, unresolved, errors, feeMode: fs.fee_mode, notified },
+      metadata: { runId, learnerBilled, staffDeferred, skipped, unresolved, overridden, errors, feeMode: fs.fee_mode, notified },
     });
 
     return NextResponse.json({
       success: true,
-      data: { mode: 'generate', runId, applicable: resolved.length, learnerBilled, staffDeferred, skipped, unresolved, errors, notified },
+      data: { mode: 'generate', runId, applicable: resolved.length, learnerBilled, staffDeferred, skipped, unresolved, overridden, errors, notified },
       message: `Generated ${learnerBilled} learner bill(s); ${staffDeferred} staff bill(s); ${notified} staff notified; ${skipped} already billed (skipped)${unresolved ? `; ${unresolved} unresolved` : ''}.`,
     });
   } catch (e) {
