@@ -169,9 +169,10 @@ where table_schema = 'public' and table_name = 'tms_fee_override'
 order by ordinal_position;
 ```
 
-Expected: 11 rows. `person_id`, `person_type`, `transport_year_id`, `term_no`,
-`billable`, `reason` are all `NO` for `is_nullable`; `amount`, `created_by`,
-`updated_at`, `updated_by` are `YES`.
+Expected: **12 rows**. Eight are `NO` for `is_nullable` — `id`, `person_id`,
+`person_type`, `transport_year_id`, `term_no`, `billable`, `reason`, `created_at`
+(`id` and `created_at` are NOT NULL via their defaults). Four are `YES` — `amount`,
+`created_by`, `updated_at`, `updated_by`.
 
 - [ ] **Step 4: Verify RLS is on with no policies**
 
