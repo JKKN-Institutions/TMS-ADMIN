@@ -446,8 +446,16 @@ skewed phone cannot make a bus look live.
 
 ## 14. Testing strategy
 
-Pure logic is unit-tested with vitest (the project has 597 passing tests across 61 files; the
-`@/*` alias does **not** resolve under vitest, so `lib/` test imports must be relative).
+Pure logic is unit-tested with vitest. Baseline on this branch: **61 files, 597 tests, all
+passing** (~9s).
+
+Two constraints from `vitest.config.ts`, both verified on this branch:
+
+- `test.include` is `['lib/**/*.test.ts', 'proxy.test.ts']` — **test files must live under
+  `lib/`**. A test placed beside an `app/` route will silently never run.
+- The `@/*` alias **is** configured (`resolve.alias`) and does resolve. Older code in
+  `lib/gps/` and `lib/geo/` uses relative imports because that alias did not always exist;
+  new code may use `@/`.
 
 - `lib/tracking/trip-state.ts` — lifecycle transitions, expiry boundaries, direction derivation.
 - `lib/gps/route-status.ts` — extended vocabulary, threshold boundaries, trip-aware cases.
