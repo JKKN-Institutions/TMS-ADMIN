@@ -443,8 +443,8 @@ async function generate(request: NextRequest, auth: AuthContext) {
       feeMode: fs.fee_mode,
       applicable: resolved.length,
       unresolved, // tiered: no admission year / year matches no band
-      overridden, // people billed a per-person override instead of structure config
       unresolvedByReason,
+      overridden, // people billed a per-person override instead of structure config
       exemptInCharge,
       unmatchedInCharge,
       scopeRequested: scope.requested,
