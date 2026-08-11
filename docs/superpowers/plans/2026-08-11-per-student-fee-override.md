@@ -23,10 +23,18 @@ service-role client, vitest.
 
 - **New tables use the modern `tms_` pattern:** `alter table … enable row level
   security;` with **no policies** — service-role access only.
-- **Never trust `update_bill_balance_on_amount_change`.** It is declared
-  `AFTER UPDATE` but mutates `NEW`, so PostgreSQL discards its work and it never
-  recomputes `balance_amount` or `status`. Any statement changing `final_amount`
-  must write `balance_amount` and `status` explicitly.
+- **`update_bill_balance_on_amount_change` is a LIVE `BEFORE UPDATE` trigger that
+  overrides your writes.** (Corrected 2026-08-11 — this constraint previously called it
+  a no-op, which was wrong. The authoritative check is `pg_trigger.tgtype & 2`;
+  tgtype 19 means BEFORE.) If your `UPDATE` changes `final_amount`, the trigger
+  recomputes from `billing_receipt_items` and, when `total_paid >= new final`, forces
+  `status='paid'`, `balance_amount=0` and `payment_date=now()` — silently discarding
+  the values your statement supplied. If your `UPDATE` leaves `final_amount` alone, the
+  trigger's guard is false and your explicit writes stick. **So repricing a bill that
+  must also end up unpaid takes TWO statements:** reprice first, then correct the
+  payment state without touching `final_amount`. Also note `SET` reads the OLD row, so
+  `balance_amount = final_amount` writes the pre-change amount — use a literal or a
+  variable.
 - **Ledger and money tables move together.** `tms_fee_bill` (TMS) and
   `billing_student_bills` (MyJKKN, shared) must be updated in **one statement** so
   they cannot diverge on partial failure.
