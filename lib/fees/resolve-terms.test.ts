@@ -229,3 +229,101 @@ describe('resolvePersonTerms — stop_wise', () => {
     ).toThrow(/non-empty stopTerms/i);
   });
 });
+
+// ── NEW: per-person overrides ───────────────────────────────────────────────
+describe('resolvePersonTerms — per-person overrides', () => {
+  it('flat: replaces one amount and drops another', () => {
+    const r = resolvePersonTerms(
+      {
+        admission_year: 2024,
+        transport_stop_id: null,
+        overrides: [
+          { term_no: 1, billable: true, amount: 500 },
+          { term_no: 2, billable: false, amount: null },
+        ],
+      },
+      ctx()
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'Term 1', amount: 500, due_date: '2026-06-15' },
+      ]);
+    }
+  });
+
+  it('flat: leaves the structure terms untouched for everyone else', () => {
+    const r = resolvePersonTerms(
+      { admission_year: 2024, transport_stop_id: null, overrides: [] },
+      ctx()
+    );
+    expect(r).toEqual({ ok: true, terms: FLAT_TERMS, band: null });
+  });
+
+  it('flat: an override does NOT leak into the shared structure terms', () => {
+    // FLAT_TERMS is a module-level array reused by every person in a run. If
+    // applyOverrides mutated it, the next learner would inherit this discount.
+    resolvePersonTerms(
+      {
+        admission_year: 2024,
+        transport_stop_id: null,
+        overrides: [{ term_no: 1, billable: true, amount: 1 }],
+      },
+      ctx()
+    );
+    expect(FLAT_TERMS[0].amount).toBe(2750);
+  });
+
+  it('tiered: overrides apply on top of the matched band', () => {
+    const r = resolvePersonTerms(
+      {
+        admission_year: 2024, // => year 3 => band-2 (2500 + 2500)
+        transport_stop_id: null,
+        overrides: [{ term_no: 2, billable: false, amount: null }],
+      },
+      ctx({ feeMode: 'tiered' })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.band?.id).toBe('band-2');
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'Term 1', amount: 2500, due_date: '2026-06-15' },
+      ]);
+    }
+  });
+
+  it('stop_wise: an override beats the stop rate split', () => {
+    const r = resolvePersonTerms(
+      {
+        admission_year: 2024,
+        transport_stop_id: 'stop-kachu-palli',
+        overrides: [{ term_no: 1, billable: true, amount: 500 }],
+      },
+      ctx({
+        feeMode: 'stop_wise',
+        stopRateByStopId: new Map<string, number>([['stop-kachu-palli', 9900]]),
+      })
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.terms).toEqual([
+        { term_no: 1, term_label: 'Term 1', amount: 500, due_date: '2026-06-15' },
+        { term_no: 2, term_label: 'Term 2', amount: 4950, due_date: '2026-11-15' },
+      ]);
+    }
+  });
+
+  it('an override never rescues an UNRESOLVED person', () => {
+    // No matching band means we do not know which terms exist at all. An override
+    // supplies an amount, not a schedule -- it must not manufacture a bill.
+    const r = resolvePersonTerms(
+      {
+        admission_year: null,
+        transport_stop_id: null,
+        overrides: [{ term_no: 1, billable: true, amount: 500 }],
+      },
+      ctx({ feeMode: 'tiered' })
+    );
+    expect(r).toEqual({ ok: false, reason: 'no_matching_band' });
+  });
+});
