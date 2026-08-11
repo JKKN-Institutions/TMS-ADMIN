@@ -180,6 +180,29 @@ const SettingsPage = () => {
                   so each travel day opens on the previous working day.
                 </p>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Automatic Bill Generation
+                </label>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="autoGenerateBills"
+                    checked={schedulingSettings.autoGenerateBills}
+                    onChange={(e) => setSchedulingSettings({ ...schedulingSettings, autoGenerateBills: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="autoGenerateBills" className="ml-2 text-sm text-gray-600">
+                    Bill newly-onboarded learners automatically
+                  </label>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  Runs every 15 minutes for fee structures marked &ldquo;Auto-generate&rdquo;.
+                  Bills use each structure&rsquo;s configured due dates, so a learner
+                  onboarded after a term fell due is billed as overdue.
+                </p>
+              </div>
             </div>
 
             <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
