@@ -1147,6 +1147,14 @@ Tell the requester, in plain terms:
 
 The generate route is auth-gated and cannot be exercised headlessly. Before the next
 real generation run, an authenticated admin should open a **dry run** on
-`Transport Fees 2026-2027` and confirm the preview reports `overridden: 0` — SOORIYA
-is already billed, so no one should be re-priced. That is the only end-to-end proof
-that Task 4's query and grouping work against the live table.
+`Transport Fees 2026-2027` and confirm the preview reports `overridden: 1`. SOORIYA
+still resolves as applicable — bus_required, active, their institution is in the
+structure's `institution_ids`, and flat fee mode always resolves — and `overridden`
+counts every resolved person carrying override rows, whether or not their bills
+already exist. The same dry run should show `alreadyBilledPairs` including SOORIYA's
+Term 1 and `toGeneratePairs` unchanged by the override: generation is INSERT-only, so
+a person whose bill already exists is never re-priced by a dry run or a real run. If
+the preview instead reports `overridden: 0`, that means SOORIYA has dropped out of
+the applicable cohort since this plan was written, which is worth investigating on
+its own rather than assumed to be this plan's doing. That dry run is the only
+end-to-end proof that Task 4's query and grouping work against the live table.

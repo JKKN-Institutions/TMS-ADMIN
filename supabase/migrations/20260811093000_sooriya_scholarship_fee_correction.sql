@@ -23,6 +23,28 @@
 -- update_bill_balance_on_amount_change looks like it would maintain them, but it
 -- is declared AFTER UPDATE while its body mutates NEW -- PostgreSQL discards an
 -- AFTER row trigger's return value, so the function is a no-op.
+--
+-- NOT A TEMPLATE FOR THE REST OF THE COHORT. This migration assumes the target
+-- Term-1 bill is ALREADY FULLY PAID (status = 'paid', balance_amount = 0) and
+-- writes those two values directly. That was true for SOORIYA, who paid in cash
+-- in full. It is NOT true for most of the remaining 7.5% scholarship cohort: of
+-- the other 42, 38 have an unpaid Term 1 totalling roughly Rs 1,14,000. Reusing
+-- this file's money_t1 UPDATE unmodified for one of those 38 would mark an unpaid
+-- bill paid, inventing cash that was never collected and breaking the
+-- Billed == Collected + Pending reconciliation on a table shared with a second
+-- application. For an unpaid or partially-paid bill, balance_amount must be
+-- recomputed from what was actually received --
+-- greatest(new_final_amount - amount_already_paid, 0) -- and status derived from
+-- that result, never hardcoded to 'paid'. The money_t1 UPDATE below now guards
+-- against this with `and b.status = 'paid' and b.balance_amount = 0`, so a
+-- not-fully-paid bill fails the row-count assertion and the whole DO block rolls
+-- back instead of silently mismarking it.
+--
+-- APPLIED HISTORY: this migration was run against production on 2026-08-11
+-- BEFORE the guard above was added. The row it touched already satisfied
+-- `status = 'paid' and balance_amount = 0`, so the guard changes nothing about
+-- what was executed -- it only closes the door for the next person who copies
+-- this file.
 
 do $$
 declare
@@ -102,6 +124,8 @@ begin
            updated_at     = now()
       from tgt
      where tgt.bill_id = b.id and tgt.term_no = 1
+       and b.status = 'paid'
+       and b.balance_amount = 0
     returning b.id
   ),
   ledger_t1 as (
