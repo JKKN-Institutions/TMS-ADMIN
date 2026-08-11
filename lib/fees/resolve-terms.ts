@@ -11,6 +11,7 @@
 import { deriveStudyYear, bandForYear } from './year-of-study';
 import { splitAnnual } from './stop-rate';
 import type { FeeMode } from './types';
+import { applyOverrides, type TermOverride } from './overrides';
 
 export interface BillableTerm {
   term_no: number;
@@ -37,6 +38,11 @@ export interface StopScheduleTerm {
 export interface ResolvePerson {
   admission_year: number | null;
   transport_stop_id: string | null;
+  /**
+   * Per-person exceptions to the structure's amounts. Omitted or empty means
+   * this person is billed exactly what their structure says.
+   */
+  overrides?: TermOverride[];
 }
 
 export interface ResolveContext {
@@ -67,11 +73,18 @@ export function resolvePersonTerms(
   person: ResolvePerson,
   ctx: ResolveContext
 ): ResolveOutcome {
+  // Applied at each SUCCESSFUL exit, never inside a mode's own logic: the three
+  // branches below are pinned by characterization tests and must not drift.
+  // Unresolved people are returned untouched -- an override supplies an amount,
+  // not a schedule, so it must never manufacture a bill for someone whose terms
+  // could not be determined.
+  const overrides = person.overrides ?? [];
+
   if (ctx.feeMode === 'tiered') {
     const year = deriveStudyYear(ctx.currentYear, person.admission_year);
     const band = bandForYear(ctx.bands, year);
     if (!band) return { ok: false, reason: 'no_matching_band' };
-    return { ok: true, terms: band.terms, band };
+    return { ok: true, terms: applyOverrides(band.terms, overrides), band };
   }
 
   if (ctx.feeMode === 'stop_wise') {
@@ -95,15 +108,18 @@ export function resolvePersonTerms(
     return {
       ok: true,
       band: null,
-      terms: schedule.map((t, i) => ({
-        term_no: t.term_no,
-        term_label: t.term_label,
-        amount: amounts[i],
-        due_date: t.due_date,
-      })),
+      terms: applyOverrides(
+        schedule.map((t, i) => ({
+          term_no: t.term_no,
+          term_label: t.term_label,
+          amount: amounts[i],
+          due_date: t.due_date,
+        })),
+        overrides
+      ),
     };
   }
 
   // 'flat' — everyone matched gets the structure terms verbatim.
-  return { ok: true, terms: ctx.flatTerms, band: null };
+  return { ok: true, terms: applyOverrides(ctx.flatTerms, overrides), band: null };
 }

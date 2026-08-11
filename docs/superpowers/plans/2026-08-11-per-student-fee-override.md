@@ -169,9 +169,10 @@ where table_schema = 'public' and table_name = 'tms_fee_override'
 order by ordinal_position;
 ```
 
-Expected: 11 rows. `person_id`, `person_type`, `transport_year_id`, `term_no`,
-`billable`, `reason` are all `NO` for `is_nullable`; `amount`, `created_by`,
-`updated_at`, `updated_by` are `YES`.
+Expected: **12 rows**. Eight are `NO` for `is_nullable` — `id`, `person_id`,
+`person_type`, `transport_year_id`, `term_no`, `billable`, `reason`, `created_at`
+(`id` and `created_at` are NOT NULL via their defaults). Four are `YES` — `amount`,
+`created_by`, `updated_at`, `updated_by`.
 
 - [ ] **Step 4: Verify RLS is on with no policies**
 
@@ -861,7 +862,16 @@ where fb.person_type = 'learner'
   and coalesce(b.status, '') <> 'cancelled';
 ```
 
-Expected: `2272 | 6130150.00 | 1890500.00 | 4239650.00`.
+**Do not compare this against a hardcoded figure — record whatever it returns as your
+baseline.** These totals move continuously: real payments land throughout the day, which
+shifts Collected up and Pending down without changing Billed. (Measured 2026-08-11
+morning: `2272 | 6130150.00 | 1890500.00 | 4239650.00`; measured again a few hours later:
+`2272 | 6130150.00 | 1901500.00 | 4228650.00` — ₹11,000 of Pending had become Collected in
+between.)
+
+Sanity-check only that `bills` is 2272 and that Billed − Collected − Pending is exactly
+`0.00`. Step 6 verifies the change as a **delta from this captured baseline**, not against
+an absolute number.
 
 ```sql
 -- (c) Portal access
@@ -914,7 +924,12 @@ declare
 begin
   -- Resolve by email, not by a hardcoded uuid, so this fails loudly rather than
   -- silently doing nothing if run against a database where the learner is absent.
-  select count(*), min(id) into v_n, v_learner
+  --
+  -- Counted and fetched in TWO statements on purpose: PostgreSQL has no min()/max()
+  -- aggregate for uuid, so `select count(*), min(id)` fails with 42883. Casting via
+  -- min(id::text)::uuid would compile, but it would quietly pick a row by TEXT order
+  -- if the exactly-one guard below were ever relaxed. Assert first, then fetch.
+  select count(*) into v_n
   from public.learners_profiles
   where lower(college_email) = 'sooriyab2024eee@jkkn.ac.in';
 
@@ -922,6 +937,10 @@ begin
     raise exception
       'Expected exactly 1 learner for sooriyab2024eee@jkkn.ac.in, found %', v_n;
   end if;
+
+  select id into v_learner
+  from public.learners_profiles
+  where lower(college_email) = 'sooriyab2024eee@jkkn.ac.in';
 
   -- 1. The durable rule. ON CONFLICT DO NOTHING so re-running is harmless.
   insert into public.tms_fee_override
@@ -1048,7 +1067,17 @@ voided by status, exactly as the vacate RPC voids bills.
 
 Re-run query (b) from Step 1.
 
-Expected: `2271 | 6125150.00 | 1885500.00 | 4239650.00`.
+Expected, **relative to the baseline you captured in Step 1(b)** — not an absolute figure:
+
+| Column | Change | Why |
+|---|---|---|
+| `bills` | **−1** | Term 2 is cancelled, so it drops out of the filter |
+| `billed` | **−5,000** | ₹2,500 off Term 1 (3,000 → 500) + ₹2,500 of Term 2 removed |
+| `collected` | **−5,000** | Both bills had `balance_amount = 0`, so collected fell by the same amount as billed |
+| `pending` | **unchanged** | Neither bill carried a balance |
+
+If Pending moved at all, something outside this correction changed concurrently — re-run
+Step 1(b) and recompute the deltas before concluding anything is wrong.
 
 Then assert the invariant explicitly:
 
@@ -1118,6 +1147,14 @@ Tell the requester, in plain terms:
 
 The generate route is auth-gated and cannot be exercised headlessly. Before the next
 real generation run, an authenticated admin should open a **dry run** on
-`Transport Fees 2026-2027` and confirm the preview reports `overridden: 0` — SOORIYA
-is already billed, so no one should be re-priced. That is the only end-to-end proof
-that Task 4's query and grouping work against the live table.
+`Transport Fees 2026-2027` and confirm the preview reports `overridden: 1`. SOORIYA
+still resolves as applicable — bus_required, active, their institution is in the
+structure's `institution_ids`, and flat fee mode always resolves — and `overridden`
+counts every resolved person carrying override rows, whether or not their bills
+already exist. The same dry run should show `alreadyBilledPairs` including SOORIYA's
+Term 1 and `toGeneratePairs` unchanged by the override: generation is INSERT-only, so
+a person whose bill already exists is never re-priced by a dry run or a real run. If
+the preview instead reports `overridden: 0`, that means SOORIYA has dropped out of
+the applicable cohort since this plan was written, which is worth investigating on
+its own rather than assumed to be this plan's doing. That dry run is the only
+end-to-end proof that Task 4's query and grouping work against the live table.
