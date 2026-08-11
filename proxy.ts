@@ -13,6 +13,15 @@ const PUBLIC_PATHS = new Set([
   '/auth/callback',
   '/unauthorized',
   '/access-denied',
+  // Scheduled bill generation, called by pg_cron via pg_net. It carries a Bearer
+  // CRON_SECRET, never a Supabase session cookie, so without this exact-path
+  // entry step 3 below 401s it and the route's own secret check never runs.
+  //
+  // EXACT PATH ONLY — do not widen this to an /api/cron/ prefix entry. That would
+  // also un-block /api/cron/incharge-attendance, which after two consecutive
+  // missed travel days removes bus in-charges from their role and bills them.
+  // Those jobs have never run; waking them is a separate decision.
+  '/api/cron/auto-generate-bills',
 ]);
 
 const PUBLIC_PATH_PREFIXES = [
