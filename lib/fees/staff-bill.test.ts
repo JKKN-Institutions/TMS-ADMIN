@@ -3,7 +3,7 @@ import { buildStaffFeeBillRow } from './staff-bill';
 
 vi.mock('./applicability', () => ({ resolveApplicablePeople: vi.fn() }));
 
-import { generateStaffBill } from './staff-bill';
+import { generateStaffBill, resolveStaffBillPlan } from './staff-bill';
 import { resolveApplicablePeople } from './applicability';
 
 describe('buildStaffFeeBillRow', () => {
@@ -197,5 +197,75 @@ describe('generateStaffBill', () => {
       onInsert: () => { n += 1; return n === 1 ? { error: null } : { error: { code: '42501' } }; },
     });
     expect(await generateStaffBill(svc, OPTS)).toEqual({ billingStatus: 'error', inserted: 1 });
+  });
+});
+
+describe('resolveStaffBillPlan', () => {
+  beforeEach(() => { vi.mocked(resolveApplicablePeople).mockReset(); });
+
+  it('reports not billable when no active staff structure exists', async () => {
+    const { svc } = makeSvc({ structures: { data: [], error: null } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'no_structure' });
+  });
+
+  it('reports not billable when the structure exists but has ZERO terms', async () => {
+    // This is the live production state: one active staff structure, no terms.
+    personMatches();
+    const { svc } = makeSvc({
+      structures: { data: [STRUCTURE], error: null },
+      terms: { data: [], error: null },
+    });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'no_structure' });
+  });
+
+  it('reports not billable when the staffer is in no applicable population', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(resolveApplicablePeople).mockResolvedValue([{ person_id: 'someone-else' } as any]);
+    const { svc } = makeSvc({ structures: { data: [STRUCTURE], error: null } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'no_structure' });
+  });
+
+  it('reports error (not no_structure) when the structure query fails', async () => {
+    const { svc } = makeSvc({ structures: { data: null, error: { message: 'boom' } } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'error' });
+  });
+
+  it('reports error when the terms query fails', async () => {
+    personMatches();
+    const { svc } = makeSvc({
+      structures: { data: [STRUCTURE], error: null },
+      terms: { data: null, error: { message: 'boom' } },
+    });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'error' });
+  });
+
+  it('reports billable with the structure id and every term on the happy path', async () => {
+    personMatches();
+    const { svc } = makeSvc({
+      structures: { data: [STRUCTURE], error: null },
+      terms: { data: TERMS, error: null },
+    });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({
+      billable: true,
+      feeStructureId: 'fs-1',
+      terms: TERMS,
+    });
+  });
+
+  it('agrees with generateStaffBill: not billable means nothing gets inserted', async () => {
+    // The cron probes with this resolver and then bills with generateStaffBill.
+    // If they could ever disagree, a staffer would lose their role for a bill
+    // that was never going to generate.
+    personMatches();
+    const mk = () => makeSvc({
+      structures: { data: [STRUCTURE], error: null },
+      terms: { data: [], error: null },
+    });
+    const plan = await resolveStaffBillPlan(mk().svc, OPTS);
+    const { svc, insertedRows } = mk();
+    const bill = await generateStaffBill(svc, OPTS);
+    expect(plan.billable).toBe(false);
+    expect(bill).toEqual({ billingStatus: 'no_structure', inserted: 0 });
+    expect(insertedRows).toHaveLength(0);
   });
 });

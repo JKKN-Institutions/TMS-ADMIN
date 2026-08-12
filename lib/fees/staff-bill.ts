@@ -61,6 +61,63 @@ export function buildStaffFeeBillRow(input: BuildStaffFeeBillRowInput): StaffFee
   };
 }
 
+export type StaffBillPlan =
+  | { billable: true; feeStructureId: string; terms: StaffBillTerm[] }
+  | { billable: false; reason: 'no_structure' | 'error' };
+
+/**
+ * Can this staffer actually be billed right now?
+ *
+ * Split out of generateStaffBill so the in-charge enforcement cron can PROBE
+ * before it revokes anything. The write path and the probe share this one
+ * resolver, so they can never disagree about what "billable" means — the
+ * alternative, duplicating the lookup, is how a staffer loses their in-charge
+ * role for a bill that was never going to generate.
+ *
+ * 'no_structure' is the expected state until the transport office configures a
+ * staff fee structure WITH terms; 'error' means the lookup itself failed and
+ * the caller must not treat the staffer as un-billable.
+ */
+export async function resolveStaffBillPlan(
+  svc: SupabaseClient,
+  opts: { staffId: string; transportYearId: string },
+): Promise<StaffBillPlan> {
+  try {
+    const { data: structures, error: sErr } = await svc
+      .from('tms_fee_structure')
+      .select('id, audience, institution_ids, staff_role_keys, lifecycle_statuses')
+      .eq('audience', 'staff')
+      .eq('status', 'active')
+      .eq('transport_year_id', opts.transportYearId);
+    if (sErr) return { billable: false, reason: 'error' };
+    if (!structures?.length) return { billable: false, reason: 'no_structure' };
+
+    // Pick the first structure whose applicable population contains this staffer.
+    let match: { id: string } | null = null;
+    for (const fs of structures) {
+      const people = await resolveApplicablePeople(svc, fs);
+      if (people.some((p) => p.person_id === opts.staffId)) {
+        match = { id: fs.id };
+        break;
+      }
+    }
+    if (!match) return { billable: false, reason: 'no_structure' };
+
+    const { data: terms, error: tErr } = await svc
+      .from('tms_fee_structure_term')
+      .select('term_no, amount, due_date')
+      .eq('fee_structure_id', match.id)
+      .is('year_band_id', null)
+      .order('term_no');
+    if (tErr) return { billable: false, reason: 'error' };
+    if (!terms?.length) return { billable: false, reason: 'no_structure' };
+
+    return { billable: true, feeStructureId: match.id, terms: terms as StaffBillTerm[] };
+  } catch {
+    return { billable: false, reason: 'error' };
+  }
+}
+
 /**
  * Find the active staff fee structure that applies to this staffer for the
  * current transport year, and write one tms_fee_bill row per term.
@@ -72,34 +129,8 @@ export async function generateStaffBill(
   opts: { staffId: string; transportYearId: string },
 ): Promise<{ billingStatus: 'billed' | 'no_structure' | 'error'; inserted: number }> {
   try {
-    const { data: structures, error: sErr } = await svc
-      .from('tms_fee_structure')
-      .select('id, audience, institution_ids, staff_role_keys, lifecycle_statuses')
-      .eq('audience', 'staff')
-      .eq('status', 'active')
-      .eq('transport_year_id', opts.transportYearId);
-    if (sErr) return { billingStatus: 'error', inserted: 0 };
-    if (!structures?.length) return { billingStatus: 'no_structure', inserted: 0 };
-
-    // Pick the first structure whose applicable population contains this staffer.
-    let match: { id: string } | null = null;
-    for (const fs of structures) {
-      const people = await resolveApplicablePeople(svc, fs);
-      if (people.some((p) => p.person_id === opts.staffId)) {
-        match = { id: fs.id };
-        break;
-      }
-    }
-    if (!match) return { billingStatus: 'no_structure', inserted: 0 };
-
-    const { data: terms, error: tErr } = await svc
-      .from('tms_fee_structure_term')
-      .select('term_no, amount, due_date')
-      .eq('fee_structure_id', match.id)
-      .is('year_band_id', null)
-      .order('term_no');
-    if (tErr) return { billingStatus: 'error', inserted: 0 };
-    if (!terms?.length) return { billingStatus: 'no_structure', inserted: 0 };
+    const plan = await resolveStaffBillPlan(svc, opts);
+    if (!plan.billable) return { billingStatus: plan.reason, inserted: 0 };
 
     const catName = TRANSPORT_CATEGORY_NAME['staff' as FeeAudience];
     const { data: cat } = await svc
@@ -109,10 +140,10 @@ export async function generateStaffBill(
       .maybeSingle();
 
     let inserted = 0;
-    for (const term of terms as StaffBillTerm[]) {
+    for (const term of plan.terms) {
       const row = buildStaffFeeBillRow({
         runId: null,
-        feeStructureId: match.id,
+        feeStructureId: plan.feeStructureId,
         transportYearId: opts.transportYearId,
         staffId: opts.staffId,
         categoryId: cat?.id ?? null,
