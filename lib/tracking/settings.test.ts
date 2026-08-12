@@ -27,8 +27,8 @@ describe('parseTrackingSettings', () => {
   });
 
   it('ignores unknown keys', () => {
-    const s = parseTrackingSettings({ liveMaxSec: 45, bogus: 9 }) as Record<string, unknown>;
-    expect(s.bogus).toBeUndefined();
+    const s = parseTrackingSettings({ liveMaxSec: 45, bogus: 9 });
+    expect(Object.keys(s).sort()).toEqual(Object.keys(DEFAULT_TRACKING_SETTINGS).sort());
   });
 
   it('never mutates the exported defaults', () => {
