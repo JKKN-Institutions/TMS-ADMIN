@@ -16,6 +16,20 @@ const SEND_INTERVAL_MS = 6000;
 const TICK_INTERVAL_MS = 5000;
 /** Basic retry: attempts per send before giving up until the next tick. */
 const SEND_ATTEMPTS = 3;
+/**
+ * Cap on fixes retained while the network is down — roughly 6 minutes at the 6s send
+ * cadence. Oldest are dropped first, so a long outage keeps the most RECENT fixes.
+ */
+const MAX_UNSENT = 60;
+
+interface CapturedFix {
+  latitude: number;
+  longitude: number;
+  speed: number | null;
+  heading: number | null;
+  accuracy: number | null;
+  capturedAt: string;
+}
 
 type WakeLock =
   | { release: () => Promise<void>; addEventListener?: (t: 'release', cb: () => void) => void }
@@ -28,12 +42,22 @@ export interface DriverFix {
   speed: number | null;
 }
 
-export function useLiveTracking(routeId: string | null) {
+export function useLiveTracking(routeId: string | null, tripId: string | null) {
   const [state, dispatch] = useReducer(reduceTracking, initialTrackingState);
   const [fix, setFix] = useState<DriverFix | null>(null);
   const [lastSentAt, setLastSentAt] = useState<number | null>(null);
+  /**
+   * Fixes captured but not accepted by the server. Deliberately NOT called "queued":
+   * the ingest endpoint takes one fix per request and there is no batch endpoint, so
+   * on reconnect we send the NEWEST and drop the rest. Position is what matters live;
+   * the history gap is the same one an outage causes today. The count exists to tell
+   * the driver honestly that the connection is bad.
+   */
+  const [unsentCount, setUnsentCount] = useState(0);
 
   const routeIdRef = useRef(routeId);
+  const tripIdRef = useRef(tripId);
+  const unsentRef = useRef<CapturedFix[]>([]);
   const latestFixRef = useRef<GeolocationPosition | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const sendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -55,6 +79,10 @@ export function useLiveTracking(routeId: string | null) {
     routeIdRef.current = routeId;
   }, [routeId]);
 
+  useEffect(() => {
+    tripIdRef.current = tripId;
+  }, [tripId]);
+
   const acquireWakeLock = useCallback(async () => {
     if (wakeLockRef.current || typeof navigator === 'undefined') return;
     try {
@@ -73,18 +101,25 @@ export function useLiveTracking(routeId: string | null) {
     if (sendingRef.current) return;
     const pos = latestFixRef.current;
     const rid = routeIdRef.current;
-    if (!pos || !rid) return;
+    const tid = tripIdRef.current;
+    if (!pos || !rid || !tid) return;
     if (isFixStale(pos.timestamp, Date.now())) return; // watchPosition frozen — don't re-send a stale fix
-    const signal = abortRef.current?.signal;
-    const body = JSON.stringify({
-      routeId: rid,
+
+    const current: CapturedFix = {
       latitude: pos.coords.latitude,
       longitude: pos.coords.longitude,
       accuracy: pos.coords.accuracy ?? null,
       speed: pos.coords.speed ?? null,
       heading: pos.coords.heading ?? null,
       capturedAt: new Date(pos.timestamp).toISOString(),
-    });
+    };
+    // Oldest-out: a long outage keeps the most recent fixes, which are the ones worth
+    // reporting when the connection returns.
+    const unsent = [...unsentRef.current, current].slice(-MAX_UNSENT);
+
+    const signal = abortRef.current?.signal;
+    const body = JSON.stringify({ routeId: rid, tripId: tid, ...current });
+
     sendingRef.current = true;
     try {
       for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt++) {
@@ -98,8 +133,19 @@ export function useLiveTracking(routeId: string | null) {
             signal,
           });
           if (signal?.aborted) return;
+          // The server says this driver has no active trip — stop claiming to be live
+          // rather than retrying a request that can never succeed.
+          if (res.status === 409) {
+            unsentRef.current = [];
+            setUnsentCount(0);
+            dispatch({ type: 'noActiveTrip' });
+            return;
+          }
           if (res.ok) {
+            unsentRef.current = [];
+            setUnsentCount(0);
             setLastSentAt(Date.now());
+            dispatch({ type: 'sendOk' });
             return;
           }
         } catch {
@@ -108,6 +154,11 @@ export function useLiveTracking(routeId: string | null) {
         }
         await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
       }
+      // Every attempt failed. Keep the fixes for the count and say so honestly rather
+      // than leaving the UI showing a healthy connection.
+      unsentRef.current = unsent;
+      setUnsentCount(unsent.length);
+      dispatch({ type: 'sendFail' });
     } finally {
       sendingRef.current = false;
     }
@@ -142,6 +193,8 @@ export function useLiveTracking(routeId: string | null) {
       wakeLockRef.current = null;
     }
     latestFixRef.current = null;
+    unsentRef.current = [];
+    setUnsentCount(0);
     if (notifyServer && started) {
       try {
         await fetch('/api/driver/location', { method: 'DELETE', credentials: 'same-origin', keepalive: true });
@@ -168,7 +221,9 @@ export function useLiveTracking(routeId: string | null) {
       dispatch({ type: 'geoError', code: 2 });
       return;
     }
-    if (!routeIdRef.current) return;
+    // No trip ⇒ no capture. The page starts the trip first; this is the client-side
+    // half of the server's 409 guard, so we never even ask for GPS without one.
+    if (!routeIdRef.current || !tripIdRef.current) return;
     startingRef.current = true;
     dispatch({ type: 'start' });
 
@@ -243,9 +298,11 @@ export function useLiveTracking(routeId: string | null) {
   return {
     status: state.status as TrackingStatus,
     banner: state.banner as TrackingBanner | null,
+    network: state.network,
     onDuty: isSharing(state.status),
     fix,
     lastSentAt,
+    unsentCount,
     start,
     stop,
   };
