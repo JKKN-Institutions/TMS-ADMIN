@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { ComponentType } from 'react';
@@ -8,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { BusContextStrip } from '@/components/live/bus-context-strip';
 import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
 import { CAMPUS } from '@/lib/gps/campus';
+import { useLiveBus } from '@/hooks/use-live-bus';
 import type { RoadRoute } from '@/lib/geo/route-to-campus';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
@@ -37,13 +39,20 @@ interface RouteInfo {
   id: string;
   label: string;
 }
-type Resp = { data?: { route: RouteInfo | null; vehicle: Vehicle | null; roadRoute?: RoadRoute | null }; notFound?: boolean };
+interface BusData {
+  route: RouteInfo | null;
+  vehicle: Vehicle | null;
+  roadRoute?: RoadRoute | null;
+  /** Server-supplied Realtime topic; never constructed client-side. */
+  realtimeTopic?: string | null;
+}
+type Resp = { data?: BusData; notFound?: boolean };
 
 async function fetchBus(): Promise<Resp> {
   const res = await fetch('/api/student/location', { cache: 'no-store', credentials: 'same-origin' });
   if (res.status === 404) return { notFound: true };
   if (!res.ok) throw new Error('Failed to load location');
-  return { data: (await res.json()).data as { route: RouteInfo | null; vehicle: Vehicle | null; roadRoute?: RoadRoute | null } };
+  return { data: (await res.json()).data as BusData };
 }
 
 function formatUpdated(ts: string | null): string {
@@ -80,11 +89,24 @@ function NoticeCard({
 }
 
 export default function StudentLiveTrackPage() {
+  // Subscribed BEFORE the query below reads `pollIntervalMs`, so the poll starts at
+  // the fallback cadence and slows only once the socket is actually up.
+  const [topic, setTopic] = useState<string | null>(null);
+  const { fix: liveFix, pollIntervalMs } = useLiveBus(topic);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['student-live-track'],
     queryFn: fetchBus,
-    refetchInterval: 5000,
+    refetchInterval: pollIntervalMs,
   });
+
+  // The topic comes from the server response — a string, so it is safe in a
+  // dependency array and cannot be forged by the client.
+  const serverTopic = data?.data?.realtimeTopic ?? null;
+  useEffect(() => {
+    setTopic(serverTopic);
+  }, [serverTopic]);
+
   const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
 
   if (isLoading) {
@@ -118,6 +140,22 @@ export default function StudentLiveTrackPage() {
   const route = data?.data?.route ?? null;
   const v = data?.data?.vehicle ?? null;
   const roadRoute = data?.data?.roadRoute ?? null;
+
+  // A broadcast fix outranks the polled snapshot when it is genuinely newer.
+  // Compared as parsed epoch milliseconds — primitives, never object identity.
+  const polledAtMs = v?.lastUpdate ? Date.parse(v.lastUpdate) : 0;
+  const liveAtMs = liveFix?.at ? Date.parse(liveFix.at) : 0;
+  const useLive = !!liveFix && liveAtMs > polledAtMs;
+
+  const shownLat = useLive ? liveFix.latitude : v?.latitude ?? null;
+  const shownLng = useLive ? liveFix.longitude : v?.longitude ?? null;
+  const shownHeading = useLive ? liveFix.heading : v?.heading ?? null;
+  const shownAccuracyM = useLive ? liveFix.accuracyM : v?.accuracyM ?? null;
+  // Both sources report speed in METRES PER SECOND.
+  const shownSpeedMs = useLive ? liveFix.speed : v?.speed ?? null;
+  const shownUpdatedIso = useLive ? liveFix.at : v?.lastUpdate ?? null;
+  // A live broadcast proves the bus is reporting right now, whatever the last poll said.
+  const hasShownFix = shownLat != null && shownLng != null;
 
   if (!route) {
     return (
@@ -154,23 +192,24 @@ export default function StudentLiveTrackPage() {
         </div>
 
         <div className="px-4 py-5 sm:px-6">
-          {v && v.hasFix && v.status !== 'offline' ? (
+          {hasShownFix && (useLive || (v && v.hasFix && v.status !== 'offline')) ? (
             <div className="space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1 text-sm font-medium text-green-700 ring-1 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-600" />
                 </span>
-                {v.status === 'online' ? 'Live now' : `Updated ${v.minutesAgo ?? '?'} min ago`}
+                {/* A broadcast we just received IS live, whatever the last poll said. */}
+                {useLive || v?.status === 'online' ? 'Live now' : `Updated ${v?.minutesAgo ?? '?'} min ago`}
               </div>
 
               <div className="h-80 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <LivePositionMap
-                  latitude={v.latitude as number}
-                  longitude={v.longitude as number}
-                  label={`Bus ${v.registrationNumber ?? ''}`}
-                  heading={v.heading}
-                  accuracyM={v.accuracyM}
+                  latitude={shownLat as number}
+                  longitude={shownLng as number}
+                  label={`Bus ${v?.registrationNumber ?? ''}`}
+                  heading={shownHeading}
+                  accuracyM={shownAccuracyM}
                   destination={CAMPUS}
                   viewer={viewer}
                   routeGeometry={roadRoute?.geometry}
@@ -178,17 +217,19 @@ export default function StudentLiveTrackPage() {
               </div>
 
               <BusContextStrip
-                position={{ lat: v.latitude as number, lng: v.longitude as number }}
-                heading={v.heading}
-                speedKmh={v.speed != null ? v.speed * 3.6 : null}
-                accuracyM={v.accuracyM}
+                position={{ lat: shownLat as number, lng: shownLng as number }}
+                heading={shownHeading}
+                speedKmh={shownSpeedMs != null ? shownSpeedMs * 3.6 : null}
+                accuracyM={shownAccuracyM}
                 viewer={viewer}
                 viewerStatus={viewerStatus}
                 viewerMessage={viewerMessage}
                 onLocateMe={onLocateMe}
               />
 
-              <p className="text-xs text-gray-500 dark:text-gray-400">Last update: {formatUpdated(v.lastUpdate)}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Last update: {formatUpdated(shownUpdatedIso)}
+              </p>
             </div>
           ) : (
             <div className="flex items-start gap-3 rounded-xl border border-dashed border-gray-300 p-5 dark:border-gray-700">

@@ -6,6 +6,10 @@ import { getDriverRoutes } from '@/lib/driver/routes';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
 import { normalizeCapturedAt, isNewerCapture } from '@/lib/driver/tracking';
+import { loadTrackingSettings } from '@/lib/tracking/settings';
+import { expireStaleTrips, getActiveTripForDriver } from '@/lib/tracking/trips';
+import { shouldAcceptFix, distanceIncrementKm } from '@/lib/tracking/trip-state';
+import { publishFix } from '@/lib/tracking/broadcast';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -125,6 +129,31 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
+
+    const settings = await loadTrackingSettings(svc);
+    await expireStaleTrips(svc, settings);
+
+    // Tracking is bound to an explicit trip: no active trip means no position is
+    // stored. This is what makes "the driver must start tracking" enforceable rather
+    // than merely a UI convention.
+    const trip = await getActiveTripForDriver(svc, drv.id);
+    if (!trip) {
+      return NextResponse.json({ error: 'No active trip' }, { status: 409 });
+    }
+    if (trip.route_id !== routeId) {
+      return NextResponse.json({ error: 'Route does not match the active trip' }, { status: 403 });
+    }
+
+    // Quality gate: a wildly inaccurate fix would teleport every reader's marker and
+    // inflate trip distance. Accepted-but-ignored rather than an error — the phone
+    // should keep trying, not treat this as a failure.
+    if (!shouldAcceptFix(accuracy, settings.minAccuracyM)) {
+      return NextResponse.json({
+        success: true,
+        data: { accepted: false, advanced: false, tripId: trip.id, rejectedReason: 'accuracy' },
+      });
+    }
+
     const routes = await getDriverRoutes(drv.staff_id, drv.assigned_route_id, svc);
     const route = routes.find((r) => r.id === routeId);
     if (!route) {
@@ -174,6 +203,7 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
       // history free of the frozen-re-send duplicates that were polluting it.
       await svc.from('gps_location_history').insert({
         vehicle_id: route.vehicleId,
+        trip_id: trip.id,
         latitude,
         longitude,
         speed,
@@ -182,6 +212,46 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
         source: 'driver_app',
         timestamp: capturedIso,
       });
+
+      // Trip odometer. distanceIncrementKm discards sub-20m jitter, so a parked bus
+      // does not accumulate phantom kilometres over a three-hour trip. The previous
+      // point is the trip's own end_* pair, which tracks the newest accepted fix.
+      const prev =
+        trip.end_latitude != null && trip.end_longitude != null
+          ? { lat: Number(trip.end_latitude), lng: Number(trip.end_longitude) }
+          : null;
+      const increment = distanceIncrementKm(prev, { lat: latitude, lng: longitude });
+
+      await svc
+        .from('tms_trip')
+        .update({
+          last_fix_at: nowIso,
+          fix_count: trip.fix_count + 1,
+          distance_km: Number(trip.distance_km) + increment,
+          // start_* is stamped once, on the first fix of the trip.
+          ...(trip.start_latitude == null
+            ? { start_latitude: latitude, start_longitude: longitude }
+            : {}),
+          end_latitude: latitude,
+          end_longitude: longitude,
+          updated_at: nowIso,
+        })
+        .eq('id', trip.id);
+
+      // Fan out to subscribers. Deliberately NOT awaited: the writes above have already
+      // committed and the poll fallback still serves this fix, so a slow or failing
+      // Realtime endpoint must not delay the driver's next ping.
+      void publishFix(routeId, {
+        tripId: trip.id,
+        routeId,
+        vehicleId: route.vehicleId,
+        latitude,
+        longitude,
+        speed,
+        heading,
+        accuracyM: accuracy,
+        at: nowIso,
+      });
     }
 
     await svc
@@ -189,28 +259,13 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
       .update({ location_sharing_enabled: true, active_route_id: routeId })
       .eq('id', drv.id);
 
-    // Stamp session start + audit ONLY on the on-duty transition (started_at was null),
-    // so the every-12s pings don't spam the activity log.
-    const { data: started } = await svc
-      .from('tms_driver')
-      .update({ location_sharing_started_at: nowIso })
-      .eq('id', drv.id)
-      .is('location_sharing_started_at', null)
-      .select('id');
+    // Session start is stamped and audited by POST /api/driver/trips, so the
+    // every-6s pings no longer need to detect the on-duty transition themselves.
 
-    if (started && started.length > 0) {
-      await logActivity(auth, request, {
-        module: 'drivers',
-        action: 'activate',
-        entityType: 'tms_driver',
-        entityId: drv.id,
-        entityLabel: route.label,
-        description: `Driver started live location sharing on route ${route.label}`,
-        metadata: { routeId, vehicleId: route.vehicleId },
-      });
-    }
-
-    return NextResponse.json({ success: true, data: { accepted: true, advanced } });
+    return NextResponse.json({
+      success: true,
+      data: { accepted: true, advanced, tripId: trip.id },
+    });
   } catch (e) {
     console.error('driver/location POST error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -235,6 +290,20 @@ async function stopLocation(request: NextRequest, auth: AuthContext) {
     if (vehicleIds.length > 0) {
       await svc.from('tms_vehicle').update({ live_tracking_enabled: false }).in('id', vehicleIds);
     }
+
+    // Ending the broadcast ends the trip: the two must never disagree, or the fleet
+    // view would show an active trip for a driver who has gone off duty.
+    const stoppedIso = new Date().toISOString();
+    await svc
+      .from('tms_trip')
+      .update({
+        status: 'completed',
+        ended_at: stoppedIso,
+        end_reason: 'driver',
+        updated_at: stoppedIso,
+      })
+      .eq('driver_id', drv.id)
+      .eq('status', 'active');
 
     await svc
       .from('tms_driver')

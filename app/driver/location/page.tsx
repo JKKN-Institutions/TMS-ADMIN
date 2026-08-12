@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import {
-  MapPin, Navigation, AlertTriangle, Gauge, Clock, Bus, Radio, Crosshair,
+  MapPin, Navigation, AlertTriangle, Gauge, Clock, Bus, Radio, Crosshair, Play, Wifi, Satellite,
 } from 'lucide-react';
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { useLiveTracking } from '@/lib/driver/use-live-tracking';
@@ -44,6 +44,42 @@ async function fetchLocation(): Promise<Resp> {
   return { data: (await res.json()).data as { routes: RouteLocation[] } };
 }
 
+interface Trip {
+  id: string;
+  route_id: string;
+  direction: string;
+  started_at: string;
+  fix_count: number;
+  distance_km: number;
+}
+interface AssignableRoute {
+  id: string;
+  label: string;
+  startLocation: string | null;
+  endLocation: string | null;
+}
+interface TripResp {
+  trip: Trip | null;
+  route: AssignableRoute | null;
+  routes: AssignableRoute[];
+  status: string | null;
+}
+
+async function fetchTrip(): Promise<TripResp> {
+  const res = await fetch('/api/driver/trips', { cache: 'no-store', credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).data as TripResp;
+}
+
+/** "1h 24m" / "12m" — trip duration, coarse enough to read at a glance. */
+function formatDuration(fromIso: string, nowMs: number): string {
+  const startMs = Date.parse(fromIso);
+  if (Number.isNaN(startMs)) return '—';
+  const mins = Math.max(0, Math.round((nowMs - startMs) / 60_000));
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
 function formatUpdated(ts: string | null): string {
   if (!ts) return 'never';
   const d = new Date(ts);
@@ -71,12 +107,83 @@ export default function DriverLocationPage() {
   });
   const routes = data?.data?.routes ?? [];
 
-  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!selectedRouteId && routes.length > 0) setSelectedRouteId(routes[0].id);
-  }, [routes, selectedRouteId]);
+  const { data: tripData, refetch: refetchTrip } = useQuery({
+    queryKey: ['driver-active-trip'],
+    queryFn: fetchTrip,
+    refetchInterval: 15000,
+  });
+  const trip = tripData?.trip ?? null;
+  const tripId = trip?.id ?? null;
+  const tripRoute = tripData?.route ?? null;
 
-  const { status, banner, onDuty, fix, lastSentAt, start, stop } = useLiveTracking(selectedRouteId);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  // Depend on the id STRING, never on `routes` itself: the query polls, so the array
+  // has a fresh identity every 15s and would re-run this effect forever.
+  const firstRouteId = routes.length > 0 ? routes[0].id : null;
+  useEffect(() => {
+    if (!selectedRouteId && firstRouteId) setSelectedRouteId(firstRouteId);
+  }, [firstRouteId, selectedRouteId]);
+
+  // Once a trip exists the broadcast route is the TRIP's route, not the picker's —
+  // the two can only disagree if the picker changed after the trip started.
+  const activeRouteId = trip?.route_id ?? selectedRouteId;
+
+  const { status, banner, network, onDuty, fix, lastSentAt, unsentCount, start, stop } =
+    useLiveTracking(activeRouteId, tripId);
+
+  const [busy, setBusy] = useState(false);
+  const [tripError, setTripError] = useState<string | null>(null);
+
+  const startTrip = async (routeId: string) => {
+    setBusy(true);
+    setTripError(null);
+    try {
+      const res = await fetch('/api/driver/trips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ routeId }),
+      });
+      // 409 = a trip is already live for this route/driver/bus. Adopt it rather than
+      // showing an error the driver can do nothing about.
+      if (!res.ok && res.status !== 409) {
+        const j = (await res.json().catch(() => null)) as { error?: string } | null;
+        setTripError(j?.error ?? 'Could not start the trip. Please try again.');
+        return;
+      }
+      await refetchTrip();
+    } catch {
+      setTripError('Network problem. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const endTrip = async () => {
+    if (!tripId) return;
+    setBusy(true);
+    setTripError(null);
+    try {
+      await stop(true); // release GPS + tell the server, before closing the trip
+      await fetch(`/api/driver/trips/${tripId}/end`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      await refetchTrip();
+    } catch {
+      setTripError('Could not end the trip cleanly. It will expire automatically.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Capture follows the trip: the driver taps START TRIP once and never touches the
+  // phone again. Primitives only in the dependency array.
+  useEffect(() => {
+    if (tripId && !onDuty && status !== 'permission_denied' && status !== 'no_active_trip') {
+      void start();
+    }
+  }, [tripId, onDuty, status, start]);
 
   if (isLoading) return <Spinner />;
   if (error) {
@@ -125,22 +232,66 @@ export default function DriverLocationPage() {
         </div>
 
         <div className="space-y-4 px-6 py-5">
-          {routes.length > 1 && (
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Route you are driving</span>
-              <select
-                value={selectedRouteId ?? ''}
-                onChange={(e) => setSelectedRouteId(e.target.value)}
-                disabled={onDuty}
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-              >
-                {routes.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {!trip && (
+            <>
+              {/* Explained BEFORE the browser permission prompt, not after. */}
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                <p className="font-semibold">Location sharing starts when you tap START TRIP.</p>
+                <p className="mt-1">
+                  Your phone will share the bus&apos;s position with the transport office and the
+                  students on this route until you tap END TRIP. Keep this screen on while driving.
+                </p>
+              </div>
+
+              {routes.length > 1 && (
+                <label className="block">
+                  <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Route you are driving
+                  </span>
+                  <select
+                    value={selectedRouteId ?? ''}
+                    onChange={(e) => setSelectedRouteId(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  >
+                    {routes.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </>
+          )}
+
+          {trip && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-800/40">
+              <div className="flex items-center justify-between gap-3">
+                <p className="truncate font-semibold text-gray-900 dark:text-white">
+                  {tripRoute?.label ?? routes.find((r) => r.id === trip.route_id)?.label ?? 'Trip in progress'}
+                </p>
+                <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium capitalize text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                  {trip.direction}
+                </span>
+              </div>
+              {(tripRoute?.startLocation || tripRoute?.endLocation) && (
+                <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                  {tripRoute?.startLocation ?? '—'} → {tripRoute?.endLocation ?? '—'}
+                </p>
+              )}
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                <span>Running {formatDuration(trip.started_at, Date.now())}</span>
+                <span>{trip.fix_count} fixes sent</span>
+                <span>{Number(trip.distance_km).toFixed(1)} km</span>
+              </div>
+            </div>
+          )}
+
+          {tripError && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{tripError}</span>
+            </div>
           )}
 
           {banner && (
@@ -159,20 +310,64 @@ export default function DriverLocationPage() {
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => (onDuty ? void stop(true) : void start())}
-            className={cn(
-              'inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 sm:w-auto',
-              onDuty ? 'bg-gradient-to-br from-red-600 to-rose-600' : 'bg-gradient-to-br from-green-600 to-emerald-600'
-            )}
-          >
-            <Crosshair className="h-4 w-4" />
-            {onDuty ? 'Go Off Duty (stop sharing)' : 'Go On Duty (share my location)'}
-          </button>
+          {/* One control, sized for a thumb. Nothing else needs pressing while driving. */}
+          {trip ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void endTrip()}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-red-600 to-rose-600 px-6 py-5 text-lg font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              <Crosshair className="h-5 w-5" />
+              {busy ? 'Ending…' : 'END TRIP'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy || !selectedRouteId}
+              onClick={() => selectedRouteId && void startTrip(selectedRouteId)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-green-600 to-emerald-600 px-6 py-5 text-lg font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              <Play className="h-5 w-5" />
+              {busy ? 'Starting…' : 'START TRIP'}
+            </button>
+          )}
 
-          {onDuty && (
+          {trip && (
             <div className="space-y-4">
+              {/* GPS and network are SEPARATE signals — a phone can have a perfect fix
+                  and no signal, or full bars and no satellites. */}
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                  <Satellite className="h-4 w-4 shrink-0 text-gray-400" />
+                  <span
+                    className={cn(
+                      'h-2.5 w-2.5 shrink-0 rounded-full',
+                      status === 'live' ? 'bg-green-500' : 'bg-amber-500'
+                    )}
+                  />
+                  <span>GPS: {status === 'live' ? 'Connected' : 'Acquiring…'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                  <Wifi className="h-4 w-4 shrink-0 text-gray-400" />
+                  <span
+                    className={cn(
+                      'h-2.5 w-2.5 shrink-0 rounded-full',
+                      network === 'connected' ? 'bg-green-500' : network === 'reconnecting' ? 'bg-amber-500' : 'bg-gray-400'
+                    )}
+                  />
+                  <span>
+                    Network:{' '}
+                    {network === 'connected'
+                      ? 'Connected'
+                      : network === 'reconnecting'
+                        ? 'Reconnecting…'
+                        : 'Waiting'}
+                    {unsentCount > 0 ? ` (${unsentCount} fixes not sent)` : ''}
+                  </span>
+                </div>
+              </div>
+
               {(() => {
                 const live = status === 'live';
                 const paused = status === 'paused' || status === 'starting';
@@ -256,7 +451,13 @@ export default function DriverLocationPage() {
               ) : v.hasFix ? (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <LiveStat icon={Navigation} label="Coordinates" value={`${v.latitude}, ${v.longitude}`} />
-                  <LiveStat icon={Gauge} label="Speed" value={v.speed != null ? `${v.speed} km/h` : '—'} />
+                  {/* gps_speed is GeolocationCoordinates.speed in METRES PER SECOND.
+                      This previously printed the raw m/s value labelled "km/h". */}
+                  <LiveStat
+                    icon={Gauge}
+                    label="Speed"
+                    value={v.speed != null ? `${Math.round(v.speed * 3.6)} km/h` : '—'}
+                  />
                   <LiveStat icon={Clock} label="Last update" value={formatUpdated(v.lastUpdate)} />
                 </div>
               ) : (

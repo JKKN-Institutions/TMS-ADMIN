@@ -38,6 +38,15 @@ export const TMS_PERMISSIONS = {
 
   TRACKING_VIEW: 'tms.tracking.view',
   TRACKING_SHARE: 'tms.tracking.share',
+  TRACKING_TRIP_MANAGE: 'tms.tracking.trip.manage',
+  /**
+   * "May watch the WHOLE fleet." Distinct from TRACKING_VIEW, which despite its name
+   * is held by the `student` role (6,281 users) and so means only "may open a tracking
+   * screen". Held by roles with tms.dashboard.view (transport_head), plus super admins
+   * who bypass permission checks. Use this wherever there is no proxy area gate to
+   * fall back on — notably the realtime.messages RLS policy.
+   */
+  TRACKING_FLEET_VIEW: 'tms.tracking.fleet.view',
 
   GRIEVANCES_SUBMIT: 'tms.grievances.submit',
   GRIEVANCES_VIEW: 'tms.grievances.view',

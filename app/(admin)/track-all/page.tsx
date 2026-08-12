@@ -7,6 +7,10 @@ import { RefreshCw, AlertTriangle, Bus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 import { humanizeAge } from '@/lib/gps/route-status';
+import { haversineKm } from '@/lib/gps/distance';
+import { CAMPUS } from '@/lib/gps/campus';
+import { useLiveBus, POLL_SUBSCRIBED_MS } from '@/hooks/use-live-bus';
+import { FLEET_TOPIC } from '@/lib/tracking/broadcast';
 import { FleetList } from './fleet-list';
 import type { FleetResponse, FleetRoute } from './types';
 import type { MapBus } from '@/components/live-tracking-map';
@@ -49,18 +53,29 @@ export default function TrackAllPage() {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [nudges, setNudges] = useState<Record<string, NudgeState>>({});
 
+  // Live fixes for the whole fleet. Gated by RLS on realtime.messages to holders of
+  // tms.tracking.fleet.view — a student subscribing to this topic receives nothing.
+  const { fix: liveFix, channelStatus } = useLiveBus(FLEET_TOPIC);
+  const socketUp = channelStatus === 'subscribed';
+
   const { data, isLoading, error, isError, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['track-all-fleet'],
     queryFn: fetchFleet,
     // Poll fast only while something is actually moving. With no bus reporting —
-    // the normal case on this fleet — a 5s poll is pure waste.
-    refetchInterval: (q) => ((q.state.data?.summary.reporting ?? 0) > 0 ? 5_000 : 30_000),
+    // the normal case on this fleet — a 5s poll is pure waste. When the realtime
+    // socket is up the poll drops to a slow reconcile, because positions now arrive
+    // by broadcast; if the socket drops we fall straight back to the 5s cadence.
+    refetchInterval: (q) => {
+      if ((q.state.data?.summary.reporting ?? 0) === 0) return 30_000;
+      return socketUp ? POLL_SUBSCRIBED_MS : 5_000;
+    },
     refetchIntervalInBackground: false,
   });
 
   // Same cadence the query above uses, mirrored here (not read back from the query)
   // purely to judge how stale the on-screen snapshot is — see the banner below.
-  const pollMs = (data?.summary.reporting ?? 0) > 0 ? 5_000 : 30_000;
+  const pollMs =
+    (data?.summary.reporting ?? 0) > 0 ? (socketUp ? POLL_SUBSCRIBED_MS : 5_000) : 30_000;
 
   // Ticks so the staleness banner's age advances on screen instead of freezing at
   // whatever render happened to run when the poll last failed or the tab was hidden.
@@ -78,7 +93,38 @@ export default function TrackAllPage() {
   const dataAgeMs = dataUpdatedAt > 0 ? now - dataUpdatedAt : 0;
   const showStale = dataUpdatedAt > 0 && (isError || dataAgeMs > pollMs * 2);
 
-  const routes = useMemo(() => data?.routes ?? [], [data]);
+  // Broadcast payload flattened to PRIMITIVES before it goes anywhere near a
+  // dependency array. This page polls, so any object/array from fetched data has a
+  // fresh identity every tick — the defect class that caused four separate bugs here
+  // (markers crawling, rows stuck on "Locating…", selection stranded).
+  const liveRouteId = liveFix?.routeId ?? null;
+  const liveAt = liveFix?.at ?? null;
+  const liveLat = liveFix?.latitude ?? null;
+  const liveLng = liveFix?.longitude ?? null;
+  const liveHeading = liveFix?.heading ?? null;
+  const liveSpeedMs = liveFix?.speed ?? null;
+  const liveAccuracyM = liveFix?.accuracyM ?? null;
+
+  const routes = useMemo(() => {
+    const base = data?.routes ?? [];
+    if (!liveRouteId || !liveAt || liveLat === null || liveLng === null) return base;
+    return base.map((r) => {
+      if (r.routeId !== liveRouteId) return r;
+      // Only overlay a fix that is genuinely newer than the polled snapshot.
+      if (!(Date.parse(liveAt) > Date.parse(r.lastFixAt ?? ''))) return r;
+      const position = { lat: liveLat, lng: liveLng };
+      return {
+        ...r,
+        position,
+        heading: liveHeading,
+        // speed arrives in METRES PER SECOND; FleetRoute.speedKmh is km/h.
+        speedKmh: liveSpeedMs != null ? liveSpeedMs * 3.6 : null,
+        accuracyM: liveAccuracyM,
+        distanceToCampusKm: haversineKm(position, CAMPUS),
+        lastFixAt: liveAt,
+      };
+    });
+  }, [data, liveRouteId, liveAt, liveLat, liveLng, liveHeading, liveSpeedMs, liveAccuracyM]);
   const buses = useMemo(
     () => routes.map(toMapBus).filter((b): b is MapBus => b !== null),
     [routes],

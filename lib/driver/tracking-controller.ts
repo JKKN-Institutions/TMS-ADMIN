@@ -14,7 +14,16 @@ export type TrackingStatus =
   | 'paused'
   | 'os_location_off'
   | 'permission_denied'
+  | 'no_active_trip'
   | 'stopped';
+
+/**
+ * Whether the SERVER is receiving our fixes. Deliberately independent of the GPS
+ * status above: a phone can hold a perfect fix with no signal, or have full bars and
+ * no satellites. The driver needs to see which one is broken, so they are two
+ * separate indicators rather than one merged "status".
+ */
+export type NetworkStatus = 'idle' | 'connected' | 'reconnecting';
 
 export interface TrackingBanner {
   tone: 'info' | 'warn' | 'error';
@@ -30,6 +39,8 @@ export interface TrackingState {
   everFixed: boolean;
   /** Consecutive POSITION_UNAVAILABLE errors (reset by any fix). */
   unavailableStreak: number;
+  /** Whether our pings are reaching the server. Independent of `status`. */
+  network: NetworkStatus;
   banner: TrackingBanner | null;
 }
 
@@ -39,7 +50,10 @@ export type TrackingEvent =
   | { type: 'fix'; atMs: number }
   | { type: 'geoError'; code: number }
   | { type: 'visibility'; visible: boolean }
-  | { type: 'tick'; nowMs: number };
+  | { type: 'tick'; nowMs: number }
+  | { type: 'sendOk' }
+  | { type: 'sendFail' }
+  | { type: 'noActiveTrip' };
 
 /** No fresh fix for this long while sharing → paused + loud banner. */
 export const PAUSE_AFTER_MS = 25_000;
@@ -51,6 +65,7 @@ export const initialTrackingState: TrackingState = {
   lastFixAt: null,
   everFixed: false,
   unavailableStreak: 0,
+  network: 'idle',
   banner: null,
 };
 
@@ -80,12 +95,26 @@ const pausedBanner = (reason: string): TrackingBanner => ({
   body: `${reason} Keep this screen on and don't lock the phone while driving.`,
 });
 
-const isTerminal = (s: TrackingStatus) => s === 'permission_denied' || s === 'stopped' || s === 'idle';
+const NO_TRIP: TrackingBanner = {
+  tone: 'warn',
+  title: 'No active trip',
+  body: 'Your trip has ended or expired. Tap START TRIP to begin sharing again.',
+};
+
+const isTerminal = (s: TrackingStatus) =>
+  s === 'permission_denied' || s === 'stopped' || s === 'idle' || s === 'no_active_trip';
 
 export function reduceTracking(state: TrackingState, event: TrackingEvent): TrackingState {
   // start/stop are always honoured, even from a terminal state.
   if (event.type === 'start') {
-    return { status: 'starting', lastFixAt: null, everFixed: false, unavailableStreak: 0, banner: ACQUIRING };
+    return {
+      status: 'starting',
+      lastFixAt: null,
+      everFixed: false,
+      unavailableStreak: 0,
+      network: 'idle',
+      banner: ACQUIRING,
+    };
   }
   if (event.type === 'stop') {
     return { ...initialTrackingState, status: 'stopped' };
@@ -96,7 +125,27 @@ export function reduceTracking(state: TrackingState, event: TrackingEvent): Trac
 
   switch (event.type) {
     case 'fix':
-      return { status: 'live', lastFixAt: event.atMs, everFixed: true, unavailableStreak: 0, banner: null };
+      // network is carried through, not reset: a fresh GPS fix says nothing about
+      // whether the last ping reached the server.
+      return {
+        status: 'live',
+        lastFixAt: event.atMs,
+        everFixed: true,
+        unavailableStreak: 0,
+        network: state.network,
+        banner: null,
+      };
+
+    case 'sendOk':
+      return { ...state, network: 'connected' };
+
+    case 'sendFail':
+      return { ...state, network: 'reconnecting' };
+
+    // The server has told us there is no active trip (409). Terminal: stop claiming
+    // to be live and tell the driver how to resume.
+    case 'noActiveTrip':
+      return { ...state, status: 'no_active_trip', banner: NO_TRIP };
 
     case 'geoError': {
       if (event.code === GEO_PERMISSION_DENIED) {
