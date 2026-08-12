@@ -143,3 +143,67 @@ describe('reduceTracking — heartbeat + visibility', () => {
     expect(s.status).toBe('permission_denied');
   });
 });
+
+describe('reduceTracking — network state', () => {
+  it('starts idle', () => {
+    expect(initialTrackingState.network).toBe('idle');
+  });
+
+  it('becomes connected on a successful send', () => {
+    const s = run([{ type: 'start' }, { type: 'fix', atMs: 1000 }, { type: 'sendOk' }]);
+    expect(s.network).toBe('connected');
+  });
+
+  it('becomes reconnecting on a failed send', () => {
+    const s = run([{ type: 'start' }, { type: 'fix', atMs: 1000 }, { type: 'sendFail' }]);
+    expect(s.network).toBe('reconnecting');
+  });
+
+  it('recovers to connected after a failure', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'sendFail' },
+      { type: 'sendOk' },
+    ]);
+    expect(s.network).toBe('connected');
+  });
+
+  it('leaves GPS status alone — network and GPS are independent signals', () => {
+    const s = run([{ type: 'start' }, { type: 'fix', atMs: 1000 }, { type: 'sendFail' }]);
+    expect(s.status).toBe('live');
+  });
+
+  it('resets to idle on start', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'sendFail' },
+      { type: 'start' },
+    ]);
+    expect(s.network).toBe('idle');
+  });
+});
+
+describe('reduceTracking — no_active_trip', () => {
+  it('carries an explanatory warn banner', () => {
+    const s = run([{ type: 'start' }, { type: 'fix', atMs: 1000 }, { type: 'noActiveTrip' }]);
+    expect(s.status).toBe('no_active_trip');
+    expect(s.banner?.tone).toBe('warn');
+  });
+
+  it('is terminal — a stray fix cannot resurrect it', () => {
+    const s = run([
+      { type: 'start' },
+      { type: 'fix', atMs: 1000 },
+      { type: 'noActiveTrip' },
+      { type: 'fix', atMs: 2000 },
+      { type: 'tick', nowMs: 3000 },
+    ]);
+    expect(s.status).toBe('no_active_trip');
+  });
+
+  it('is not a sharing state, so capture stops', () => {
+    expect(isSharing('no_active_trip')).toBe(false);
+  });
+});
