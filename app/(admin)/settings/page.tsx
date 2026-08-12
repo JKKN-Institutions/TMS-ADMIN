@@ -203,6 +203,36 @@ const SettingsPage = () => {
                   onboarded after a term fell due is billed as overdue.
                 </p>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  In-charge Attendance Enforcement
+                </label>
+                <select
+                  value={schedulingSettings.inchargeEnforcementMode}
+                  onChange={(e) =>
+                    setSchedulingSettings({
+                      ...schedulingSettings,
+                      inchargeEnforcementMode: e.target.value as 'off' | 'shadow' | 'enforce',
+                    })
+                  }
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="off">Off — do not run</option>
+                  <option value="shadow">Shadow — record strikes only</option>
+                  <option value="enforce">Enforce — warn, then remove and bill</option>
+                </select>
+                <p className="text-sm text-gray-600 mt-1">
+                  Runs each weekday at 21:00. A bus in-charge who misses travel days in a row is
+                  warned twice; on the third the in-charge role is removed and a transport fee bill
+                  is generated. <strong>Shadow</strong> records the same strikes without notifying,
+                  removing, or billing anyone — review them on the{' '}
+                  <a className="underline" href="/staff-route-assignments/enforcement">
+                    enforcement board
+                  </a>{' '}
+                  before switching to Enforce.
+                </p>
+              </div>
             </div>
 
             <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">

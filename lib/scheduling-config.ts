@@ -4,6 +4,8 @@ export interface SchedulingSettings {
   bookingDaysAhead: number;      // 1..14 rolling horizon
   autoNotifyPassengers: boolean;
   autoGenerateBills: boolean;
+  /** In-charge attendance enforcement. Ships in shadow — see lib/settings/scheduling.ts. */
+  inchargeEnforcementMode: 'off' | 'shadow' | 'enforce';
 }
 
 export const defaultSchedulingSettings: SchedulingSettings = {
@@ -12,4 +14,5 @@ export const defaultSchedulingSettings: SchedulingSettings = {
   bookingDaysAhead: 6,       // ~one week ahead
   autoNotifyPassengers: true,
   autoGenerateBills: false,
+  inchargeEnforcementMode: 'shadow',
 };
