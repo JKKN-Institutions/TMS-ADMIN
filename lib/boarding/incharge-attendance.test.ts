@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   evaluateDay,
+  isServiceWeekday,
   warningCopy,
   removalCopy,
   performRemoval,
@@ -9,7 +10,13 @@ import {
 } from './incharge-attendance';
 
 const fresh: StrikeState = { consecutiveMisses: 0, missedDates: [], lastEvaluatedDate: null };
-const travelDay = { date: '2026-07-20', hasBookedRiders: true, attendanceMarked: false, assignedOnDate: false };
+const travelDay = {
+  date: '2026-07-20',
+  hasBookedRiders: true,
+  attendanceMarked: false,
+  assignedOnDate: false,
+  isServiceWeekday: true,
+};
 
 describe('evaluateDay', () => {
   it('skips a day already evaluated (idempotent re-fire)', () => {
@@ -48,15 +55,43 @@ describe('evaluateDay', () => {
     });
   });
 
-  it('removes on the second consecutive miss', () => {
-    const prev = { consecutiveMisses: 1, missedDates: ['2026-07-18'], lastEvaluatedDate: '2026-07-18' };
+  it('warns again on the second consecutive miss (final warning)', () => {
+    const prev = { consecutiveMisses: 1, missedDates: ['2026-07-17'], lastEvaluatedDate: '2026-07-17' };
+    expect(evaluateDay(prev, travelDay)).toEqual({
+      action: 'warn',
+      state: {
+        consecutiveMisses: 2,
+        missedDates: ['2026-07-17', '2026-07-20'],
+        lastEvaluatedDate: '2026-07-20',
+      },
+    });
+  });
+
+  it('removes on the THIRD consecutive miss', () => {
+    const prev = {
+      consecutiveMisses: 2,
+      missedDates: ['2026-07-16', '2026-07-17'],
+      lastEvaluatedDate: '2026-07-17',
+    };
     expect(evaluateDay(prev, travelDay)).toEqual({
       action: 'remove',
       state: {
-        consecutiveMisses: 2,
-        missedDates: ['2026-07-18', '2026-07-20'],
+        consecutiveMisses: 3,
+        missedDates: ['2026-07-16', '2026-07-17', '2026-07-20'],
         lastEvaluatedDate: '2026-07-20',
       },
+    });
+  });
+
+  it('a marked day at two misses resets the streak to zero', () => {
+    const prev = {
+      consecutiveMisses: 2,
+      missedDates: ['2026-07-16', '2026-07-17'],
+      lastEvaluatedDate: '2026-07-17',
+    };
+    expect(evaluateDay(prev, { ...travelDay, attendanceMarked: true })).toEqual({
+      action: 'reset',
+      state: { consecutiveMisses: 0, missedDates: [], lastEvaluatedDate: '2026-07-20' },
     });
   });
 
@@ -64,25 +99,74 @@ describe('evaluateDay', () => {
     const afterMiss = evaluateDay(fresh, travelDay);
     if (afterMiss.action !== 'warn') throw new Error('expected warn');
     const afterMark = evaluateDay(afterMiss.state, {
-      date: '2026-07-21', hasBookedRiders: true, attendanceMarked: true, assignedOnDate: false,
+      ...travelDay, date: '2026-07-21', attendanceMarked: true,
     });
     if (afterMark.action !== 'reset') throw new Error('expected reset');
-    const afterSecondMiss = evaluateDay(afterMark.state, {
-      date: '2026-07-22', hasBookedRiders: true, attendanceMarked: false, assignedOnDate: false,
-    });
+    const afterSecondMiss = evaluateDay(afterMark.state, { ...travelDay, date: '2026-07-22' });
     expect(afterSecondMiss.action).toBe('warn');
   });
 
-  it('exposes a removal threshold of 2', () => {
-    expect(REMOVAL_THRESHOLD).toBe(2);
+  it('skips a weekend even when the route has booked riders', () => {
+    expect(evaluateDay(fresh, { ...travelDay, isServiceWeekday: false }))
+      .toEqual({ action: 'skip', reason: 'not_a_service_day' });
+  });
+
+  it('a weekend neither punishes nor forgives an existing streak', () => {
+    const prev = { consecutiveMisses: 2, missedDates: ['2026-07-16', '2026-07-17'], lastEvaluatedDate: '2026-07-17' };
+    const out = evaluateDay(prev, { ...travelDay, isServiceWeekday: false });
+    expect(out).toEqual({ action: 'skip', reason: 'not_a_service_day' });
+    // The caller persists nothing on a skip, so the streak survives untouched.
+    expect(prev.consecutiveMisses).toBe(2);
+  });
+
+  it('already-evaluated takes precedence over a weekend', () => {
+    const prev = { ...fresh, lastEvaluatedDate: '2026-07-20' };
+    expect(evaluateDay(prev, { ...travelDay, isServiceWeekday: false }))
+      .toEqual({ action: 'skip', reason: 'already_evaluated' });
+  });
+
+  it('exposes a removal threshold of 3 (two warnings, then removal)', () => {
+    expect(REMOVAL_THRESHOLD).toBe(3);
+  });
+});
+
+describe('isServiceWeekday', () => {
+  // 2026-08-10 is a Monday; the week runs Mon..Sun.
+  it('accepts Monday through Friday', () => {
+    for (const d of ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14']) {
+      expect(isServiceWeekday(d)).toBe(true);
+    }
+  });
+
+  it('rejects Saturday and Sunday', () => {
+    expect(isServiceWeekday('2026-08-15')).toBe(false);
+    expect(isServiceWeekday('2026-08-16')).toBe(false);
+  });
+
+  it('reads the date string literally, not through the host timezone', () => {
+    // A naive `new Date('2026-08-16')` is midnight UTC, which is still the 15th
+    // in the Americas. The IST day-of-week must not depend on where this runs.
+    expect(isServiceWeekday('2026-08-16')).toBe(false);
+  });
+
+  it('rejects a malformed date rather than guessing', () => {
+    expect(isServiceWeekday('not-a-date')).toBe(false);
   });
 });
 
 describe('copy', () => {
   it('names the missed date in the warning', () => {
-    const { title, body } = warningCopy(['2026-07-20']);
+    const { title, body } = warningCopy(['2026-07-20'], false);
     expect(title).toMatch(/attendance/i);
     expect(body).toContain('2026-07-20');
+  });
+
+  it('escalates the second warning to a final warning', () => {
+    const first = warningCopy(['2026-07-20'], false);
+    const final = warningCopy(['2026-07-17', '2026-07-20'], true);
+    expect(final.title).toMatch(/final/i);
+    expect(final.body).toMatch(/final warning/i);
+    expect(final.title).not.toBe(first.title);
   });
 
   it('says fees apply on removal, and mentions the bill when billed', () => {
