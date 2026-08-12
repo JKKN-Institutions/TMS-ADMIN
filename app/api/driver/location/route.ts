@@ -9,6 +9,7 @@ import { normalizeCapturedAt, isNewerCapture } from '@/lib/driver/tracking';
 import { loadTrackingSettings } from '@/lib/tracking/settings';
 import { expireStaleTrips, getActiveTripForDriver } from '@/lib/tracking/trips';
 import { shouldAcceptFix, distanceIncrementKm } from '@/lib/tracking/trip-state';
+import { publishFix } from '@/lib/tracking/broadcast';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -236,6 +237,21 @@ async function postLocation(request: NextRequest, auth: AuthContext) {
           updated_at: nowIso,
         })
         .eq('id', trip.id);
+
+      // Fan out to subscribers. Deliberately NOT awaited: the writes above have already
+      // committed and the poll fallback still serves this fix, so a slow or failing
+      // Realtime endpoint must not delay the driver's next ping.
+      void publishFix(routeId, {
+        tripId: trip.id,
+        routeId,
+        vehicleId: route.vehicleId,
+        latitude,
+        longitude,
+        speed,
+        heading,
+        accuracyM: accuracy,
+        at: nowIso,
+      });
     }
 
     await svc
