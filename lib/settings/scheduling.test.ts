@@ -20,6 +20,7 @@ describe('parseSchedulingConfig', () => {
       daysAhead: 3,
       autoNotifyPassengers: false,
       autoGenerateBills: false,
+      inchargeEnforcementMode: 'shadow',
     });
   });
 
@@ -104,21 +105,44 @@ describe('autoGenerateBills', () => {
 
 describe('toWindowOpts', () => {
   it('enabled: passes cutoffHour and daysAhead through unchanged', () => {
-    const cfg = { enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false };
+    const cfg = { enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const };
     expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 18, daysAhead: 4 });
   });
 
   it('disabled: cutoffHour becomes the 24 sentinel, but daysAhead is STILL passed through unchanged', () => {
-    const cfg = { enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false };
+    const cfg = { enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const };
     expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 24, daysAhead: 4 });
   });
 
   it('disabling the time window never widens or narrows the horizon, whatever daysAhead is set to', () => {
     for (const daysAhead of [1, 5, 10]) {
-      const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false });
-      const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false });
+      const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const });
+      const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const });
       expect(disabled.daysAhead).toBe(enabled.daysAhead);
       expect(disabled.daysAhead).toBe(daysAhead);
     }
+  });
+});
+
+describe('inchargeEnforcementMode', () => {
+  it('defaults to shadow when absent', () => {
+    expect(parseSchedulingConfig({}).inchargeEnforcementMode).toBe('shadow');
+    expect(DEFAULT_SCHEDULING_CONFIG.inchargeEnforcementMode).toBe('shadow');
+  });
+
+  it('defaults to shadow for a null or malformed blob', () => {
+    expect(parseSchedulingConfig(null).inchargeEnforcementMode).toBe('shadow');
+    expect(parseSchedulingConfig('nonsense').inchargeEnforcementMode).toBe('shadow');
+  });
+
+  it('accepts each valid mode', () => {
+    for (const mode of ['off', 'shadow', 'enforce'] as const) {
+      expect(parseSchedulingConfig({ inchargeEnforcementMode: mode }).inchargeEnforcementMode).toBe(mode);
+    }
+  });
+
+  it('falls back to shadow for an unknown value rather than enforcing', () => {
+    expect(parseSchedulingConfig({ inchargeEnforcementMode: 'ENFORCE' }).inchargeEnforcementMode).toBe('shadow');
+    expect(parseSchedulingConfig({ inchargeEnforcementMode: 42 }).inchargeEnforcementMode).toBe('shadow');
   });
 });

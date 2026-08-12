@@ -1,5 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * How hard the in-charge attendance enforcement cron acts on its own findings.
+ * `shadow` evaluates and persists strikes but notifies nobody and removes
+ * nobody, so the admin dashboard accumulates real data before anyone is
+ * punished. Distinct from the route's `dryRun` flag, which persists nothing.
+ */
+export type InchargeEnforcementMode = 'off' | 'shadow' | 'enforce';
+
+const ENFORCEMENT_MODES: readonly InchargeEnforcementMode[] = ['off', 'shadow', 'enforce'];
+
 /** Effective, normalized scheduling config consumed by the booking gate + reminders. */
 export interface SchedulingConfig {
   enableBookingTimeWindow: boolean;
@@ -8,6 +18,8 @@ export interface SchedulingConfig {
   autoNotifyPassengers: boolean;
   /** Master switch for the automatic bill generation sweep. Opt-in. */
   autoGenerateBills: boolean;
+  /** Master switch for in-charge attendance enforcement. Ships in shadow. */
+  inchargeEnforcementMode: InchargeEnforcementMode;
 }
 
 export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
@@ -16,6 +28,7 @@ export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
   daysAhead: 1,
   autoNotifyPassengers: true,
   autoGenerateBills: false,
+  inchargeEnforcementMode: 'shadow',
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -28,6 +41,14 @@ function boolOr(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+// An unrecognised value must never read as 'enforce' — punitive action is
+// opt-in, so anything unexpected falls back to the safe shadow default.
+function enforcementModeOr(value: unknown, fallback: InchargeEnforcementMode): InchargeEnforcementMode {
+  return ENFORCEMENT_MODES.includes(value as InchargeEnforcementMode)
+    ? (value as InchargeEnforcementMode)
+    : fallback;
+}
+
 /** Pure: normalize a stored settings_data blob into a SchedulingConfig (defaults + clamps). */
 export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_SCHEDULING_CONFIG };
@@ -38,6 +59,10 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
     daysAhead: clampInt(b.bookingDaysAhead, 1, 10, DEFAULT_SCHEDULING_CONFIG.daysAhead),
     autoNotifyPassengers: boolOr(b.autoNotifyPassengers, DEFAULT_SCHEDULING_CONFIG.autoNotifyPassengers),
     autoGenerateBills: boolOr(b.autoGenerateBills, DEFAULT_SCHEDULING_CONFIG.autoGenerateBills),
+    inchargeEnforcementMode: enforcementModeOr(
+      b.inchargeEnforcementMode,
+      DEFAULT_SCHEDULING_CONFIG.inchargeEnforcementMode,
+    ),
   };
 }
 
