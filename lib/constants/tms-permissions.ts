@@ -38,6 +38,7 @@ export const TMS_PERMISSIONS = {
 
   TRACKING_VIEW: 'tms.tracking.view',
   TRACKING_SHARE: 'tms.tracking.share',
+  TRACKING_TRIP_MANAGE: 'tms.tracking.trip.manage',
 
   GRIEVANCES_SUBMIT: 'tms.grievances.submit',
   GRIEVANCES_VIEW: 'tms.grievances.view',
