@@ -210,3 +210,50 @@ describe('performRemoval', () => {
     })).rejects.toThrow('revoke failed');
   });
 });
+
+describe('backfill ordering (dates only ever move forward)', () => {
+  it('skips a date EARLIER than the last evaluated one', () => {
+    const prev = { consecutiveMisses: 1, missedDates: ['2026-08-12'], lastEvaluatedDate: '2026-08-12' };
+    expect(evaluateDay(prev, { ...travelDay, date: '2026-08-11' }))
+      .toEqual({ action: 'skip', reason: 'already_evaluated' });
+  });
+
+  it('still skips the exact same date (unchanged behaviour)', () => {
+    const prev = { consecutiveMisses: 1, missedDates: ['2026-08-12'], lastEvaluatedDate: '2026-08-12' };
+    expect(evaluateDay(prev, { ...travelDay, date: '2026-08-12' }))
+      .toEqual({ action: 'skip', reason: 'already_evaluated' });
+  });
+
+  it('accepts a LATER date', () => {
+    const prev = { consecutiveMisses: 1, missedDates: ['2026-08-11'], lastEvaluatedDate: '2026-08-11' };
+    const out = evaluateDay(prev, { ...travelDay, date: '2026-08-12' });
+    expect(out.action).toBe('warn');
+  });
+
+  it('a two-day backfill then today reaches removal exactly once', () => {
+    // Tue -> Wed -> Thu, all missed. This is the real backfill scenario.
+    let state: StrikeState = { consecutiveMisses: 0, missedDates: [], lastEvaluatedDate: null };
+    const actions: string[] = [];
+    for (const date of ['2026-08-11', '2026-08-12', '2026-08-13']) {
+      const out = evaluateDay(state, { ...travelDay, date });
+      actions.push(out.action);
+      if (out.action !== 'skip') state = out.state;
+    }
+    expect(actions).toEqual(['warn', 'warn', 'remove']);
+    expect(state.consecutiveMisses).toBe(3);
+  });
+
+  it('replaying the whole backfill cannot remove a second time', () => {
+    let state: StrikeState = { consecutiveMisses: 0, missedDates: [], lastEvaluatedDate: null };
+    for (const date of ['2026-08-11', '2026-08-12', '2026-08-13']) {
+      const out = evaluateDay(state, { ...travelDay, date });
+      if (out.action !== 'skip') state = out.state;
+    }
+    // Re-run every date: all must skip, streak frozen at 3.
+    const replay = ['2026-08-11', '2026-08-12', '2026-08-13'].map(
+      (date) => evaluateDay(state, { ...travelDay, date }).action,
+    );
+    expect(replay).toEqual(['skip', 'skip', 'skip']);
+    expect(state.consecutiveMisses).toBe(3);
+  });
+});

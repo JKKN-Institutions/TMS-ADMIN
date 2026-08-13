@@ -27,6 +27,7 @@ import { maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 import { logActivityFromHeaders } from '@/lib/activity/log';
 import { generateStaffBill, resolveStaffBillPlan } from '@/lib/fees/staff-bill';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
+import { emailIlikePattern } from '@/lib/identity/email-match';
 import {
   evaluateDay,
   isServiceWeekday,
@@ -51,8 +52,30 @@ export async function GET(request: NextRequest) {
   // still required — this is not a public preview.
   const dryRun = request.nextUrl.searchParams.get('dryRun') === '1';
 
+  // Backfill: evaluate a specific PAST day instead of today, so a streak can be
+  // reconstructed from days that have already gone by. Replay is safe because
+  // evaluateDay only lets the evaluated date move forward (see its <= guard).
+  //
+  // `silent=1` records the strike but sends no notification and takes no
+  // punitive action — used to prime a backfilled streak without warning people
+  // about days they can no longer do anything about.
+  const dateParam = request.nextUrl.searchParams.get('date');
+  const silent = request.nextUrl.searchParams.get('silent') === '1';
+
   const svc = createServiceRoleClient();
-  const date = istToday();
+  const today = istToday();
+
+  if (dateParam !== null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      return NextResponse.json({ error: 'date must be YYYY-MM-DD' }, { status: 400 });
+    }
+    // A future date has no attendance yet, so it would strike everyone for a
+    // day that has not happened. Never allow it.
+    if (dateParam > today) {
+      return NextResponse.json({ error: 'date cannot be in the future' }, { status: 400 });
+    }
+  }
+  const date = dateParam ?? today;
 
   const cfg = await loadSchedulingConfig(svc);
   const mode = cfg.inchargeEnforcementMode;
@@ -60,7 +83,7 @@ export async function GET(request: NextRequest) {
   // `shadow` still evaluates and persists strikes — that is the whole point,
   // it builds the admin board out of real data — it only withholds
   // notifications, revokes and bills. `dryRun` persists nothing either way.
-  const act = mode === 'enforce' && !dryRun;
+  const act = mode === 'enforce' && !dryRun && !silent;
 
   if (mode === 'off') {
     return NextResponse.json({ success: true, data: { date, mode, skipped: 'mode_off' } });
@@ -74,6 +97,8 @@ export async function GET(request: NextRequest) {
   const summary = {
     date,
     mode,
+    backfill: dateParam !== null,
+    silent,
     evaluated: 0,
     skipped: 0,
     warned: 0,
@@ -176,7 +201,7 @@ export async function GET(request: NextRequest) {
       const { data: profile, error: profErr } = await svc
         .from('profiles')
         .select('id')
-        .ilike('email', a.staff_email)
+        .ilike('email', emailIlikePattern(a.staff_email))
         .maybeSingle();
       if (profErr) throw new Error(`profile load failed: ${profErr.message}`);
       const profileId = profile?.id ?? null;
@@ -191,7 +216,7 @@ export async function GET(request: NextRequest) {
         const { data: staffRow } = await svc
           .from('staff')
           .select('id')
-          .ilike('email', a.staff_email)
+          .ilike('email', emailIlikePattern(a.staff_email))
           .maybeSingle();
 
         const plan =
