@@ -25,7 +25,11 @@ import { loadBookedRoster } from '@/lib/booking/roster';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 import { logActivityFromHeaders } from '@/lib/activity/log';
-import { generateStaffBill, resolveStaffBillPlan } from '@/lib/fees/staff-bill';
+import {
+  generateStaffBill,
+  resolveStaffBillPlan,
+  type StaffUnbillableReason,
+} from '@/lib/fees/staff-bill';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { emailIlikePattern } from '@/lib/identity/email-match';
 import {
@@ -40,6 +44,17 @@ import {
 } from '@/lib/boarding/incharge-attendance';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Why a removal was blocked, in words the transport office can act on.
+ * Each reason has a different owner, so they must not collapse into one message.
+ */
+const UNBILLABLE_LABEL: Record<StaffUnbillableReason, string> = {
+  no_structure: 'no staff fee structure with terms',
+  no_stop: 'no boarding stop on their staff record',
+  no_stop_rate: 'their boarding stop has no fee configured',
+  error: 'billing lookup failed',
+};
 
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -241,8 +256,7 @@ export async function GET(request: NextRequest) {
           // No bill can be raised, so no role is taken away. Nobody loses their
           // fee exemption without the bill that justifies it; the transport
           // office sees this on the admin board and configures the fee terms.
-          blockedReason =
-            plan.reason === 'error' ? 'billing lookup failed' : 'no staff fee structure with terms';
+          blockedReason = UNBILLABLE_LABEL[plan.reason];
           billingStatus = plan.reason;
           summary.blocked++;
         } else if (!act) {

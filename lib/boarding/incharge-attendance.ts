@@ -126,7 +126,12 @@ export function removalCopy(missedDates: string[], billed: boolean): { title: st
   };
 }
 
-export type BillingStatus = 'billed' | 'no_structure' | 'error';
+/**
+ * Mirrors StaffUnbillableReason in lib/fees/staff-bill.ts. The stop-wise reasons
+ * are kept distinct so the enforcement board can say WHICH gap blocked a
+ * removal — "no boarding stop" and "stop not priced" have different owners.
+ */
+export type BillingStatus = 'billed' | 'no_structure' | 'no_stop' | 'no_stop_rate' | 'error';
 
 /**
  * Runs the removal in the ONE order that is safe: revoke first, bill second.

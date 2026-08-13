@@ -209,7 +209,7 @@ describe('resolveStaffBillPlan', () => {
   });
 
   it('reports not billable when the structure exists but has ZERO terms', async () => {
-    // This is the live production state: one active staff structure, no terms.
+    // A flat structure with no term rows: nothing to bill, so nothing to revoke.
     personMatches();
     const { svc } = makeSvc({
       structures: { data: [STRUCTURE], error: null },
@@ -267,5 +267,137 @@ describe('resolveStaffBillPlan', () => {
     expect(plan.billable).toBe(false);
     expect(bill).toEqual({ billingStatus: 'no_structure', inserted: 0 });
     expect(insertedRows).toHaveLength(0);
+  });
+});
+
+/**
+ * Stop-wise staff billing.
+ *
+ * The live staff structure is fee_mode 'stop_wise' with 463 priced stops and a
+ * single 100% instalment. Reading only the flat term table made every lookup
+ * answer 'no_structure', which blocked every in-charge removal.
+ */
+const STOP_STRUCTURE = { ...STRUCTURE, fee_mode: 'stop_wise' };
+const STOP_SCHEDULE = [
+  { term_no: 1, term_label: 'Term 1', due_date: '2026-08-31', share_percent: 100 },
+];
+
+function makeStopSvc(cfg: {
+  structures?: Result;
+  schedule?: Result;
+  staff?: Result;
+  rate?: Result;
+}) {
+  const svc = {
+    from: (table: string) => {
+      if (table === 'tms_fee_structure')
+        return makeBuilder(cfg.structures ?? { data: [STOP_STRUCTURE], error: null });
+      if (table === 'tms_fee_structure_stop_term')
+        return makeBuilder(cfg.schedule ?? { data: STOP_SCHEDULE, error: null });
+      if (table === 'staff')
+        return makeBuilder(cfg.staff ?? { data: { transport_stop_id: 'stop-1' }, error: null });
+      if (table === 'tms_fee_structure_stop_rate')
+        return makeBuilder(cfg.rate ?? { data: { annual_amount: 5500 }, error: null });
+      return makeBuilder({ data: [], error: null });
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return svc as any;
+}
+
+describe('resolveStaffBillPlan — stop_wise', () => {
+  beforeEach(() => { vi.mocked(resolveApplicablePeople).mockReset(); });
+
+  it('prices the bill from the staffer OWN boarding stop', async () => {
+    personMatches();
+    expect(await resolveStaffBillPlan(makeStopSvc({}), OPTS)).toEqual({
+      billable: true,
+      feeStructureId: 'fs-1',
+      terms: [{ term_no: 1, amount: 5500, due_date: '2026-08-31' }],
+    });
+  });
+
+  it('never falls back to the flat term table for a stop_wise structure', async () => {
+    // The regression guard: a stop_wise structure legitimately has zero rows in
+    // tms_fee_structure_term, and that must not read as "not billable".
+    personMatches();
+    const plan = await resolveStaffBillPlan(makeStopSvc({}), OPTS);
+    expect(plan.billable).toBe(true);
+  });
+
+  it('splits the annual across a multi-instalment schedule', async () => {
+    personMatches();
+    const svc = makeStopSvc({
+      schedule: { data: [
+        { term_no: 1, term_label: 'T1', due_date: '2026-08-31', share_percent: 60 },
+        { term_no: 2, term_label: 'T2', due_date: '2026-12-31', share_percent: 40 },
+      ], error: null },
+    });
+    const plan = await resolveStaffBillPlan(svc, OPTS);
+    expect(plan).toEqual({
+      billable: true,
+      feeStructureId: 'fs-1',
+      terms: [
+        { term_no: 1, amount: 3300, due_date: '2026-08-31' },
+        { term_no: 2, amount: 2200, due_date: '2026-12-31' },
+      ],
+    });
+  });
+
+  it('instalments always re-add to the annual amount exactly', async () => {
+    personMatches();
+    const svc = makeStopSvc({
+      rate: { data: { annual_amount: 5000 }, error: null },
+      schedule: { data: [
+        { term_no: 1, term_label: null, due_date: '2026-08-31', share_percent: 33.33 },
+        { term_no: 2, term_label: null, due_date: '2026-11-30', share_percent: 33.33 },
+        { term_no: 3, term_label: null, due_date: '2027-02-28', share_percent: 33.34 },
+      ], error: null },
+    });
+    const plan = await resolveStaffBillPlan(svc, OPTS);
+    if (!plan.billable) throw new Error('expected billable');
+    expect(plan.terms.reduce((a, t) => a + t.amount, 0)).toBe(5000);
+  });
+
+  it('reports no_stop when the staffer has no boarding stop', async () => {
+    personMatches();
+    const svc = makeStopSvc({ staff: { data: { transport_stop_id: null }, error: null } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'no_stop' });
+  });
+
+  it('reports no_stop_rate when their stop is not on the rate sheet', async () => {
+    personMatches();
+    const svc = makeStopSvc({ rate: { data: null, error: null } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'no_stop_rate' });
+  });
+
+  it('bills a configured free stop rather than calling it unpriced', async () => {
+    // annual_amount 0 is a real decision; only a MISSING row means unpriced.
+    personMatches();
+    const svc = makeStopSvc({ rate: { data: { annual_amount: 0 }, error: null } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({
+      billable: true,
+      feeStructureId: 'fs-1',
+      terms: [{ term_no: 1, amount: 0, due_date: '2026-08-31' }],
+    });
+  });
+
+  it('reports no_structure when the stop_wise structure has no instalment schedule', async () => {
+    // A structure-wide gap, not a per-person one — and it must not throw.
+    personMatches();
+    const svc = makeStopSvc({ schedule: { data: [], error: null } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'no_structure' });
+  });
+
+  it('reports error when the stop rate lookup fails', async () => {
+    personMatches();
+    const svc = makeStopSvc({ rate: { data: null, error: { message: 'boom' } } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'error' });
+  });
+
+  it('reports error when the staff record lookup fails', async () => {
+    personMatches();
+    const svc = makeStopSvc({ staff: { data: null, error: { message: 'boom' } } });
+    expect(await resolveStaffBillPlan(svc, OPTS)).toEqual({ billable: false, reason: 'error' });
   });
 });
