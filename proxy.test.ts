@@ -11,10 +11,16 @@ describe('proxy cron allowlist', () => {
     expect(SRC).toContain("'/api/cron/auto-generate-bills'");
   });
 
+  it('allowlists the in-charge attendance cron by EXACT path', () => {
+    // Deliberately woken: enforcement is additionally gated by the
+    // inchargeEnforcementMode setting, which ships as 'shadow'.
+    expect(SRC).toContain("'/api/cron/incharge-attendance'");
+  });
+
   it('does NOT allowlist the whole /api/cron/ prefix', () => {
-    // A prefix allowlist would also un-block /api/cron/incharge-attendance,
-    // which removes bus in-charges from their role and bills them. Waking that
-    // job must be a deliberate, separate decision.
+    // A prefix allowlist would un-block every future cron route by accident,
+    // including any that removes roles or bills people. Each one must be an
+    // exact, deliberate entry.
     expect(SRC).not.toContain("'/api/cron/'");
   });
 });

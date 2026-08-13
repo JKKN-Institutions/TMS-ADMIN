@@ -1,12 +1,22 @@
 /**
  * Daily bus in-charge attendance enforcement loop.
  *
- * Scheduled from vercel.json at "30 15 * * *" UTC = 21:00 IST, after both the
- * onward and return legs have closed. Vercel sends `Authorization: Bearer $CRON_SECRET`.
+ * Scheduled from pg_cron via pg_net at "30 15 * * *" UTC = 21:00 IST, after
+ * both the onward and return legs have closed, carrying
+ * `Authorization: Bearer $CRON_SECRET`. (Vercel crons have never fired on this
+ * project; see the migration for why pg_cron owns the schedule.)
  *
- * For each ACTIVE in-charge assignment: if the route had booked riders that day
- * and nobody marked attendance, record a strike. First strike warns; the second
- * CONSECUTIVE strike revokes the assignment and generates a staff fee bill.
+ * For each ACTIVE in-charge assignment: if the route had booked riders on a
+ * weekday and nobody marked attendance, record a strike. The first two
+ * consecutive strikes warn; the third revokes the assignment and generates a
+ * staff fee bill.
+ *
+ * Two gates stand in front of any punitive action:
+ *   - `inchargeEnforcementMode` (admin_settings). Ships as 'shadow', which
+ *     evaluates and PERSISTS strikes but notifies, removes and bills nobody.
+ *   - billability. If no staff fee structure with terms applies to the
+ *     staffer, the removal is blocked rather than performed: nobody loses
+ *     their fee exemption without the bill that justifies it.
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -15,12 +25,15 @@ import { loadBookedRoster } from '@/lib/booking/roster';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 import { logActivityFromHeaders } from '@/lib/activity/log';
-import { generateStaffBill } from '@/lib/fees/staff-bill';
+import { generateStaffBill, resolveStaffBillPlan } from '@/lib/fees/staff-bill';
+import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import {
   evaluateDay,
+  isServiceWeekday,
   warningCopy,
   removalCopy,
   performRemoval,
+  REMOVAL_THRESHOLD,
   type StrikeState,
   type BillingStatus,
 } from '@/lib/boarding/incharge-attendance';
@@ -40,12 +53,33 @@ export async function GET(request: NextRequest) {
 
   const svc = createServiceRoleClient();
   const date = istToday();
+
+  const cfg = await loadSchedulingConfig(svc);
+  const mode = cfg.inchargeEnforcementMode;
+  // `act` is the single authority on whether anything punitive happens.
+  // `shadow` still evaluates and persists strikes — that is the whole point,
+  // it builds the admin board out of real data — it only withholds
+  // notifications, revokes and bills. `dryRun` persists nothing either way.
+  const act = mode === 'enforce' && !dryRun;
+
+  if (mode === 'off') {
+    return NextResponse.json({ success: true, data: { date, mode, skipped: 'mode_off' } });
+  }
+  // Weekends are not service days, so the whole run short-circuits before a
+  // single per-assignment query is issued.
+  if (!isServiceWeekday(date)) {
+    return NextResponse.json({ success: true, data: { date, mode, skipped: 'not_a_service_day' } });
+  }
+
   const summary = {
     date,
+    mode,
     evaluated: 0,
     skipped: 0,
     warned: 0,
     removed: 0,
+    /** Reached the threshold but could not be acted on (unbillable / unreachable). */
+    blocked: 0,
     billed: 0,
     errors: 0,
     // Which staffer failed and why. A bare error COUNT is undiagnosable in a
@@ -58,6 +92,7 @@ export async function GET(request: NextRequest) {
       consecutiveMisses: number;
       missedDates: string[];
       wouldBill: boolean;
+      blockedReason?: string;
     }>,
   };
 
@@ -119,6 +154,8 @@ export async function GET(request: NextRequest) {
         hasBookedRiders: roster.riders.length > 0,
         attendanceMarked,
         assignedOnDate: a.assigned_at ? istToday(new Date(a.assigned_at)) === date : false,
+        // The whole run already short-circuited on non-service days.
+        isServiceWeekday: true,
       });
 
       if (outcome.action === 'skip') {
@@ -135,16 +172,6 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      if (dryRun) {
-        summary.plan.push({
-          staffEmail: a.staff_email,
-          action: outcome.action,
-          consecutiveMisses: outcome.state.consecutiveMisses,
-          missedDates: outcome.state.missedDates,
-          wouldBill: outcome.action === 'remove',
-        });
-      }
-
       // Resolve the staffer's profile once — needed for notifications.
       const { data: profile, error: profErr } = await svc
         .from('profiles')
@@ -157,61 +184,95 @@ export async function GET(request: NextRequest) {
       const reachable = Boolean(profileId && actorId);
 
       let billingStatus: BillingStatus | null = null;
+      let blockedReason: string | null = null;
 
-      if (outcome.action === 'remove' && !reachable) {
-        // Never revoke a role or bill a person we cannot even notify. The
-        // strike is still persisted below, so this resurfaces on every run
-        // until a human fixes the missing profiles row.
-        summary.errors++;
-        summary.failures.push({
+      if (outcome.action === 'remove') {
+        // Resolve the staff row and PROBE billability before touching the role.
+        const { data: staffRow } = await svc
+          .from('staff')
+          .select('id')
+          .ilike('email', a.staff_email)
+          .maybeSingle();
+
+        const plan =
+          staffRow?.id && currentYear?.id
+            ? await resolveStaffBillPlan(svc, {
+                staffId: staffRow.id as string,
+                transportYearId: currentYear.id as string,
+              })
+            : ({ billable: false, reason: 'no_structure' } as const);
+
+        if (!reachable) {
+          // Never revoke a role or bill a person we cannot even notify. The
+          // strike still persists below, so this resurfaces on every run until
+          // a human fixes the missing profiles row.
+          blockedReason = 'no reachable profiles row';
+          summary.errors++;
+          summary.failures.push({
+            staffEmail: a.staff_email,
+            message: 'no reachable profiles row — removal and billing skipped',
+          });
+        } else if (!plan.billable) {
+          // No bill can be raised, so no role is taken away. Nobody loses their
+          // fee exemption without the bill that justifies it; the transport
+          // office sees this on the admin board and configures the fee terms.
+          blockedReason =
+            plan.reason === 'error' ? 'billing lookup failed' : 'no staff fee structure with terms';
+          billingStatus = plan.reason;
+          summary.blocked++;
+        } else if (!act) {
+          // shadow or dryRun: count what WOULD happen, change nothing.
+          summary.removed++;
+        } else {
+          // performRemoval guarantees revoke-then-bill, and that a billing
+          // failure cannot undo the revoke. See lib/boarding/incharge-attendance.ts.
+          const removal = await performRemoval({
+            revoke: async () => {
+              await svc
+                .from('tms_staff_route_assignment')
+                .update({ is_active: false })
+                .eq('id', a.id);
+              await maybeRevokeBoardingRole(svc, a.id);
+            },
+            bill: async () => {
+              const res = await generateStaffBill(svc, {
+                staffId: staffRow!.id as string,
+                transportYearId: currentYear!.id as string,
+              });
+              return res.billingStatus;
+            },
+          });
+
+          billingStatus = removal.billingStatus;
+          if (billingStatus === 'billed') summary.billed++;
+          summary.removed++;
+          await logActivityFromHeaders(request, {
+            module: 'staff-route-assignments',
+            action: 'unassign',
+            entityId: a.id,
+            metadata: {
+              reason: 'attendance_auto_removal',
+              missed_dates: outcome.state.missedDates,
+              billing_status: billingStatus,
+            },
+          });
+        }
+      }
+
+      if (dryRun) {
+        summary.plan.push({
           staffEmail: a.staff_email,
-          message: 'no reachable profiles row — removal and billing skipped',
-        });
-      } else if (outcome.action === 'remove' && dryRun) {
-        // Count what WOULD happen; revoke nothing, bill nothing.
-        summary.removed++;
-      } else if (outcome.action === 'remove') {
-        // performRemoval guarantees revoke-then-bill, and that a billing
-        // failure cannot undo the revoke. See lib/boarding/incharge-attendance.ts.
-        const removal = await performRemoval({
-          revoke: async () => {
-            await svc
-              .from('tms_staff_route_assignment')
-              .update({ is_active: false })
-              .eq('id', a.id);
-            await maybeRevokeBoardingRole(svc, a.id);
-          },
-          bill: async () => {
-            const { data: staffRow } = await svc
-              .from('staff')
-              .select('id')
-              .ilike('email', a.staff_email)
-              .maybeSingle();
-            if (!staffRow?.id || !currentYear?.id) return 'no_structure';
-            const res = await generateStaffBill(svc, {
-              staffId: staffRow.id,
-              transportYearId: currentYear.id,
-            });
-            return res.billingStatus;
-          },
-        });
-
-        billingStatus = removal.billingStatus;
-        if (billingStatus === 'billed') summary.billed++;
-        summary.removed++;
-        await logActivityFromHeaders(request, {
-          module: 'staff-route-assignments',
-          action: 'unassign',
-          entityId: a.id,
-          metadata: {
-            reason: 'attendance_auto_removal',
-            missed_dates: outcome.state.missedDates,
-            billing_status: billingStatus,
-          },
+          action: outcome.action,
+          consecutiveMisses: outcome.state.consecutiveMisses,
+          missedDates: outcome.state.missedDates,
+          wouldBill: outcome.action === 'remove' && !blockedReason,
+          ...(blockedReason ? { blockedReason } : {}),
         });
       }
 
       // Persist the strike state (upsert on the unique assignment_id).
+      // This RUNS in shadow mode — recording what would have happened is the
+      // entire purpose of shadow. Only dryRun writes nothing.
       if (!dryRun) {
         await svc.from('tms_incharge_attendance_strike').upsert(
           {
@@ -227,7 +288,13 @@ export async function GET(request: NextRequest) {
                 : outcome.action === 'reset'
                   ? null
                   : strike?.warned_at ?? null,
-            removed_at: outcome.action === 'remove' ? new Date().toISOString() : strike?.removed_at ?? null,
+            // Only a removal that ACTUALLY happened is recorded as one. A
+            // blocked or shadowed removal leaves this null, which is what
+            // makes the admin board's "pending removal" status derivable.
+            removed_at:
+              outcome.action === 'remove' && act && !blockedReason
+                ? new Date().toISOString()
+                : strike?.removed_at ?? null,
             billing_status: billingStatus ?? strike?.billing_status ?? null,
             updated_at: new Date().toISOString(),
           },
@@ -238,10 +305,12 @@ export async function GET(request: NextRequest) {
       if (outcome.action === 'warn') {
         // Counted whether or not delivery succeeds — the strike DID advance.
         summary.warned++;
-        if (dryRun) {
-          // no delivery in a dry run
+        if (!act) {
+          // shadow / dryRun: the strike is recorded, but nobody is told.
         } else if (reachable && profileId && actorId) {
-          const copy = warningCopy(outcome.state.missedDates);
+          // The last warning before the threshold escalates its copy.
+          const isFinal = outcome.state.consecutiveMisses >= REMOVAL_THRESHOLD - 1;
+          const copy = warningCopy(outcome.state.missedDates, isFinal);
           await notifyProfile(svc, {
             profileId,
             actorId,
@@ -257,7 +326,8 @@ export async function GET(request: NextRequest) {
         }
       } else if (
         outcome.action === 'remove' &&
-        !dryRun &&
+        act &&
+        !blockedReason &&
         reachable &&
         profileId &&
         actorId &&

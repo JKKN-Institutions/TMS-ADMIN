@@ -11,6 +11,7 @@ interface SchedulingSettingsData {
   bookingDaysAhead: number;
   autoNotifyPassengers: boolean;
   autoGenerateBills: boolean;
+  inchargeEnforcementMode: 'off' | 'shadow' | 'enforce';
 }
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -33,6 +34,7 @@ function toBlobShape(cfg: ReturnType<typeof parseSchedulingConfig>): SchedulingS
     bookingDaysAhead: cfg.daysAhead,
     autoNotifyPassengers: cfg.autoNotifyPassengers,
     autoGenerateBills: cfg.autoGenerateBills,
+    inchargeEnforcementMode: cfg.inchargeEnforcementMode,
   };
 }
 
@@ -44,6 +46,10 @@ function validate(settings: Record<string, unknown>): string | null {
   const days = settings.bookingDaysAhead;
   if (typeof days !== 'number' || days < 1 || days > 14) {
     return 'Booking days available must be between 1 and 14';
+  }
+  const mode = settings.inchargeEnforcementMode;
+  if (mode !== undefined && !['off', 'shadow', 'enforce'].includes(mode as string)) {
+    return 'Enforcement mode must be off, shadow, or enforce';
   }
   return null;
 }

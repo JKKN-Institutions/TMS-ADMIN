@@ -66,7 +66,11 @@ export default function BoardingAttendancePage() {
       const res = await fetch('/api/boarding/incharge-strike', { credentials: 'same-origin' });
       if (!res.ok) return null;
       const json = await res.json();
-      return json.data as { consecutiveMisses: number; missedDates: string[] } | null;
+      return json.data as {
+        consecutiveMisses: number;
+        missedDates: string[];
+        isFinalWarning: boolean;
+      } | null;
     },
   });
 
@@ -156,10 +160,20 @@ export default function BoardingAttendancePage() {
       )}
 
       {strike && (
-        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <strong>Attendance not marked on {strike.missedDates.join(', ')}.</strong>{' '}
-          Mark attendance on your next travel day — missing 2 travel days in a row removes
-          your bus in-charge role and transport fees will apply.
+        <div
+          className={
+            strike.isFinalWarning
+              ? 'mb-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-200'
+              : 'mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200'
+          }
+        >
+          <strong>
+            {strike.isFinalWarning ? 'Final warning — ' : ''}
+            Attendance not marked on {strike.missedDates.join(', ')}.
+          </strong>{' '}
+          {strike.isFinalWarning
+            ? 'If attendance is not marked on your next travel day, your bus in-charge role will be removed and a transport fee bill will be generated for you.'
+            : 'Mark attendance on your next travel day to clear this — missing 3 travel days in a row removes your bus in-charge role and transport fees will apply.'}
         </div>
       )}
 
