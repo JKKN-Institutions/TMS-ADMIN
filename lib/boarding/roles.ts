@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { emailIlikePattern } from '@/lib/identity/email-match';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
@@ -7,7 +8,7 @@ type Svc = ReturnType<typeof createServiceRoleClient>;
 // /boarding gate + client can() pass. Best-effort — never fails the assignment.
 export async function grantBoardingRole(supabase: Svc, staffEmail: string, assignedBy: string) {
   try {
-    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', staffEmail).maybeSingle();
+    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', emailIlikePattern(staffEmail)).maybeSingle();
     const profileId = (prof as { id: string } | null)?.id;
     if (!profileId) return;
     const { data: role } = await supabase.from('custom_roles').select('id').eq('role_key', 'transport_boarding').maybeSingle();
@@ -30,7 +31,7 @@ export async function maybeRevokeBoardingRole(supabase: Svc, assignmentId: strin
     const { data: remaining } = await supabase
       .from('tms_staff_route_assignment').select('id').eq('staff_email', email).eq('is_active', true).limit(1).maybeSingle();
     if (remaining) return;
-    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', email).maybeSingle();
+    const { data: prof } = await supabase.from('profiles').select('id').ilike('email', emailIlikePattern(email)).maybeSingle();
     const profileId = (prof as { id: string } | null)?.id;
     if (!profileId) return;
     const { data: role } = await supabase.from('custom_roles').select('id').eq('role_key', 'transport_boarding').maybeSingle();

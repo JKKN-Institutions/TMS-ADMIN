@@ -58,7 +58,13 @@ export type StrikeOutcome =
 
 export function evaluateDay(prev: StrikeState, facts: DayFacts): StrikeOutcome {
   // Idempotency first: a re-fired cron must change nothing.
-  if (prev.lastEvaluatedDate === facts.date) {
+  //
+  // The comparison is <=, not ==, because backfill can replay historical days:
+  // dates must only ever move FORWARD. A `==` check would let an out-of-order
+  // or repeated backfill re-count a day that already advanced the streak, and
+  // double-counting here removes and bills someone a day early.
+  // ISO 'YYYY-MM-DD' sorts correctly as a plain string.
+  if (prev.lastEvaluatedDate !== null && facts.date <= prev.lastEvaluatedDate) {
     return { action: 'skip', reason: 'already_evaluated' };
   }
   if (facts.assignedOnDate) return { action: 'skip', reason: 'grace_day' };
