@@ -32,6 +32,7 @@ import {
 } from '@/lib/fees/staff-bill';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { emailIlikePattern } from '@/lib/identity/email-match';
+import { resolveStaffId } from '@/lib/identity/staff-lookup';
 import {
   evaluateDay,
   isServiceWeekday,
@@ -74,8 +75,14 @@ export async function GET(request: NextRequest) {
   // `silent=1` records the strike but sends no notification and takes no
   // punitive action — used to prime a backfilled streak without warning people
   // about days they can no longer do anything about.
+  //
+  // `quiet=1` is the OTHER half of that idea and must not be confused with it:
+  // it acts in full — revokes and bills — but sends no notification. It exists
+  // for a retroactive catch-up, where replaying three past days in one minute
+  // would otherwise fire three messages about days the staffer cannot change.
   const dateParam = request.nextUrl.searchParams.get('date');
   const silent = request.nextUrl.searchParams.get('silent') === '1';
+  const quiet = request.nextUrl.searchParams.get('quiet') === '1';
 
   const svc = createServiceRoleClient();
   const today = istToday();
@@ -99,6 +106,11 @@ export async function GET(request: NextRequest) {
   // it builds the admin board out of real data — it only withholds
   // notifications, revokes and bills. `dryRun` persists nothing either way.
   const act = mode === 'enforce' && !dryRun && !silent;
+  // Notifying is a STRICTLY narrower permission than acting: you can act
+  // without telling anyone (`quiet`), but you can never tell someone their role
+  // was removed when it was not. Deriving it from `act` makes that impossible
+  // to get wrong — a message can only follow a change that really happened.
+  const notify = act && !quiet;
 
   if (mode === 'off') {
     return NextResponse.json({ success: true, data: { date, mode, skipped: 'mode_off' } });
@@ -114,6 +126,7 @@ export async function GET(request: NextRequest) {
     mode,
     backfill: dateParam !== null,
     silent,
+    quiet,
     evaluated: 0,
     skipped: 0,
     warned: 0,
@@ -228,16 +241,20 @@ export async function GET(request: NextRequest) {
 
       if (outcome.action === 'remove') {
         // Resolve the staff row and PROBE billability before touching the role.
-        const { data: staffRow } = await svc
-          .from('staff')
-          .select('id')
-          .ilike('email', emailIlikePattern(a.staff_email))
-          .maybeSingle();
+        //
+        // Matching `staff.email` alone lost 34 of 114 in-charges, whose
+        // assignment carries their institutional address instead: the probe
+        // returned 'no_structure' and quietly spared them. resolveStaffId tries
+        // profile_id first, then both email columns.
+        const staffId = await resolveStaffId(svc, {
+          email: a.staff_email,
+          profileId,
+        });
 
         const plan =
-          staffRow?.id && currentYear?.id
+          staffId && currentYear?.id
             ? await resolveStaffBillPlan(svc, {
-                staffId: staffRow.id as string,
+                staffId,
                 transportYearId: currentYear.id as string,
               })
             : ({ billable: false, reason: 'no_structure' } as const);
@@ -275,7 +292,7 @@ export async function GET(request: NextRequest) {
             },
             bill: async () => {
               const res = await generateStaffBill(svc, {
-                staffId: staffRow!.id as string,
+                staffId: staffId!,
                 transportYearId: currentYear!.id as string,
               });
               return res.billingStatus;
@@ -344,8 +361,8 @@ export async function GET(request: NextRequest) {
       if (outcome.action === 'warn') {
         // Counted whether or not delivery succeeds — the strike DID advance.
         summary.warned++;
-        if (!act) {
-          // shadow / dryRun: the strike is recorded, but nobody is told.
+        if (!notify) {
+          // shadow / dryRun / quiet: the strike is recorded, but nobody is told.
         } else if (reachable && profileId && actorId) {
           // The last warning before the threshold escalates its copy.
           const isFinal = outcome.state.consecutiveMisses >= REMOVAL_THRESHOLD - 1;
@@ -365,7 +382,7 @@ export async function GET(request: NextRequest) {
         }
       } else if (
         outcome.action === 'remove' &&
-        act &&
+        notify &&
         !blockedReason &&
         reachable &&
         profileId &&
