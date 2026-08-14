@@ -32,6 +32,7 @@ import {
 } from '@/lib/fees/staff-bill';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { emailIlikePattern } from '@/lib/identity/email-match';
+import { resolveStaffId } from '@/lib/identity/staff-lookup';
 import {
   evaluateDay,
   isServiceWeekday,
@@ -240,16 +241,20 @@ export async function GET(request: NextRequest) {
 
       if (outcome.action === 'remove') {
         // Resolve the staff row and PROBE billability before touching the role.
-        const { data: staffRow } = await svc
-          .from('staff')
-          .select('id')
-          .ilike('email', emailIlikePattern(a.staff_email))
-          .maybeSingle();
+        //
+        // Matching `staff.email` alone lost 34 of 114 in-charges, whose
+        // assignment carries their institutional address instead: the probe
+        // returned 'no_structure' and quietly spared them. resolveStaffId tries
+        // profile_id first, then both email columns.
+        const staffId = await resolveStaffId(svc, {
+          email: a.staff_email,
+          profileId,
+        });
 
         const plan =
-          staffRow?.id && currentYear?.id
+          staffId && currentYear?.id
             ? await resolveStaffBillPlan(svc, {
-                staffId: staffRow.id as string,
+                staffId,
                 transportYearId: currentYear.id as string,
               })
             : ({ billable: false, reason: 'no_structure' } as const);
@@ -287,7 +292,7 @@ export async function GET(request: NextRequest) {
             },
             bill: async () => {
               const res = await generateStaffBill(svc, {
-                staffId: staffRow!.id as string,
+                staffId: staffId!,
                 transportYearId: currentYear!.id as string,
               });
               return res.billingStatus;
