@@ -15,6 +15,13 @@ export interface SchedulingConfig {
   enableBookingTimeWindow: boolean;
   cutoffHour: number;         // 0..23 IST (from stored bookingWindowEndHour)
   daysAhead: number;          // 1..10 WORKING days (from stored bookingDaysAhead)
+  /**
+   * Opt-in: also let learners book TODAY. Ships OFF so the live window is
+   * unchanged until an admin turns it on.
+   */
+  allowSameDayBooking: boolean;
+  /** Deadline hour (IST) on the travel date itself for same-day bookings. */
+  sameDayCutoffHour: number;  // 0..23 IST (from stored sameDayBookingCutoffHour)
   autoNotifyPassengers: boolean;
   /** Master switch for the automatic bill generation sweep. Opt-in. */
   autoGenerateBills: boolean;
@@ -26,6 +33,8 @@ export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
   enableBookingTimeWindow: true,
   cutoffHour: 20,
   daysAhead: 1,
+  allowSameDayBooking: false,
+  sameDayCutoffHour: 6,
   autoNotifyPassengers: true,
   autoGenerateBills: false,
   inchargeEnforcementMode: 'shadow',
@@ -57,6 +66,8 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
     enableBookingTimeWindow: boolOr(b.enableBookingTimeWindow, DEFAULT_SCHEDULING_CONFIG.enableBookingTimeWindow),
     cutoffHour: clampInt(b.bookingWindowEndHour, 0, 23, DEFAULT_SCHEDULING_CONFIG.cutoffHour),
     daysAhead: clampInt(b.bookingDaysAhead, 1, 10, DEFAULT_SCHEDULING_CONFIG.daysAhead),
+    allowSameDayBooking: boolOr(b.allowSameDayBooking, DEFAULT_SCHEDULING_CONFIG.allowSameDayBooking),
+    sameDayCutoffHour: clampInt(b.sameDayBookingCutoffHour, 0, 23, DEFAULT_SCHEDULING_CONFIG.sameDayCutoffHour),
     autoNotifyPassengers: boolOr(b.autoNotifyPassengers, DEFAULT_SCHEDULING_CONFIG.autoNotifyPassengers),
     autoGenerateBills: boolOr(b.autoGenerateBills, DEFAULT_SCHEDULING_CONFIG.autoGenerateBills),
     inchargeEnforcementMode: enforcementModeOr(
@@ -73,11 +84,22 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
  * through the whole prior day. The horizon / Sunday / service-calendar gates are
  * unaffected: daysAhead — now a count of WORKING days — is always passed through
  * unchanged.
+ *
+ * The same 24 sentinel applies to the same-day deadline: with the daily time window
+ * off, today stays bookable through the end of the day rather than being clipped at
+ * an hour the admin has explicitly disabled.
  */
-export function toWindowOpts(cfg: SchedulingConfig): { cutoffHour: number; daysAhead: number } {
+export function toWindowOpts(cfg: SchedulingConfig): {
+  cutoffHour: number;
+  daysAhead: number;
+  allowSameDay: boolean;
+  sameDayCutoffHour: number;
+} {
   return {
     cutoffHour: cfg.enableBookingTimeWindow ? cfg.cutoffHour : 24,
     daysAhead: cfg.daysAhead,
+    allowSameDay: cfg.allowSameDayBooking,
+    sameDayCutoffHour: cfg.enableBookingTimeWindow ? cfg.sameDayCutoffHour : 24,
   };
 }
 

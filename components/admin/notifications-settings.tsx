@@ -9,6 +9,8 @@ interface SchedulingBlob {
   enableBookingTimeWindow: boolean;
   bookingWindowEndHour: number;
   bookingDaysAhead: number;
+  allowSameDayBooking: boolean;
+  sameDayBookingCutoffHour: number;
   autoNotifyPassengers: boolean;
 }
 

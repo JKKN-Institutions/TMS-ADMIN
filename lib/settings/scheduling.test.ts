@@ -18,6 +18,8 @@ describe('parseSchedulingConfig', () => {
       enableBookingTimeWindow: false,
       cutoffHour: 19,
       daysAhead: 3,
+      allowSameDayBooking: false,
+      sameDayCutoffHour: 6,
       autoNotifyPassengers: false,
       autoGenerateBills: false,
       inchargeEnforcementMode: 'shadow',
@@ -103,24 +105,81 @@ describe('autoGenerateBills', () => {
   });
 });
 
+/** A full config with the given overrides — keeps these cases readable. */
+const cfgWith = (over: Partial<typeof DEFAULT_SCHEDULING_CONFIG> = {}) => ({
+  ...DEFAULT_SCHEDULING_CONFIG,
+  ...over,
+});
+
 describe('toWindowOpts', () => {
   it('enabled: passes cutoffHour and daysAhead through unchanged', () => {
-    const cfg = { enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const };
-    expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 18, daysAhead: 4 });
+    expect(toWindowOpts(cfgWith({ enableBookingTimeWindow: true, cutoffHour: 18, daysAhead: 4 })))
+      .toEqual({ cutoffHour: 18, daysAhead: 4, allowSameDay: false, sameDayCutoffHour: 6 });
   });
 
   it('disabled: cutoffHour becomes the 24 sentinel, but daysAhead is STILL passed through unchanged', () => {
-    const cfg = { enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4, autoNotifyPassengers: true, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const };
-    expect(toWindowOpts(cfg)).toEqual({ cutoffHour: 24, daysAhead: 4 });
+    expect(toWindowOpts(cfgWith({ enableBookingTimeWindow: false, cutoffHour: 18, daysAhead: 4 })))
+      .toEqual({ cutoffHour: 24, daysAhead: 4, allowSameDay: false, sameDayCutoffHour: 24 });
   });
 
   it('disabling the time window never widens or narrows the horizon, whatever daysAhead is set to', () => {
     for (const daysAhead of [1, 5, 10]) {
-      const enabled = toWindowOpts({ enableBookingTimeWindow: true, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const });
-      const disabled = toWindowOpts({ enableBookingTimeWindow: false, cutoffHour: 20, daysAhead, autoNotifyPassengers: false, autoGenerateBills: false, inchargeEnforcementMode: 'shadow' as const });
+      const enabled = toWindowOpts(cfgWith({ enableBookingTimeWindow: true, daysAhead }));
+      const disabled = toWindowOpts(cfgWith({ enableBookingTimeWindow: false, daysAhead }));
       expect(disabled.daysAhead).toBe(enabled.daysAhead);
       expect(disabled.daysAhead).toBe(daysAhead);
     }
+  });
+
+  it('carries the same-day flag and hour through when enabled', () => {
+    expect(toWindowOpts(cfgWith({ allowSameDayBooking: true, sameDayCutoffHour: 11 })))
+      .toMatchObject({ allowSameDay: true, sameDayCutoffHour: 11 });
+  });
+
+  it('applies the 24 sentinel to the same-day hour when the daily window is off', () => {
+    // The admin disabled deadlines entirely — today must not still be clipped
+    // at an hour they turned off.
+    expect(toWindowOpts(cfgWith({ allowSameDayBooking: true, sameDayCutoffHour: 6, enableBookingTimeWindow: false })))
+      .toMatchObject({ allowSameDay: true, sameDayCutoffHour: 24 });
+  });
+});
+
+describe('allowSameDayBooking', () => {
+  it('defaults to false — same-day booking is opt-in', () => {
+    expect(DEFAULT_SCHEDULING_CONFIG.allowSameDayBooking).toBe(false);
+    expect(parseSchedulingConfig({}).allowSameDayBooking).toBe(false);
+    expect(parseSchedulingConfig(null).allowSameDayBooking).toBe(false);
+  });
+
+  it('is false for the LIVE blob shape, which predates the key', () => {
+    const cfg = parseSchedulingConfig({
+      bookingDaysAhead: 1,
+      autoNotifyPassengers: true,
+      bookingWindowEndHour: 19,
+      enableBookingTimeWindow: true,
+    });
+    expect(cfg.allowSameDayBooking).toBe(false);
+    expect(cfg.sameDayCutoffHour).toBe(6);
+  });
+
+  it('reads a stored true', () => {
+    expect(parseSchedulingConfig({ allowSameDayBooking: true }).allowSameDayBooking).toBe(true);
+  });
+
+  it('ignores a non-boolean rather than switching the feature on', () => {
+    expect(parseSchedulingConfig({ allowSameDayBooking: 'yes' }).allowSameDayBooking).toBe(false);
+    expect(parseSchedulingConfig({ allowSameDayBooking: 1 }).allowSameDayBooking).toBe(false);
+  });
+
+  it('clamps the same-day cutoff hour to 0..23', () => {
+    expect(parseSchedulingConfig({ sameDayBookingCutoffHour: 99 }).sameDayCutoffHour).toBe(23);
+    expect(parseSchedulingConfig({ sameDayBookingCutoffHour: -1 }).sameDayCutoffHour).toBe(0);
+    expect(parseSchedulingConfig({ sameDayBookingCutoffHour: 11 }).sameDayCutoffHour).toBe(11);
+  });
+
+  it('falls back to 6 for a malformed same-day cutoff hour', () => {
+    expect(parseSchedulingConfig({ sameDayBookingCutoffHour: 'dawn' }).sameDayCutoffHour).toBe(6);
+    expect(parseSchedulingConfig({ sameDayBookingCutoffHour: NaN }).sameDayCutoffHour).toBe(6);
   });
 });
 

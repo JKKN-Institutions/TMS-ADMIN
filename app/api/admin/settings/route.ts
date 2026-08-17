@@ -9,6 +9,8 @@ interface SchedulingSettingsData {
   enableBookingTimeWindow: boolean;
   bookingWindowEndHour: number;
   bookingDaysAhead: number;
+  allowSameDayBooking: boolean;
+  sameDayBookingCutoffHour: number;
   autoNotifyPassengers: boolean;
   autoGenerateBills: boolean;
   inchargeEnforcementMode: 'off' | 'shadow' | 'enforce';
@@ -32,6 +34,8 @@ function toBlobShape(cfg: ReturnType<typeof parseSchedulingConfig>): SchedulingS
     enableBookingTimeWindow: cfg.enableBookingTimeWindow,
     bookingWindowEndHour: cfg.cutoffHour,
     bookingDaysAhead: cfg.daysAhead,
+    allowSameDayBooking: cfg.allowSameDayBooking,
+    sameDayBookingCutoffHour: cfg.sameDayCutoffHour,
     autoNotifyPassengers: cfg.autoNotifyPassengers,
     autoGenerateBills: cfg.autoGenerateBills,
     inchargeEnforcementMode: cfg.inchargeEnforcementMode,
@@ -50,6 +54,16 @@ function validate(settings: Record<string, unknown>): string | null {
   const mode = settings.inchargeEnforcementMode;
   if (mode !== undefined && !['off', 'shadow', 'enforce'].includes(mode as string)) {
     return 'Enforcement mode must be off, shadow, or enforce';
+  }
+  // Optional — a client that predates same-day booking simply omits these, and
+  // parseSchedulingConfig fills the safe defaults (feature off).
+  const sameDayHour = settings.sameDayBookingCutoffHour;
+  if (sameDayHour !== undefined && (typeof sameDayHour !== 'number' || sameDayHour < 0 || sameDayHour > 23)) {
+    return 'Same-day booking cutoff hour must be between 0 and 23';
+  }
+  const sameDay = settings.allowSameDayBooking;
+  if (sameDay !== undefined && typeof sameDay !== 'boolean') {
+    return 'Allow same-day booking must be true or false';
   }
   return null;
 }
