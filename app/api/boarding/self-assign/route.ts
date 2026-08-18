@@ -62,36 +62,57 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
       .eq('is_current', true)
       .maybeSingle();
 
-    if (currentYear?.id) {
-      const staffId = await resolveStaffId(svc, { email, profileId: auth.userId });
-      if (staffId) {
-        const billState = await loadStaffBillState(svc, {
-          personId: staffId,
-          transportYearId: currentYear.id as string,
-        });
-        const { data: probation } = await svc
-          .from('tms_incharge_probation')
-          .select('id')
-          .ilike('staff_email', emailIlikePattern(email))
-          .eq('status', 'active')
-          .maybeSingle();
+    // Both lookups below are gate INPUTS, not optional decorations. A gate that
+    // disables itself whenever a config row is missing or a lookup errors is not a
+    // gate — this project has already been burned by that exact fail-open shape in
+    // the transport-fees access RPC. Failing closed costs a staffer a "contact the
+    // office" message; failing open hands out an unearned fee exemption silently.
+    if (!currentYear?.id) {
+      return NextResponse.json(
+        {
+          error: 'Transport fees are not configured for the current year. Please contact the transport office.',
+          reason: 'no_current_year',
+        },
+        { status: 409 },
+      );
+    }
 
-        const verdict = maySelfAssign({
-          hasOutstandingBill: billState.hasOutstanding,
-          hasActiveProbation: Boolean(probation?.id),
-        });
-        if (!verdict.allowed) {
-          return NextResponse.json(
-            {
-              error:
-                'Transport fees are outstanding on your account. Accept the attendance ' +
-                'commitment or settle the fees to continue as bus in-charge.',
-              reason: verdict.reason,
-            },
-            { status: 403 },
-          );
-        }
-      }
+    const staffId = await resolveStaffId(svc, { email, profileId: auth.userId });
+    if (!staffId) {
+      return NextResponse.json(
+        {
+          error: 'We could not match your staff record to check your transport fees. Please contact the transport office.',
+          reason: 'staff_unresolved',
+        },
+        { status: 409 },
+      );
+    }
+
+    const billState = await loadStaffBillState(svc, {
+      personId: staffId,
+      transportYearId: currentYear.id as string,
+    });
+    const { data: probation } = await svc
+      .from('tms_incharge_probation')
+      .select('id')
+      .ilike('staff_email', emailIlikePattern(email))
+      .eq('status', 'active')
+      .maybeSingle();
+
+    const verdict = maySelfAssign({
+      hasOutstandingBill: billState.hasOutstanding,
+      hasActiveProbation: Boolean(probation?.id),
+    });
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            'Transport fees are outstanding on your account. Accept the attendance ' +
+            'commitment or settle the fees to continue as bus in-charge.',
+          reason: verdict.reason,
+        },
+        { status: 403 },
+      );
     }
 
     const { data: assignment, error } = await svc
