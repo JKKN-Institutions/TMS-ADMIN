@@ -21,6 +21,10 @@ interface MonthResp {
   nextBookableDate?: string | null;
   /** Effective cutoff hour (0..23 IST), or null when the daily window is off. */
   cutoffHour?: number | null;
+  /** Same-day deadline hour (0..23 IST); null when same-day booking is off. */
+  sameDayCutoffHour?: number | null;
+  /** True when the FIRST bookable date is today, so the copy can say "today". */
+  todayBookable?: boolean;
 }
 
 async function fetchMonth(month: string): Promise<MonthResp> {
@@ -158,14 +162,22 @@ export default function StudentBookingsPage() {
           <div className="space-y-2.5 rounded-2xl border border-gray-200 bg-white p-4 text-xs text-muted-foreground shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <Hint icon={<CalendarRange className="h-4 w-4 text-blue-500" />}>
               {data?.nextBookableDate ? (
-                <>Booking is open for <span className="font-medium text-foreground">{formatLong(data.nextBookableDate)}</span> — the next travel day.</>
+                <>Booking is open for <span className="font-medium text-foreground">{formatLong(data.nextBookableDate)}</span>{data.todayBookable ? ' — today.' : ' — the next travel day.'}</>
               ) : (
                 <>You can book <span className="font-medium text-foreground">one working day at a time</span> — each day opens on the previous working day.</>
               )}
             </Hint>
+            {/* Two deadlines can be in play at once, and stating only the
+                prior-day one would misinform anyone booking for today. */}
+            {typeof data?.sameDayCutoffHour === 'number' && (
+              <Hint icon={<Clock className="h-4 w-4 text-blue-500" />}>
+                Booking for <span className="font-medium text-foreground">today</span> closes at{' '}
+                <span className="font-medium text-foreground">{formatCutoffHour(data.sameDayCutoffHour)} today</span>.
+              </Hint>
+            )}
             {typeof data?.cutoffHour === 'number' && (
               <Hint icon={<Clock className="h-4 w-4 text-blue-500" />}>
-                Booking closes at{' '}
+                Booking{typeof data?.sameDayCutoffHour === 'number' ? ' for a future day' : ''} closes at{' '}
                 <span className="font-medium text-foreground">{formatCutoffHour(data.cutoffHour)} the day before</span> travel.
               </Hint>
             )}
@@ -206,7 +218,15 @@ export default function StudentBookingsPage() {
         description={
           confirm
             ? confirm.action === 'cancel'
-              ? (<>Release your seat for <strong>{formatLong(confirm.date)}</strong>?{typeof data?.cutoffHour === 'number' ? <> You can rebook before {formatCutoffHour(data.cutoffHour)} the day before travel.</> : null}</>)
+              ? (<>Release your seat for <strong>{formatLong(confirm.date)}</strong>?{
+                  // Quote the deadline that governs THIS date: a same-day seat
+                  // is rebookable until this morning's hour, not last evening's.
+                  typeof data?.sameDayCutoffHour === 'number' && confirm.date === data?.nextBookableDate && data?.todayBookable
+                    ? <> You can rebook before {formatCutoffHour(data.sameDayCutoffHour)} today.</>
+                    : typeof data?.cutoffHour === 'number'
+                      ? <> You can rebook before {formatCutoffHour(data.cutoffHour)} the day before travel.</>
+                      : null
+                }</>)
               : (<>Reserve a seat for <strong>{formatLong(confirm.date)}</strong>? This covers both trips that day{data?.routeLabel ? <> on <strong>{data.routeLabel}</strong></> : null}.</>)
             : null
         }

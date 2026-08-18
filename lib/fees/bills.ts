@@ -79,6 +79,53 @@ const emptySummary = (): BillSummary => ({
 export const isActiveLearnerBill = (r: TransportBillRow): boolean =>
   r.person_type === 'learner' && r.status !== 'cancelled';
 
+/**
+ * Every bill that represents live money, learner or staff.
+ *
+ * This — NOT isActiveLearnerBill — is the rule for the money KPIs. Staff bills
+ * were once coverage records with nothing behind them, so excluding them was
+ * right; the in-charge enforcement path now raises genuinely payable staff bills,
+ * and MyJKKN's Transport Fees screen counts them. While this predicate said
+ * "learners only", TMS reported Billed ₹62,70,250 against MyJKKN's ₹67,15,100 —
+ * a gap equal to the staff total to the rupee.
+ *
+ * isActiveLearnerBill survives for the analytics that are genuinely ABOUT
+ * learners (per-learner payment buckets, degree/department groupings). Those
+ * would be wrong, not merely different, if staff were folded in.
+ */
+export const isActiveBill = (r: TransportBillRow): boolean => r.status !== 'cancelled';
+
+/**
+ * Money and status for a staff bill, read from the tms_fee_bill ledger itself.
+ *
+ * Staff have no billing_student_bills row to read from — that table is
+ * learner-keyed — so the ledger IS the money row for them. Pure and separately
+ * tested because getting `pending` wrong here silently breaks the invariant the
+ * whole module rests on: Billed === Collected + Pending.
+ *
+ * Order matters: cancelled is decided BEFORE anything else. The previous inline
+ * code branched on person_type first, which would have scored a cancelled staff
+ * bill as still owed.
+ */
+export function scoreStaffLedgerRow(
+  input: { status: string; amount: number; paidAmount: number | null; dueDate: string },
+  today: string,
+): { status: BillStatus; paid: number; pending: number } {
+  if (input.status === 'cancelled') return { status: 'cancelled', paid: 0, pending: 0 };
+  if (input.status === 'paid') {
+    // Fall back to the bill amount: a row paid before paid_amount existed would
+    // otherwise drop its money out of Collected while still counting as Billed.
+    return { status: 'paid', paid: input.paidAmount ?? input.amount, pending: 0 };
+  }
+  // Deferred and generated both mean "raised, nothing received".
+  const pending = input.amount;
+  return {
+    status: input.dueDate < today ? 'overdue' : 'staff_deferred',
+    paid: 0,
+    pending,
+  };
+}
+
 const uniq = <T,>(xs: (T | null | undefined)[]): T[] =>
   [...new Set(xs.filter((x): x is T => x != null))];
 
@@ -239,12 +286,14 @@ async function loadBillMap(
  * active fee structures, which these rows alone don't carry.
  */
 export function summarizeBills(rows: TransportBillRow[]): BillSummary {
-  const activeLearnerRows = rows.filter(isActiveLearnerBill);
+  // Learners AND staff: these tiles must reconcile with MyJKKN's Transport Fees
+  // screen, which shows both.
+  const activeRows = rows.filter(isActiveBill);
   const overdueRows = rows.filter((r) => r.status === 'overdue');
   return {
-    totalBilledAmount: activeLearnerRows.reduce((s, r) => s + r.amount, 0),
-    collectedAmount: activeLearnerRows.reduce((s, r) => s + r.paid_amount, 0),
-    pendingAmount: activeLearnerRows.reduce((s, r) => s + r.pending_amount, 0),
+    totalBilledAmount: activeRows.reduce((s, r) => s + r.amount, 0),
+    collectedAmount: activeRows.reduce((s, r) => s + r.paid_amount, 0),
+    pendingAmount: activeRows.reduce((s, r) => s + r.pending_amount, 0),
     overdueAmount: overdueRows.reduce((s, r) => s + r.pending_amount, 0),
     overdueCount: overdueRows.length,
     billedPeople: new Set(rows.map((r) => r.person_id)).size,
@@ -320,7 +369,19 @@ export async function loadTransportBills(
     let paymentDate: string | null = null;
 
     if (personType === 'staff' || r.status === 'staff_deferred') {
-      status = 'staff_deferred';
+      // The ledger is the money row for staff — see scoreStaffLedgerRow.
+      const scored = scoreStaffLedgerRow(
+        {
+          status: r.status as string,
+          amount,
+          paidAmount: r.paid_amount == null ? null : Number(r.paid_amount),
+          dueDate,
+        },
+        td,
+      );
+      status = scored.status;
+      paid = scored.paid;
+      pending = scored.pending;
     } else if (r.status === 'cancelled') {
       // Vacated: the ledger row was cancelled. It owes nothing and is not overdue.
       status = 'cancelled';

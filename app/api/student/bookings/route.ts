@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getLearnerRowForUser } from '@/lib/student/identity';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { addDays, bookableDates, cutoffFor, dayStatus, isCancelable, isSunday, istToday } from '@/lib/booking/window';
+import { addDays, bookableDates, deadlineFor, dayStatus, isCancelable, isSunday, istToday } from '@/lib/booking/window';
 import { bookedCount, routeCapacity, hasBookingForDate } from '@/lib/booking/repo';
 import { isOverCapacity } from '@/lib/booking/capacity';
 import { buildMonthCells, loadExceptions, loadWindows, effectiveOpen, type CalendarException, type WindowOverride } from '@/lib/booking/calendar';
@@ -38,8 +38,12 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
     // the next WORKING day, so load the service calendar across the whole 21-day
     // search cap — not just the month being viewed.
     const today = istToday();
+    // Range starts at TODAY, not tomorrow: with same-day booking enabled the walk
+    // can offer today, and a holiday declared for today must still exclude it. The
+    // extra day costs nothing and removes the whole "today's holiday is invisible"
+    // failure mode regardless of how the flag is set.
     const horizonExceptions = await loadExceptions(
-      svc, learner.transport_route_id ?? null, addDays(today, 1), addDays(today, 21)
+      svc, learner.transport_route_id ?? null, today, addDays(today, 21)
     );
     const offDates = new Set(horizonExceptions.keys());
     const dates = bookableDates(new Date(), { ...winOpts, offDates });
@@ -109,10 +113,10 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
         attendance.set(r.trip_date, list);
       }
 
-      const cells = buildMonthCells(monthParam, { bookedDates, exceptions, windows, cutoffHour: winOpts.cutoffHour, daysAhead: winOpts.daysAhead, offDates }).map((c) => ({
+      const cells = buildMonthCells(monthParam, { ...winOpts, bookedDates, exceptions, windows, offDates }).map((c) => ({
         ...c,
         cutoff: c.status === 'open' || c.status === 'booked'
-          ? (windows.get(c.date)?.deadline ?? cutoffFor(c.date, winOpts.cutoffHour).toISOString())
+          ? (windows.get(c.date)?.deadline ?? deadlineFor(c.date, new Date(), winOpts).toISOString())
           : null,
         attendance: attendance.get(c.date),
       }));
@@ -130,6 +134,11 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
           // The EFFECTIVE cutoff hour, so the UI can state the real deadline
           // instead of hardcoding one. null = the daily time window is disabled.
           cutoffHour: cfg.enableBookingTimeWindow ? cfg.cutoffHour : null,
+          // Non-null only when same-day booking is ON, so the UI can state the
+          // deadline that actually governs TODAY rather than the prior-day one.
+          sameDayCutoffHour:
+            cfg.allowSameDayBooking && cfg.enableBookingTimeWindow ? cfg.sameDayCutoffHour : null,
+          todayBookable: dates[0] === istToday(),
         },
       });
     }
@@ -151,7 +160,7 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
     const days = dates.map((date) => ({
       date,
       status: dayStatus(booked.has(date), date, new Date(), { ...winOpts, offDates }),
-      cutoff: cutoffFor(date, winOpts.cutoffHour).toISOString(),
+      cutoff: deadlineFor(date, new Date(), winOpts).toISOString(),
     }));
 
     return NextResponse.json({
@@ -164,6 +173,9 @@ async function getBoard(_request: NextRequest, auth: AuthContext) {
         maxBookableDate: dates[dates.length - 1] ?? null,
         nextBookableDate: dates[0] ?? null,
         cutoffHour: cfg.enableBookingTimeWindow ? cfg.cutoffHour : null,
+        sameDayCutoffHour:
+          cfg.allowSameDayBooking && cfg.enableBookingTimeWindow ? cfg.sameDayCutoffHour : null,
+        todayBookable: dates[0] === istToday(),
       },
     });
   } catch (e) {
@@ -208,7 +220,7 @@ async function mutate(request: NextRequest, auth: AuthContext) {
       // holiday" message would be masked by the generic "booking is closed".
       const today = istToday();
       const horizonExceptions = await loadExceptions(
-        svc, learner.transport_route_id, addDays(today, 1), addDays(today, 21)
+        svc, learner.transport_route_id, today, addDays(today, 21)
       );
       if (horizonExceptions.has(travelDate)) {
         return NextResponse.json({ error: 'That date is a holiday / no-service day' }, { status: 409 });

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Bus, Check, Loader2, LogOut } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/providers/auth-provider';
+import RemovalBillNotice from '@/components/boarding/removal-bill-notice';
 
 /**
  * One-time willingness toggle for a bus_required staffer.
@@ -103,6 +104,9 @@ export default function InChargePage() {
   if (declined) {
     return (
       <div className="w-full max-w-md">
+        {/* Shown in BOTH states: a removed in-charge who then declines still has
+            a bill to understand, and this is the only screen that reaches them. */}
+        <RemovalBillNotice />
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
             <Bus className="h-6 w-6 text-gray-400" />
@@ -126,6 +130,7 @@ export default function InChargePage() {
 
   return (
     <div className="w-full max-w-md">
+      <RemovalBillNotice />
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-7">
         <div className="text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-green-600 sm:h-14 sm:w-14">

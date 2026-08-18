@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX, Loader2 } from 'lucide-react';
@@ -10,6 +10,7 @@ import { getBillColumns, inr } from './columns';
 import { getUnbilledColumns } from './unbilled-columns';
 import { exportBills } from './bill-export';
 import { fetchBills, fetchUnbilled, fetchTransportYearOptions } from './bill-management-api';
+import { summarizeBills, type TransportBillRow } from '@/lib/fees/bills';
 
 type View = 'bills' | 'unbilled' | 'analytics';
 
@@ -74,12 +75,44 @@ export default function BillManagementPage() {
   const billColumns = useMemo(() => getBillColumns(), []);
   const unbilledColumns = useMemo(() => getUnbilledColumns(), []);
 
-  const summary = bills?.summary;
   const rows = useMemo(() => bills?.rows ?? [], [bills]);
+
+  // Rows surviving the table's search + Institution/Status/Type filters. null
+  // until the table reports, and reset whenever the view or year changes so a
+  // stale selection from the Bills tab can never colour another tab's totals.
+  const [filtered, setFiltered] = useState<{ rows: TransportBillRow[]; isFiltered: boolean } | null>(null);
+  useEffect(() => { setFiltered(null); }, [view, selectedYear]);
+
+  const onFilteredRowsChange = useCallback(
+    (r: TransportBillRow[], isFiltered: boolean) => setFiltered({ rows: r, isFiltered }),
+    [],
+  );
+
+  const visibleRows = filtered?.rows ?? rows;
+  const isFiltered = filtered?.isFiltered ?? false;
+
+  // Recomputed from what the user can actually see, so the cards agree with the
+  // table beneath them. Uses the SAME summarizeBills the server calls, so an
+  // unfiltered view reproduces the server's numbers exactly rather than
+  // approximating them. unbilledCount is year-level and not derivable from rows,
+  // so it stays the server's — and is blanked in the UI while a filter is on.
+  const summary = useMemo(
+    () => (bills ? { ...summarizeBills(visibleRows), unbilledCount: bills.summary.unbilledCount } : undefined),
+    [bills, visibleRows],
+  );
 
   const billInstitutionOptions = useMemo(() => {
     const s = new Set<string>();
     for (const r of rows) if (r.institution_name) s.add(r.institution_name);
+    return [...s].sort().map((n) => ({ label: n, value: n }));
+  }, [rows]);
+
+  // Derived from the loaded rows so the dropdown never offers a department that
+  // has no bills in the selected year. Staff rows carry a department too, so this
+  // narrows both populations.
+  const billDepartmentOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of rows) if (r.department_name) s.add(r.department_name);
     return [...s].sort().map((n) => ({ label: n, value: n }));
   }, [rows]);
 
@@ -114,10 +147,13 @@ export default function BillManagementPage() {
         <Kpi label="Overdue" value={inr(summary?.overdueAmount)} sub={`${summary?.overdueCount ?? 0} bill(s)`} icon={<AlertTriangle className="h-4 w-4 text-red-500" />} loading={billsLoading} />
         <Kpi
           label="Unbilled"
-          value={isAll ? '—' : String(summary?.unbilledCount ?? 0)}
+          // Unbilled counts people who have NO bill, so it cannot be narrowed by
+          // filters that act on bill rows. Blanked rather than left showing a
+          // year-wide number beside four filtered ones.
+          value={isAll || isFiltered ? '—' : String(summary?.unbilledCount ?? 0)}
           icon={<FileX className="h-4 w-4 text-blue-500" />}
           loading={billsLoading}
-          onClick={!isAll ? () => setView('unbilled') : undefined}
+          onClick={!isAll && !isFiltered ? () => setView('unbilled') : undefined}
         />
         <Kpi label="Staff deferred" value={String(summary?.staffDeferred ?? 0)} icon={<Users className="h-4 w-4 text-purple-500" />} loading={billsLoading} />
       </div>
@@ -155,10 +191,14 @@ export default function BillManagementPage() {
           isLoading={billsLoading}
           getRowId={(r) => r.id}
           enableRowSelection
+          onFilteredRowsChange={onFilteredRowsChange}
           searchPlaceholder="Search person, code or institution..."
           filters={[
             ...(billInstitutionOptions.length
               ? [{ columnId: 'institution', title: 'Institution', options: billInstitutionOptions }]
+              : []),
+            ...(billDepartmentOptions.length
+              ? [{ columnId: 'department', title: 'Department', options: billDepartmentOptions }]
               : []),
             {
               columnId: 'status',

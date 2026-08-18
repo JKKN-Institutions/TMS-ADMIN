@@ -4,7 +4,7 @@
  * The builder is pure + unit-tested; loadExceptions wraps the DB for the API.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { bookableDates, horizonDates, isSunday } from './window';
+import { bookableDates, horizonDates, isSunday, type WindowOpts } from './window';
 
 export type CalendarStatus =
   | 'open' | 'booked' | 'locked' | 'closed'
@@ -44,18 +44,19 @@ export function monthDays(monthStr: string): string[] {
  * KNOWN GAP (pre-existing, out of scope): a per-date `deadline` set LATER than
  * the standard cutoff cannot rescue a date the walk has already dropped. The
  * override can only tighten the window, not widen it.
+ *
+ * `opts` EXTENDS WindowOpts and is forwarded to the walk wholesale rather than
+ * destructured field by field. A new window option (allowSameDay, …) then reaches
+ * the walk automatically instead of being silently dropped here — the failure mode
+ * that hid the booking-cutoff disconnect before.
  */
 export function effectiveOpen(
   date: string,
-  opts: { window?: WindowOverride; now?: Date; cutoffHour?: number; daysAhead?: number; offDates?: Set<string> }
+  opts: WindowOpts & { window?: WindowOverride; now?: Date }
 ): boolean {
   const now = opts.now ?? new Date();
   if (opts.window && !opts.window.enabled) return false;
-  const inWindow = bookableDates(now, {
-    cutoffHour: opts.cutoffHour,
-    daysAhead: opts.daysAhead,
-    offDates: opts.offDates,
-  }).includes(date);
+  const inWindow = bookableDates(now, opts).includes(date);
   if (!inWindow) return false;
   if (opts.window?.deadline) return now.getTime() < new Date(opts.window.deadline).getTime();
   return true;
@@ -64,28 +65,24 @@ export function effectiveOpen(
 /** Status for ONE date. A service-calendar exception wins over everything. */
 export function cellStatus(
   date: string,
-  opts: {
+  opts: WindowOpts & {
     hasBooking: boolean;
     exception?: CalendarException;
     window?: WindowOverride;
     now?: Date;
-    cutoffHour?: number;
-    daysAhead?: number;
-    offDates?: Set<string>;
   }
 ): CalendarStatus {
   if (opts.exception) return opts.exception.kind; // 'holiday' | 'no_service'
   if (isSunday(date)) return opts.hasBooking ? 'locked' : 'weekly_off';
 
   const now = opts.now ?? new Date();
-  const walkOpts = { cutoffHour: opts.cutoffHour, daysAhead: opts.daysAhead, offDates: opts.offDates };
 
-  if (effectiveOpen(date, { window: opts.window, now, ...walkOpts })) {
+  if (effectiveOpen(date, { ...opts, now })) {
     return opts.hasBooking ? 'booked' : 'open';
   }
   // Inside the labelled horizon but not open => the cutoff passed (or an admin
   // disabled the date). Distinct from a day that was never in range at all.
-  if (horizonDates(now, walkOpts).includes(date)) {
+  if (horizonDates(now, opts).includes(date)) {
     return opts.hasBooking ? 'locked' : 'closed';
   }
   return opts.hasBooking ? 'locked' : 'out_of_horizon';
@@ -94,14 +91,11 @@ export function cellStatus(
 /** Build all cells for a month from the learner's bookings + the gate. */
 export function buildMonthCells(
   monthStr: string,
-  opts: {
+  opts: WindowOpts & {
     bookedDates: Set<string>;
     exceptions: Map<string, CalendarException>;
     windows?: Map<string, WindowOverride>;
     now?: Date;
-    cutoffHour?: number;
-    daysAhead?: number;
-    offDates?: Set<string>;
   }
 ): DayCell[] {
   return monthDays(monthStr).map((date) => {
@@ -109,13 +103,10 @@ export function buildMonthCells(
     return {
       date,
       status: cellStatus(date, {
+        ...opts,
         hasBooking: opts.bookedDates.has(date),
         exception,
         window: opts.windows?.get(date),
-        now: opts.now,
-        cutoffHour: opts.cutoffHour,
-        daysAhead: opts.daysAhead,
-        offDates: opts.offDates,
       }),
       note: exception?.note ?? null,
     };

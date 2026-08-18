@@ -8,11 +8,15 @@
  * not already past their cutoff. With the default `daysAhead` of 1 this means a
  * travel day is booked on the previous WORKING day — Friday opens Monday when the
  * Saturday is marked off, so nobody depends on opening the app over a weekend.
+ *
+ * TODAY is excluded by default. When an admin opts in via `allowSameDay`, today is
+ * offered ADDITIVELY — see walkForward() for why that matters.
  */
 const IST_OFFSET_MIN = 5 * 60 + 30; // +05:30
 const DEFAULT_CUTOFF_HOUR_IST = 20; // 20:00 IST on the prior day
 const DEFAULT_DAYS_AHEAD = 1;       // WORKING days (admin-configurable 1..10)
 const MAX_LOOKAHEAD_DAYS = 21;      // search cap so a long holiday block can't loop
+const DEFAULT_SAME_DAY_CUTOFF_HOUR = 6; // 06:00 IST on the travel date itself
 
 export type DayStatus = 'not_booked' | 'booked' | 'locked' | 'closed';
 
@@ -26,6 +30,19 @@ export interface WindowOpts {
    * lives at the route edge in loadExceptions().
    */
   offDates?: Set<string>;
+  /**
+   * Opt-in: let learners book TODAY, not just future working days. Default false,
+   * so the shipped behaviour is unchanged until an admin turns it on.
+   */
+  allowSameDay?: boolean;
+  /**
+   * Deadline hour (IST) on the travel date ITSELF, governing same-day bookings.
+   * `cutoffHour` cannot serve here: it means "hour on the PRIOR day", which for
+   * today is already in the past, so today would be filtered out the instant it
+   * entered the walk. Default 6 (before the buses roll); 24 = open all day.
+   * Ignored entirely unless `allowSameDay` is true.
+   */
+  sameDayCutoffHour?: number;
 }
 
 /** 'YYYY-MM-DD' for the given instant rendered in IST. */
@@ -60,21 +77,64 @@ export function isSunday(travelDate: string): boolean {
 }
 
 /**
+ * The deadline instant at 'hour':00 IST on the travel date ITSELF — the same-day
+ * counterpart to cutoffFor(), which lands on the PRIOR day. Hour 24 means the end
+ * of the travel day, i.e. same-day booking stays open all day.
+ */
+export function sameDayCutoffFor(
+  travelDate: string,
+  hour: number = DEFAULT_SAME_DAY_CUTOFF_HOUR,
+): Date {
+  const [y, m, d] = travelDate.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + (hour * 60 - IST_OFFSET_MIN) * 60_000);
+}
+
+/**
+ * The deadline that ACTUALLY governs `travelDate` right now. Every gate — the
+ * walk, cancellation, and the deadline the API hands the UI — must ask this one
+ * function, or today's booking would be judged against yesterday evening.
+ */
+export function deadlineFor(travelDate: string, now: Date = new Date(), opts: WindowOpts = {}): Date {
+  if (opts.allowSameDay && travelDate === istToday(now)) {
+    return sameDayCutoffFor(travelDate, opts.sameDayCutoffHour ?? DEFAULT_SAME_DAY_CUTOFF_HOUR);
+  }
+  return cutoffFor(travelDate, opts.cutoffHour ?? DEFAULT_CUTOFF_HOUR_IST);
+}
+
+/** A date buses actually run on: not the weekly off, not an admin exception. */
+function isServiceDay(date: string, opts: WindowOpts): boolean {
+  return !isSunday(date) && !opts.offDates?.has(date);
+}
+
+/**
  * The walk shared by horizonDates() and bookableDates(). Starts at tomorrow and
  * collects the first `daysAhead` dates that are service days, optionally also
  * requiring the cutoff to still be open.
+ *
+ * Same-day is ADDITIVE — today is prepended and never counts against `daysAhead`.
+ * Charging it a slot would mean that switching the feature on REMOVES tomorrow
+ * from the window at the default daysAhead of 1: a learner who could pre-book the
+ * evening before would suddenly be unable to, which is a worse regression than
+ * same-day booking is an improvement.
  */
 function walkForward(now: Date, opts: WindowOpts, requireOpen: boolean): string[] {
   const want = opts.daysAhead ?? DEFAULT_DAYS_AHEAD;
-  const cutoffHour = opts.cutoffHour ?? DEFAULT_CUTOFF_HOUR_IST;
   const today = istToday(now);
   const out: string[] = [];
-  for (let i = 1; i <= MAX_LOOKAHEAD_DAYS && out.length < want; i++) {
+
+  const stillOpen = (date: string) =>
+    !requireOpen || now.getTime() < deadlineFor(date, now, opts).getTime();
+
+  if (opts.allowSameDay && isServiceDay(today, opts) && stillOpen(today)) {
+    out.push(today);
+  }
+
+  for (let i = 1, taken = 0; i <= MAX_LOOKAHEAD_DAYS && taken < want; i++) {
     const date = addDays(today, i);
-    if (isSunday(date)) continue;              // compulsory weekly holiday
-    if (opts.offDates?.has(date)) continue;    // admin holiday / no-service day
-    if (requireOpen && now.getTime() >= cutoffFor(date, cutoffHour).getTime()) continue;
+    if (!isServiceDay(date, opts)) continue;   // Sunday or admin holiday / no-service
+    if (!stillOpen(date)) continue;
     out.push(date);
+    taken++;
   }
   return out;
 }
@@ -120,10 +180,15 @@ export function isBookingOpen(travelDate: string, now: Date = new Date(), opts: 
  * AND its cutoff has not passed.
  *
  * Sunday is not gated here: a pre-existing Sunday booking must stay cancellable.
+ *
+ * Today is cancellable ONLY when same-day booking is on, and then only until the
+ * same-day deadline — a seat a learner can book must be a seat they can release.
  */
 export function isCancelable(travelDate: string, now: Date = new Date(), opts: WindowOpts = {}): boolean {
-  if (travelDate <= istToday(now)) return false;
-  return now.getTime() < cutoffFor(travelDate, opts.cutoffHour ?? DEFAULT_CUTOFF_HOUR_IST).getTime();
+  const today = istToday(now);
+  if (travelDate < today) return false;
+  if (travelDate === today && !opts.allowSameDay) return false;
+  return now.getTime() < deadlineFor(travelDate, now, opts).getTime();
 }
 
 export function dayStatus(

@@ -136,3 +136,65 @@ describe('effectiveOpen with injected config', () => {
     expect(effectiveOpen('2026-06-23', { now: new Date('2026-06-22T13:31:00Z'), cutoffHour: 19 })).toBe(false);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Same-day booking reaches the calendar. These guard the specific bug class the
+// opts-spreading refactor removed: a new WindowOpts field being accepted by the
+// walk but silently dropped on the way through cellStatus / buildMonthCells, so
+// the grid and the API disagree about whether a date is bookable.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('same-day booking through the calendar layer', () => {
+  const EARLY = new Date('2026-06-22T00:00:00Z'); // 05:30 IST Mon 22nd
+  const LATE = new Date('2026-06-22T05:03:00Z');  // 10:33 IST Mon 22nd
+  const sameDay = { allowSameDay: true, sameDayCutoffHour: 6 };
+
+  it('effectiveOpen opens today before the same-day cutoff', () => {
+    expect(effectiveOpen('2026-06-22', { now: EARLY, ...sameDay })).toBe(true);
+    expect(effectiveOpen('2026-06-22', { now: LATE, ...sameDay })).toBe(false);
+  });
+
+  it('effectiveOpen leaves today closed when the flag is off', () => {
+    expect(effectiveOpen('2026-06-22', { now: EARLY })).toBe(false);
+  });
+
+  it('cellStatus marks today open, then closed after the cutoff', () => {
+    expect(cellStatus('2026-06-22', { hasBooking: false, now: EARLY, ...sameDay })).toBe('open');
+    expect(cellStatus('2026-06-22', { hasBooking: false, now: LATE, ...sameDay })).toBe('closed');
+  });
+
+  it('cellStatus reports a booked today as booked, then locked', () => {
+    expect(cellStatus('2026-06-22', { hasBooking: true, now: EARLY, ...sameDay })).toBe('booked');
+    expect(cellStatus('2026-06-22', { hasBooking: true, now: LATE, ...sameDay })).toBe('locked');
+  });
+
+  it('a service-calendar exception still wins over same-day', () => {
+    expect(
+      cellStatus('2026-06-22', {
+        hasBooking: false,
+        now: EARLY,
+        exception: { kind: 'holiday', note: null },
+        ...sameDay,
+      })
+    ).toBe('holiday');
+  });
+
+  it('buildMonthCells threads the same-day options to today’s cell', () => {
+    const cells = buildMonthCells('2026-06', {
+      bookedDates: new Set<string>(),
+      exceptions: new Map(),
+      now: EARLY,
+      ...sameDay,
+    });
+    expect(cells.find((c) => c.date === '2026-06-22')?.status).toBe('open');
+    expect(cells.find((c) => c.date === '2026-06-23')?.status).toBe('open');
+  });
+
+  it('buildMonthCells leaves today out_of_horizon when the flag is off', () => {
+    const cells = buildMonthCells('2026-06', {
+      bookedDates: new Set<string>(),
+      exceptions: new Map(),
+      now: EARLY,
+    });
+    expect(cells.find((c) => c.date === '2026-06-22')?.status).toBe('out_of_horizon');
+  });
+});

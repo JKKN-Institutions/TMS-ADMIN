@@ -36,7 +36,9 @@ async function getSummary(request: NextRequest, auth: AuthContext) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       const today = istToday();
       const [exceptions, cfg] = await Promise.all([
-        loadExceptions(svc, null, addDays(today, 1), addDays(today, 21)),
+        // From TODAY, not tomorrow — same-day booking can put today in the walk,
+        // and a holiday declared for today must exclude it here too.
+        loadExceptions(svc, null, today, addDays(today, 21)),
         loadSchedulingConfig(svc),
       ]);
       date =

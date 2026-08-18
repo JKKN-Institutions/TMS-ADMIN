@@ -183,6 +183,51 @@ const SettingsPage = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Same-day Booking
+                </label>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="allowSameDayBooking"
+                    checked={schedulingSettings.allowSameDayBooking}
+                    onChange={(e) => setSchedulingSettings({ ...schedulingSettings, allowSameDayBooking: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="allowSameDayBooking" className="ml-2 text-sm text-gray-600">
+                    Let learners also book <strong>today</strong>
+                  </label>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  Off by default. Today is offered <strong>in addition to</strong> the days above — it
+                  never uses up one of those slots, so turning this on cannot remove tomorrow from the
+                  window. Sundays and service-calendar holidays are still excluded.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Same-day Cutoff Time
+                </label>
+                <select
+                  value={schedulingSettings.sameDayBookingCutoffHour}
+                  onChange={(e) => setSchedulingSettings({ ...schedulingSettings, sameDayBookingCutoffHour: parseInt(e.target.value) })}
+                  disabled={!schedulingSettings.allowSameDayBooking}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>
+                      {i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-sm text-gray-600 mt-1">
+                  Deadline on the travel day <strong>itself</strong>. Keep it before the first
+                  departure — after this hour today closes and only future days stay bookable.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Automatic Bill Generation
                 </label>
                 <div className="flex items-center">
@@ -248,6 +293,13 @@ const SettingsPage = () => {
                        `${schedulingSettings.bookingWindowEndHour-12}:00 PM`} the day before the trip</li>
                     <li>• Each schedule must be individually approved by admin</li>
                     <li>• Booking opens for the next {schedulingSettings.bookingDaysAhead} working day(s); Sundays and service-calendar holidays are skipped</li>
+                    <li>• Same-day booking: {schedulingSettings.allowSameDayBooking
+                      ? `ON — today is also bookable until ${
+                          schedulingSettings.sameDayBookingCutoffHour === 0 ? '12:00 AM' :
+                          schedulingSettings.sameDayBookingCutoffHour < 12 ? `${schedulingSettings.sameDayBookingCutoffHour}:00 AM` :
+                          schedulingSettings.sameDayBookingCutoffHour === 12 ? '12:00 PM' :
+                          `${schedulingSettings.sameDayBookingCutoffHour - 12}:00 PM`} on the travel day itself`
+                      : 'OFF — the earliest bookable day is tomorrow'}</li>
                   </ul>
                 </div>
               </div>

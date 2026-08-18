@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, ShieldAlert, UserMinus } from 'lucide-reac
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import UniversalStatCard from '@/components/universal-stat-card';
+import InchargeRemovalNotify from '@/components/admin/incharge-removal-notify';
 import { getStrikeColumns, STATUS_LABEL, type StrikeRow, type StrikeStatus } from './columns';
 
 type Mode = 'off' | 'shadow' | 'enforce';
@@ -70,6 +71,13 @@ export default function InchargeEnforcementPage() {
     (r) => r.status === 'pending_removal' && r.billing_status === 'no_structure',
   );
 
+  // Only surfaced when someone was actually removed AND billed. Once the board
+  // clears, the panel disappears rather than sitting there as a standing button
+  // that messages people about money.
+  const hasRemovedBilled = rows.some(
+    (r) => r.status === 'removed' && r.billing_status === 'billed',
+  );
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="min-w-0">
@@ -81,6 +89,8 @@ export default function InchargeEnforcementPage() {
       </div>
 
       <div className={`rounded-md px-4 py-3 text-sm ${banner.className}`}>{banner.text}</div>
+
+      {hasRemovedBilled && <InchargeRemovalNotify />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <UniversalStatCard title="Warning 1" value={count('warned')} icon={AlertTriangle} color="yellow" />
