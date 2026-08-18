@@ -59,3 +59,35 @@ create table if not exists tms_incharge_month_verdict (
 -- expression index.
 create unique index if not exists tms_incharge_month_verdict_person_month
   on tms_incharge_month_verdict (staff_email, month);
+
+-- ── Verification (run separately after applying) ─────────────────────────────
+--   select table_name, count(*) as columns
+--   from information_schema.columns
+--   where table_name in ('tms_incharge_probation','tms_incharge_month_verdict')
+--   group by 1;
+--   -- Expected: tms_incharge_probation = 10 columns, tms_incharge_month_verdict = 15
+--
+--   select indexrelid::regclass, pg_get_indexdef(indexrelid)
+--   from pg_index
+--   where indrelid in ('tms_incharge_probation'::regclass, 'tms_incharge_month_verdict'::regclass);
+--   -- Expected among the results:
+--   --   tms_incharge_month_verdict_person_month | UNIQUE btree (staff_email, month)
+--   --   tms_incharge_probation_one_active       | UNIQUE btree (lower(staff_email)) WHERE status = 'active'
+--   --   tms_incharge_probation_email_idx        | btree (lower(staff_email))
+--
+--   -- Manual check only (writes and cleans up rows) -- proves the partial
+--   -- unique index rejects a second active probation for the same person
+--   -- even when the email's case differs:
+--   -- do $$
+--   -- begin
+--   --   insert into tms_incharge_probation (staff_email, window_start, window_end)
+--   --   values ('probe@example.test', '2026-08-18', '2026-08-31');
+--   --   begin
+--   --     insert into tms_incharge_probation (staff_email, window_start, window_end)
+--   --     values ('PROBE@example.test', '2026-08-18', '2026-08-31');
+--   --     raise exception 'FAIL: duplicate active probation was accepted';
+--   --   exception when unique_violation then
+--   --     raise notice 'PASS: duplicate active probation rejected';
+--   --   end;
+--   --   delete from tms_incharge_probation where staff_email ilike 'probe@example.test';
+--   -- end $$;
