@@ -28,6 +28,7 @@ export async function cancelStaffBills(
     .eq('person_id', opts.personId)
     .eq('person_type', 'staff')
     .eq('transport_year_id', opts.transportYearId)
+    .neq('status', 'cancelled')
     .is('paid_at', null)
     .select('id');
   if (error) throw new Error(`cancelStaffBills failed: ${error.message}`);

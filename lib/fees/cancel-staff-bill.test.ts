@@ -9,6 +9,7 @@ function fakeSvc(result: { data: unknown; error: { message: string } | null }) {
     eq(col: string, val: unknown) { calls.push({ op: 'eq', col, val }); return builder; },
     in(col: string, val: unknown) { calls.push({ op: 'in', col, val }); return builder; },
     is(col: string, val: unknown) { calls.push({ op: 'is', col, val }); return builder; },
+    neq(col: string, val: unknown) { calls.push({ op: 'neq', col, val }); return builder; },
     select() { return Promise.resolve(result); },
   };
   return {
@@ -29,6 +30,9 @@ describe('cancelStaffBills', () => {
       && (c.payload as { status: string }).status === 'cancelled')).toBe(true);
     // A paid bill must never be cancelled -- that would erase a payment.
     expect(calls).toContainEqual({ op: 'is', col: 'paid_at', val: null });
+    // Already-cancelled bills must be excluded, or a re-run recounts them and
+    // inflates the "bills cancelled this run" total the verdict records.
+    expect(calls).toContainEqual({ op: 'neq', col: 'status', val: 'cancelled' });
   });
 
   it('throws when the update fails rather than reporting success', async () => {
