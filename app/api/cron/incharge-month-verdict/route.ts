@@ -30,6 +30,7 @@ import { emailIlikePattern } from '@/lib/identity/email-match';
 import { resolveStaffId } from '@/lib/identity/staff-lookup';
 import { generateStaffBill, resolveStaffBillPlan } from '@/lib/fees/staff-bill';
 import { cancelStaffBills, makeStaffBillsPayable } from '@/lib/fees/cancel-staff-bill';
+import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
 import { serviceDays, evaluateMonth, monthWindow } from '@/lib/boarding/incharge-month';
 
 export const dynamic = 'force-dynamic';
@@ -248,6 +249,31 @@ export async function GET(request: NextRequest) {
             }
           }
 
+          // generateStaffBill can report billingStatus:'billed' even when
+          // EVERY term insert 23505'd -- the idempotency index
+          // (fee_structure_id, person_id, term_no, transport_year_id) does
+          // NOT include status, so a row this same staffer already has in
+          // 'cancelled' state (from an earlier passed month) silently blocks
+          // re-billing that term and 'billed' is returned with inserted: 0.
+          // Never trust the reported status alone -- re-read the actual bill
+          // state and require a REAL outstanding bill before the role is
+          // taken away.
+          if (billed) {
+            const after = await loadStaffBillState(svc, {
+              personId: staffId,
+              transportYearId: currentYear.id as string,
+            });
+            if (!after.hasOutstanding) {
+              billed = false;
+              blockedReason = 'bill could not be made payable (existing cancelled bill blocks re-billing for this term)';
+              summary.blocked++;
+              summary.failures.push({
+                staffEmail: a.staff_email,
+                message: `blocked: ${blockedReason}`,
+              });
+            }
+          }
+
           if (billed) {
             billAction = 'generated';
             summary.billed++;
@@ -263,19 +289,49 @@ export async function GET(request: NextRequest) {
           // billed -- this is the ₹13-lakh preview an admin reads before
           // flipping the mode to 'enforce', and it must not promise an
           // action that would not happen.
-          const plan = await resolveStaffBillPlan(svc, {
-            staffId,
+          //
+          // An already-outstanding bill (staff_deferred or generated) would
+          // simply be confirmed/promoted for real, so that alone previews as
+          // billable. Otherwise a fresh bill would need to be raised, and a
+          // pre-existing CANCELLED row for this person/year is the exact
+          // condition that silently defeats that insert (see the comment on
+          // the real path above) -- so its presence previews as blocked even
+          // when the fee structure itself resolves.
+          const existing = await loadStaffBillState(svc, {
+            personId: staffId,
             transportYearId: currentYear.id as string,
           });
-          if (plan.billable) {
+          if (existing.hasOutstanding) {
             billAction = 'generated';
           } else {
-            blockedReason = plan.reason;
-            summary.blocked++;
-            summary.failures.push({
-              staffEmail: a.staff_email,
-              message: `blocked: ${plan.reason}`,
-            });
+            const [{ data: cancelledRows }, plan] = await Promise.all([
+              svc
+                .from('tms_fee_bill')
+                .select('id')
+                .eq('person_id', staffId)
+                .eq('person_type', 'staff')
+                .eq('transport_year_id', currentYear.id as string)
+                .eq('status', 'cancelled')
+                .limit(1),
+              resolveStaffBillPlan(svc, {
+                staffId,
+                transportYearId: currentYear.id as string,
+              }),
+            ]);
+            const blockedByCancelledBill = (cancelledRows?.length ?? 0) > 0;
+
+            if (plan.billable && !blockedByCancelledBill) {
+              billAction = 'generated';
+            } else {
+              blockedReason = !plan.billable
+                ? plan.reason
+                : 'bill could not be made payable (existing cancelled bill blocks re-billing for this term)';
+              summary.blocked++;
+              summary.failures.push({
+                staffEmail: a.staff_email,
+                message: `blocked: ${blockedReason}`,
+              });
+            }
           }
         }
       }
