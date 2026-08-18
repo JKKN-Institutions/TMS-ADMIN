@@ -28,7 +28,7 @@ import { maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { emailIlikePattern } from '@/lib/identity/email-match';
 import { resolveStaffId } from '@/lib/identity/staff-lookup';
-import { generateStaffBill } from '@/lib/fees/staff-bill';
+import { generateStaffBill, resolveStaffBillPlan } from '@/lib/fees/staff-bill';
 import { cancelStaffBills, makeStaffBillsPayable } from '@/lib/fees/cancel-staff-bill';
 import { serviceDays, evaluateMonth, monthWindow } from '@/lib/boarding/incharge-month';
 
@@ -71,6 +71,8 @@ export async function GET(request: NextRequest) {
     cancelled: 0,
     billed: 0,
     removed: 0,
+    /** Reached a failing verdict but could not be acted on (unbillable / unresolved). */
+    blocked: 0,
     errors: 0,
     failures: [] as Array<{ staffEmail: string; message: string }>,
     plan: [] as Array<{
@@ -80,6 +82,7 @@ export async function GET(request: NextRequest) {
       markedDays: number;
       missedDates: string[];
       billAction: string;
+      blockedReason?: string;
     }>,
   };
 
@@ -91,11 +94,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to load assignments' }, { status: 500 });
   }
 
-  const { data: currentYear } = await svc
+  const { data: currentYear, error: cyErr } = await svc
     .from('tms_transport_year')
     .select('id')
     .eq('is_current', true)
     .maybeSingle();
+  // NEVER let this read as "no current year, so evaluate nobody" -- a failed
+  // query and a genuinely absent current year must not collapse into the
+  // same silent no-op that a live run then mistakes for a quiet month.
+  if (cyErr) {
+    return NextResponse.json({ error: 'Failed to load current transport year' }, { status: 500 });
+  }
+  if (!currentYear?.id) {
+    return NextResponse.json({
+      success: true,
+      data: { month: window, mode, skipped: 'no_current_year' },
+    });
+  }
 
   // Booking and attendance dates are per-route, and many in-charges share a
   // route -- nine on one of them. Fetching per assignment would repeat the same
@@ -167,10 +182,11 @@ export async function GET(request: NextRequest) {
       const staffId = await resolveStaffId(svc, { email: a.staff_email, profileId });
 
       let billAction: 'cancelled' | 'generated' | 'none' = 'none';
+      let blockedReason: string | undefined;
 
       if (verdict.outcome === 'passed') {
         summary.passed++;
-        if (act && staffId && currentYear?.id) {
+        if (act && staffId && currentYear.id) {
           const res = await cancelStaffBills(svc, {
             personId: staffId,
             transportYearId: currentYear.id as string,
@@ -179,34 +195,88 @@ export async function GET(request: NextRequest) {
             billAction = 'cancelled';
             summary.cancelled += res.cancelled;
           }
-        } else if (staffId) {
+        } else if (staffId && currentYear.id) {
+          // shadow / dryRun preview: mirror the exact gate the real path
+          // requires, so the preview never promises a cancellation that
+          // would not actually happen.
           billAction = 'cancelled';
         }
       } else {
         summary.failed++;
-        if (act && staffId && currentYear?.id) {
+        if (!staffId || !currentYear.id) {
+          // Can't bill someone we can't resolve, so no role is taken away --
+          // same "no bill, no role loss" guarantee as the blocked path below.
+          blockedReason = !staffId ? 'unresolved staff id' : 'no current transport year';
+          summary.blocked++;
+          summary.failures.push({
+            staffEmail: a.staff_email,
+            message: `blocked: ${blockedReason}`,
+          });
+        } else if (act) {
           // Held bills become payable; a staffer with no bill row yet has one
-          // raised now. Both paths end in a payable bill, which is what the
-          // lockout screen and the admin mark-paid action both expect.
+          // raised now. The revoke below must never run until one of these
+          // two paths has confirmed a payable bill actually exists -- the
+          // daily cron (incharge-attendance) makes the identical guarantee:
+          // "No bill can be raised, so no role is taken away."
           const promoted = await makeStaffBillsPayable(svc, {
             personId: staffId,
             transportYearId: currentYear.id as string,
           });
-          if (promoted.generated === 0) {
-            await generateStaffBill(svc, {
+          let billed = promoted.generated > 0;
+
+          if (!billed) {
+            const gen = await generateStaffBill(svc, {
               staffId,
               transportYearId: currentYear.id as string,
             });
+            if (gen.billingStatus === 'billed') {
+              // generateStaffBill defaults new rows to 'staff_deferred' --
+              // promote them so the admin mark-paid path (which requires
+              // 'generated') can actually collect this.
+              await makeStaffBillsPayable(svc, {
+                personId: staffId,
+                transportYearId: currentYear.id as string,
+              });
+              billed = true;
+            } else {
+              blockedReason = gen.billingStatus;
+              summary.blocked++;
+              summary.failures.push({
+                staffEmail: a.staff_email,
+                message: `blocked: ${gen.billingStatus}`,
+              });
+            }
           }
-          billAction = 'generated';
-          summary.billed++;
 
-          await svc.from('tms_staff_route_assignment')
-            .update({ is_active: false }).eq('id', a.id);
-          await maybeRevokeBoardingRole(svc, a.id);
-          summary.removed++;
+          if (billed) {
+            billAction = 'generated';
+            summary.billed++;
+
+            await svc.from('tms_staff_route_assignment')
+              .update({ is_active: false }).eq('id', a.id);
+            await maybeRevokeBoardingRole(svc, a.id);
+            summary.removed++;
+          }
         } else {
-          billAction = 'generated';
+          // shadow / dryRun preview: PROBE billability without writing, so a
+          // staffer who would be blocked shows as blocked here too, never as
+          // billed -- this is the ₹13-lakh preview an admin reads before
+          // flipping the mode to 'enforce', and it must not promise an
+          // action that would not happen.
+          const plan = await resolveStaffBillPlan(svc, {
+            staffId,
+            transportYearId: currentYear.id as string,
+          });
+          if (plan.billable) {
+            billAction = 'generated';
+          } else {
+            blockedReason = plan.reason;
+            summary.blocked++;
+            summary.failures.push({
+              staffEmail: a.staff_email,
+              message: `blocked: ${plan.reason}`,
+            });
+          }
         }
       }
 
@@ -223,6 +293,7 @@ export async function GET(request: NextRequest) {
         markedDays: verdict.markedDays,
         missedDates: verdict.missedDates,
         billAction,
+        ...(blockedReason ? { blockedReason } : {}),
       });
 
       // Shadow mode still RECORDS the verdict -- that is the entire point of
@@ -250,7 +321,11 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      if (act && profileId) {
+      // billAction is the single source of truth for "something actually
+      // changed" -- 'none' covers both the blocked failure path and a
+      // passed staffer for whom nothing needed cancelling, and neither
+      // deserves a notification claiming otherwise.
+      if (act && profileId && billAction !== 'none') {
         await notifyProfile(svc, {
           profileId,
           actorId: profileId,
