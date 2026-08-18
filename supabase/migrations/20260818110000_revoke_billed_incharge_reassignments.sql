@@ -61,7 +61,12 @@ set is_active = false
 where a.id in (select id from tms_staff_route_assignment_backup_20260818);
 
 -- ── Verification (run separately after applying) ─────────────────────────────
---   select count(*) from tms_staff_route_assignment_backup_20260818;   -- expect 26
+-- The population has been observed growing (26 -> 28 as of 2026-08-18) since
+-- the guard that stops new leaks is not deployed yet. Do NOT compare against
+-- a number hardcoded in this file — re-run the Step 2 pre-count `select`
+-- immediately before applying, and compare the backup row count below
+-- against THAT freshly measured number, not against any count written here.
+--   select count(*) from tms_staff_route_assignment_backup_20260818;
 --   -- and zero billed-and-active staff should remain:
 --   -- (see the Step 3 query in the plan)
 --

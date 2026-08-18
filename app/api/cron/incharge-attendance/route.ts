@@ -50,14 +50,23 @@ export async function GET(request: NextRequest) {
   // reconstructed from days that have already gone by. Replay is safe because
   // evaluateDay only lets the evaluated date move forward (see its <= guard).
   //
-  // `silent=1` records the strike but sends no notification and takes no
-  // punitive action — used to prime a backfilled streak without warning people
+  // This route never revokes an assignment or raises a bill any more — see
+  // the file header; that moved to the month-end verdict
+  // (app/api/cron/incharge-month-verdict/route.ts). So `silent=1` and
+  // `quiet=1` are now FUNCTIONALLY IDENTICAL here: both simply suppress the
+  // notification while the strike still records and advances the same way
+  // either way. Do not read either flag as controlling a bill or a removal
+  // in this route — neither can happen here regardless of which is set.
+  // They stay as two separate flags/names for backward compatibility with
+  // existing callers (and any future scripts replaying past dates), not
+  // because they still differ in effect.
+  //
+  // `silent=1` — used to prime a backfilled streak without warning people
   // about days they can no longer do anything about.
   //
-  // `quiet=1` is the OTHER half of that idea and must not be confused with it:
-  // it acts in full — revokes and bills — but sends no notification. It exists
-  // for a retroactive catch-up, where replaying three past days in one minute
-  // would otherwise fire three messages about days the staffer cannot change.
+  // `quiet=1` — exists for a retroactive catch-up, where replaying three past
+  // days in one minute would otherwise fire three messages about days the
+  // staffer cannot change.
   const dateParam = request.nextUrl.searchParams.get('date');
   const silent = request.nextUrl.searchParams.get('silent') === '1';
   const quiet = request.nextUrl.searchParams.get('quiet') === '1';
@@ -79,10 +88,11 @@ export async function GET(request: NextRequest) {
 
   const cfg = await loadSchedulingConfig(svc);
   const mode = cfg.inchargeEnforcementMode;
-  // `act` is the single authority on whether anything punitive happens.
-  // `shadow` still evaluates and persists strikes — that is the whole point,
-  // it builds the admin board out of real data — it only withholds
-  // notifications, revokes and bills. `dryRun` persists nothing either way.
+  // This route has nothing punitive left to gate — no revoke, no bill. `act`
+  // now only feeds `notify` below: in effect it decides whether a warning is
+  // sent. `shadow` still evaluates and persists strikes regardless of `act`
+  // — that is the whole point, it builds the admin board out of real data —
+  // `act` only withholds notification. `dryRun` persists nothing either way.
   const act = mode === 'enforce' && !dryRun && !silent;
   // Notifying is a STRICTLY narrower permission than acting: you can act
   // without telling anyone (`quiet`), but you can never tell someone their role
@@ -111,8 +121,9 @@ export async function GET(request: NextRequest) {
     /** Reached REMOVAL_THRESHOLD misses. The month-end verdict decides what happens next. */
     atThreshold: 0,
     errors: 0,
-    // Which staffer failed and why. A bare error COUNT is undiagnosable in a
-    // job that revokes roles and writes bills — always carry the reason out.
+    // Which staffer failed and why. A bare error COUNT is undiagnosable —
+    // always carry the reason out, even though this job now only warns
+    // (revoking roles and writing bills is the month-end verdict's job).
     failures: [] as Array<{ staffEmail: string; message: string }>,
     dryRun,
     plan: [] as Array<{
@@ -120,7 +131,6 @@ export async function GET(request: NextRequest) {
       action: string;
       consecutiveMisses: number;
       missedDates: string[];
-      wouldBill: boolean;
     }>,
   };
 
@@ -188,7 +198,6 @@ export async function GET(request: NextRequest) {
             action: `skip:${outcome.reason}`,
             consecutiveMisses: prev.consecutiveMisses,
             missedDates: prev.missedDates,
-            wouldBill: false,
           });
         }
         continue;
@@ -220,7 +229,6 @@ export async function GET(request: NextRequest) {
           action: outcome.action,
           consecutiveMisses: outcome.state.consecutiveMisses,
           missedDates: outcome.state.missedDates,
-          wouldBill: false,
         });
       }
 
