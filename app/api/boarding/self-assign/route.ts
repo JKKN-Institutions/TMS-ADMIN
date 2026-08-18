@@ -4,6 +4,10 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getStaffBoardingEligibility } from '@/lib/boarding/eligibility';
 import { grantBoardingRole } from '@/lib/boarding/roles';
 import { logActivity } from '@/lib/activity/log';
+import { resolveStaffId } from '@/lib/identity/staff-lookup';
+import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
+import { maySelfAssign } from '@/lib/boarding/self-assign-guard';
+import { emailIlikePattern } from '@/lib/identity/email-match';
 
 /**
  * A bus_required staffer accepts the boarding in-charge duty.
@@ -47,9 +51,48 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
       );
     }
 
-    // ── PHASE 2 SEAM (staff fees) ──────────────────────────────────────────────
-    // When staff transport fees exist, block here if this staffer is not cleared
-    // (mirror the learner tms_student_transport_access gate). No-op in Phase 1.
+    // ── Fee gate ───────────────────────────────────────────────────────────────
+    // The in-charge duty carries a fee exemption, so a staffer who already owes
+    // transport fees cannot hand themselves that exemption. An ACTIVE probation
+    // is the sanctioned way back (see /api/boarding/incharge-pledge), so it
+    // passes through here.
+    const { data: currentYear } = await svc
+      .from('tms_transport_year')
+      .select('id')
+      .eq('is_current', true)
+      .maybeSingle();
+
+    if (currentYear?.id) {
+      const staffId = await resolveStaffId(svc, { email, profileId: auth.userId });
+      if (staffId) {
+        const billState = await loadStaffBillState(svc, {
+          personId: staffId,
+          transportYearId: currentYear.id as string,
+        });
+        const { data: probation } = await svc
+          .from('tms_incharge_probation')
+          .select('id')
+          .ilike('staff_email', emailIlikePattern(email))
+          .eq('status', 'active')
+          .maybeSingle();
+
+        const verdict = maySelfAssign({
+          hasOutstandingBill: billState.hasOutstanding,
+          hasActiveProbation: Boolean(probation?.id),
+        });
+        if (!verdict.allowed) {
+          return NextResponse.json(
+            {
+              error:
+                'Transport fees are outstanding on your account. Accept the attendance ' +
+                'commitment or settle the fees to continue as bus in-charge.',
+              reason: verdict.reason,
+            },
+            { status: 403 },
+          );
+        }
+      }
+    }
 
     const { data: assignment, error } = await svc
       .from('tms_staff_route_assignment')
