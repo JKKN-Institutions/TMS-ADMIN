@@ -152,7 +152,9 @@ export default function BillAnalytics({
       {summary.staffDeferred > 0 && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Users className="h-3.5 w-3.5" />
-          {num(summary.staffDeferred)} staff record(s) are deferred (tracked, not billed) and excluded from the figures above.
+          {num(summary.staffDeferred)} staff bill(s) are included in the money totals, but not in the
+          learner counts and per-learner breakdowns above — staff have no degree, department or
+          year of study to group by.
         </p>
       )}
     </div>
@@ -161,8 +163,11 @@ export default function BillAnalytics({
 
 // The reusable analytics body: three headline tiles + collection-progress and
 // learner-status charts + the per-term table. Rendered once for Overall and again
-// for a filtered cohort. `rows` may include staff/cancelled rows — every aggregator
-// it calls filters to active learner bills, so the figures stay reconciled.
+// for a filtered cohort. `rows` may include staff/cancelled rows. The MONEY comes
+// from `summary` (learners + staff, matching MyJKKN's Transport Fees screen); the
+// per-learner aggregators below filter to active LEARNER bills, because a staff
+// member has no degree/department/year to be counted under. The two answer
+// different questions and are labelled as such — they are not expected to tally.
 function AnalyticsSection({
   rows, summary, scope, yearLabel,
 }: {

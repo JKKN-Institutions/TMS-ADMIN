@@ -43,6 +43,15 @@ interface DataTableProps<TData, TValue> {
   getRowId?: (originalRow: TData, index: number) => string;
   /** Right-side toolbar controls; receives current selection. */
   toolbarActions?: (ctx: ToolbarActionContext<TData>) => React.ReactNode;
+  /**
+   * Reports the rows left after search + column filters, for callers that render
+   * their own totals above the table.
+   *
+   * Filter state lives inside this component, so without this a summary computed
+   * by the parent silently ignores every filter the user applies — the numbers
+   * sit still while the rows beneath them change.
+   */
+  onFilteredRowsChange?: (rows: TData[], isFiltered: boolean) => void;
 }
 
 // "licenseNumber" -> "License Number" for the column-visibility menu.
@@ -53,6 +62,7 @@ function prettifyColumnId(id: string) {
 export function DataTable<TData, TValue>({
   columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 10,
   entityName = 'rows', isLoading = false, enableRowSelection = false, getRowId, toolbarActions,
+  onFilteredRowsChange,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
@@ -84,6 +94,18 @@ export function DataTable<TData, TValue>({
   const pageCount = table.getPageCount() || 1;
   const selectedCount = table.getFilteredSelectedRowModel().rows.length;
   const isFiltered = globalFilter.length > 0 || columnFilters.length > 0;
+  // Keyed on the inputs to filtering, NOT on the row array itself:
+  // getFilteredRowModel() returns a fresh array every render, so depending on it
+  // would re-fire on any parent re-render and loop through the parent's setState.
+  React.useEffect(() => {
+    if (!onFilteredRowsChange) return;
+    onFilteredRowsChange(
+      table.getFilteredRowModel().rows.map((r) => r.original),
+      isFiltered,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, columnFilters, globalFilter, isFiltered, onFilteredRowsChange]);
+
   const seenSoFar = Math.min((pageIndex + 1) * currentPageSize, filteredCount);
   const percentOfTotal = filteredCount > 0 ? Math.round((seenSoFar / filteredCount) * 100) : 0;
   const hideableColumns = table.getAllColumns().filter((c) => c.getCanHide());

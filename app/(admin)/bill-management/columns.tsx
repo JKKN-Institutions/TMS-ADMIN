@@ -98,6 +98,15 @@ export function getBillColumns(): ColumnDef<TransportBillRow>[] {
       ),
     },
     {
+      id: 'department',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Department" />,
+      accessorFn: (r) => r.department_name ?? '',
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      cell: ({ row }) => (
+        <span className="text-sm text-gray-600 dark:text-gray-300">{row.original.department_name || '—'}</span>
+      ),
+    },
+    {
       id: 'structure',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Structure / Term" />,
       accessorFn: (r) => r.structure_name ?? '',
