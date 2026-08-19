@@ -75,6 +75,14 @@ async function getAccess(auth: AuthContext) {
       outstandingAmount = billState.outstandingAmount;
     }
 
+    // Mirrors self-assign's own fail-closed conditions (reasons 'no_current_year'
+    // / 'staff_unresolved'). Neither is a leak on its own -- self-assign still
+    // rejects them -- but without this, hasOutstandingBill silently stays false,
+    // the gate below can come out 'choose', and a billed staffer would be shown
+    // a willingness toggle that 409s the instant they press it.
+    const feeCheckReason: 'no_current_year' | 'staff_unresolved' | null =
+      !currentYear?.id ? 'no_current_year' : !staffId ? 'staff_unresolved' : null;
+
     if (hasOutstandingBill && email) {
       const today = istToday();
       const win = monthWindow(today);
@@ -104,7 +112,7 @@ async function getAccess(auth: AuthContext) {
       }
     }
 
-    const gate = deriveInChargeGate({
+    let gate = deriveInChargeGate({
       allowed,
       eligible: elig.eligible,
       assignedRouteCount: elig.assignedRouteCount,
@@ -113,6 +121,11 @@ async function getAccess(auth: AuthContext) {
       probationThisMonth,
       remainingServiceDays,
     });
+    // Only 'choose' is at risk here -- it is the one gate that offers an action
+    // (self-assign) whose own fail-closed checks we could not evaluate.
+    if (gate === 'choose' && feeCheckReason) {
+      gate = 'denied';
+    }
 
     return NextResponse.json({
       success: true,
@@ -130,6 +143,7 @@ async function getAccess(auth: AuthContext) {
         gate,
         outstandingAmount,
         probationThisMonth,
+        ...(feeCheckReason ? { reason: feeCheckReason } : {}),
       },
     });
   } catch (e) {
