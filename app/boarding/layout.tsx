@@ -151,8 +151,8 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
         if (cancelled) return;
         if (res.ok) {
           // The server now owns this decision -- it is the only side that can see
-          // the staffer's bills. deriveBoardingAccess remains for the fee-free
-          // dimensions and is still unit-tested, but the gate wins.
+          // the staffer's bills. The gate is derived by deriveInChargeGate in
+          // lib/boarding/incharge-gate.ts and published here via /api/boarding/access.
           const gate = d.gate as
             | 'in_duty' | 'choose' | 'pledge' | 'must_pay' | 'denied' | undefined;
           setAccess(gate === 'in_duty' ? 'allowed' : (gate ?? 'denied'));

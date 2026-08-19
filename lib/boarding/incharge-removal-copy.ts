@@ -3,12 +3,12 @@
  * role and raises a transport fee bill.
  *
  * Pure and separately tested because this is the ONLY explanation the staffer
- * ever gets. Removal locks them out of the boarding portal — `deriveBoardingAccess`
- * returns 'choose' once their assignment count hits zero, and the layout
- * redirects every /boarding path to the willingness toggle, a screen with no
- * notification bell. None of them have a push subscription and this app has no
- * email sender, so the text below is delivered as a banner on that one reachable
- * page. There is no follow-up channel to correct a confusing message.
+ * ever gets. Removal locks them out of the boarding portal — `deriveInChargeGate`
+ * in lib/boarding/incharge-gate.ts returns 'choose' once their assignment count
+ * hits zero, and the layout redirects every /boarding path to the willingness
+ * toggle, a screen with no notification bell. None of them have a push subscription
+ * and this app has no email sender, so the text below is delivered as a banner on
+ * that one reachable page. There is no follow-up channel to correct a confusing message.
  *
  * Two things it must get right, both learned from the data rather than assumed:
  *  - Attendance is scored PER ROUTE. On a route with several in-charges, each
