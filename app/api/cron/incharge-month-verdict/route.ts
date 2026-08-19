@@ -13,12 +13,21 @@
  *   - `inchargeEnforcementMode` (admin_settings). Ships as 'shadow', which
  *     records verdicts but cancels, bills, revokes and notifies nobody.
  *   - `dryRun=1`, which writes nothing at all.
+ *   - A third gate, below: `act` also requires the run to be evaluating the
+ *     TRUE end of the month, or an explicit `month=` param. See the comment
+ *     at `canAct`.
  *
  * Blast radius, measured 2026-08-18: under the zero-miss rule NO route was
  * marked on every day it carried riders, so a live run bills all 102 in-charges
  * about Rs 13 lakh. That consequence was chosen deliberately and is recorded in
  * the design doc -- but it is why the first live run must be a human pressing a
  * button, never this job waking up on its own.
+ *
+ * This route has no AuthContext -- it is a cron, not an admin action -- so it
+ * deliberately does NOT call lib/activity/log.ts (which requires one). The
+ * tms_incharge_month_verdict row this route writes IS the audit substitute:
+ * every cancellation, bill and revoke this job performs must be explainable
+ * from that table alone. This is a decision, not an oversight.
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -34,6 +43,12 @@ import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
 import { serviceDays, evaluateMonth, monthWindow } from '@/lib/boarding/incharge-month';
 
 export const dynamic = 'force-dynamic';
+
+interface Assignment {
+  id: string;
+  staff_email: string;
+  route_id: string | null;
+}
 
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -54,7 +69,24 @@ export async function GET(request: NextRequest) {
 
   const cfg = await loadSchedulingConfig(svc);
   const mode = cfg.inchargeEnforcementMode;
-  const act = mode === 'enforce' && !dryRun;
+
+  // The pg_cron schedule fires '0 16 28-31 * *' -- every day from the 28th
+  // onward, because cron syntax cannot express "the last day of the month".
+  // Recording the verdict in shadow on the 28th-30th is harmless (that is
+  // the whole point of shadow). But ACTING three days early is not: it
+  // settles the month before it has finished, on non-idempotent side
+  // effects (money moved, a role revoked, a notification sent). Money and
+  // roles may only move on the day that truly is the month's last day --
+  // OR when a human explicitly named a month via `month=`, which is by
+  // definition a deliberate, once-off run.
+  const monthExplicit = monthParam !== null;
+  const atMonthEnd = today === window.end;
+  const canAct = atMonthEnd || monthExplicit;
+  const act = mode === 'enforce' && !dryRun && canAct;
+  const actionWithheldReason =
+    mode === 'enforce' && !dryRun && !canAct
+      ? `withheld: today (${today}) is not the last day of the verdict month (${window.end}); pass ?month=YYYY-MM to force a deliberate run`
+      : null;
 
   if (mode === 'off') {
     return NextResponse.json({ success: true, data: { month: window, mode, skipped: 'mode_off' } });
@@ -65,6 +97,7 @@ export async function GET(request: NextRequest) {
     window,
     mode,
     dryRun,
+    actionWithheldReason,
     evaluated: 0,
     skippedNoRoute: 0,
     passed: 0,
@@ -87,13 +120,14 @@ export async function GET(request: NextRequest) {
     }>,
   };
 
-  const { data: assignments, error: aErr } = await svc
+  const { data: assignmentRows, error: aErr } = await svc
     .from('tms_staff_route_assignment')
     .select('id, staff_email, route_id')
     .eq('is_active', true);
   if (aErr) {
     return NextResponse.json({ error: 'Failed to load assignments' }, { status: 500 });
   }
+  const assignments = (assignmentRows ?? []) as Assignment[];
 
   const { data: currentYear, error: cyErr } = await svc
     .from('tms_transport_year')
@@ -149,10 +183,29 @@ export async function GET(request: NextRequest) {
     };
   }
 
-  for (const a of assignments ?? []) {
+  // Group assignments by PERSON, not by row. A staffer on two routes was
+  // previously evaluated twice -- once per assignment row -- and could pass
+  // on one route and fail on the other, with both verdicts fighting over the
+  // same (staff_email, month) audit row and only ONE of their two
+  // assignments getting deactivated on a fail (so maybeRevokeBoardingRole
+  // found the surviving one and kept the role -- billed and still in-charge).
+  // Evaluating the person once across the union of their routes closes that.
+  const groups = new Map<string, { staffEmail: string; rows: Assignment[] }>();
+  for (const a of assignments) {
+    const key = a.staff_email.toLowerCase().trim();
+    const existing = groups.get(key);
+    if (existing) existing.rows.push(a);
+    else groups.set(key, { staffEmail: a.staff_email, rows: [a] });
+  }
+
+  for (const group of groups.values()) {
     try {
       summary.evaluated++;
-      if (!a.route_id) {
+
+      const routeIds = [...new Set(
+        group.rows.map((r) => r.route_id).filter((id): id is string => Boolean(id)),
+      )];
+      if (routeIds.length === 0) {
         summary.skippedNoRoute++;
         continue;
       }
@@ -160,27 +213,48 @@ export async function GET(request: NextRequest) {
       // An ACTIVE probation narrows the window: the staffer committed from the
       // day they accepted, not from the 1st, and holding them to days that
       // preceded their promise would make the promise unwinnable.
+      //
+      // Filtered to probations that overlap THIS verdict month -- matching
+      // app/api/boarding/access/route.ts. Without this, a probation accepted
+      // in an earlier month and never explicitly closed out would still be
+      // 'active' and would silently narrow (or pass) a LATER month's verdict
+      // for free.
       const { data: probation } = await svc
         .from('tms_incharge_probation')
         .select('id, window_start, window_end')
-        .ilike('staff_email', emailIlikePattern(a.staff_email))
+        .ilike('staff_email', emailIlikePattern(group.staffEmail))
         .eq('status', 'active')
+        .gte('window_end', window.start)
+        .lte('window_start', window.end)
         .maybeSingle();
       const prob = probation as { id: string; window_start: string; window_end: string } | null;
       const from = prob?.window_start ?? window.start;
       const to = prob?.window_end ?? window.end;
 
-      const { booked, marked } = await routeDates(a.route_id as string);
-      const days = serviceDays(booked, from, to);
-      const verdict = evaluateMonth({ serviceDays: days, markedDates: marked });
+      // Union across the person's routes: each route contributes its own
+      // service days (it may run on different days than a colleague route),
+      // and a mark on ANY of the person's routes that day counts -- credit
+      // is route-level (shared roster), and stays that way when a person
+      // covers more than one route.
+      const serviceDaySet = new Set<string>();
+      const markedSet = new Set<string>();
+      for (const routeId of routeIds) {
+        const { booked, marked } = await routeDates(routeId);
+        for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
+        for (const d of marked) markedSet.add(d);
+      }
+      const verdict = evaluateMonth({
+        serviceDays: [...serviceDaySet].sort(),
+        markedDates: [...markedSet],
+      });
 
       const { data: profile } = await svc
         .from('profiles')
         .select('id')
-        .ilike('email', emailIlikePattern(a.staff_email))
+        .ilike('email', emailIlikePattern(group.staffEmail))
         .maybeSingle();
       const profileId = (profile as { id: string } | null)?.id ?? null;
-      const staffId = await resolveStaffId(svc, { email: a.staff_email, profileId });
+      const staffId = await resolveStaffId(svc, { email: group.staffEmail, profileId });
 
       let billAction: 'cancelled' | 'generated' | 'none' = 'none';
       let blockedReason: string | undefined;
@@ -191,6 +265,11 @@ export async function GET(request: NextRequest) {
           const res = await cancelStaffBills(svc, {
             personId: staffId,
             transportYearId: currentYear.id as string,
+            // Cancel only the bill(s) belonging to THIS verdict month, not the
+            // staffer's whole year -- see the comment on cancelStaffBills for
+            // why an unscoped cancel was a critical bug.
+            dueFrom: window.start,
+            dueTo: window.end,
           });
           if (res.cancelled > 0) {
             billAction = 'cancelled';
@@ -198,9 +277,16 @@ export async function GET(request: NextRequest) {
           }
         } else if (staffId && currentYear.id) {
           // shadow / dryRun preview: mirror the exact gate the real path
-          // requires, so the preview never promises a cancellation that
-          // would not actually happen.
-          billAction = 'cancelled';
+          // requires -- confirm a bill actually exists before previewing a
+          // cancellation. Only 38 of ~108 in-charges have a bill at all,
+          // so promising 'cancelled' unconditionally (as this branch used
+          // to) overstated what an 'enforce' run would do on the evidence an
+          // admin reads before flipping the mode.
+          const state = await loadStaffBillState(svc, {
+            personId: staffId,
+            transportYearId: currentYear.id as string,
+          });
+          billAction = state.hasOutstanding ? 'cancelled' : 'none';
         }
       } else {
         summary.failed++;
@@ -210,7 +296,7 @@ export async function GET(request: NextRequest) {
           blockedReason = !staffId ? 'unresolved staff id' : 'no current transport year';
           summary.blocked++;
           summary.failures.push({
-            staffEmail: a.staff_email,
+            staffEmail: group.staffEmail,
             message: `blocked: ${blockedReason}`,
           });
         } else if (act) {
@@ -243,7 +329,7 @@ export async function GET(request: NextRequest) {
               blockedReason = gen.billingStatus;
               summary.blocked++;
               summary.failures.push({
-                staffEmail: a.staff_email,
+                staffEmail: group.staffEmail,
                 message: `blocked: ${gen.billingStatus}`,
               });
             }
@@ -268,7 +354,7 @@ export async function GET(request: NextRequest) {
               blockedReason = 'bill could not be made payable (existing cancelled bill blocks re-billing for this term)';
               summary.blocked++;
               summary.failures.push({
-                staffEmail: a.staff_email,
+                staffEmail: group.staffEmail,
                 message: `blocked: ${blockedReason}`,
               });
             }
@@ -278,10 +364,29 @@ export async function GET(request: NextRequest) {
             billAction = 'generated';
             summary.billed++;
 
+            const assignmentIds = group.rows.map((r) => r.id);
             await svc.from('tms_staff_route_assignment')
-              .update({ is_active: false }).eq('id', a.id);
-            await maybeRevokeBoardingRole(svc, a.id);
+              .update({ is_active: false }).in('id', assignmentIds);
+            // All of the person's active assignments are gone now (not just
+            // the one that happened to be evaluated last), so a single call
+            // is enough -- maybeRevokeBoardingRole resolves the email from
+            // whichever assignment id it is given and checks for ANY
+            // remaining active row for that person.
+            await maybeRevokeBoardingRole(svc, assignmentIds[0]);
             summary.removed++;
+
+            // The daily loop (incharge-attendance) carries removed_at /
+            // billing_status forward with a comment claiming the month-end
+            // verdict writes them -- make that true. Update only, never
+            // insert: if a strike row does not exist for an assignment this
+            // route never creates one, it just skips quietly (an update
+            // that matches zero rows is not an error).
+            const revokedAt = new Date().toISOString();
+            for (const assignmentId of assignmentIds) {
+              await svc.from('tms_incharge_attendance_strike')
+                .update({ removed_at: revokedAt, billing_status: 'billed' })
+                .eq('assignment_id', assignmentId);
+            }
           }
         } else {
           // shadow / dryRun preview: PROBE billability without writing, so a
@@ -328,7 +433,7 @@ export async function GET(request: NextRequest) {
                 : 'bill could not be made payable (existing cancelled bill blocks re-billing for this term)';
               summary.blocked++;
               summary.failures.push({
-                staffEmail: a.staff_email,
+                staffEmail: group.staffEmail,
                 message: `blocked: ${blockedReason}`,
               });
             }
@@ -343,7 +448,7 @@ export async function GET(request: NextRequest) {
       }
 
       summary.plan.push({
-        staffEmail: a.staff_email,
+        staffEmail: group.staffEmail,
         outcome: verdict.outcome,
         requiredDays: verdict.requiredDays,
         markedDays: verdict.markedDays,
@@ -356,19 +461,48 @@ export async function GET(request: NextRequest) {
       // shadow, it builds the admin board from real decisions. Only dryRun
       // writes nothing.
       if (!dryRun) {
+        const monthKey = `${anchor.slice(0, 7)}-01`;
+        const staffEmailKey = group.staffEmail.toLowerCase().trim();
+
+        // A re-run in the same month (e.g. a second `enforce` pass, or a
+        // shadow pass after an earlier enforce run) must never DOWNGRADE an
+        // already-recorded action: once bills are cancelled, cancelStaffBills
+        // has nothing left to cancel and reports 0, which would otherwise
+        // overwrite 'cancelled' with 'none' -- and on the fail side
+        // 'generated' would become 'none', which hides the Mark-bill-paid
+        // button the admin board keys off of.
+        let recordedBillAction = billAction;
+        if (billAction === 'none') {
+          const { data: existingVerdict } = await svc
+            .from('tms_incharge_month_verdict')
+            .select('bill_action')
+            .eq('staff_email', staffEmailKey)
+            .eq('month', monthKey)
+            .maybeSingle();
+          const prior = (existingVerdict as { bill_action: string | null } | null)?.bill_action;
+          if (prior && prior !== 'none') {
+            recordedBillAction = prior as typeof billAction;
+          }
+        }
+
         await svc.from('tms_incharge_month_verdict').upsert(
           {
-            staff_email: a.staff_email.toLowerCase().trim(),
+            staff_email: staffEmailKey,
             person_id: staffId,
-            route_id: a.route_id,
-            month: `${anchor.slice(0, 7)}-01`,
+            // The column is singular; a person spanning routes is stored
+            // against their first (in iteration order) route as a
+            // representative value -- the audit trail's authority for which
+            // routes a person actually covered is tms_staff_route_assignment,
+            // not this column.
+            route_id: routeIds[0],
+            month: monthKey,
             window_start: from,
             window_end: to,
             required_days: verdict.requiredDays,
             marked_days: verdict.markedDays,
             missed_dates: verdict.missedDates,
             outcome: verdict.outcome,
-            bill_action: billAction,
+            bill_action: recordedBillAction,
             was_probation: Boolean(prob),
             mode,
             decided_at: new Date().toISOString(),
@@ -395,13 +529,13 @@ export async function GET(request: NextRequest) {
         });
       }
     } catch (e) {
-      // One staffer's failure must never abort the run for the others.
+      // One person's failure must never abort the run for the others.
       summary.errors++;
       summary.failures.push({
-        staffEmail: a.staff_email,
+        staffEmail: group.staffEmail,
         message: e instanceof Error ? e.message : String(e),
       });
-      console.error('[incharge-month-verdict] failed for', a.staff_email, e);
+      console.error('[incharge-month-verdict] failed for', group.staffEmail, e);
     }
   }
 
