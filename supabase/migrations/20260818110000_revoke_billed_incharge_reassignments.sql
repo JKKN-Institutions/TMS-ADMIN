@@ -12,6 +12,17 @@
 -- The population has grown since the plan was written. Do not apply this
 -- migration, and re-run the Step 2 count immediately before the deferred
 -- application stage to get a current number.
+--
+-- FIX (2026-08-18 review): the `leaked` CTE below now also excludes anyone
+-- with an ACTIVE tms_incharge_probation row. Without that exclusion this
+-- migration would deactivate exactly the people who did the right thing: a
+-- pledge-created reassignment (source='self', assigned_at after the
+-- enforcement run, matched to an outstanding bill) satisfies every other
+-- clause here, because the whole point of probation is that the bill is
+-- NOT cancelled until the month-end verdict passes them. Applying the
+-- original version would strand pledged staff with a dead assignment_id and
+-- an active probation the month-end job (which only iterates active
+-- assignments) would then never resolve either way.
 
 -- Revoke the in-charge assignments that billed staff re-granted themselves.
 --
@@ -50,6 +61,14 @@ leaked as (
     -- Only re-grants made AFTER the enforcement run. An assignment predating it
     -- was not a re-entry and is not this migration's business.
     and a.assigned_at >= '2026-08-15'
+    -- Never touch someone on an active pledge -- their bill is deliberately
+    -- still outstanding until the month-end verdict decides them. See the
+    -- FIX note at the top of this file.
+    and not exists (
+      select 1 from tms_incharge_probation p
+      where lower(p.staff_email) = lower(trim(a.staff_email))
+        and p.status = 'active'
+    )
 )
 insert into tms_staff_route_assignment_backup_20260818
 select a.*, now()

@@ -17,6 +17,17 @@
 -- schedule can be this crude rather than computing the true month end in cron
 -- syntax, which cron cannot express.
 --
+-- This crude "fire every day from the 28th" schedule is only safe because the
+-- ROUTE carries a matching guard: app/api/cron/incharge-month-verdict/route.ts
+-- refuses to ACT (cancel/bill/revoke/notify) unless today is truly the last
+-- day of the verdict month, or an explicit ?month= was supplied. On the
+-- 28th-30th it still RECORDS the verdict in shadow -- harmless, since that is
+-- the whole point of shadow -- but withholds the money/role side effects.
+-- Do not "simplify" this schedule to a single fixed day without checking that
+-- guard first: the schedule and the route's date check are a matched pair,
+-- and removing either half on its own reintroduces the bug it closes (the
+-- job settling the month three days early on non-idempotent side effects).
+--
 -- The job records verdicts but cancels, bills, revokes and notifies NOBODY
 -- until inchargeEnforcementMode is switched from 'shadow' to 'enforce' on
 -- Settings -> Scheduling.
