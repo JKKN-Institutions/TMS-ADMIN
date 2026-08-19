@@ -18,10 +18,22 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getStaffBoardingEligibility } from '@/lib/boarding/eligibility';
+import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { grantBoardingRole } from '@/lib/boarding/roles';
 import { logActivity } from '@/lib/activity/log';
-import { probationWindow } from '@/lib/boarding/incharge-month';
+import { probationWindow, serviceDays, monthWindow } from '@/lib/boarding/incharge-month';
 import { istToday } from '@/lib/booking/window';
+import { resolveStaffId } from '@/lib/identity/staff-lookup';
+import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
+import { deriveInChargeGate } from '@/lib/boarding/incharge-gate';
+import { emailIlikePattern } from '@/lib/identity/email-match';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+
+async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
+  if (auth.isSuperAdmin) return true;
+  const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: permission });
+  return !!data;
+}
 
 async function postPledge(request: NextRequest, auth: AuthContext) {
   try {
@@ -45,7 +57,82 @@ async function postPledge(request: NextRequest, auth: AuthContext) {
       );
     }
 
-    const window = probationWindow(istToday());
+    // ── Re-derive the same gate /api/boarding/access computes, server-side.
+    // The pledge is a WRITE: it must never be reachable by anyone the gate
+    // would not itself offer 'pledge' to, no matter what the client sent.
+    const hasScan = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN);
+    const routeIds = hasScan ? await getAssignedRouteIdsForUser(auth) : [];
+    const allowed = routeIds.length > 0;
+
+    const { data: currentYear } = await svc
+      .from('tms_transport_year').select('id').eq('is_current', true).maybeSingle();
+
+    let hasOutstandingBill = false;
+    let probationThisMonth: 'none' | 'active' | 'failed' = 'none';
+    let remainingServiceDays = 0;
+
+    const staffId = await resolveStaffId(svc, { email, profileId: auth.userId });
+    if (staffId && currentYear?.id) {
+      const billState = await loadStaffBillState(svc, {
+        personId: staffId, transportYearId: currentYear.id as string,
+      });
+      hasOutstandingBill = billState.hasOutstanding;
+    }
+
+    const today = istToday();
+    const win = monthWindow(today);
+    let windowServiceDays: string[] = [];
+
+    if (hasOutstandingBill) {
+      const { data: probRows } = await svc
+        .from('tms_incharge_probation')
+        .select('status')
+        .ilike('staff_email', emailIlikePattern(email))
+        .gte('window_end', win.start);
+      const statuses = ((probRows ?? []) as Array<{ status: string }>).map((r) => r.status);
+      if (statuses.includes('active')) probationThisMonth = 'active';
+      else if (statuses.includes('failed')) probationThisMonth = 'failed';
+
+      const { data: booked } = await svc
+        .from('tms_booking')
+        .select('travel_date')
+        .eq('route_id', elig.routeId)
+        .gte('travel_date', today)
+        .lte('travel_date', win.end);
+      windowServiceDays = serviceDays(
+        ((booked ?? []) as Array<{ travel_date: string }>).map((b) => b.travel_date),
+        today, win.end,
+      );
+      remainingServiceDays = windowServiceDays.length;
+    }
+
+    const gate = deriveInChargeGate({
+      allowed,
+      eligible: elig.eligible,
+      assignedRouteCount: elig.assignedRouteCount,
+      hasRoute: elig.hasRoute,
+      hasOutstandingBill,
+      probationThisMonth,
+      remainingServiceDays,
+    });
+    if (gate !== 'pledge') {
+      return NextResponse.json(
+        { error: 'You are not eligible to accept this commitment right now.' },
+        { status: 403 },
+      );
+    }
+    // Belt and suspenders: evaluateMonth PASSES an empty window by design (no
+    // service days means no duty was possible), so a pledge accepted with zero
+    // remaining service days must never be allowed to reach that shortcut --
+    // it would cancel every outstanding bill for zero days of duty.
+    if (windowServiceDays.length === 0) {
+      return NextResponse.json(
+        { error: 'There are no more service days this month on your route -- this commitment cannot be honoured.' },
+        { status: 400 },
+      );
+    }
+
+    const window = probationWindow(today);
 
     const { data: probation, error: pErr } = await svc
       .from('tms_incharge_probation')
