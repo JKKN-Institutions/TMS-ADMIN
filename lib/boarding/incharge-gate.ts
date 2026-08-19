@@ -1,11 +1,12 @@
 /**
  * Which screen does this staffer see in the boarding portal?
  *
- * Extends deriveBoardingAccess in access-state.ts with the fee dimension. The
- * two are kept separate rather than merged: access-state answers "may you use
- * the portal", which the layout has always asked, while this answers "and what
- * do we show you if not" -- a question that only exists now that a bill can
- * stand between a staffer and their duty.
+ * The sole authority on this question. It used to extend a separate
+ * deriveBoardingAccess (access-state.ts) that answered only "may you use the
+ * portal" without knowing about bills -- exactly the fee-blind gate this
+ * feature exists to replace. That file had zero live call sites (only its
+ * own test referenced it) and was deleted; this function is the only place
+ * the decision is made now.
  *
  * States:
  *   'in_duty'  -- the full portal. Includes anyone on an ACTIVE probation,
