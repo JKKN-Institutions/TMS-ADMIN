@@ -36,6 +36,8 @@ async function handler(request: NextRequest, auth: AuthContext) {
   if (!email) {
     return NextResponse.json({ error: 'Staff email is required' }, { status: 400 });
   }
+  const body = await request.json().catch(() => ({}));
+  const paymentReference = body?.reference ? String(body.reference).trim() : null;
   const svc = createServiceRoleClient();
 
   // R2: raw email is a LIKE pattern to .ilike(); `_` matches any single
@@ -66,14 +68,41 @@ async function handler(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({ error: 'Nothing outstanding for this staff member' }, { status: 409 });
   }
 
+  // Only genuinely payable bills may be settled here. `staff_deferred` bills
+  // are HELD pending the month-end verdict -- the older
+  // fees/[id]/staff-bills/mark-paid route refuses those, and this route must
+  // agree or a held bill could be paid (and its exemption lost) before the
+  // verdict that was supposed to decide its fate ever runs.
+  const { data: payable, error: payableErr } = await svc
+    .from('tms_fee_bill')
+    .select('id, amount')
+    .in('id', state.billIds)
+    .eq('status', 'generated');
+  if (payableErr) {
+    return NextResponse.json({ error: 'Failed to load the outstanding bills' }, { status: 500 });
+  }
+  const payableRows = (payable ?? []) as Array<{ id: string; amount: number }>;
+  if (payableRows.length === 0) {
+    return NextResponse.json(
+      { error: 'The outstanding bill(s) are held pending the month-end verdict and cannot be marked paid here.' },
+      { status: 409 },
+    );
+  }
+  const payableIds = payableRows.map((r) => r.id);
+  // `amount` is a Postgres numeric -> string over supabase-js; see summarizeStaffBills.
+  const paidAmount = payableRows.reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
+
   const { error } = await svc
     .from('tms_fee_bill')
     .update({
+      status: 'paid',
       paid_at: new Date().toISOString(),
+      paid_amount: paidAmount,
+      payment_reference: paymentReference,
       marked_paid_by: auth.userId,
     })
-    .in('id', state.billIds)
-    .is('paid_at', null);
+    .in('id', payableIds)
+    .eq('status', 'generated'); // guard against a concurrent double-mark, same as the older route
   if (error) {
     return NextResponse.json({ error: 'Failed to record the payment' }, { status: 500 });
   }
@@ -83,13 +112,13 @@ async function handler(request: NextRequest, auth: AuthContext) {
     action: 'update',
     entityType: 'tms_fee_bill',
     entityLabel: email,
-    description: `Recorded payment of ₹${state.outstandingAmount} across ${state.billIds.length} transport bill(s)`,
-    metadata: { email, staffId, billIds: state.billIds, amount: state.outstandingAmount },
+    description: `Recorded payment of ₹${paidAmount} across ${payableIds.length} transport bill(s)`,
+    metadata: { email, staffId, billIds: payableIds, amount: paidAmount, paymentReference },
   });
 
   return NextResponse.json({
     success: true,
-    message: `Recorded payment of ₹${state.outstandingAmount}`,
+    message: `Recorded payment of ₹${paidAmount}`,
   });
 }
 
