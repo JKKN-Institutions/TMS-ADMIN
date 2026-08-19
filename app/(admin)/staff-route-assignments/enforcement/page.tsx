@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, ShieldAlert, UserMinus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
@@ -84,7 +85,10 @@ export default function InchargeEnforcementPage() {
         <h1 className="text-2xl font-semibold">In-charge attendance enforcement</h1>
         <p className="text-sm text-muted-foreground">
           Bus in-charges hold a transport fee exemption in exchange for marking their route each travel
-          day. Marking on any weekday clears the route&rsquo;s streak for every in-charge on it.
+          day. Marking on any weekday clears the route&rsquo;s streak for every in-charge on it.{' '}
+          <Link href="/staff-route-assignments/enforcement/monthly" className="underline">
+            Monthly verdict board
+          </Link>
         </p>
       </div>
 

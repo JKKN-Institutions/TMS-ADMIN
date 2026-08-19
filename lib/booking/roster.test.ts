@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groupRosterByStop, buildRosterRows, type RosterRider, type OrderedStop, type RosterRow } from './roster';
+import { groupRosterByStop, buildRosterRows, mergeAttendanceRoster, type RosterRider, type OrderedStop, type RosterRow } from './roster';
 
 const stops: OrderedStop[] = [
   { id: 's2', name: 'Second', time: '07:20', order: 2 },
@@ -86,5 +86,77 @@ describe('buildRosterRows', () => {
     expect(rows[0].learner_id).toBe('b');
     const trailing = rows.slice(1);
     expect(trailing.every((x) => x.stop_name === 'Stop not set' && x.stop_time === null)).toBe(true);
+  });
+});
+
+describe('mergeAttendanceRoster', () => {
+  const alloc = (learner_id: string, roll: string | null, stop_id: string | null, name = 'X'): RosterRider =>
+    ({ learner_id, roll, stop_id, name });
+
+  it('flags allocated riders with no booking as booked:false', () => {
+    const merged = mergeAttendanceRoster([alloc('a', '10', 's1')], []);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].booked).toBe(false);
+  });
+
+  it('flags an allocated rider who booked as booked:true', () => {
+    const merged = mergeAttendanceRoster([alloc('a', '10', 's1')], [alloc('a', '10', 's1')]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].booked).toBe(true);
+  });
+
+  it("prefers the day's BOOKED stop over the profile's allocated stop", () => {
+    const merged = mergeAttendanceRoster([alloc('a', '10', 's1')], [alloc('a', '10', 's2')]);
+    expect(merged[0].stop_id).toBe('s2');
+  });
+
+  it('keeps a booked rider who is NOT allocated to this route (never drops a booking)', () => {
+    const merged = mergeAttendanceRoster([alloc('a', '10', 's1')], [alloc('z', '99', 's2', 'Zed')]);
+    expect(merged.map((m) => m.learner_id).sort()).toEqual(['a', 'z']);
+    expect(merged.find((m) => m.learner_id === 'z')!.booked).toBe(true);
+  });
+
+  it('falls back to the allocated stop when the booking carries no stop', () => {
+    const merged = mergeAttendanceRoster([alloc('a', '10', 's1')], [alloc('a', '10', null)]);
+    expect(merged[0].stop_id).toBe('s1');
+    expect(merged[0].booked).toBe(true);
+  });
+
+  it('keeps the allocated name/roll when the booking row has none', () => {
+    const merged = mergeAttendanceRoster([alloc('a', '10', 's1', 'Ann')], [{ learner_id: 'a', name: 'Learner', roll: null, stop_id: 's1' }]);
+    expect(merged[0].name).toBe('Ann');
+    expect(merged[0].roll).toBe('10');
+  });
+});
+
+describe('buildRosterRows — ticket state', () => {
+  const stops: OrderedStop[] = [{ id: 's1', name: 'First', time: '07:00', order: 1 }];
+  const route = { id: 'r1', route_number: '05' };
+
+  it('carries booked:false through to the row', () => {
+    const rows = buildRosterRows(
+      [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1', booked: false }],
+      route, stops, new Map()
+    );
+    expect(rows[0].booked).toBe(false);
+    expect(rows[0].status).toBe('unmarked');
+  });
+
+  it('defaults booked to true when the rider carries no flag (booking-only callers)', () => {
+    const rows = buildRosterRows(
+      [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1' }],
+      route, stops, new Map()
+    );
+    expect(rows[0].booked).toBe(true);
+  });
+
+  it('still reports a real attendance mark on a rider without a ticket', () => {
+    const att = new Map([['a', { status: 'present', method: 'manual', scanned_at: 't' }]]);
+    const rows = buildRosterRows(
+      [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1', booked: false }],
+      route, stops, att
+    );
+    expect(rows[0].status).toBe('present');
+    expect(rows[0].booked).toBe(false);
   });
 });

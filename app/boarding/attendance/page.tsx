@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, XCircle, ListChecks, Download, QrCode } from 'lucide-react';
+import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import ScanDialog from '@/components/boarding/scan-dialog';
@@ -16,7 +16,7 @@ interface RosterResponse {
   date: string;
   direction: AttDirection;
   rows: RosterRow[];
-  counts: { total: number; present: number; absent: number; unmarked: number };
+  counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number };
 }
 
 async function fetchRoster(date: string, direction: AttDirection): Promise<RosterResponse> {
@@ -75,7 +75,7 @@ export default function BoardingAttendancePage() {
   });
 
   const rows = data?.rows ?? [];
-  const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0 };
+  const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 };
 
   const legOpen = isDirectionOpen(windows.onward);
   const canMark = isToday && legOpen;
@@ -109,15 +109,17 @@ export default function BoardingAttendancePage() {
   );
 
   const filters: DataTableFilter[] = [
+    { columnId: 'ticket', title: 'Ticket', options: [{ label: 'Booked', value: 'booked' }, { label: 'Without ticket', value: 'without_ticket' }] },
     { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
   ];
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Status', 'Method', 'Marked At'];
+    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Ticket', 'Status', 'Method', 'Marked At'];
     const lines = [header.map(esc).join(',')];
     for (const r of rowsToExport) {
-      lines.push([r.name, r.roll, r.route_number, r.stop_name, r.status, r.method, r.scanned_at].map(esc).join(','));
+      const ticket = r.booked ? 'Booked' : 'Without ticket';
+      lines.push([r.name, r.roll, r.route_number, r.stop_name, ticket, r.status, r.method, r.scanned_at].map(esc).join(','));
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -132,15 +134,19 @@ export default function BoardingAttendancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
-        <p className="text-gray-600 mt-1 text-sm">Today&apos;s booked students — scan or mark them present.</p>
+        <p className="text-gray-600 mt-1 text-sm">
+          Everyone allocated to your route — students who booked a seat can be scanned or marked present;
+          the rest are listed as <span className="font-medium">Without ticket</span>.
+        </p>
       </div>
 
       {/* Analytics tiles + day picker */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="grid flex-1 grid-cols-3 gap-3">
+        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
           <Tile label="Present" value={counts.present} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
           <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
-          <Tile label="Total bookings" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
+          <Tile label="Without ticket" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
+          <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Day</label>
@@ -221,12 +227,14 @@ export default function BoardingAttendancePage() {
   );
 }
 
-function Tile({ label, value, tone, icon }: { label: string; value: number; tone: 'green' | 'red' | 'gray' | 'slate'; icon: React.ReactNode }) {
+function Tile({ label, value, tone, icon }: { label: string; value: number; tone: 'green' | 'red' | 'gray' | 'amber' | 'slate'; icon: React.ReactNode }) {
   const toneCls =
     tone === 'green'
       ? 'text-green-700 dark:text-green-300'
       : tone === 'red'
       ? 'text-red-700 dark:text-red-300'
+      : tone === 'amber'
+      ? 'text-amber-700 dark:text-amber-300'
       : tone === 'gray'
       ? 'text-gray-600 dark:text-gray-300'
       : 'text-slate-700 dark:text-slate-300';

@@ -28,6 +28,7 @@ const PUBLIC_PATHS = new Set([
   // the job records strikes but notifies, removes and bills nobody until an
   // admin switches it to 'enforce'.
   '/api/cron/incharge-attendance',
+  '/api/cron/incharge-month-verdict',
 ]);
 
 const PUBLIC_PATH_PREFIXES = [

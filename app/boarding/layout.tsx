@@ -8,7 +8,6 @@ import {
 import { useAuth } from '@/providers/auth-provider';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import { boardingNavigation, deriveBoardingPageTitle } from '@/lib/boarding/navigation';
-import { deriveBoardingAccess } from '@/lib/boarding/access-state';
 import BoardingBottomNav from '@/components/boarding-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
@@ -118,7 +117,9 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   const [collapsed, setCollapsed] = useState(false);
   // Portal access requires an ACTUAL route assignment, not just the permission.
   // Authoritative check is server-side (/api/boarding/access). Super admins pass.
-  const [access, setAccess] = useState<'checking' | 'allowed' | 'choose' | 'denied'>('checking');
+  const [access, setAccess] = useState<
+    'checking' | 'allowed' | 'choose' | 'pledge' | 'must_pay' | 'denied'
+  >('checking');
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('tms-boarding-sidebar-collapsed') === '1');
@@ -149,12 +150,12 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
         const d = json?.data ?? {};
         if (cancelled) return;
         if (res.ok) {
-          setAccess(deriveBoardingAccess({
-            allowed: !!d.allowed,
-            eligible: !!d.eligible,
-            assignedRouteCount: d.assignedRouteCount ?? 0,
-            hasRoute: !!d.hasRoute,
-          }));
+          // The server now owns this decision -- it is the only side that can see
+          // the staffer's bills. The gate is derived by deriveInChargeGate in
+          // lib/boarding/incharge-gate.ts and published here via /api/boarding/access.
+          const gate = d.gate as
+            | 'in_duty' | 'choose' | 'pledge' | 'must_pay' | 'denied' | undefined;
+          setAccess(gate === 'in_duty' ? 'allowed' : (gate ?? 'denied'));
         } else setAccess('denied');
       } catch {
         if (!cancelled) setAccess('denied');
@@ -165,7 +166,8 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
 
   // Keep an undecided-but-eligible staffer on the in-charge toggle.
   useEffect(() => {
-    if (access === 'choose' && pathname !== '/boarding/in-charge') {
+    if ((access === 'choose' || access === 'pledge' || access === 'must_pay')
+        && pathname !== '/boarding/in-charge') {
       router.replace('/boarding/in-charge');
     }
   }, [access, pathname, router]);
@@ -195,7 +197,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
     );
   }
 
-  if (access === 'choose') {
+  if (access === 'choose' || access === 'pledge' || access === 'must_pay') {
     return (
       <BugReporterWrapper>
         {/* .app-header is position:fixed, so this shell must reserve its height the

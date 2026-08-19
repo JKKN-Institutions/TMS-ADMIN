@@ -1,9 +1,17 @@
 /**
- * Shared "who booked today" roster helper. Powers the boarding dashboard's
- * today's-bookings list and the driver Boardings view. `groupRosterByStop` is a
- * pure, unit-tested transform; `loadBookedRoster` is its DB companion.
+ * Shared "who is on the bus today" roster helpers.
+ *
+ * Two different questions live here, and they must not be confused:
+ *   - loadBookedRoster            → who BOOKED a seat today (driver Boardings,
+ *                                   boarding dashboard, in-charge enforcement).
+ *   - loadRouteAttendanceRoster   → who is ALLOCATED to the bus, whether or not
+ *                                   they booked (the boarding Attendance screen).
+ *
+ * `groupRosterByStop`, `buildRosterRows` and `mergeAttendanceRoster` are pure,
+ * unit-tested transforms; the `load*` functions are their DB companions.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 import { bookedCount, routeCapacity } from './repo';
 
 export interface RosterRider {
@@ -11,6 +19,13 @@ export interface RosterRider {
   name: string;
   roll: string | null;
   stop_id: string | null;
+  /**
+   * Did this rider book a seat for the day? Optional so the booking-only callers
+   * (driver Boardings, boarding dashboard) stay unchanged — an absent flag means
+   * "came from the booking list", i.e. booked. Only the attendance roster, which
+   * lists the whole ALLOCATED bus, sets it to false.
+   */
+  booked?: boolean;
 }
 
 export interface OrderedStop {
@@ -140,6 +155,8 @@ export interface RosterRow {
   status: 'present' | 'absent' | 'unmarked';
   method: string | null;
   scanned_at: string | null;
+  /** false = on the bus roster but holds no ticket (no booking) for this day. */
+  booked: boolean;
 }
 
 /**
@@ -178,6 +195,9 @@ export function buildRosterRows(
       status,
       method: marked ? att!.method : null,
       scanned_at: marked ? att!.scanned_at : null,
+      // Ticket state is INDEPENDENT of attendance state: a rider with no booking
+      // can still carry a real manual mark, and must keep showing it.
+      booked: rider.booked !== false,
     };
   });
 
@@ -187,4 +207,95 @@ export function buildRosterRows(
     return (a.roll ?? a.name).localeCompare(b.roll ?? b.name, undefined, { numeric: true });
   });
   return rows;
+}
+
+/**
+ * Pure: fold the day's BOOKED riders into the route's ALLOCATED riders, tagging
+ * each with its ticket state. The allocated list is the spine — every student on
+ * the bus appears, booked or not — and the booking list only decorates it:
+ *
+ *   - allocated ∩ booked → booked: true, and the BOOKING's stop wins (a student
+ *     may board somewhere other than their profile stop on a given day; a null
+ *     booking stop falls back to the allocated one).
+ *   - allocated only     → booked: false ("Without ticket").
+ *   - booked only        → kept and appended. A booking on a route the student is
+ *     not allocated to is a data oddity, but dropping it would make a real rider
+ *     vanish from the very screen used to account for them.
+ *
+ * Identity fields prefer whichever side actually has them, so a booking row with
+ * an unresolved name never overwrites the allocated profile's real one.
+ */
+export function mergeAttendanceRoster(
+  allocated: RosterRider[],
+  booked: RosterRider[],
+): RosterRider[] {
+  const byId = new Map<string, RosterRider>();
+  for (const a of allocated) byId.set(a.learner_id, { ...a, booked: false });
+
+  for (const b of booked) {
+    const a = byId.get(b.learner_id);
+    if (!a) {
+      byId.set(b.learner_id, { ...b, booked: true });
+      continue;
+    }
+    byId.set(b.learner_id, {
+      ...a,
+      // Fall back to the allocated value whenever the booking side is blank.
+      name: a.name && a.name !== 'Learner' ? a.name : b.name,
+      roll: a.roll ?? b.roll,
+      stop_id: b.stop_id ?? a.stop_id,
+      booked: true,
+    });
+  }
+  return [...byId.values()];
+}
+
+/** Page size for the allocated-learner scan (see countRouteRoster on why we page). */
+const ALLOC_PAGE = 1000;
+
+/**
+ * Every student the Attendance screen must account for on one route + date:
+ * the route's ALLOCATED learners unioned with that day's BOOKINGS, each tagged
+ * `booked`. Allocation matches lib/passengers/route-roster.ts exactly
+ * (bus_required + active lifecycle) so the boarding, driver and admin screens
+ * can never disagree on who belongs to a route. 42P01-safe on both tables.
+ *
+ * Staff riders are deliberately NOT included: tms_attendance is keyed by
+ * learner_id, so a staff row could be listed but never marked.
+ */
+export async function loadRouteAttendanceRoster(
+  svc: SupabaseClient,
+  routeId: string,
+  date: string,
+): Promise<RosterRider[]> {
+  const allocated: RosterRider[] = [];
+  for (let from = 0; ; from += ALLOC_PAGE) {
+    const { data, error } = await svc
+      .from('learners_profiles')
+      .select('id, first_name, last_name, roll_number, transport_stop_id')
+      .eq('transport_route_id', routeId)
+      .eq('bus_required', true)
+      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
+      .range(from, from + ALLOC_PAGE - 1);
+    if (error) {
+      if (isMissingTable(error)) break;
+      throw error;
+    }
+    const page = (data ?? []) as Array<{
+      id: string; first_name: string | null; last_name: string | null;
+      roll_number: string | null; transport_stop_id: string | null;
+    }>;
+    for (const l of page) {
+      allocated.push({
+        learner_id: l.id,
+        name: `${l.first_name ?? ''} ${l.last_name ?? ''}`.trim() || 'Learner',
+        roll: l.roll_number,
+        stop_id: l.transport_stop_id ?? null,
+      });
+    }
+    if (page.length < ALLOC_PAGE) break;
+  }
+
+  const { riders: booked } = await loadBookedRoster(svc, routeId, date);
+  return mergeAttendanceRoster(allocated, booked);
 }

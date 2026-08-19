@@ -27,11 +27,31 @@ export async function resolveLearnerByProfile(
   svc: Svc,
   profileId: string,
 ): Promise<{ id: string; busRequired: boolean; lifecycleStatus: string; routeId: string | null; stopId: string | null } | null> {
-  const { data } = await svc
+  // profile_id is NOT unique in learners_profiles: a stub row (an 'approved'
+  // enquiry with no bus) can shadow the real, bus-carrying one. A bare
+  // .maybeSingle() ERRORS on that duplicate (PGRST116) rather than picking a
+  // row, and the swallowed error read as "no transport account" — which made
+  // the student vacate card render NOTHING for the affected learner while the
+  // fees page beside it worked fine.
+  //
+  // Resolve with the SAME bias tms_student_transport_access uses, so the fees
+  // page and this endpoint can never disagree about WHICH row is the learner:
+  // prefer the row carrying the obligation, then one with a route, then by id
+  // for determinism.
+  const { data, error } = await svc
     .from('learners_profiles')
     .select('id, bus_required, lifecycle_status, transport_route_id, transport_stop_id')
     .eq('profile_id', profileId)
+    .order('bus_required', { ascending: false, nullsFirst: false })
+    .order('transport_route_id', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: true })
+    .limit(1)
     .maybeSingle();
+  // Fail LOUD: a read error here is not the same as "this learner has no
+  // transport account", and conflating the two is what hid this bug.
+  if (error) {
+    throw new Error(`resolveLearnerByProfile failed for ${profileId}: ${error.message}`);
+  }
   if (!data) return null;
   const r = data as {
     id: string; bus_required: boolean | null; lifecycle_status: string;
