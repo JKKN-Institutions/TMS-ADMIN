@@ -10,6 +10,8 @@ function fakeSvc(result: { data: unknown; error: { message: string } | null }) {
     in(col: string, val: unknown) { calls.push({ op: 'in', col, val }); return builder; },
     is(col: string, val: unknown) { calls.push({ op: 'is', col, val }); return builder; },
     neq(col: string, val: unknown) { calls.push({ op: 'neq', col, val }); return builder; },
+    gte(col: string, val: unknown) { calls.push({ op: 'gte', col, val }); return builder; },
+    lte(col: string, val: unknown) { calls.push({ op: 'lte', col, val }); return builder; },
     select() { return Promise.resolve(result); },
   };
   return {
@@ -49,6 +51,39 @@ describe('cancelStaffBills', () => {
     expect(await cancelStaffBills(svc as never, {
       personId: 'p1', transportYearId: 'y1',
     })).toEqual({ cancelled: 0 });
+  });
+
+  it('scopes to the due_date window when one is supplied', async () => {
+    const { svc, calls } = fakeSvc({ data: [{ id: 'a' }], error: null });
+    const res = await cancelStaffBills(svc as never, {
+      personId: 'p1', transportYearId: 'y1', dueFrom: '2026-08-01', dueTo: '2026-08-31',
+    });
+    expect(res).toEqual({ cancelled: 1 });
+    expect(calls).toContainEqual({ op: 'gte', col: 'due_date', val: '2026-08-01' });
+    expect(calls).toContainEqual({ op: 'lte', col: 'due_date', val: '2026-08-31' });
+  });
+
+  it('omitting the window leaves the previous whole-year behaviour unchanged', async () => {
+    const { svc, calls } = fakeSvc({ data: [{ id: 'a' }, { id: 'b' }], error: null });
+    const res = await cancelStaffBills(svc as never, {
+      personId: 'p1', transportYearId: 'y1',
+    });
+    expect(res).toEqual({ cancelled: 2 });
+    expect(calls.some((c) => c.op === 'gte')).toBe(false);
+    expect(calls.some((c) => c.op === 'lte')).toBe(false);
+  });
+
+  it('leaves a bill outside the window alone', async () => {
+    // The fake builder can't filter by due_date itself, so this documents the
+    // contract at the call boundary: a window narrows the update via gte/lte
+    // on due_date, and a bill whose due_date falls outside it is excluded by
+    // that filter before Postgres ever executes the update.
+    const { svc, calls } = fakeSvc({ data: [], error: null });
+    await cancelStaffBills(svc as never, {
+      personId: 'p1', transportYearId: 'y1', dueFrom: '2026-09-01', dueTo: '2026-09-30',
+    });
+    expect(calls).toContainEqual({ op: 'gte', col: 'due_date', val: '2026-09-01' });
+    expect(calls).toContainEqual({ op: 'lte', col: 'due_date', val: '2026-09-30' });
   });
 });
 
