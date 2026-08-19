@@ -47,7 +47,20 @@ const PLATFORM_URL = process.env.NEXT_PUBLIC_BUG_REPORTER_API_URL;
 // would fail on submit.
 const CONFIGURED = !!API_KEY && !!PLATFORM_URL && !PLATFORM_URL.includes('your-platform.com');
 
-export function BugReporterWrapper({ children }: { children: React.ReactNode }) {
+/**
+ * `enabled` lets a portal switch the floating widget OFF without unmounting the
+ * tree below it — the SDK renders the widget as `enabled && apiClient && <Widget/>`,
+ * so flipping it keeps `children` mounted (no page-state loss on toggle).
+ * The student portal passes false for a fee-blocked learner: someone confined to
+ * the fees page shouldn't be offered the bug-report widget.
+ */
+export function BugReporterWrapper({
+  children,
+  enabled = true,
+}: {
+  children: React.ReactNode;
+  enabled?: boolean;
+}) {
   const { user, profile } = useAuth();
 
   // Point the SDK at our own origin so its browser calls hit the same-origin relay.
@@ -60,7 +73,7 @@ export function BugReporterWrapper({ children }: { children: React.ReactNode }) 
     <BugReporterProvider
       apiKey={API_KEY as string}
       apiUrl={origin}
-      enabled
+      enabled={enabled}
       debug={process.env.NODE_ENV === 'development'}
       networkExcludePatterns={NETWORK_EXCLUDE}
       userContext={

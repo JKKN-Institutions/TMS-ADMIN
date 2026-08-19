@@ -10,6 +10,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import { Toaster } from 'react-hot-toast';
 import { studentNavigation, deriveStudentPageTitle } from '@/lib/student/navigation';
+import { useTransportAccess } from '@/lib/student/use-transport-access';
 import StudentBottomNav from '@/components/student-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
@@ -117,6 +118,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  // Fee-blocked learners get NO bug widget. Shares the ['student-transport-access']
+  // cache with the fees page/dashboard, so this costs no extra request there.
+  // Fail-CLOSED: the icon stays hidden until access is known to be allowed, so a
+  // blocked learner never sees it flash in before the check resolves.
+  const { data: transportAccess } = useTransportAccess();
+  const bugReporterEnabled = transportAccess?.allowed === true;
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('tms-student-sidebar-collapsed') === '1');
@@ -154,7 +161,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const pageTitle = deriveStudentPageTitle(pathname);
 
   return (
-    <BugReporterWrapper>
+    <BugReporterWrapper enabled={bugReporterEnabled}>
     <div className="min-h-screen bg-gray-100 overflow-x-hidden">
       <div className={`sidebar-modern ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
