@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Ticket, TicketX } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -29,13 +29,30 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
   );
 }
 
+function TicketBadge({ booked }: { booked: boolean }) {
+  return booked ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+      <Ticket className="h-3 w-3" /> Booked
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+      <TicketX className="h-3 w-3" /> Without ticket
+    </span>
+  );
+}
+
 /**
- * Booked-students columns for the Attendance page. Route/Status are filterable.
+ * Full-bus columns for the Attendance page. Route/Status are filterable.
  * The Action column is a single toggle button, shown only when `canMark` (the
  * travel day AND the attendance window is open — onward-only, see
- * lib/boarding/attendance-window.ts). It shows the NEXT action: unmarked/absent
- * → "Present", present → "Absent"; the Status badge shows the current state.
- * Clicking POSTs that status to /api/boarding/attendance.
+ * lib/boarding/attendance-window.ts) AND the student holds a ticket for the day.
+ * It shows the NEXT action: unmarked/absent → "Present", present → "Absent"; the
+ * Status badge shows the current state. Clicking POSTs that status to
+ * /api/boarding/attendance.
+ *
+ * Rows now cover the WHOLE allocated bus, so a student who did not book appears
+ * with a "Without ticket" badge and no mark control — they are visible to the
+ * in-charge but are not part of the day's attendance.
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
@@ -91,6 +108,15 @@ export function getRosterColumns(opts: {
       ),
     },
     {
+      id: 'ticket',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Ticket" />,
+      // Filter values are the strings the page's filter options emit, not booleans.
+      accessorFn: (r) => (r.booked ? 'booked' : 'without_ticket'),
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      size: 130,
+      cell: ({ row }) => <TicketBadge booked={row.original.booked} />,
+    },
+    {
       id: 'status',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (r) => r.status,
@@ -122,6 +148,10 @@ export function getRosterColumns(opts: {
         // Marking is gated to the travel day AND an open attendance window; otherwise
         // no control shows at all (present and absent are both disabled by timing).
         if (!opts.canMark) return null;
+        // No booking → no attendance for the day. The row stays visible (the
+        // in-charge still needs to see who is on the bus roster) but carries no
+        // mark control; the Ticket column already says why.
+        if (!row.original.booked) return <span className="text-xs text-gray-400">—</span>;
         const busy = opts.busyId === row.original.learner_id;
         // Single toggle showing the NEXT action: present → mark Absent, else → mark Present.
         const next: 'present' | 'absent' = row.original.status === 'present' ? 'absent' : 'present';

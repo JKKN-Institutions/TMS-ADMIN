@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
-import { loadBookedRoster, buildRosterRows, type OrderedStop, type RosterRow } from '@/lib/booking/roster';
+import { loadRouteAttendanceRoster, buildRosterRows, type OrderedStop, type RosterRow } from '@/lib/booking/roster';
 import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -17,11 +17,16 @@ interface StopRow { id: string; route_id: string; stop_name: string; stop_time: 
 interface AttRow { learner_id: string; status: string | null; method: string | null; scanned_at: string | null }
 
 /**
- * GET /api/boarding/attendance/roster?date=&direction= — today's (or any day's)
- * booked students across the staff's assigned routes, each joined to their
- * attendance for the selected leg. Route-scoped to the staff's assigned routes
- * (super admins see all). Counts are derived from the produced rows so
- * Marked + Unmarked === Total always holds.
+ * GET /api/boarding/attendance/roster?date=&direction= — EVERY student on the
+ * staff's assigned routes for the day, not just the ones who booked: the route's
+ * allocated learners unioned with the day's bookings (see
+ * loadRouteAttendanceRoster), each joined to their attendance for the selected
+ * leg and tagged `booked`. Students without a booking are listed as "Without
+ * ticket" so the in-charge can see the whole bus rather than the small booked
+ * slice of it; the client offers no mark action for them.
+ *
+ * Route-scoped to the staff's assigned routes (super admins see all). Counts are
+ * derived from the produced rows so Marked + Unmarked === Total always holds.
  */
 async function getRoster(request: NextRequest, auth: AuthContext) {
   try {
@@ -47,7 +52,13 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       const { data } = await svc.from('tms_route').select('id');
       routeIds = ((data ?? []) as { id: string }[]).map((r) => r.id);
     }
-    const empty = { success: true, data: { date, direction, rows: [] as RosterRow[], counts: { total: 0, present: 0, absent: 0, unmarked: 0 } } };
+    const empty = {
+      success: true,
+      data: {
+        date, direction, rows: [] as RosterRow[],
+        counts: { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 },
+      },
+    };
     if (routeIds.length === 0) return NextResponse.json(empty);
 
     const { data: routeData } = await svc
@@ -81,15 +92,28 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
 
     const rows: RosterRow[] = [];
     for (const rt of routes) {
-      const { riders } = await loadBookedRoster(svc, rt.id, date);
+      const riders = await loadRouteAttendanceRoster(svc, rt.id, date);
       rows.push(...buildRosterRows(riders, { id: rt.id, route_number: rt.route_number }, stopsByRoute.get(rt.id) ?? [], attByLearner));
     }
 
     const present = rows.filter((r) => r.status === 'present').length;
     const absent = rows.filter((r) => r.status === 'absent').length;
+    const booked = rows.filter((r) => r.booked).length;
     return NextResponse.json({
       success: true,
-      data: { date, direction, rows, counts: { total: rows.length, present, absent, unmarked: rows.length - present - absent } },
+      data: {
+        date,
+        direction,
+        rows,
+        counts: {
+          total: rows.length,
+          present,
+          absent,
+          unmarked: rows.length - present - absent,
+          booked,
+          withoutTicket: rows.length - booked,
+        },
+      },
     });
   } catch (e) {
     console.error('boarding attendance roster error:', e);
