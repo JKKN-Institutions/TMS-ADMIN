@@ -5,9 +5,10 @@ import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
 import { FINE_SKIP_LABEL } from '@/lib/fines/resolve';
+import { priceableStops, draftsToRates } from '@/lib/fines/rate-drafts';
 import type { TransportBillRow } from '@/lib/fees/bills';
 import { inr } from './columns';
-import { previewFines, createFines } from './fines-api';
+import { previewFines, createFines, saveFineRates } from './fines-api';
 
 /** Default due date: 15 days out. A fine dated in the past is born overdue. */
 function defaultDueDate(): string {
@@ -33,6 +34,10 @@ export function FineDialog({
   const [reason, setReason] = useState('');
   const [notify, setNotify] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // stop_id -> the amount being typed. Keyed by STOP, not learner: the sheet
+  // holds one rate per stop, so several learners boarding there share one input.
+  const [rateDrafts, setRateDrafts] = useState<Record<string, string>>({});
+  const [savingRates, setSavingRates] = useState(false);
 
   // One key per opening of the dialog: a retried submission is a no-op, while a
   // deliberate second fine (new dialog) gets a new key and is allowed.
@@ -42,6 +47,7 @@ export function FineDialog({
       idempotencyKey.current = crypto.randomUUID();
       setDueDate(defaultDueDate());
       setReason('');
+      setRateDrafts({});
     }
   }, [open]);
 
@@ -64,7 +70,7 @@ export function FineDialog({
     };
   }, [selectedRows]);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['fine-preview', year, personIds.join(',')],
     queryFn: () => previewFines(year, personIds),
     enabled: open && personIds.length > 0,
@@ -75,9 +81,50 @@ export function FineDialog({
     [data]
   );
 
+  // Stops the operator can price without leaving the dialog, and the set of
+  // stop ids that get an input rendered against them.
+  const unpricedStops = useMemo(() => priceableStops(data?.candidates ?? []), [data]);
+  const unpricedStopIds = useMemo(
+    () => new Set(unpricedStops.map((s) => s.stop_id)),
+    [unpricedStops]
+  );
+  const filledDrafts = useMemo(
+    () => Object.values(rateDrafts).filter((v) => v.trim() !== '').length,
+    [rateDrafts]
+  );
+
+  /**
+   * Save the typed amounts into the year's fine sheet, then re-price. This is a
+   * SEPARATE act from raising the fine: the rate is permanent and applies to
+   * every learner at that stop, so it gets its own click and its own audit entry.
+   */
+  async function saveRates() {
+    setSavingRates(true);
+    try {
+      const rates = draftsToRates(rateDrafts);
+      if (!rates.length) return;
+      await saveFineRates(year, rates);
+      setRateDrafts({});
+      await refetch();
+      toast.success(
+        `Saved ${rates.length} stop rate(s) to the fine sheet. Re-priced the selection.`
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the stop rates');
+    } finally {
+      setSavingRates(false);
+    }
+  }
+
   if (!open) return null;
 
   async function submit() {
+    // Typed-but-unsaved amounts are not in the sheet, so those learners would be
+    // skipped without explanation. Refuse rather than under-fine silently.
+    if (filledDrafts > 0) {
+      toast.error(`Save the ${filledDrafts} stop rate(s) first, or clear them.`);
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await createFines({
@@ -172,13 +219,28 @@ export function FineDialog({
                     </td>
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{c.stop_name ?? '—'}</td>
                     <td className="px-3 py-2 text-right">
-                      {c.amount === null ? (
-                        <span className="text-amber-700 dark:text-amber-400">
-                          {c.skip_reason ? FINE_SKIP_LABEL[c.skip_reason] : 'Not finable'}
-                        </span>
-                      ) : (
+                      {c.amount !== null ? (
                         <span className="font-medium text-gray-900 dark:text-gray-100">
                           {inr(c.amount)}
+                        </span>
+                      ) : c.stop_id && unpricedStopIds.has(c.stop_id) ? (
+                        // Unpriced stop: price it here and it lands in the sheet.
+                        <input
+                          type="number"
+                          min="1"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={rateDrafts[c.stop_id] ?? ''}
+                          onChange={(e) =>
+                            setRateDrafts((d) => ({ ...d, [c.stop_id as string]: e.target.value }))
+                          }
+                          placeholder="Set fine ₹"
+                          aria-label={`Fine amount for ${c.stop_name ?? 'this stop'}`}
+                          className="h-8 w-28 rounded-lg border border-amber-300 bg-amber-50 px-2 text-right text-sm text-gray-900 placeholder:text-amber-700/60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-gray-100 dark:placeholder:text-amber-300/60"
+                        />
+                      ) : (
+                        <span className="text-amber-700 dark:text-amber-400">
+                          {c.skip_reason ? FINE_SKIP_LABEL[c.skip_reason] : 'Not finable'}
                         </span>
                       )}
                     </td>
@@ -188,6 +250,34 @@ export function FineDialog({
             </table>
           )}
         </div>
+
+        {unpricedStops.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              {unpricedStops.length} stop(s) have no fine configured. Enter an amount above to
+              price them — it is saved to this year&apos;s fine sheet and applies to{' '}
+              <strong>every learner boarding that stop</strong>, not just this fine.
+            </p>
+            {unpricedStops.some((s) => s.learner_count > 1) && (
+              <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                {unpricedStops
+                  .filter((s) => s.learner_count > 1)
+                  .map((s) => `${s.stop_name ?? 'Stop'} covers ${s.learner_count} of the selected learners`)
+                  .join(' · ')}
+                .
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={saveRates}
+              disabled={savingRates || filledDrafts === 0}
+              className="mt-2 inline-flex h-9 items-center gap-2 rounded-lg bg-amber-600 px-3 text-sm font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+            >
+              {savingRates ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save {filledDrafts} stop rate(s)
+            </button>
+          </div>
+        )}
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-gray-700 dark:text-gray-200">

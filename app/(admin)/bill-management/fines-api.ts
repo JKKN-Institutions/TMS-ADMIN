@@ -1,4 +1,5 @@
 import type { FineCandidate, CreateFinesResult } from '@/lib/fines/create';
+import type { FineRateInput } from '@/lib/fines/fields';
 import type { FineRow, FineSummary } from '@/lib/fines/list';
 
 const json = async (res: Response) => {
@@ -38,6 +39,21 @@ export async function previewFines(
     body: JSON.stringify({ transport_year_id: year, person_ids: personIds }),
   });
   return (await json(res)).data;
+}
+
+/**
+ * Write stop rates into the year's fine sheet. Shares the same endpoint as the
+ * Fine Rates screen, so a rate typed in the Generate Fine dialog shows up there
+ * — there is one sheet, not a dialog-local copy.
+ */
+export async function saveFineRates(year: string, rates: FineRateInput[]): Promise<void> {
+  const res = await fetch('/api/admin/fees/fine-rates', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ year, rates }),
+  });
+  await json(res);
 }
 
 export async function createFines(body: {
