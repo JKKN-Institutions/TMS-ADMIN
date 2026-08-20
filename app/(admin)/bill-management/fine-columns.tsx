@@ -35,6 +35,18 @@ export function getFineColumns(
       ),
     },
     {
+      // Hidden by default: powers the Route filter only — the visible Stop column
+      // already prints the route number. NOTE this filters on the route as it was
+      // when the fine was RAISED (tms_fee_fine snapshots it), so a learner who has
+      // since moved routes still appears under their old one. That is deliberate:
+      // the ledger is a historical record, not a live view of the roster.
+      id: 'route',
+      header: 'Route',
+      accessorFn: (r) => r.route_number ?? '',
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      cell: ({ row }) => <span>{row.original.route_number ?? '—'}</span>,
+    },
+    {
       id: 'stop',
       header: 'Stop',
       cell: ({ row }) => (

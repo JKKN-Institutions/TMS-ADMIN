@@ -1,5 +1,6 @@
 'use client';
 
+import { routeLabel } from '@/lib/fees/route-labels';
 import type { ColumnDef } from '@tanstack/react-table';
 import { GraduationCap, Users } from 'lucide-react';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
@@ -34,6 +35,20 @@ export function getUnbilledColumns(): ColumnDef<UnbilledPerson>[] {
         <span className="text-sm text-gray-500 dark:text-gray-400">{row.original.code || '—'}</span>
       ),
       size: 140,
+    },
+    {
+      // Hidden by default: exists to power the Route filter without widening the
+      // table. Matches on route_number, not the label, so renaming a route in
+      // tms_route cannot break a saved filter selection.
+      id: 'route',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
+      accessorFn: (r) => r.route_number ?? '',
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      cell: ({ row }) => (
+        <span className="text-sm text-gray-600 dark:text-gray-300">
+          {routeLabel(row.original.route_number, row.original.route_name) || '—'}
+        </span>
+      ),
     },
     {
       id: 'institution',

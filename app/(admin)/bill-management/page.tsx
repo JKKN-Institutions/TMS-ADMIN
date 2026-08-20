@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX, Loader2 } from 'lucide-react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
+import { routeFilterOptions } from '@/lib/fees/route-labels';
 import { getBillColumns, inr } from './columns';
 import { getUnbilledColumns } from './unbilled-columns';
 import { exportBills } from './bill-export';
@@ -120,6 +121,16 @@ export default function BillManagementPage() {
     [bills, visibleRows],
   );
 
+  // Route options come from the loaded rows, so the dropdown only ever offers
+  // routes that actually have bills in view. People with no boarding stop carry
+  // no route and are excluded from every route selection.
+  const billRouteOptions = useMemo(() => routeFilterOptions(rows), [rows]);
+  const unbilledRouteOptions = useMemo(
+    () => routeFilterOptions(unbilled?.people ?? []),
+    [unbilled]
+  );
+  const fineRouteOptions = useMemo(() => routeFilterOptions(fines?.rows ?? []), [fines]);
+
   const billInstitutionOptions = useMemo(() => {
     const s = new Set<string>();
     for (const r of rows) if (r.institution_name) s.add(r.institution_name);
@@ -212,7 +223,13 @@ export default function BillManagementPage() {
           entityName="fines"
           isLoading={finesLoading}
           getRowId={(r) => r.id}
+          initialColumnVisibility={{ route: false }}
           searchPlaceholder="Search learner, code or reason..."
+          filters={
+            fineRouteOptions.length
+              ? [{ columnId: 'route', title: 'Route', options: fineRouteOptions }]
+              : []
+          }
         />
       ) : view === 'analytics' ? (
         billsError ? (
@@ -233,6 +250,7 @@ export default function BillManagementPage() {
           getRowId={(r) => r.id}
           enableRowSelection
           onFilteredRowsChange={onFilteredRowsChange}
+          initialColumnVisibility={{ route: false }}
           searchPlaceholder="Search person, code or institution..."
           filters={[
             ...(billInstitutionOptions.length
@@ -240,6 +258,9 @@ export default function BillManagementPage() {
               : []),
             ...(billDepartmentOptions.length
               ? [{ columnId: 'department', title: 'Department', options: billDepartmentOptions }]
+              : []),
+            ...(billRouteOptions.length
+              ? [{ columnId: 'route', title: 'Route', options: billRouteOptions }]
               : []),
             {
               columnId: 'status',
@@ -286,10 +307,14 @@ export default function BillManagementPage() {
           entityName="people"
           isLoading={unbilledLoading}
           getRowId={(p) => p.person_id}
+          initialColumnVisibility={{ route: false }}
           searchPlaceholder="Search person, code or institution..."
           filters={[
             ...(unbilledInstitutionOptions.length
               ? [{ columnId: 'institution', title: 'Institution', options: unbilledInstitutionOptions }]
+              : []),
+            ...(unbilledRouteOptions.length
+              ? [{ columnId: 'route', title: 'Route', options: unbilledRouteOptions }]
               : []),
             TYPE_FILTER,
           ]}

@@ -52,6 +52,12 @@ interface DataTableProps<TData, TValue> {
    * sit still while the rows beneath them change.
    */
   onFilteredRowsChange?: (rows: TData[], isFiltered: boolean) => void;
+  /**
+   * Columns hidden on first render, e.g. { route: false }. Lets a column exist
+   * purely to power a filter without widening the table, while staying available
+   * in the column-visibility menu. Defaults to everything visible.
+   */
+  initialColumnVisibility?: VisibilityState;
 }
 
 // "licenseNumber" -> "License Number" for the column-visibility menu.
@@ -62,11 +68,13 @@ function prettifyColumnId(id: string) {
 export function DataTable<TData, TValue>({
   columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 10,
   entityName = 'rows', isLoading = false, enableRowSelection = false, getRowId, toolbarActions,
-  onFilteredRowsChange,
+  onFilteredRowsChange, initialColumnVisibility,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
+    initialColumnVisibility ?? {}
+  );
   const [globalFilter, setGlobalFilter] = React.useState('');
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
 

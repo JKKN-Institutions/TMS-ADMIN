@@ -22,6 +22,9 @@ export interface TransportBillRow {
   institution_name: string | null;
   department_id: string | null;
   department_name: string | null;
+  route_id: string | null;
+  route_number: string | null;
+  route_name: string | null;
   structure_id: string;
   structure_name: string | null;
   transport_year_id: string;
@@ -56,6 +59,9 @@ export interface UnbilledPerson {
   code: string | null;
   institution_id: string | null;
   institution_name: string | null;
+  route_id: string | null;
+  route_number: string | null;
+  route_name: string | null;
 }
 
 const emptySummary = (): BillSummary => ({
@@ -170,8 +176,15 @@ async function selectByIds<T = Record<string, unknown>>(
 }
 
 // Resolve learner/staff display names + their institution_id + department_id in two
-// batch queries. department_id feeds Bill Management's department-wise analytics.
-type PersonInfo = { name: string; code: string | null; institution_id: string | null; department_id: string | null };
+// batch queries. department_id feeds Bill Management's department-wise analytics;
+// transport_stop_id feeds the Route filter via resolveRoutes() below.
+type PersonInfo = {
+  name: string;
+  code: string | null;
+  institution_id: string | null;
+  department_id: string | null;
+  transport_stop_id: string | null;
+};
 async function resolvePeople(
   supabase: SupabaseClient,
   learnerIds: string[],
@@ -186,13 +199,15 @@ async function resolvePeople(
       roll_number: string | null;
       institution_id: string | null;
       department_id: string | null;
-    }>(supabase, 'learners_profiles', 'id, first_name, last_name, roll_number, institution_id, department_id', learnerIds);
+      transport_stop_id: string | null;
+    }>(supabase, 'learners_profiles', 'id, first_name, last_name, roll_number, institution_id, department_id, transport_stop_id', learnerIds);
     for (const r of data) {
       map.set(r.id, {
         name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
         code: r.roll_number ?? null,
         institution_id: r.institution_id ?? null,
         department_id: r.department_id ?? null,
+        transport_stop_id: r.transport_stop_id ?? null,
       });
     }
   }
@@ -204,18 +219,71 @@ async function resolvePeople(
       staff_id: string | null;
       institution_id: string | null;
       department_id: string | null;
-    }>(supabase, 'staff', 'id, first_name, last_name, staff_id, institution_id, department_id', staffIds);
+      transport_stop_id: string | null;
+    }>(supabase, 'staff', 'id, first_name, last_name, staff_id, institution_id, department_id, transport_stop_id', staffIds);
     for (const r of data) {
       map.set(r.id, {
         name: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—',
         code: r.staff_id ?? null,
         institution_id: r.institution_id ?? null,
         department_id: r.department_id ?? null,
+        transport_stop_id: r.transport_stop_id ?? null,
       });
     }
   }
   return map;
 }
+
+export interface RouteInfo {
+  route_id: string | null;
+  route_number: string | null;
+  route_name: string | null;
+}
+
+/**
+ * boarding stop -> the route it sits on, for the Route filter.
+ *
+ * Two chunked hops (stop -> route_id -> route). Errors propagate rather than
+ * degrading to an empty map: a swallowed failure here would render every bill
+ * as route-less, which reads as "nobody is assigned to a route" instead of
+ * "the lookup broke".
+ */
+async function resolveRoutes(
+  supabase: SupabaseClient,
+  stopIds: string[]
+): Promise<Map<string, RouteInfo>> {
+  const map = new Map<string, RouteInfo>();
+  if (!stopIds.length) return map;
+
+  const stops = await selectByIds<{ id: string; route_id: string | null }>(
+    supabase,
+    'tms_route_stop',
+    'id, route_id',
+    stopIds
+  );
+  const routeIds = uniq(stops.map((s) => s.route_id));
+  const routes = routeIds.length
+    ? await selectByIds<{ id: string; route_number: string | null; route_name: string | null }>(
+        supabase,
+        'tms_route',
+        'id, route_number, route_name',
+        routeIds
+      )
+    : [];
+  const routeById = new Map(routes.map((r) => [r.id, r]));
+
+  for (const s of stops) {
+    const r = s.route_id ? routeById.get(s.route_id) : undefined;
+    map.set(s.id, {
+      route_id: s.route_id ?? null,
+      route_number: r?.route_number ?? null,
+      route_name: r?.route_name ?? null,
+    });
+  }
+  return map;
+}
+
+const NO_ROUTE: RouteInfo = { route_id: null, route_number: null, route_name: null };
 
 async function nameMapFor(
   supabase: SupabaseClient,
@@ -342,10 +410,12 @@ export async function loadTransportBills(
   const instIds = uniq([...peopleMap.values()].map((p) => p.institution_id));
   const deptIds = uniq([...peopleMap.values()].map((p) => p.department_id));
   const acadYearIds = uniq([...billMap.values()].map((b) => b.academic_year_id));
-  const [instMap, deptMap, acadYearMap] = await Promise.all([
+  const stopIds = uniq([...peopleMap.values()].map((p) => p.transport_stop_id));
+  const [instMap, deptMap, acadYearMap, routeMap] = await Promise.all([
     nameMapFor(supabase, 'institutions', 'name', instIds),
     nameMapFor(supabase, 'departments', 'department_name', deptIds),
     nameMapFor(supabase, 'academic_years', 'academic_year_name', acadYearIds),
+    resolveRoutes(supabase, stopIds),
   ]);
 
   const td = today();
@@ -355,6 +425,7 @@ export async function loadTransportBills(
     const person = peopleMap.get(r.person_id as string);
     const institutionId = person?.institution_id ?? null;
     const departmentId = person?.department_id ?? null;
+    const route = (person?.transport_stop_id ? routeMap.get(person.transport_stop_id) : null) ?? NO_ROUTE;
     const billRef = r.billing_student_bill_id as string | null;
     const bill = billRef ? billMap.get(billRef) : undefined;
     // Prefer the LIVE money row for amount/due_date so MyJKKN edits reflect; fall back
@@ -410,6 +481,9 @@ export async function loadTransportBills(
       institution_name: institutionId ? instMap.get(institutionId) ?? null : null,
       department_id: departmentId,
       department_name: departmentId ? deptMap.get(departmentId) ?? null : null,
+      route_id: route.route_id,
+      route_number: route.route_number,
+      route_name: route.route_name,
       structure_id: r.fee_structure_id as string,
       structure_name: structureMap.get(r.fee_structure_id as string) ?? null,
       transport_year_id: r.transport_year_id as string,
@@ -518,11 +592,16 @@ export async function loadUnbilledPeople(
   const staffIds = uniq(unbilled.filter((p) => p.person_type === 'staff').map((p) => p.person_id));
   const peopleMap = await resolvePeople(supabase, learnerIds, staffIds);
   const instIds = uniq(unbilled.map((p) => p.institution_id));
-  const instMap = await nameMapFor(supabase, 'institutions', 'name', instIds);
+  const stopIds = uniq([...peopleMap.values()].map((i) => i.transport_stop_id));
+  const [instMap, routeMap] = await Promise.all([
+    nameMapFor(supabase, 'institutions', 'name', instIds),
+    resolveRoutes(supabase, stopIds),
+  ]);
 
   const people: UnbilledPerson[] = unbilled.map((p) => {
     const info = peopleMap.get(p.person_id);
     const institutionId = info?.institution_id ?? p.institution_id ?? null;
+    const route = (info?.transport_stop_id ? routeMap.get(info.transport_stop_id) : null) ?? NO_ROUTE;
     return {
       person_id: p.person_id,
       person_type: p.person_type,
@@ -530,6 +609,9 @@ export async function loadUnbilledPeople(
       code: info?.code ?? null,
       institution_id: institutionId,
       institution_name: institutionId ? instMap.get(institutionId) ?? null : null,
+      route_id: route.route_id,
+      route_number: route.route_number,
+      route_name: route.route_name,
     };
   });
 
