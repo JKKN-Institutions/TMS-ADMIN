@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
+import toast from 'react-hot-toast';
 import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX, Loader2 } from 'lucide-react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
@@ -293,6 +294,59 @@ export default function BillManagementPage() {
             TYPE_FILTER,
           ]}
         />
+      )}
+
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              Waive {inr(cancelTarget.fine_amount)} fine — {cancelTarget.person_name}?
+            </h3>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+              The bill is cancelled, not deleted. The learner stops owing it immediately.
+            </p>
+            <input
+              type="text"
+              value={waiveReason}
+              onChange={(e) => setWaiveReason(e.target.value)}
+              placeholder="Reason for waiving"
+              className="mt-3 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCancelTarget(null);
+                  setWaiveReason('');
+                }}
+                className="h-10 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                disabled={waiving || waiveReason.trim() === ''}
+                onClick={async () => {
+                  setWaiving(true);
+                  try {
+                    await cancelFine(cancelTarget.id, waiveReason.trim());
+                    toast.success('Fine waived.');
+                    setCancelTarget(null);
+                    setWaiveReason('');
+                    await qc.invalidateQueries({ queryKey: ['fines', selectedYear] });
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Could not waive the fine');
+                  } finally {
+                    setWaiving(false);
+                  }
+                }}
+                className="h-10 rounded-lg bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                Waive
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <FineDialog
