@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX, Loader2 } from 'lucide-react';
 import { SelectMenu } from '@/components/ui/select-menu';
@@ -11,6 +11,7 @@ import { getUnbilledColumns } from './unbilled-columns';
 import { exportBills } from './bill-export';
 import { fetchBills, fetchUnbilled, fetchTransportYearOptions } from './bill-management-api';
 import { summarizeBills, type TransportBillRow } from '@/lib/fees/bills';
+import { FineDialog } from './fine-dialog';
 
 type View = 'bills' | 'unbilled' | 'analytics';
 
@@ -35,8 +36,11 @@ const BillAnalytics = dynamic(() => import('./bill-analytics'), {
 });
 
 export default function BillManagementPage() {
+  const qc = useQueryClient();
   const [selectedYear, setSelectedYear] = useState('');
   const [view, setView] = useState<View>('bills');
+  // Non-null while the Generate Fine dialog is open, holding the ticked bill rows.
+  const [fineRows, setFineRows] = useState<TransportBillRow[] | null>(null);
 
   const { data: years = [] } = useQuery({
     queryKey: ['transport-year-options'],
@@ -215,15 +219,27 @@ export default function BillManagementPage() {
             TYPE_FILTER,
           ]}
           toolbarActions={({ selectedRows }) => (
-            <button
-              type="button"
-              onClick={() => exportBills(selectedRows.length ? selectedRows : rows, yearLabel)}
-              disabled={rows.length === 0}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <Download className="h-4 w-4" />
-              Export{selectedRows.length ? ` (${selectedRows.length})` : ''}
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Fining needs a specific year: the fine sheet is per transport year. */}
+              <button
+                type="button"
+                onClick={() => setFineRows(selectedRows)}
+                disabled={selectedRows.length === 0 || isAll}
+                title={isAll ? 'Select a specific transport year to fine' : undefined}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-red-300 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10"
+              >
+                Generate Fine{selectedRows.length ? ` (${selectedRows.length})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => exportBills(selectedRows.length ? selectedRows : rows, yearLabel)}
+                disabled={rows.length === 0}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <Download className="h-4 w-4" />
+                Export{selectedRows.length ? ` (${selectedRows.length})` : ''}
+              </button>
+            </div>
           )}
         />
       ) : (
@@ -242,6 +258,16 @@ export default function BillManagementPage() {
           ]}
         />
       )}
+
+      <FineDialog
+        open={fineRows !== null}
+        year={selectedYear}
+        selectedRows={fineRows ?? []}
+        onClose={() => setFineRows(null)}
+        onDone={() => {
+          void qc.invalidateQueries({ queryKey: ['fines', selectedYear] });
+        }}
+      />
     </div>
   );
 }
