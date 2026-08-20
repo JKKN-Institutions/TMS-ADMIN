@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Receipt, CheckCircle, IndianRupee, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -116,14 +117,22 @@ export default function FeesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Fees</h1>
           <p className="text-gray-600">Configure transport fee structures and generate bills</p>
         </div>
-        {canManage && (
-          <button
-            onClick={() => router.push('/fees/new')}
-            className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/fees/fine-rates"
+            className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
-            <Plus className="h-4 w-4" /> Add Fee Structure
-          </button>
-        )}
+            <IndianRupee className="h-4 w-4" /> Fine Rates
+          </Link>
+          {canManage && (
+            <button
+              onClick={() => router.push('/fees/new')}
+              className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+            >
+              <Plus className="h-4 w-4" /> Add Fee Structure
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
