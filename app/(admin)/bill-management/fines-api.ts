@@ -1,4 +1,5 @@
 import type { FineCandidate, CreateFinesResult } from '@/lib/fines/create';
+import type { FineRow, FineSummary } from '@/lib/fines/list';
 
 const json = async (res: Response) => {
   const j = await res.json();
@@ -6,7 +7,25 @@ const json = async (res: Response) => {
   return j;
 };
 
-export type { FineCandidate, CreateFinesResult };
+export type { FineCandidate, CreateFinesResult, FineRow, FineSummary };
+
+export async function fetchFines(year: string): Promise<{ rows: FineRow[]; summary: FineSummary }> {
+  const res = await fetch(`/api/admin/fines?year=${encodeURIComponent(year)}`, {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  });
+  return (await json(res)).data;
+}
+
+export async function cancelFine(id: string, reason: string): Promise<void> {
+  const res = await fetch(`/api/admin/fines/${id}/cancel`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+  await json(res);
+}
 
 export async function previewFines(
   year: string,

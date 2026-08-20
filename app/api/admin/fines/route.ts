@@ -5,11 +5,31 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
 import { parseCreateFineBody } from '@/lib/fines/fields';
 import { createFines } from '@/lib/fines/create';
+import { loadFines } from '@/lib/fines/list';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
   const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: permission });
   return !!data;
+}
+
+/** Fines raised in one transport year, joined to their money rows. */
+async function list(request: NextRequest, auth: AuthContext) {
+  try {
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.FEES_VIEW))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    const year = new URL(request.url).searchParams.get('year');
+    if (!year || year === 'all') {
+      return NextResponse.json({ error: 'Select a specific transport year' }, { status: 400 });
+    }
+    const svc = createServiceRoleClient();
+    const { rows, summary } = await loadFines(svc, { transportYearId: year });
+    return NextResponse.json({ success: true, data: { rows, summary }, count: rows.length });
+  } catch (e) {
+    console.error('Fine list error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 async function create(request: NextRequest, auth: AuthContext) {
@@ -63,4 +83,5 @@ async function create(request: NextRequest, auth: AuthContext) {
   }
 }
 
+export const GET = withAuth((request, auth) => list(request, auth));
 export const POST = withAuth((request, auth) => create(request, auth));

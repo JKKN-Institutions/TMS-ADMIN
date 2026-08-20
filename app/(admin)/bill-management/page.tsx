@@ -10,10 +10,13 @@ import { getBillColumns, inr } from './columns';
 import { getUnbilledColumns } from './unbilled-columns';
 import { exportBills } from './bill-export';
 import { fetchBills, fetchUnbilled, fetchTransportYearOptions } from './bill-management-api';
+import { fetchFines, cancelFine } from './fines-api';
+import { getFineColumns } from './fine-columns';
+import type { FineRow } from '@/lib/fines/list';
 import { summarizeBills, type TransportBillRow } from '@/lib/fees/bills';
 import { FineDialog } from './fine-dialog';
 
-type View = 'bills' | 'unbilled' | 'analytics';
+type View = 'bills' | 'unbilled' | 'analytics' | 'fines';
 
 const TYPE_FILTER: DataTableFilter = {
   columnId: 'type',
@@ -41,6 +44,10 @@ export default function BillManagementPage() {
   const [view, setView] = useState<View>('bills');
   // Non-null while the Generate Fine dialog is open, holding the ticked bill rows.
   const [fineRows, setFineRows] = useState<TransportBillRow[] | null>(null);
+  // Non-null while the waive panel is open, holding the fine being waived.
+  const [cancelTarget, setCancelTarget] = useState<FineRow | null>(null);
+  const [waiveReason, setWaiveReason] = useState('');
+  const [waiving, setWaiving] = useState(false);
 
   const { data: years = [] } = useQuery({
     queryKey: ['transport-year-options'],
@@ -53,9 +60,9 @@ export default function BillManagementPage() {
   }, [years, selectedYear]);
 
   const isAll = selectedYear === 'all';
-  // Unbilled needs a specific year — never stay on it for "All years".
+  // Unbilled and Fines need a specific year — never stay on them for "All years".
   useEffect(() => {
-    if (isAll && view === 'unbilled') setView('bills');
+    if (isAll && (view === 'unbilled' || view === 'fines')) setView('bills');
   }, [isAll, view]);
 
   const yearOptions = useMemo(
@@ -76,7 +83,14 @@ export default function BillManagementPage() {
     enabled: !!selectedYear && !isAll && view === 'unbilled',
   });
 
+  const { data: fines, isLoading: finesLoading } = useQuery({
+    queryKey: ['fines', selectedYear],
+    queryFn: () => fetchFines(selectedYear),
+    enabled: !!selectedYear && !isAll && view === 'fines',
+  });
+
   const billColumns = useMemo(() => getBillColumns(), []);
+  const fineColumns = useMemo(() => getFineColumns(true, (row) => setCancelTarget(row)), []);
   const unbilledColumns = useMemo(() => getUnbilledColumns(), []);
 
   const rows = useMemo(() => bills?.rows ?? [], [bills]);
@@ -170,13 +184,35 @@ export default function BillManagementPage() {
         <ToggleBtn active={view === 'unbilled'} onClick={() => setView('unbilled')} disabled={isAll}>
           Unbilled{!isAll && summary ? ` (${summary.unbilledCount})` : ''}
         </ToggleBtn>
+        <ToggleBtn active={view === 'fines'} onClick={() => setView('fines')} disabled={isAll}>
+          Fines{fines ? ` (${fines.summary.count})` : ''}
+        </ToggleBtn>
         <ToggleBtn active={view === 'analytics'} onClick={() => setView('analytics')}>
           Analytics
         </ToggleBtn>
       </div>
 
+      {/* Fine money is reported separately: it lives outside tms_fee_bill, so
+          folding it into the fee tiles above would silently change them. */}
+      {view === 'fines' && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <Kpi label="Fines raised" value={inr(fines?.summary.raised)} loading={finesLoading} />
+          <Kpi label="Fines collected" value={inr(fines?.summary.collected)} loading={finesLoading} />
+          <Kpi label="Fines outstanding" value={inr(fines?.summary.outstanding)} loading={finesLoading} />
+        </div>
+      )}
+
       {!selectedYear ? (
         <EmptyMsg>Select a transport year to view billing.</EmptyMsg>
+      ) : view === 'fines' ? (
+        <DataTable
+          columns={fineColumns}
+          data={fines?.rows ?? []}
+          entityName="fines"
+          isLoading={finesLoading}
+          getRowId={(r) => r.id}
+          searchPlaceholder="Search learner, code or reason..."
+        />
       ) : view === 'analytics' ? (
         billsError ? (
           <EmptyMsg>Couldn&apos;t load billing data. Please try again.</EmptyMsg>
