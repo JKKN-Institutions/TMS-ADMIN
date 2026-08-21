@@ -20,6 +20,13 @@ interface RouteRow { id: string; route_number: string | null }
 interface StopRow { id: string; route_id: string; stop_name: string; stop_time: string | null; evening_time: string | null; sequence_order: number | null }
 interface AttRow { learner_id: string; status: string | null; method: string | null; scanned_at: string | null }
 
+/** Split an id list into ≤150-id chunks (API-gateway limit on `.in()`). */
+function chunk<T>(arr: T[], size = 150): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 /**
  * GET /api/boarding/attendance/roster?date=&direction= — EVERY student on the
  * staff's assigned routes for the day, not just the ones who booked: the route's
@@ -51,8 +58,15 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
     const cfg = await loadSchedulingConfig(svc);
-    const { data: callerProfile } = await auth.supabase
+    // A failed lookup here must NOT silently fall through to a null email: that
+    // would make every row the caller actually owns read as is_mine:false and
+    // disable their mark buttons with no visible error.
+    const { data: callerProfile, error: callerProfileError } = await auth.supabase
       .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    if (callerProfileError) {
+      console.error('boarding attendance roster: failed to load caller profile:', callerProfileError);
+      return NextResponse.json({ error: 'Failed to load staff profile' }, { status: 500 });
+    }
     const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
 
     let routeIds = await getAssignedRouteIdsForUser(auth);
@@ -99,10 +113,85 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       if (a.status) attByLearner.set(a.learner_id, { status: a.status, method: a.method, scanned_at: a.scanned_at });
     }
 
+    // "Mine" is my own share plus any share I accepted cover for today. These
+    // queries are caller-scoped, not route-scoped, so they are hoisted OUT of
+    // the per-route loop below: on the super-admin path (~25 routes) doing
+    // this per-route would be 75-100 extra queries per page load for a value
+    // that never varies by route.
+    const mineByRoute = new Map<string, Set<string>>();
+    if (cfg.inchargeShareScoringEnabled && callerEmail) {
+      const myAssignmentByRoute = new Map<string, string>();
+      for (const c of chunk(routeIds)) {
+        const { data, error } = await svc
+          .from('tms_staff_route_assignment')
+          .select('id, route_id')
+          .eq('staff_email', callerEmail).eq('is_active', true)
+          .in('route_id', c);
+        if (error) {
+          console.error('boarding attendance roster: failed to load caller assignments:', error);
+          return NextResponse.json({ error: 'Failed to load staff assignment' }, { status: 500 });
+        }
+        for (const a of (data ?? []) as { id: string; route_id: string }[]) myAssignmentByRoute.set(a.route_id, a.id);
+      }
+
+      // Absences are scoped per route below (via absencesByRoute) so an
+      // absence declared on one route can never grant cover on another.
+      const absencesByRoute = new Map<string, AbsenceRow[]>();
+      for (const c of chunk(routeIds)) {
+        const { data, error } = await svc
+          .from('tms_incharge_absence')
+          .select('route_id, assignment_id, absence_date, covering_assignment_id, cover_status')
+          .in('route_id', c).eq('absence_date', date);
+        if (error) {
+          console.error('boarding attendance roster: failed to load in-charge absences:', error);
+          return NextResponse.json({ error: 'Failed to load in-charge absences' }, { status: 500 });
+        }
+        for (const a of (data ?? []) as Array<AbsenceRow & { route_id: string }>) {
+          const arr = absencesByRoute.get(a.route_id) ?? [];
+          arr.push(a);
+          absencesByRoute.set(a.route_id, arr);
+        }
+      }
+
+      const coveredByRoute = new Map<string, string[]>();
+      const allCoveredIds = new Set<string>();
+      for (const [routeId, myAssignmentId] of myAssignmentByRoute) {
+        const covered = delegatedTo(myAssignmentId, date, absencesByRoute.get(routeId) ?? []);
+        if (covered.length) {
+          coveredByRoute.set(routeId, covered);
+          for (const id of covered) allCoveredIds.add(id);
+        }
+      }
+
+      const emailByAssignmentId = new Map<string, string>();
+      for (const c of chunk([...allCoveredIds])) {
+        const { data, error } = await svc
+          .from('tms_staff_route_assignment').select('id, staff_email').in('id', c);
+        if (error) {
+          console.error('boarding attendance roster: failed to resolve covering assignments:', error);
+          return NextResponse.json({ error: 'Failed to resolve covering assignments' }, { status: 500 });
+        }
+        for (const a of (data ?? []) as { id: string; staff_email: string }[]) {
+          emailByAssignmentId.set(a.id, a.staff_email.toLowerCase());
+        }
+      }
+
+      for (const routeId of routeIds) {
+        const mine = new Set<string>([callerEmail]);
+        for (const id of coveredByRoute.get(routeId) ?? []) {
+          const email = emailByAssignmentId.get(id);
+          if (email) mine.add(email);
+        }
+        mineByRoute.set(routeId, mine);
+      }
+    }
+
     const rows: RosterRow[] = [];
     for (const rt of routes) {
       const riders = await loadRouteAttendanceRoster(svc, rt.id, date);
 
+      // Owner names genuinely differ per route, so allocation + staff lookup
+      // stay inside the loop; there is no clean batch form for them.
       let ownership: Parameters<typeof buildRosterRows>[4];
       if (cfg.inchargeShareScoringEnabled) {
         const [allocation, staff] = await Promise.all([
@@ -117,28 +206,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
             name: nameByEmail.get(owner.staff_email) ?? owner.staff_email,
           });
         }
-
-        // "Mine" is my own share plus any share I accepted cover for today.
-        const mine = new Set<string>();
-        if (callerEmail) {
-          mine.add(callerEmail);
-          const { data: myAssignment } = await svc
-            .from('tms_staff_route_assignment')
-            .select('id').eq('route_id', rt.id).eq('staff_email', callerEmail).eq('is_active', true).maybeSingle();
-          const myAssignmentId = (myAssignment as { id: string } | null)?.id ?? null;
-          if (myAssignmentId) {
-            const { data: absData } = await svc
-              .from('tms_incharge_absence')
-              .select('assignment_id, absence_date, covering_assignment_id, cover_status')
-              .eq('route_id', rt.id).eq('absence_date', date);
-            const covered = delegatedTo(myAssignmentId, date, (absData ?? []) as AbsenceRow[]);
-            if (covered.length) {
-              const { data: coveredRows } = await svc
-                .from('tms_staff_route_assignment').select('staff_email').in('id', covered);
-              for (const c of (coveredRows ?? []) as { staff_email: string }[]) mine.add(c.staff_email.toLowerCase());
-            }
-          }
-        }
+        const mine = mineByRoute.get(rt.id) ?? new Set<string>();
         ownership = { ownerByLearner, mine };
       }
 
