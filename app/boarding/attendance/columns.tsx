@@ -58,6 +58,12 @@ export function getRosterColumns(opts: {
   canMark: boolean;
   busyId: string | null;
   onMark: (row: RosterRow, status: 'present' | 'absent') => void;
+  // Whether ANY row in the current response carries an owner. While the
+  // share-scoring flag is off, owner_name is null on every row and this is
+  // false — in that state the In-charge column is omitted entirely rather
+  // than rendering "Unassigned" on the whole bus (which would read as an
+  // alarm on a screen in-charges use daily, for a feature that isn't live).
+  hasOwners: boolean;
 }): ColumnDef<RosterRow>[] {
   const selectColumn: ColumnDef<RosterRow> = {
     id: 'select',
@@ -74,6 +80,27 @@ export function getRosterColumns(opts: {
     cell: ({ row }) => (
       <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(v)} aria-label="Select row" />
     ),
+  };
+
+  // Built separately (rather than inline in the return array) so it can be
+  // conditionally spread in only when hasOwners — see the opts.hasOwners doc.
+  const ownerColumn: ColumnDef<RosterRow> = {
+    accessorKey: 'owner_name',
+    id: 'owner',
+    header: 'In-charge',
+    cell: ({ row }) => {
+      const r = row.original;
+      if (!r.owner_name) return <span className="text-xs text-gray-400">Unassigned</span>;
+      return (
+        <span className={r.is_mine ? 'text-xs font-medium text-gray-900 dark:text-gray-100' : 'text-xs text-gray-500'}>
+          {r.is_mine ? 'You' : r.owner_name}
+        </span>
+      );
+    },
+    // FilterSelect (components/ui/data-table.tsx) is single-select and passes
+    // a plain string — 'mine' or 'others' — matching the equality pattern the
+    // other filterable columns in this file use (route_number/ticket/status).
+    filterFn: (row, _id, value) => (row.original.is_mine ? 'mine' : 'others') === value,
   };
 
   return [
@@ -116,22 +143,7 @@ export function getRosterColumns(opts: {
       size: 130,
       cell: ({ row }) => <TicketBadge booked={row.original.booked} />,
     },
-    {
-      accessorKey: 'owner_name',
-      id: 'owner',
-      header: 'In-charge',
-      cell: ({ row }) => {
-        const r = row.original;
-        if (!r.owner_name) return <span className="text-xs text-gray-400">Unassigned</span>;
-        return (
-          <span className={r.is_mine ? 'text-xs font-medium text-gray-900 dark:text-gray-100' : 'text-xs text-gray-500'}>
-            {r.is_mine ? 'You' : r.owner_name}
-          </span>
-        );
-      },
-      filterFn: (row, _id, value: string[]) =>
-        value.length === 0 || value.includes(row.original.is_mine ? 'mine' : 'others'),
-    },
+    ...(opts.hasOwners ? [ownerColumn] : []),
     {
       id: 'status',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,

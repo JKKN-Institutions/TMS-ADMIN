@@ -78,6 +78,12 @@ export default function BoardingAttendancePage() {
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 };
   const share = data?.share ?? { total: 0, marked: 0, remaining: 0 };
+  // Derived from the data, not the flag: the page has no access to the setting, and
+  // deriving it from the rows keeps the column/filter in sync with what actually
+  // arrived. False while share-scoring is off (owner_name null on every row) — in
+  // that state the In-charge column and filter are omitted entirely rather than
+  // showing "Unassigned" for the whole bus.
+  const hasOwners = rows.some((r) => r.owner_name !== null);
 
   const legOpen = isDirectionOpen(windows.onward);
   const canMark = isToday && legOpen;
@@ -106,12 +112,14 @@ export default function BoardingAttendancePage() {
   );
 
   const columns = useMemo(
-    () => getRosterColumns({ canMark, busyId, onMark: mark }),
-    [canMark, busyId, mark]
+    () => getRosterColumns({ canMark, busyId, onMark: mark, hasOwners }),
+    [canMark, busyId, mark, hasOwners]
   );
 
   const filters: DataTableFilter[] = [
-    { columnId: 'owner', title: 'In-charge', options: [{ label: 'My share', value: 'mine' }, { label: 'Others', value: 'others' }] },
+    ...(hasOwners
+      ? [{ columnId: 'owner', title: 'In-charge', options: [{ label: 'My share', value: 'mine' }, { label: 'Others', value: 'others' }] }]
+      : []),
     { columnId: 'ticket', title: 'Ticket', options: [{ label: 'Booked', value: 'booked' }, { label: 'Without ticket', value: 'without_ticket' }] },
     { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
   ];
