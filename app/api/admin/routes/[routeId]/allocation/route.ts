@@ -10,7 +10,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import { recomputeRouteAllocation, loadRouteAllocation } from '@/lib/boarding/allocation-repo';
+import { recomputeRouteAllocation } from '@/lib/boarding/allocation-repo';
 import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -45,8 +45,9 @@ async function getAllocation(request: NextRequest, auth: AuthContext) {
     if (lErr) return NextResponse.json({ error: 'Failed to load learners' }, { status: 500 });
     const learners = (learnerData ?? []) as LearnerLite[];
 
-    const { data: stopData } = await svc
+    const { data: stopData, error: sErr } = await svc
       .from('tms_route_stop').select('id, stop_name').eq('route_id', routeId);
+    if (sErr) return NextResponse.json({ error: 'Failed to load stops' }, { status: 500 });
     const stopName = new Map(((stopData ?? []) as { id: string; stop_name: string }[]).map((s) => [s.id, s.stop_name]));
 
     const { data: rows, error: rErr } = await svc
@@ -136,9 +137,34 @@ async function postAllocation(request: NextRequest, auth: AuthContext) {
       if (!learnerId || !assignmentId) {
         return NextResponse.json({ error: 'learnerId and assignmentId are required' }, { status: 400 });
       }
-      const { data: assignment } = await svc
+      // A learner's route membership must be checked explicitly: the DB's
+      // UNIQUE (learner_id) constraint on tms_incharge_roster_allocation
+      // guarantees single ownership, but it happily accepts a pin naming a
+      // learner from a DIFFERENT route than the one this endpoint is scoped
+      // to — the constraint has no notion of "route", only of "one row per
+      // learner". Without this check that learner's ownership silently
+      // moves onto a bus they don't ride.
+      const { data: learnerRow, error: lrErr } = await svc
+        .from('learners_profiles')
+        .select('id, transport_route_id')
+        .eq('id', learnerId)
+        .maybeSingle();
+      if (lrErr) {
+        console.error('allocation pin learner lookup error:', lrErr);
+        return NextResponse.json({ error: 'Failed to verify learner' }, { status: 500 });
+      }
+      const learner = learnerRow as { id: string; transport_route_id: string | null } | null;
+      if (!learner || learner.transport_route_id !== routeId) {
+        return NextResponse.json({ error: 'That learner is not on this route' }, { status: 400 });
+      }
+
+      const { data: assignment, error: aErr } = await svc
         .from('tms_staff_route_assignment')
         .select('id, staff_email').eq('id', assignmentId).eq('route_id', routeId).eq('is_active', true).maybeSingle();
+      if (aErr) {
+        console.error('allocation pin assignment lookup error:', aErr);
+        return NextResponse.json({ error: 'Failed to verify in-charge assignment' }, { status: 500 });
+      }
       const target = assignment as { id: string; staff_email: string } | null;
       if (!target) {
         return NextResponse.json({ error: 'That in-charge is not assigned to this route' }, { status: 400 });
