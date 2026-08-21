@@ -126,11 +126,10 @@ export async function GET(request: NextRequest) {
       billAction: string;
       blockedReason?: string;
       /**
-       * Which rule decided this verdict. The
-       * tms_incharge_month_verdict row has no column for it (a migration was
-       * deliberately not added for this task), so `plan` here and the
-       * notification body below are the only recoverable record of which
-       * rule produced a given bill.
+       * Which rule decided this verdict. Also written to
+       * tms_incharge_month_verdict.scored_by, which is the row's audit
+       * substitute (see file header) -- `plan` here and the notification
+       * body below must always agree with that column.
        */
       scoredBy: 'share' | 'route';
     }>,
@@ -622,6 +621,7 @@ export async function GET(request: NextRequest) {
             bill_action: recordedBillAction,
             was_probation: Boolean(prob),
             mode,
+            scored_by: scoredBy,
             decided_at: new Date().toISOString(),
           },
           { onConflict: 'staff_email,month' },
