@@ -6,7 +6,7 @@ import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX } from 'lu
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import ScanDialog from '@/components/boarding/scan-dialog';
-import AbsenceDialog from '@/components/boarding/absence-dialog';
+import AbsenceDialog, { type AbsenceRoute } from '@/components/boarding/absence-dialog';
 import { getRosterColumns } from './columns';
 import type { RosterRow } from '@/lib/booking/roster';
 import { DEFAULT_WINDOWS, isDirectionOpen, formatHM, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
@@ -87,6 +87,16 @@ export default function BoardingAttendancePage() {
   // showing "Unassigned" for the whole bus.
   const hasOwners = rows.some((r) => r.owner_name !== null);
 
+  // Every distinct route on this roster, for the absence dialog. An in-charge
+  // on two buses must choose which one they are declaring absence from.
+  const absenceRoutes: AbsenceRoute[] = useMemo(() => {
+    const byId = new Map<string, AbsenceRoute>();
+    for (const r of rows) {
+      if (r.route_id && !byId.has(r.route_id)) byId.set(r.route_id, { id: r.route_id, number: r.route_number ?? null });
+    }
+    return [...byId.values()];
+  }, [rows]);
+
   const legOpen = isDirectionOpen(windows.onward);
   const canMark = isToday && legOpen;
 
@@ -147,19 +157,48 @@ export default function BoardingAttendancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
+        {/* Copy is gated on hasOwners for the same reason the owner column and
+            filter are: with no allocation on this route there are no shares, so
+            promising "you mark only your own share" would describe a rule that
+            is not in force. */}
         <p className="text-gray-600 mt-1 text-sm">
-          The whole bus is listed so you can see it is covered, but you mark only
-          your own share. Students owned by another in-charge show their name.
+          {hasOwners ? (
+            <>
+              The whole bus is listed so you can see it is covered, but you mark only
+              your own share. Students owned by another in-charge show their name.
+            </>
+          ) : (
+            <>
+              Everyone allocated to your route — students who booked a seat can be scanned or marked present;
+              the rest are listed as <span className="font-medium">Without ticket</span>.
+            </>
+          )}
         </p>
       </div>
 
       {/* Analytics tiles + day picker */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        {/* Share tiles only where shares exist. With no owners, `share.total`
+            is the whole booked bus and calling it "My share" is a lie;
+            "Marked" would conflate present with absent, and the Absent tile
+            would vanish from a screen in-charges read every day. Off the flag
+            this must be exactly the pre-share set of tiles. */}
         <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
-          <Tile label="My share" value={share.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
-          <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
-          <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
-          <Tile label="On bus" value={counts.total} tone="gray" icon={<TicketX className="h-4 w-4" />} />
+          {hasOwners ? (
+            <>
+              <Tile label="My share" value={share.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
+              <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
+              <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
+              <Tile label="On bus" value={counts.total} tone="gray" icon={<TicketX className="h-4 w-4" />} />
+            </>
+          ) : (
+            <>
+              <Tile label="Present" value={counts.present} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
+              <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
+              <Tile label="Without ticket" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
+            </>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Day</label>
@@ -249,7 +288,7 @@ export default function BoardingAttendancePage() {
       <AbsenceDialog
         open={absenceOpen}
         onOpenChange={setAbsenceOpen}
-        routeId={rows[0]?.route_id ?? ''}
+        routes={absenceRoutes}
         date={date}
         onDeclared={() => {
           qc.invalidateQueries({ queryKey: ['incharge-absence'] });
