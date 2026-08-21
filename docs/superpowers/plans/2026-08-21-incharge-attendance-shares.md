@@ -1079,9 +1079,11 @@ import { parseSchedulingConfig, DEFAULT_SCHEDULING_CONFIG } from './scheduling';
 
 describe('inchargeShareScoringEnabled', () => {
   it('defaults to false', () => {
-    // Per-share scoring is strictly stricter than the route-level rule it
-    // replaces, so turning it on bills MORE people. It must never arrive by
-    // default.
+    // Per-share scoring changes WHO is billed, not merely how many: it
+    // narrows credit to your own students but also narrows your denominator
+    // to the days they travelled (measured on production it fails FEWER
+    // people -- July 104 vs 112, August 109 vs 112). Either way it must never
+    // arrive by default; see the field's doc comment in ./scheduling.ts.
     expect(DEFAULT_SCHEDULING_CONFIG.inchargeShareScoringEnabled).toBe(false);
     expect(parseSchedulingConfig({}).inchargeShareScoringEnabled).toBe(false);
   });
@@ -1108,10 +1110,15 @@ In `lib/settings/scheduling.ts`, add to the `SchedulingConfig` interface after `
 ```ts
   /**
    * Score in-charge attendance against each staffer's OWN share rather than
-   * the route as a whole. Ships OFF: per-share scoring is strictly stricter
-   * than the route-level rule, so enabling it while inchargeEnforcementMode is
-   * 'enforce' bills more people, not fewer. Two independent flags must both be
-   * on before any money moves.
+   * the route as a whole. Ships OFF.
+   *
+   * Per-share is NOT uniformly stricter. It narrows CREDIT to marks on your
+   * own students, but the same move narrows the DENOMINATOR to the days your
+   * own students actually travelled, and an empty duty counts as covered.
+   * Measured by dry run against production it fails FEWER people, not more:
+   * July 104 vs 112 under the route rule, August 109 vs 112. It still ships
+   * OFF -- two independent flags must both be on before any money moves,
+   * because "fewer in aggregate" is not "nobody new".
    */
   inchargeShareScoringEnabled: boolean;
 ```
@@ -2354,9 +2361,11 @@ Add `scoredBy: cfg.inchargeShareScoringEnabled ? 'share' : 'route'` to each `sum
 
 - [ ] **Step 4: Verify with a dry run**
 
-Run with `?dryRun=1&month=2026-07` while the flag is off, record the summary. Turn the flag on, re-run the same command, and compare. Expect `passed` to drop and `failed` to rise — per-share scoring is strictly stricter. **Turn the flag back off.**
+Run with `?dryRun=1&month=2026-07` while the flag is off, record the summary. Turn the flag on, re-run the same command, and compare. **Turn the flag back off.**
 
-Report both numbers to the user before anything is enabled for real. The file header already records that a live run under the route-level zero-miss rule bills all 102 in-charges roughly ₹13 lakh; the per-share number will be larger, and that figure is the decision the transport office has to make.
+Expect `failed` to fall slightly, not rise. Per-share narrows credit to your own students but also narrows your denominator to the days those students actually travelled, and an empty duty counts as covered — the looser denominator dominates. The measured figures on production are July **104 failed under per-share vs 112 under the route rule**, and August **109 vs 112**. A run in that neighbourhood is CORRECT; a large jump in either direction is the signal to stop. (An earlier draft of this step told the operator to expect `failed` to rise, which would have read a correct run as a bug.)
+
+Report both numbers to the user before anything is enabled for real. The file header records that a live run under the route-level zero-miss rule bills all 102 in-charges roughly ₹13 lakh; the per-share total is slightly smaller but falls on a *different* set of people, and that is the decision the transport office has to make.
 
 - [ ] **Step 5: Commit**
 

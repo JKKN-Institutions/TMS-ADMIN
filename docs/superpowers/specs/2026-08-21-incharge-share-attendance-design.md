@@ -45,7 +45,7 @@ One measurement decided the algorithm: **route 29's fourteen in-charges share on
 
 These two are recorded so they can be overturned before Phase 4 goes live. Until then the conservative default holds.
 
-1. **The zero-miss rule is unchanged.** `evaluateMonth` requires every service day in the window to be marked. This design changes *whose* marks count, not *how many* days are required. Per-share scoring is strictly stricter than route-level scoring, so the same rule will fail more people. A threshold (say 90% of duty days) is a fee-policy change and is out of scope here.
+1. **The zero-miss rule is unchanged.** `evaluateMonth` requires every service day in the window to be marked. This design changes *whose* marks count, and — as a consequence — *which* days are required of each person. Per-share scoring is **not** uniformly stricter: it narrows credit to your own students, but the same move narrows your denominator to the days your own students actually travelled, and an empty duty counts as covered. Measured by dry run against production it fails FEWER people than the route rule (July 104 vs 112, August 109 vs 112) — though on a different set of people. A threshold (say 90% of duty days) is a fee-policy change and is out of scope here.
 2. **Under-staffed routes are flagged, not exempted.** Route 24's single in-charge owns all 67 of its students and will fail a zero-miss month almost by construction. The coverage board surfaces this so the office can assign more in-charges; no automatic billing exemption is granted.
 
 ## Architecture
@@ -179,7 +179,7 @@ No new billing path is introduced. That is the point: the daily loop warns, the 
 
 A single `admin_settings` flag, `inchargeShareScoringEnabled`, read through `loadSchedulingConfig`, **default false**. While false, both crons apply the current route-level rule and the mark API keeps today's behaviour. The tables, the split, the share-scoped roster and the absence flow all ship and can be inspected with no billing consequence.
 
-**Blast radius.** The month verdict's file header records that under the current zero-miss rule a live run bills all 102 in-charges roughly ₹13 lakh. Per-share scoring is strictly stricter, so enabling this flag while `inchargeEnforcementMode` is `enforce` will bill **more** people, not fewer. Two independent flags must both be on before any money moves, and the first live run must be a human pressing a button.
+**Blast radius.** The month verdict's file header records that under the current zero-miss rule a live run bills all 102 in-charges roughly ₹13 lakh. Per-share scoring does **not** widen that: measured by dry run against production it fails *fewer* people (July 104 vs 112 under the route rule, August 109 vs 112), because narrowing credit to your own students also narrows your denominator to the days those students travelled, and `shareCovered` treats an empty duty as covered. The safety argument is unchanged, and is not built on the direction of that number: two independent flags must both be on before any money moves, and the first live run must be a human pressing a button. "Fewer in aggregate" is not "nobody new" — per-share moves individuals in both directions, so the *set* of people billed changes even where the count falls.
 
 ## Error handling
 

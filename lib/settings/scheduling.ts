@@ -29,10 +29,23 @@ export interface SchedulingConfig {
   inchargeEnforcementMode: InchargeEnforcementMode;
   /**
    * Score in-charge attendance against each staffer's OWN share rather than
-   * the route as a whole. Ships OFF: per-share scoring is strictly stricter
-   * than the route-level rule, so enabling it while inchargeEnforcementMode is
-   * 'enforce' bills more people, not fewer. Two independent flags must both be
-   * on before any money moves.
+   * the route as a whole. Ships OFF.
+   *
+   * Per-share is NOT uniformly stricter, and an earlier version of this comment
+   * claimed it was. It narrows CREDIT -- only marks on your own students count,
+   * where the route rule let any colleague's single mark credit everyone -- but
+   * the same move narrows the DENOMINATOR: your required days become the days
+   * your own students actually travelled, and a day on which none of them
+   * booked is an empty duty, which `shareCovered` counts as covered
+   * (lib/boarding/share-coverage.ts). Measured by dry run against production,
+   * the looser denominator dominates: July failed 104 under per-share against
+   * 112 under the route rule, August 109 against 112. Per-share bills FEWER
+   * people, not more.
+   *
+   * It still ships OFF and the safety argument is unchanged: this flag and
+   * inchargeEnforcementMode must BOTH be on before any money moves. "Fewer in
+   * aggregate" is not "nobody new" -- per-share moves individuals in both
+   * directions, so WHO is billed changes even where the total falls.
    */
   inchargeShareScoringEnabled: boolean;
 }

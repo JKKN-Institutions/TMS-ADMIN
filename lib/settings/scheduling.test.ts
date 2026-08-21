@@ -209,9 +209,11 @@ describe('inchargeEnforcementMode', () => {
 
 describe('inchargeShareScoringEnabled', () => {
   it('defaults to false', () => {
-    // Per-share scoring is strictly stricter than the route-level rule it
-    // replaces, so turning it on bills MORE people. It must never arrive by
-    // default.
+    // Per-share scoring changes WHO is billed, not merely how many: it
+    // narrows credit to your own students but also narrows your denominator
+    // to the days they travelled (measured on production it fails FEWER
+    // people -- July 104 vs 112, August 109 vs 112). Either way it must never
+    // arrive by default; see the field's doc comment in ./scheduling.ts.
     expect(DEFAULT_SCHEDULING_CONFIG.inchargeShareScoringEnabled).toBe(false);
     expect(parseSchedulingConfig({}).inchargeShareScoringEnabled).toBe(false);
   });
