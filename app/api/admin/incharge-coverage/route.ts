@@ -14,7 +14,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { loadSharesForRoutes } from '@/lib/boarding/allocation-repo';
 import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
-import { shareDuty, shareCovered, isExcused, type AbsenceRow } from '@/lib/boarding/share-coverage';
+import { shareDuty, shareCovered, isExcused, delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -96,10 +96,13 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    const { data: absData } = await svc
+    const { data: absData, error: absErr } = await svc
       .from('tms_incharge_absence')
       .select('assignment_id, absence_date, covering_assignment_id, cover_status')
       .eq('absence_date', date);
+    // Never let a failed load read as "nobody is excused" — that would list
+    // legitimately absent in-charges as coverage gaps the office then chases.
+    if (absErr) return NextResponse.json({ error: 'Failed to load absences' }, { status: 500 });
     const absences = (absData ?? []) as AbsenceRow[];
 
     const totals = { routes: routes.length, unowned: 0, emptyShares: 0, unmarkedShares: 0 };
@@ -117,8 +120,18 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
         allocated += share.length;
         if (share.length === 0) emptyShares += 1;
         if (isExcused(a.id, date, absences)) continue;
+        // Duty is the own share PLUS any share accepted as cover today —
+        // must match the cron (app/api/cron/incharge-attendance/route.ts)
+        // exactly, or the board shows green while the cron strikes/bills
+        // someone for a covered share it holds them answerable for. Both
+        // shares are already loaded in `sharesByAssignment`, so this union
+        // costs no extra query.
+        const shareIds = new Set(share);
+        for (const covered of delegatedTo(a.id, date, absences)) {
+          for (const id of sharesByAssignment.get(covered) ?? []) shareIds.add(id);
+        }
         const duty = shareDuty({
-          shareLearnerIds: share,
+          shareLearnerIds: [...shareIds],
           bookedLearnerIds: bookedByRoute.get(r.id) ?? [],
         });
         const coverage = shareCovered({ duty, markedLearnerIds: markedByRoute.get(r.id) ?? [] });
