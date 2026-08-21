@@ -16,6 +16,7 @@ import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { emailIlikePattern } from '@/lib/identity/email-match';
 import { istToday } from '@/lib/booking/window';
+import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
 
@@ -167,6 +168,28 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Absence can only be declared for today or a future day' }, { status: 400 });
     }
 
+    // Declarations are only accepted while share scoring is actually live.
+    //
+    // A row written now would be honoured RETROACTIVELY the moment the flag
+    // flips: the month verdict subtracts every excused date from requiredDays,
+    // so someone who posted one declaration per remaining weekday while the
+    // feature was dormant would face an empty window, pass, and have their
+    // transport bill cancelled without marking anybody. The blanket-declaration
+    // policy itself (a cap? an approval step?) is the repo owner's call and is
+    // deliberately NOT decided here -- this only stops the rows accumulating
+    // before there is a policy to apply to them.
+    //
+    // GET and the respond route stay ungated: reading your own absences, and
+    // answering a request that already exists, change nothing.
+    const svcCfg = createServiceRoleClient();
+    const cfg = await loadSchedulingConfig(svcCfg);
+    if (!cfg.inchargeShareScoringEnabled) {
+      return NextResponse.json({
+        error: 'Absence declarations are not open yet: per-share attendance is not active on this system.',
+        reason: 'share_scoring_disabled',
+      }, { status: 409 });
+    }
+
     const email = await callerEmailOf(auth);
     if (!email) return NextResponse.json({ error: 'Your profile has no email' }, { status: 400 });
 
@@ -175,7 +198,7 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'You are not assigned to this route' }, { status: 403 });
     }
 
-    const svc = createServiceRoleClient();
+    const svc = svcCfg;
     const { data: mine, error: mineError } = await svc
       .from('tms_staff_route_assignment').select('id')
       .eq('route_id', routeId).eq('staff_email', email).eq('is_active', true).maybeSingle();

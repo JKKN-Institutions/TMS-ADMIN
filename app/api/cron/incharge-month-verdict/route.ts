@@ -213,6 +213,52 @@ export async function GET(request: NextRequest) {
     return p;
   }
 
+  // Absence rows for a route+window, memoized for the whole run. Every
+  // assignment on a route asks the same question of the same rows -- once to
+  // decide whether it holds any duty at all, and again to score each date.
+  const absenceCache = new Map<string, Promise<AbsenceRow[]>>();
+  function cachedAbsences(routeId: string, from: string, to: string): Promise<AbsenceRow[]> {
+    const key = `${routeId}|${from}|${to}`;
+    let p = absenceCache.get(key);
+    if (!p) {
+      p = (async () => {
+        const { data, error } = await svc
+          .from('tms_incharge_absence')
+          .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+          .eq('route_id', routeId)
+          .gte('absence_date', from)
+          .lte('absence_date', to);
+        // Reading a failed load as "no absences" would erase every excuse in
+        // the window and bill people who were legitimately off.
+        if (error) throw new Error(`absence load failed: ${error.message}`);
+        return (data ?? []) as AbsenceRow[];
+      })();
+      absenceCache.set(key, p);
+    }
+    return p;
+  }
+
+  /**
+   * Did this assignment accept cover for ANY date in the window?
+   *
+   * Delegation is recorded per DATE; this question is per WINDOW, because it
+   * only decides whether the assignment PARTICIPATES in the month at all. The
+   * per-date arithmetic stays exact inside shareMarkedDates, which recomputes
+   * duty date by date -- a date with neither own students nor accepted cover
+   * yields an empty duty, which shareCovered already credits as covered.
+   */
+  async function hasAcceptedCoverInWindow(
+    assignmentId: string,
+    routeId: string,
+    from: string,
+    to: string,
+  ): Promise<boolean> {
+    const absences = await cachedAbsences(routeId, from, to);
+    return absences.some(
+      (a) => a.cover_status === 'accepted' && a.covering_assignment_id === assignmentId,
+    );
+  }
+
   /**
    * Dates in the window on which THIS assignment's duty was fully covered.
    *
@@ -226,17 +272,14 @@ export async function GET(request: NextRequest) {
     from: string,
     to: string,
   ): Promise<{ marked: string[]; excused: string[] }> {
+    // No early return on an empty own share. An in-charge who accepted a
+    // colleague's cover has real duty on the covered dates even with no
+    // students of their own, and returning {marked: []} here would report
+    // every one of those dates as missed. The CALLER decides whether this
+    // assignment participates at all; once it does, duty is computed per date
+    // below and an empty duty is credited as covered.
     const shareIds = await cachedShareLearnerIds(assignmentId);
-    if (shareIds.length === 0) return { marked: [], excused: [] };
-
-    const { data: absData, error: absErr } = await svc
-      .from('tms_incharge_absence')
-      .select('assignment_id, absence_date, covering_assignment_id, cover_status')
-      .eq('route_id', routeId)
-      .gte('absence_date', from)
-      .lte('absence_date', to);
-    if (absErr) throw new Error(`absence load failed: ${absErr.message}`);
-    const absences = (absData ?? []) as AbsenceRow[];
+    const absences = await cachedAbsences(routeId, from, to);
 
     // Bookings per learner per date, so duty can be computed for each date.
     const { data: bookings, error: bErr } = await svc
@@ -338,39 +381,61 @@ export async function GET(request: NextRequest) {
       // service days (it may run on different days than a colleague route).
       // Under the flag, credit is per-share (scored per assignment); off the
       // flag, credit is route-level (shared roster) exactly as before.
-      const serviceDaySet = new Set<string>();
+      //
+      // Required days are accumulated PER ASSIGNMENT and only then unioned. A
+      // single person-wide excused set used to be subtracted from a
+      // person-wide service-day set, so declaring absence on route A also
+      // erased that date from route B's requirement. A date must be able to be
+      // excused on one route while still being required on another, and the
+      // only way to express that is to subtract each assignment's excuses from
+      // its OWN service days before the union.
+      const requiredSet = new Set<string>();
       const markedSet = new Set<string>();
-      const excusedSet = new Set<string>();
       for (const row of group.rows) {
         const routeId = row.route_id;
         if (!routeId) continue;
         if (cfg.inchargeShareScoringEnabled) {
-          // An empty share is no duty at all -- it must contribute neither
-          // service days nor marked days for THIS assignment. Adding its
-          // service days while shareMarkedDates contributes zero marked days
-          // would bill someone for students they don't have. This is
-          // per-assignment, not per-person: a person can hold an empty share
-          // on one route and a real one on another, and skipping only this
-          // row keeps the other route's duty intact.
+          // Duty on this assignment is its own share PLUS any colleague's
+          // share it accepted cover for. Testing the own share alone diverged
+          // from the daily cron, which unions the delegated shares in BEFORE
+          // deciding there is nothing to do: someone with an empty share who
+          // had accepted cover was struck daily and shown unmarked on the
+          // board, yet contributed zero service days here -- warned every day,
+          // never billed.
+          //
+          // The empty-share protection this guard exists for is intact: an
+          // in-charge with genuinely no students AND no accepted cover still
+          // contributes no service days, so they are never billed for students
+          // they do not have. It stays per-assignment, not per-person -- a
+          // person can hold an empty share on one route and a real one on
+          // another, and skipping only this row keeps the other route's duty
+          // intact.
           const shareIds = await cachedShareLearnerIds(row.id);
-          if (shareIds.length === 0) continue;
+          if (shareIds.length === 0 && !(await hasAcceptedCoverInWindow(row.id, routeId, from, to))) {
+            continue;
+          }
           const { booked } = await routeDates(routeId);
-          for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
           const share = await shareMarkedDates(row.id, routeId, from, to);
+          // An excused day is neither credit nor blame, exactly like a
+          // holiday. It leaves THIS assignment's denominator rather than
+          // joining the numerator, so a month spent entirely on sick leave
+          // PASSES with zero required days.
+          const excused = new Set(share.excused);
+          for (const d of serviceDays(booked, from, to)) {
+            if (!excused.has(d)) requiredSet.add(d);
+          }
           for (const d of share.marked) markedSet.add(d);
-          for (const d of share.excused) excusedSet.add(d);
         } else {
           // Route-level credit: a mark by anyone on the route counts. This is
-          // the original rule and stays in force until the flag is on.
+          // the original rule and stays in force until the flag is on. It has
+          // no notion of an excused day, so nothing is subtracted here --
+          // byte-for-byte the pre-share denominator.
           const { booked, marked } = await routeDates(routeId);
-          for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
+          for (const d of serviceDays(booked, from, to)) requiredSet.add(d);
           for (const d of marked) markedSet.add(d);
         }
       }
-      // An excused day is neither credit nor blame, exactly like a holiday.
-      // It leaves the denominator rather than joining the numerator, so a
-      // month spent entirely on sick leave PASSES with zero required days.
-      const requiredDays = [...serviceDaySet].filter((d) => !excusedSet.has(d)).sort();
+      const requiredDays = [...requiredSet].sort();
       const verdict = evaluateMonth({ serviceDays: requiredDays, markedDates: [...markedSet] });
       const scoredBy: 'share' | 'route' = cfg.inchargeShareScoringEnabled ? 'share' : 'route';
 

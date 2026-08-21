@@ -8,6 +8,7 @@ import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } f
 import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
+import { istToday } from '@/lib/booking/window';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -116,9 +117,18 @@ async function mark(request: NextRequest, auth: AuthContext) {
     const { data: callerProfile } = await auth.supabase
       .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
     const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
+    // AUTHORIZATION date: IST, not UTC. Between 00:00 and 05:30 IST the UTC
+    // date is still yesterday, so an accepted cover for TODAY would not be
+    // found and the coverer would be 403'd 'not_your_share'.
+    //
+    // `today` below -- the trip_date these marks are STORED under -- is
+    // deliberately left on UTC. That is pre-existing behaviour shared with the
+    // QR scanner, and changing which date a mark lands on is out of scope here
+    // and would be dangerous. Only the authorization lookup moves to IST.
+    const authDate = istToday();
     const today = new Date().toISOString().slice(0, 10);
     const markable = await markableLearnerIds(svc, {
-      callerEmail, routeId, date: today, isSuperAdmin: auth.isSuperAdmin,
+      callerEmail, routeId, date: authDate, isSuperAdmin: auth.isSuperAdmin,
       enabled: cfg.inchargeShareScoringEnabled,
     });
 
@@ -327,14 +337,18 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
+    // See the note on the marking path above: the trip_date rows are matched
+    // and deleted by stays on UTC (pre-existing, shared with the QR scanner);
+    // only the authorization date is IST.
     const today = new Date().toISOString().slice(0, 10);
+    const authDate = istToday();
 
     const cfg = await loadSchedulingConfig(svc);
     const { data: callerProfile } = await auth.supabase
       .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
     const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
     const markable = await markableLearnerIds(svc, {
-      callerEmail, routeId, date: today, isSuperAdmin: auth.isSuperAdmin,
+      callerEmail, routeId, date: authDate, isSuperAdmin: auth.isSuperAdmin,
       enabled: cfg.inchargeShareScoringEnabled,
     });
 

@@ -10,6 +10,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { emailIlikePattern } from '@/lib/identity/email-match';
+import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -66,6 +67,20 @@ async function respond(
     const nominatedEmail = (coverAssignment as { staff_email: string } | null)?.staff_email?.toLowerCase() ?? null;
     if (!nominatedEmail || nominatedEmail !== email) {
       return NextResponse.json({ error: 'This cover request was not addressed to you' }, { status: 403 });
+    }
+
+    // Cover cannot be ACCEPTED for a day that has already gone. Accepting
+    // retroactively adds the absentee's share to this coverer's duty for days
+    // they can no longer mark -- the marking window on a past date is shut --
+    // so a late "yes" would fail the coverer's month for the act of agreeing to
+    // help. A DECLINE of a past request stays allowed: declining changes
+    // nothing retroactively, and leaving stale requests unanswerable would trap
+    // them in the nominee's inbox forever.
+    if (body.accept && absence.absence_date < istToday()) {
+      return NextResponse.json({
+        error: 'That day has already passed, so cover can no longer be accepted for it. You can still decline the request.',
+        reason: 'absence_date_past',
+      }, { status: 400 });
     }
 
     const { error } = await svc

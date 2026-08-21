@@ -204,6 +204,22 @@ export async function GET(request: NextRequest) {
 
         if (isExcused(a.id, date, absences)) {
           summary.skipped++;
+          // A dry run is the only pre-flight instrument before the share flag
+          // is flipped, and "excused" is exactly the new outcome that needs
+          // eyeballing -- without this entry an excused person is simply
+          // absent from the plan, indistinguishable from one who was never
+          // evaluated. Same shape as the evaluateDay skip push below;
+          // dutyRequired/dutyMarked are still 0 because no duty was computed.
+          if (dryRun) {
+            summary.plan.push({
+              staffEmail: a.staff_email,
+              action: 'skip:excused',
+              consecutiveMisses: prev.consecutiveMisses,
+              missedDates: prev.missedDates,
+              dutyRequired,
+              dutyMarked,
+            });
+          }
           continue;
         }
 
