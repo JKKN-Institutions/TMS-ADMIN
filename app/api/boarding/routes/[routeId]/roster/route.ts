@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
+import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { bookedCount, routeCapacity } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
@@ -169,6 +170,14 @@ async function getRoster(auth: AuthContext, routeId: string, dateParam: string |
       routeCapacity(svc, routeId),
     ]);
 
+    // Other in-charges on this route, for the absence dialog's cover picker.
+    // Excludes the caller so nobody can nominate themselves as their own cover
+    // (the absence API also rejects self-nomination with a 400).
+    const { data: callerProf } = await auth.supabase.from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    const callerEmail = (callerProf?.email as string | undefined)?.toLowerCase() ?? null;
+    const allStaff = await getBoardingStaffForRoute(svc, routeId);
+    const staff = allStaff.filter((s) => s.email !== callerEmail);
+
     return NextResponse.json({
       success: true,
       data: {
@@ -183,6 +192,7 @@ async function getRoster(auth: AuthContext, routeId: string, dateParam: string |
           present_return: presentReturn,
         },
         students: rows,
+        staff,
       },
     });
   } catch (e) {

@@ -6,6 +6,7 @@ import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX } from 'lu
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import ScanDialog from '@/components/boarding/scan-dialog';
+import AbsenceDialog from '@/components/boarding/absence-dialog';
 import { getRosterColumns } from './columns';
 import type { RosterRow } from '@/lib/booking/roster';
 import { DEFAULT_WINDOWS, isDirectionOpen, formatHM, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
@@ -39,6 +40,7 @@ export default function BoardingAttendancePage() {
   const [date, setDate] = useState(todayStr());
   const direction: AttDirection = 'onward';
   const [scanOpen, setScanOpen] = useState(false);
+  const [absenceOpen, setAbsenceOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   // Forces a re-render every 30s so the amber closed-window hint (isToday && !legOpen)
   // appears/disappears at a scan-window edge instead of lagging until an unrelated re-render.
@@ -215,6 +217,15 @@ export default function BoardingAttendancePage() {
                 <QrCode className="h-4 w-4" /> Scan
               </button>
             )}
+            {isToday && rows.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setAbsenceOpen(true)}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              >
+                I am absent today
+              </button>
+            )}
             {selectedRows.length > 0 && (
               <button
                 type="button"
@@ -233,6 +244,17 @@ export default function BoardingAttendancePage() {
         onOpenChange={setScanOpen}
         windows={windows}
         onMarked={() => qc.invalidateQueries({ queryKey: ['boarding-roster'] })}
+      />
+
+      <AbsenceDialog
+        open={absenceOpen}
+        onOpenChange={setAbsenceOpen}
+        routeId={rows[0]?.route_id ?? ''}
+        date={date}
+        onDeclared={() => {
+          qc.invalidateQueries({ queryKey: ['incharge-absence'] });
+          qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+        }}
       />
     </div>
   );

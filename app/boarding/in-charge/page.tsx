@@ -1,10 +1,137 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bus, Check, Loader2, LogOut } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/providers/auth-provider';
 import RemovalBillNotice from '@/components/boarding/removal-bill-notice';
+
+interface AbsenceRecord {
+  id: string;
+  route_id: string;
+  route_number: string | null;
+  absence_date: string;
+  reason: string | null;
+  cover_status: 'pending' | 'accepted' | 'declined' | 'uncovered';
+  covering_staff_email: string | null;
+  covering_staff_name: string | null;
+  staff_email: string;
+  staff_name: string;
+}
+
+async function fetchAbsences(): Promise<{ mine: AbsenceRecord[]; requests: AbsenceRecord[] }> {
+  const res = await fetch('/api/boarding/absence', { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  if (!res.ok || !json?.success) return { mine: [], requests: [] };
+  return json.data as { mine: AbsenceRecord[]; requests: AbsenceRecord[] };
+}
+
+const coverStatusBadge: Record<AbsenceRecord['cover_status'], string> = {
+  pending: 'bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300',
+  accepted: 'bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300',
+  declined: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+  uncovered: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+};
+
+/**
+ * My declared absences + cover requests addressed to me. A declared absence
+ * excuses the in-charge for that day whether or not anyone covers — this
+ * panel only ever shows what's already been recorded, it never asks the
+ * viewer to chase their own cover.
+ */
+function AbsencePanel() {
+  const qc = useQueryClient();
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const { data } = useQuery({ queryKey: ['incharge-absence'], queryFn: fetchAbsences });
+  const mine = data?.mine ?? [];
+  const requests = data?.requests ?? [];
+
+  const respond = async (id: string, accept: boolean) => {
+    setRespondingId(id);
+    try {
+      const res = await fetch(`/api/boarding/absence/${id}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ accept }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to respond');
+      toast.success(accept ? 'Cover accepted' : 'Cover declined');
+      qc.invalidateQueries({ queryKey: ['incharge-absence'] });
+      qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to respond');
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  if (mine.length === 0 && requests.length === 0) return null;
+
+  return (
+    <div className="mt-6 w-full max-w-md space-y-4">
+      {requests.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Cover requests for you</h2>
+          <ul className="mt-3 space-y-3">
+            {requests.map((r) => (
+              <li key={r.id} className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+                <p className="text-sm text-gray-900 dark:text-gray-100">
+                  {r.staff_name} · route {r.route_number ?? '—'} · {r.absence_date}
+                </p>
+                {r.reason && <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{r.reason}</p>}
+                {r.cover_status === 'pending' ? (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={respondingId === r.id}
+                      onClick={() => respond(r.id, true)}
+                      className="h-[34px] rounded-lg bg-green-600 px-3 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      disabled={respondingId === r.id}
+                      onClick={() => respond(r.id, false)}
+                      className="h-[34px] rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                ) : (
+                  <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${coverStatusBadge[r.cover_status]}`}>
+                    {r.cover_status}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {mine.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">My absences</h2>
+          <ul className="mt-3 space-y-2">
+            {mine.map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-gray-700 dark:text-gray-200">
+                  {a.absence_date} · route {a.route_number ?? '—'}
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${coverStatusBadge[a.cover_status]}`}>
+                  {a.cover_status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * One-time willingness toggle for a bus_required staffer.
@@ -302,6 +429,8 @@ export default function InChargePage() {
           {saving ? 'Setting…' : 'Confirm'}
         </button>
       </div>
+
+      <AbsencePanel />
     </div>
   );
 }
