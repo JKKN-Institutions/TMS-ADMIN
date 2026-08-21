@@ -5,6 +5,7 @@ import { LEARNER_SELECT, mapLearner, type LearnerRow } from '@/lib/passengers/ty
 import { loadPassengerRefs } from '@/lib/passengers/refs';
 import { notifyLearner } from '@/lib/notifications/notify';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { recomputeRouteAllocation } from '@/lib/boarding/allocation-repo';
 
 /**
  * Admin Transport Enrollment — DIRECT ALLOCATION (no student self-service, no
@@ -130,6 +131,15 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
+    // The route the learner is on BEFORE this update, needed to recompute the
+    // in-charge shares on whichever route(s) actually change shape.
+    const { data: beforeRow } = await svc
+      .from('learners_profiles')
+      .select('transport_route_id')
+      .eq('id', body.learnerId)
+      .maybeSingle();
+    const previousRouteId = (beforeRow as { transport_route_id: string | null } | null)?.transport_route_id ?? null;
+
     // Clear allocation.
     if (!body.routeId) {
       const upd = await svc
@@ -144,6 +154,14 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
         return NextResponse.json({ error: 'Failed to clear allocation' }, { status: 500 });
       }
       if (!upd.data) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
+      // Only the route the learner LEFT changes shape.
+      for (const rid of [...new Set([previousRouteId].filter(Boolean))] as string[]) {
+        try {
+          await recomputeRouteAllocation(svc, rid, auth.userId);
+        } catch (e) {
+          console.error('recomputeRouteAllocation after enrollment change (non-fatal):', e);
+        }
+      }
       await notifyLearner(svc, {
         learnerId: body.learnerId,
         actorId: auth.userId,
@@ -182,6 +200,14 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Failed to update allocation' }, { status: 500 });
     }
     if (!upd.data) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
+    // Both the route the learner LEFT and the one they joined change shape.
+    for (const rid of [...new Set([previousRouteId, body.routeId].filter(Boolean))] as string[]) {
+      try {
+        await recomputeRouteAllocation(svc, rid, auth.userId);
+      } catch (e) {
+        console.error('recomputeRouteAllocation after enrollment change (non-fatal):', e);
+      }
+    }
     await notifyLearner(svc, {
       learnerId: body.learnerId,
       actorId: auth.userId,

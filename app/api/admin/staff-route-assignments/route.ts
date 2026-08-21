@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { grantBoardingRole, maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 import { countRouteRoster } from '@/lib/passengers/route-roster';
+import { recomputeRouteAllocation } from '@/lib/boarding/allocation-repo';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 // Service-role client bypasses RLS, so writes are gated by an explicit
@@ -175,6 +176,14 @@ async function postAssignment(request: NextRequest, auth: AuthContext) {
     }
     // Grant the boarding-scanner role so this staff can enter /boarding (best-effort).
     await grantBoardingRole(supabase, staffEmail, auth.userId);
+    // The route gained an in-charge, so every share on it shrinks. Best-effort:
+    // a failed recompute must not undo an assignment that already succeeded —
+    // the nightly reconcile repairs it.
+    try {
+      await recomputeRouteAllocation(supabase, routeId, auth.userId);
+    } catch (e) {
+      console.error('recomputeRouteAllocation after assign (non-fatal):', e);
+    }
     await logActivity(auth, request, {
       module: 'staff-route-assignments',
       action: 'assign',
@@ -217,6 +226,15 @@ async function deleteAssignment(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ success: false, error: 'Failed to remove assignment' }, { status: 500 });
     }
     await maybeRevokeBoardingRole(supabase, assignmentId);
+    // The route lost an in-charge, so the remaining shares grow. Best-effort,
+    // same as the assign path — the nightly reconcile is the safety net.
+    if (existing?.route_id) {
+      try {
+        await recomputeRouteAllocation(supabase, existing.route_id, auth.userId);
+      } catch (e) {
+        console.error('recomputeRouteAllocation after unassign (non-fatal):', e);
+      }
+    }
     await logActivity(auth, request, {
       module: 'staff-route-assignments',
       action: 'unassign',
