@@ -344,15 +344,26 @@ export async function GET(request: NextRequest) {
       for (const row of group.rows) {
         const routeId = row.route_id;
         if (!routeId) continue;
-        const { booked, marked } = await routeDates(routeId);
-        for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
         if (cfg.inchargeShareScoringEnabled) {
+          // An empty share is no duty at all -- it must contribute neither
+          // service days nor marked days for THIS assignment. Adding its
+          // service days while shareMarkedDates contributes zero marked days
+          // would bill someone for students they don't have. This is
+          // per-assignment, not per-person: a person can hold an empty share
+          // on one route and a real one on another, and skipping only this
+          // row keeps the other route's duty intact.
+          const shareIds = await cachedShareLearnerIds(row.id);
+          if (shareIds.length === 0) continue;
+          const { booked } = await routeDates(routeId);
+          for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
           const share = await shareMarkedDates(row.id, routeId, from, to);
           for (const d of share.marked) markedSet.add(d);
           for (const d of share.excused) excusedSet.add(d);
         } else {
           // Route-level credit: a mark by anyone on the route counts. This is
           // the original rule and stays in force until the flag is on.
+          const { booked, marked } = await routeDates(routeId);
+          for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
           for (const d of marked) markedSet.add(d);
         }
       }
