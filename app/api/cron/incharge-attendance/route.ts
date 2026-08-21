@@ -25,6 +25,14 @@ import { loadBookedRoster } from '@/lib/booking/roster';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { emailIlikePattern } from '@/lib/identity/email-match';
+import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
+import {
+  shareDuty,
+  shareCovered,
+  isExcused,
+  delegatedTo,
+  type AbsenceRow,
+} from '@/lib/boarding/share-coverage';
 import {
   evaluateDay,
   isServiceWeekday,
@@ -32,6 +40,13 @@ import {
   REMOVAL_THRESHOLD,
   type StrikeState,
 } from '@/lib/boarding/incharge-attendance';
+
+/** Split an id list into <=150-id chunks (API-gateway limit on `.in()`). */
+function chunk<T>(arr: T[], size = 150): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -118,6 +133,8 @@ export async function GET(request: NextRequest) {
     evaluated: 0,
     skipped: 0,
     warned: 0,
+    /** Assignments scored via the per-share rule (inchargeShareScoringEnabled). */
+    shareScored: 0,
     /** Reached REMOVAL_THRESHOLD misses. The month-end verdict decides what happens next. */
     atThreshold: 0,
     errors: 0,
@@ -131,6 +148,8 @@ export async function GET(request: NextRequest) {
       action: string;
       consecutiveMisses: number;
       missedDates: string[];
+      dutyRequired: number;
+      dutyMarked: number;
     }>,
   };
 
@@ -167,8 +186,71 @@ export async function GET(request: NextRequest) {
         : { counts: { booked: 0, capacity: 0 }, riders: [] };
 
       // Route-level coverage: ANY mark on this route today, either leg, counts.
+      // This is the ORIGINAL rule and stays in force until the share flag is
+      // on — one mark by one person credits every in-charge on the route.
       let attendanceMarked = false;
-      if (a.route_id) {
+      let dutyRequired = 0;
+      let dutyMarked = 0;
+
+      if (a.route_id && cfg.inchargeShareScoringEnabled) {
+        // Per-share coverage. A declared absence excuses the day outright.
+        const { data: absData, error: absErr } = await svc
+          .from('tms_incharge_absence')
+          .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+          .eq('route_id', a.route_id)
+          .eq('absence_date', date);
+        if (absErr) throw new Error(`absence load failed: ${absErr.message}`);
+        const absences = (absData ?? []) as AbsenceRow[];
+
+        if (isExcused(a.id, date, absences)) {
+          summary.skipped++;
+          continue;
+        }
+
+        // My share, plus any share I accepted cover for today.
+        const shareIds = new Set(await loadShareLearnerIds(svc, a.id));
+        for (const covered of delegatedTo(a.id, date, absences)) {
+          for (const id of await loadShareLearnerIds(svc, covered)) shareIds.add(id);
+        }
+
+        const duty = shareDuty({
+          shareLearnerIds: [...shareIds],
+          bookedLearnerIds: roster.riders.map((r) => r.learner_id),
+        });
+
+        // Only fetch marks when there is a duty to check. Chunked — an .in()
+        // over the raw duty list would silently truncate at the API-gateway
+        // limit, and a truncated duty list reads as "those learners were
+        // never due", which turns a query limit into a free pass from being
+        // billed. The largest measured share is 67 (route 24), but the guard
+        // must exist: a route losing its in-charges collapses every student
+        // onto one share.
+        let markedIds: string[] = [];
+        if (duty.length > 0) {
+          for (const c of chunk(duty)) {
+            const { data: att, error: attErr } = await svc
+              .from('tms_attendance')
+              .select('learner_id')
+              .eq('route_id', a.route_id)
+              .eq('trip_date', date)
+              .in('learner_id', c);
+            // NEVER let a failed query read as "nobody marked" — that
+            // strikes, and eventually BILLS, a staffer for an infrastructure
+            // failure.
+            if (attErr) throw new Error(`attendance load failed: ${attErr.message}`);
+            markedIds.push(...((att ?? []) as { learner_id: string }[]).map((r) => r.learner_id));
+          }
+        }
+
+        const coverage = shareCovered({ duty, markedLearnerIds: markedIds });
+        dutyRequired = coverage.required;
+        dutyMarked = coverage.marked;
+        // An EMPTY duty must not read as a miss. shareCovered already returns
+        // covered:true for it, and evaluateDay's hasBookedRiders check is the
+        // second guard.
+        attendanceMarked = coverage.covered;
+        summary.shareScored += 1;
+      } else if (a.route_id) {
         const { count, error: attErr } = await svc
           .from('tms_attendance')
           .select('id', { count: 'exact', head: true })
@@ -198,6 +280,8 @@ export async function GET(request: NextRequest) {
             action: `skip:${outcome.reason}`,
             consecutiveMisses: prev.consecutiveMisses,
             missedDates: prev.missedDates,
+            dutyRequired,
+            dutyMarked,
           });
         }
         continue;
@@ -229,6 +313,8 @@ export async function GET(request: NextRequest) {
           action: outcome.action,
           consecutiveMisses: outcome.state.consecutiveMisses,
           missedDates: outcome.state.missedDates,
+          dutyRequired,
+          dutyMarked,
         });
       }
 
