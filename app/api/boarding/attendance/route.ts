@@ -5,6 +5,10 @@ import { logActivity } from '@/lib/activity/log';
 import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
+import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
+import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
+import { loadSchedulingConfig } from '@/lib/settings/scheduling';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Manually mark attendance (present/absent) for one or many learners on a route,
@@ -22,6 +26,48 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 
 interface MarkInput { learnerId: string; status: 'present' | 'absent' }
 interface StudentLite { id: string; transport_route_id: string | null; transport_stop_id: string | null }
+
+/**
+ * The learner ids this caller may mark on this route and date: their own share
+ * plus any share they accepted cover for.
+ *
+ * Returns null when the share restriction does not apply — the flag is off, or
+ * the caller is a super admin, or the route has no allocation at all. A null
+ * means "no restriction", which is the pre-share behaviour and the safe
+ * default while the feature ships dormant.
+ */
+async function markableLearnerIds(
+  svc: SupabaseClient,
+  opts: { callerEmail: string | null; routeId: string; date: string; isSuperAdmin: boolean; enabled: boolean },
+): Promise<Set<string> | null> {
+  if (!opts.enabled || opts.isSuperAdmin || !opts.callerEmail) return null;
+
+  const { data: myAssignment } = await svc
+    .from('tms_staff_route_assignment')
+    .select('id')
+    .eq('route_id', opts.routeId)
+    .eq('staff_email', opts.callerEmail)
+    .eq('is_active', true)
+    .maybeSingle();
+  const myAssignmentId = (myAssignment as { id: string } | null)?.id ?? null;
+  if (!myAssignmentId) return null; // Not an in-charge here; the route check already passed.
+
+  const ids = new Set(await loadShareLearnerIds(svc, myAssignmentId));
+
+  const { data: absData } = await svc
+    .from('tms_incharge_absence')
+    .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+    .eq('route_id', opts.routeId)
+    .eq('absence_date', opts.date);
+  for (const covered of delegatedTo(myAssignmentId, opts.date, (absData ?? []) as AbsenceRow[])) {
+    for (const id of await loadShareLearnerIds(svc, covered)) ids.add(id);
+  }
+
+  // An allocation that produced nothing for this person is a coverage gap, not
+  // a lockout. Restricting them to an empty set would make the route
+  // unmarkable, which is worse than the problem this feature solves.
+  return ids.size > 0 ? ids : null;
+}
 
 async function mark(request: NextRequest, auth: AuthContext) {
   try {
@@ -66,6 +112,34 @@ async function mark(request: NextRequest, auth: AuthContext) {
       }, { status: 409 });
     }
 
+    const cfg = await loadSchedulingConfig(svc);
+    const { data: callerProfile } = await auth.supabase
+      .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    const markable = await markableLearnerIds(svc, {
+      callerEmail, routeId, date: today, isSuperAdmin: auth.isSuperAdmin,
+      enabled: cfg.inchargeShareScoringEnabled,
+    });
+
+    if (markable) {
+      const outside = marks.filter((m) => !markable.has(m.learnerId)).map((m) => m.learnerId);
+      if (outside.length > 0) {
+        // Name the owner. A bare 403 tells the in-charge nothing they can act
+        // on, and "ask Priya, they own this student" is the whole point of
+        // having an owner.
+        const { data: owners } = await svc
+          .from('tms_incharge_roster_allocation')
+          .select('learner_id, staff_email')
+          .in('learner_id', outside.slice(0, 150));
+        return NextResponse.json({
+          error: 'Some of these students belong to another in-charge on this route.',
+          reason: 'not_your_share',
+          learners: (owners ?? []) as Array<{ learner_id: string; staff_email: string }>,
+        }, { status: 403 });
+      }
+    }
+
     // Verify each learner actually belongs to this route; grab their stop id.
     const learnerIds = [...new Set(marks.map((m) => m.learnerId).filter(Boolean))];
     const { data: studs } = await svc
@@ -77,7 +151,6 @@ async function mark(request: NextRequest, auth: AuthContext) {
       if (s.transport_route_id === routeId) stopByLearner.set(s.id, s.transport_stop_id ?? null);
     }
 
-    const today = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
     const rows = marks
       .filter((m) => stopByLearner.has(m.learnerId) && (m.status === 'present' || m.status === 'absent'))
@@ -255,6 +328,26 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
     const today = new Date().toISOString().slice(0, 10);
+
+    const cfg = await loadSchedulingConfig(svc);
+    const { data: callerProfile } = await auth.supabase
+      .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
+    const markable = await markableLearnerIds(svc, {
+      callerEmail, routeId, date: today, isSuperAdmin: auth.isSuperAdmin,
+      enabled: cfg.inchargeShareScoringEnabled,
+    });
+
+    if (markable) {
+      const outside = learnerIds.filter((id) => !markable.has(id));
+      if (outside.length > 0) {
+        return NextResponse.json({
+          error: 'Some of these students belong to another in-charge on this route.',
+          reason: 'not_your_share',
+        }, { status: 403 });
+      }
+    }
+
     const { data, error } = await svc
       .from('tms_attendance')
       .delete()
