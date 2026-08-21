@@ -41,6 +41,14 @@ import { generateStaffBill, resolveStaffBillPlan } from '@/lib/fees/staff-bill';
 import { cancelStaffBills, makeStaffBillsPayable } from '@/lib/fees/cancel-staff-bill';
 import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
 import { serviceDays, evaluateMonth, monthWindow } from '@/lib/boarding/incharge-month';
+import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
+import {
+  shareDuty,
+  shareCovered,
+  isExcused,
+  delegatedTo,
+  type AbsenceRow,
+} from '@/lib/boarding/share-coverage';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,6 +125,14 @@ export async function GET(request: NextRequest) {
       missedDates: string[];
       billAction: string;
       blockedReason?: string;
+      /**
+       * Which rule decided this verdict. The
+       * tms_incharge_month_verdict row has no column for it (a migration was
+       * deliberately not added for this task), so `plan` here and the
+       * notification body below are the only recoverable record of which
+       * rule produced a given bill.
+       */
+      scoredBy: 'share' | 'route';
     }>,
   };
 
@@ -183,6 +199,94 @@ export async function GET(request: NextRequest) {
     };
   }
 
+  // Per-assignment share membership, memoized for the whole run. Without
+  // this, shareMarkedDates below would re-fetch the SAME assignment's share
+  // once per date in the window (up to ~26 service days) -- both for the
+  // assignment itself and for every date it covers a colleague's share.
+  // Same inputs, same output; this only removes the repeat query.
+  const shareLearnerIdsCache = new Map<string, Promise<string[]>>();
+  function cachedShareLearnerIds(assignmentId: string): Promise<string[]> {
+    let p = shareLearnerIdsCache.get(assignmentId);
+    if (!p) {
+      p = loadShareLearnerIds(svc, assignmentId);
+      shareLearnerIdsCache.set(assignmentId, p);
+    }
+    return p;
+  }
+
+  /**
+   * Dates in the window on which THIS assignment's duty was fully covered.
+   *
+   * The route-level cache above cannot answer this: two in-charges on the same
+   * route now have different answers for the same day. The bookings are still
+   * shared, so only the attendance side is recomputed per person.
+   */
+  async function shareMarkedDates(
+    assignmentId: string,
+    routeId: string,
+    from: string,
+    to: string,
+  ): Promise<{ marked: string[]; excused: string[] }> {
+    const shareIds = await cachedShareLearnerIds(assignmentId);
+    if (shareIds.length === 0) return { marked: [], excused: [] };
+
+    const { data: absData, error: absErr } = await svc
+      .from('tms_incharge_absence')
+      .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+      .eq('route_id', routeId)
+      .gte('absence_date', from)
+      .lte('absence_date', to);
+    if (absErr) throw new Error(`absence load failed: ${absErr.message}`);
+    const absences = (absData ?? []) as AbsenceRow[];
+
+    // Bookings per learner per date, so duty can be computed for each date.
+    const { data: bookings, error: bErr } = await svc
+      .from('tms_booking')
+      .select('travel_date, learner_id')
+      .eq('route_id', routeId)
+      .gte('travel_date', from)
+      .lte('travel_date', to);
+    if (bErr) throw new Error(`booking load failed: ${bErr.message}`);
+    const bookedByDate = new Map<string, string[]>();
+    for (const b of (bookings ?? []) as { travel_date: string; learner_id: string }[]) {
+      const arr = bookedByDate.get(b.travel_date) ?? [];
+      arr.push(b.learner_id);
+      bookedByDate.set(b.travel_date, arr);
+    }
+
+    const { data: att, error: attErr } = await svc
+      .from('tms_attendance')
+      .select('trip_date, learner_id')
+      .eq('route_id', routeId)
+      .gte('trip_date', from)
+      .lte('trip_date', to);
+    // Never let THIS read as "nobody marked" -- that fails everyone and bills
+    // them for an infrastructure failure.
+    if (attErr) throw new Error(`attendance load failed: ${attErr.message}`);
+    const markedByDate = new Map<string, string[]>();
+    for (const r of (att ?? []) as { trip_date: string; learner_id: string }[]) {
+      const arr = markedByDate.get(r.trip_date) ?? [];
+      arr.push(r.learner_id);
+      markedByDate.set(r.trip_date, arr);
+    }
+
+    const marked: string[] = [];
+    const excused: string[] = [];
+    for (const date of bookedByDate.keys()) {
+      if (isExcused(assignmentId, date, absences)) {
+        excused.push(date);
+        continue;
+      }
+      const ids = new Set(shareIds);
+      for (const covered of delegatedTo(assignmentId, date, absences)) {
+        for (const id of await cachedShareLearnerIds(covered)) ids.add(id);
+      }
+      const duty = shareDuty({ shareLearnerIds: [...ids], bookedLearnerIds: bookedByDate.get(date) ?? [] });
+      if (shareCovered({ duty, markedLearnerIds: markedByDate.get(date) ?? [] }).covered) marked.push(date);
+    }
+    return { marked, excused };
+  }
+
   // Group assignments by PERSON, not by row. A staffer on two routes was
   // previously evaluated twice -- once per assignment row -- and could pass
   // on one route and fail on the other, with both verdicts fighting over the
@@ -232,21 +336,33 @@ export async function GET(request: NextRequest) {
       const to = prob?.window_end ?? window.end;
 
       // Union across the person's routes: each route contributes its own
-      // service days (it may run on different days than a colleague route),
-      // and a mark on ANY of the person's routes that day counts -- credit
-      // is route-level (shared roster), and stays that way when a person
-      // covers more than one route.
+      // service days (it may run on different days than a colleague route).
+      // Under the flag, credit is per-share (scored per assignment); off the
+      // flag, credit is route-level (shared roster) exactly as before.
       const serviceDaySet = new Set<string>();
       const markedSet = new Set<string>();
-      for (const routeId of routeIds) {
+      const excusedSet = new Set<string>();
+      for (const row of group.rows) {
+        const routeId = row.route_id;
+        if (!routeId) continue;
         const { booked, marked } = await routeDates(routeId);
         for (const d of serviceDays(booked, from, to)) serviceDaySet.add(d);
-        for (const d of marked) markedSet.add(d);
+        if (cfg.inchargeShareScoringEnabled) {
+          const share = await shareMarkedDates(row.id, routeId, from, to);
+          for (const d of share.marked) markedSet.add(d);
+          for (const d of share.excused) excusedSet.add(d);
+        } else {
+          // Route-level credit: a mark by anyone on the route counts. This is
+          // the original rule and stays in force until the flag is on.
+          for (const d of marked) markedSet.add(d);
+        }
       }
-      const verdict = evaluateMonth({
-        serviceDays: [...serviceDaySet].sort(),
-        markedDates: [...markedSet],
-      });
+      // An excused day is neither credit nor blame, exactly like a holiday.
+      // It leaves the denominator rather than joining the numerator, so a
+      // month spent entirely on sick leave PASSES with zero required days.
+      const requiredDays = [...serviceDaySet].filter((d) => !excusedSet.has(d)).sort();
+      const verdict = evaluateMonth({ serviceDays: requiredDays, markedDates: [...markedSet] });
+      const scoredBy: 'share' | 'route' = cfg.inchargeShareScoringEnabled ? 'share' : 'route';
 
       const { data: profile } = await svc
         .from('profiles')
@@ -455,6 +571,7 @@ export async function GET(request: NextRequest) {
         missedDates: verdict.missedDates,
         billAction,
         ...(blockedReason ? { blockedReason } : {}),
+        scoredBy,
       });
 
       // Shadow mode still RECORDS the verdict -- that is the entire point of
@@ -522,9 +639,10 @@ export async function GET(request: NextRequest) {
           title: verdict.outcome === 'passed'
             ? 'Transport fee cancelled'
             : 'Transport fee is now payable',
-          body: verdict.outcome === 'passed'
+          body: (verdict.outcome === 'passed'
             ? `Your bus was marked on every service day this month, so your transport fee bill has been cancelled. Thank you for keeping the attendance up to date.`
-            : `Attendance was not marked on ${verdict.missedDates.join(', ')}. Your bus in-charge role has been removed and your transport fee is now payable. Once you pay the fees you can continue the transport service.`,
+            : `Attendance was not marked on ${verdict.missedDates.join(', ')}. Your bus in-charge role has been removed and your transport fee is now payable. Once you pay the fees you can continue the transport service.`)
+            + (scoredBy === 'share' ? ' (scored on your own student share.)' : ''),
           url: '/boarding/in-charge',
         });
       }
