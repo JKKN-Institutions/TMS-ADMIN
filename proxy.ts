@@ -29,6 +29,10 @@ const PUBLIC_PATHS = new Set([
   // admin switches it to 'enforce'.
   '/api/cron/incharge-attendance',
   '/api/cron/incharge-month-verdict',
+  // Recomputes in-charge share ownership only — moves no money, removes no
+  // role. Safety net for the recompute hooks on the assignment/enrollment
+  // APIs.
+  '/api/cron/incharge-allocation-reconcile',
 ]);
 
 const PUBLIC_PATH_PREFIXES = [

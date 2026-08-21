@@ -44,20 +44,37 @@ export async function GET(request: NextRequest) {
     summary.routes += 1;
     try {
       if (!force) {
-        // Drift check: allocation row count vs allocated-learner count. Cheap,
-        // and catches the cases that matter (a learner added, moved or removed).
-        const [{ count: allocCount }, { count: learnerCount }] = await Promise.all([
-          svc.from('tms_incharge_roster_allocation').select('id', { count: 'exact', head: true }).eq('route_id', r.id),
-          svc.from('learners_profiles').select('id', { count: 'exact', head: true }).eq('transport_route_id', r.id),
+        // Drift check: SET comparison of learner ids, not a row count. A swap
+        // (one learner added, a different one removed — net count unchanged)
+        // is invisible to a count check but is exactly what
+        // lib/route-optimization/apply.ts produces when it moves learners
+        // between routes, so it must be caught here.
+        const [allocRes, learnerRes, icRes] = await Promise.all([
+          svc.from('tms_incharge_roster_allocation').select('learner_id').eq('route_id', r.id),
+          svc.from('learners_profiles').select('id').eq('transport_route_id', r.id),
+          svc
+            .from('tms_staff_route_assignment')
+            .select('id', { count: 'exact', head: true })
+            .eq('route_id', r.id)
+            .eq('is_active', true),
         ]);
-        const { count: icCount } = await svc
-          .from('tms_staff_route_assignment')
-          .select('id', { count: 'exact', head: true })
-          .eq('route_id', r.id)
-          .eq('is_active', true);
-        // A route with no in-charge legitimately holds zero allocations.
-        const expected = (icCount ?? 0) === 0 ? 0 : learnerCount ?? 0;
-        if ((allocCount ?? 0) === expected) {
+        // A failed query must never read as "no drift" — surface it as this
+        // route's error so it is retried on the next run instead of skipped.
+        if (allocRes.error) throw allocRes.error;
+        if (learnerRes.error) throw learnerRes.error;
+        if (icRes.error) throw icRes.error;
+
+        const allocatedIds = new Set((allocRes.data ?? []).map((a) => a.learner_id as string));
+        // A route with no active in-charge legitimately expects an EMPTY
+        // allocation set — it is in drift only if allocation rows still exist.
+        const expectedIds = (icRes.count ?? 0) === 0
+          ? new Set<string>()
+          : new Set((learnerRes.data ?? []).map((l) => l.id as string));
+
+        const inDrift =
+          allocatedIds.size !== expectedIds.size ||
+          [...allocatedIds].some((id) => !expectedIds.has(id));
+        if (!inDrift) {
           summary.skipped += 1;
           continue;
         }
