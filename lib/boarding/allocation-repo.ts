@@ -81,10 +81,11 @@ export async function recomputeRouteAllocation(
   const stopByEmail = new Map<string, string | null>();
   for (const c of chunk(emails)) {
     for (const column of ['email', 'institution_email'] as const) {
-      const { data } = await svc
+      const { data, error } = await svc
         .from('staff')
         .select('email, institution_email, transport_stop_id')
         .in(column, c);
+      if (error && !isMissingTable(error)) throw error;
       for (const s of (data ?? []) as StaffStopRow[]) {
         for (const addr of [s.email, s.institution_email]) {
           const key = addr?.toLowerCase();
@@ -117,7 +118,12 @@ export async function recomputeRouteAllocation(
 
   // 6. Replace the route's rows. Delete-then-insert rather than a diff: the
   //    split is deterministic, so a full replace is the simplest operation
-  //    that cannot leave a learner owned by two people.
+  //    that cannot leave a learner owned by two people. This client has no
+  //    multi-statement transaction, so there is a real window here: if an
+  //    insert chunk below fails after this delete commits (or after earlier
+  //    chunks already landed), the route is left partially allocated until
+  //    someone re-runs recompute. That is accepted -- it never double-owns a
+  //    learner, and the nightly reconcile repairs the gap.
   const { error: delErr } = await svc
     .from('tms_incharge_roster_allocation')
     .delete()
