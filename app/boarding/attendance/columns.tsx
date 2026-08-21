@@ -117,6 +117,22 @@ export function getRosterColumns(opts: {
       cell: ({ row }) => <TicketBadge booked={row.original.booked} />,
     },
     {
+      accessorKey: 'owner_name',
+      id: 'owner',
+      header: 'In-charge',
+      cell: ({ row }) => {
+        const r = row.original;
+        if (!r.owner_name) return <span className="text-xs text-gray-400">Unassigned</span>;
+        return (
+          <span className={r.is_mine ? 'text-xs font-medium text-gray-900 dark:text-gray-100' : 'text-xs text-gray-500'}>
+            {r.is_mine ? 'You' : r.owner_name}
+          </span>
+        );
+      },
+      filterFn: (row, _id, value: string[]) =>
+        value.length === 0 || value.includes(row.original.is_mine ? 'mine' : 'others'),
+    },
+    {
       id: 'status',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (r) => r.status,
@@ -153,13 +169,19 @@ export function getRosterColumns(opts: {
         // mark control; the Ticket column already says why.
         if (!row.original.booked) return <span className="text-xs text-gray-400">—</span>;
         const busy = opts.busyId === row.original.learner_id;
+        // Ownership gate: the in-charge can see the whole bus but only marks their own
+        // share. Not-mine rows keep the button visible (so the state stays legible) but
+        // disabled, with a tooltip naming whose share it is.
+        const disabled = !row.original.is_mine || busy;
+        const title = !row.original.is_mine ? `${row.original.owner_name ?? 'Another in-charge'} marks this student` : undefined;
         // Single toggle showing the NEXT action: present → mark Absent, else → mark Present.
         const next: 'present' | 'absent' = row.original.status === 'present' ? 'absent' : 'present';
         return next === 'present' ? (
           <button
             type="button"
             onClick={() => opts.onMark(row.original, 'present')}
-            disabled={busy}
+            disabled={disabled}
+            title={title}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
           >
             <Check className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Present'}
@@ -168,7 +190,8 @@ export function getRosterColumns(opts: {
           <button
             type="button"
             onClick={() => opts.onMark(row.original, 'absent')}
-            disabled={busy}
+            disabled={disabled}
+            title={title}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
           >
             <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}

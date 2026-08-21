@@ -17,6 +17,7 @@ interface RosterResponse {
   direction: AttDirection;
   rows: RosterRow[];
   counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number };
+  share: { total: number; marked: number; remaining: number };
 }
 
 async function fetchRoster(date: string, direction: AttDirection): Promise<RosterResponse> {
@@ -76,6 +77,7 @@ export default function BoardingAttendancePage() {
 
   const rows = data?.rows ?? [];
   const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 };
+  const share = data?.share ?? { total: 0, marked: 0, remaining: 0 };
 
   const legOpen = isDirectionOpen(windows.onward);
   const canMark = isToday && legOpen;
@@ -109,6 +111,7 @@ export default function BoardingAttendancePage() {
   );
 
   const filters: DataTableFilter[] = [
+    { columnId: 'owner', title: 'In-charge', options: [{ label: 'My share', value: 'mine' }, { label: 'Others', value: 'others' }] },
     { columnId: 'ticket', title: 'Ticket', options: [{ label: 'Booked', value: 'booked' }, { label: 'Without ticket', value: 'without_ticket' }] },
     { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
   ];
@@ -135,18 +138,18 @@ export default function BoardingAttendancePage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Attendance</h1>
         <p className="text-gray-600 mt-1 text-sm">
-          Everyone allocated to your route — students who booked a seat can be scanned or marked present;
-          the rest are listed as <span className="font-medium">Without ticket</span>.
+          The whole bus is listed so you can see it is covered, but you mark only
+          your own share. Students owned by another in-charge show their name.
         </p>
       </div>
 
       {/* Analytics tiles + day picker */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
-          <Tile label="Present" value={counts.present} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
-          <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
-          <Tile label="Without ticket" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
-          <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
+          <Tile label="My share" value={share.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
+          <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
+          <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
+          <Tile label="On bus" value={counts.total} tone="gray" icon={<TicketX className="h-4 w-4" />} />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Day</label>
