@@ -23,6 +23,7 @@ describe('parseSchedulingConfig', () => {
       autoNotifyPassengers: false,
       autoGenerateBills: false,
       inchargeEnforcementMode: 'shadow',
+      inchargeShareScoringEnabled: false,
     });
   });
 
@@ -203,5 +204,23 @@ describe('inchargeEnforcementMode', () => {
   it('falls back to shadow for an unknown value rather than enforcing', () => {
     expect(parseSchedulingConfig({ inchargeEnforcementMode: 'ENFORCE' }).inchargeEnforcementMode).toBe('shadow');
     expect(parseSchedulingConfig({ inchargeEnforcementMode: 42 }).inchargeEnforcementMode).toBe('shadow');
+  });
+});
+
+describe('inchargeShareScoringEnabled', () => {
+  it('defaults to false', () => {
+    // Per-share scoring is strictly stricter than the route-level rule it
+    // replaces, so turning it on bills MORE people. It must never arrive by
+    // default.
+    expect(DEFAULT_SCHEDULING_CONFIG.inchargeShareScoringEnabled).toBe(false);
+    expect(parseSchedulingConfig({}).inchargeShareScoringEnabled).toBe(false);
+  });
+
+  it('reads a stored true', () => {
+    expect(parseSchedulingConfig({ inchargeShareScoringEnabled: true }).inchargeShareScoringEnabled).toBe(true);
+  });
+
+  it('falls back to false for a non-boolean value', () => {
+    expect(parseSchedulingConfig({ inchargeShareScoringEnabled: 'yes' }).inchargeShareScoringEnabled).toBe(false);
   });
 });

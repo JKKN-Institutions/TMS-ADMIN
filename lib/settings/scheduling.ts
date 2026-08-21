@@ -27,6 +27,14 @@ export interface SchedulingConfig {
   autoGenerateBills: boolean;
   /** Master switch for in-charge attendance enforcement. Ships in shadow. */
   inchargeEnforcementMode: InchargeEnforcementMode;
+  /**
+   * Score in-charge attendance against each staffer's OWN share rather than
+   * the route as a whole. Ships OFF: per-share scoring is strictly stricter
+   * than the route-level rule, so enabling it while inchargeEnforcementMode is
+   * 'enforce' bills more people, not fewer. Two independent flags must both be
+   * on before any money moves.
+   */
+  inchargeShareScoringEnabled: boolean;
 }
 
 export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
@@ -38,6 +46,7 @@ export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
   autoNotifyPassengers: true,
   autoGenerateBills: false,
   inchargeEnforcementMode: 'shadow',
+  inchargeShareScoringEnabled: false,
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -73,6 +82,10 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
     inchargeEnforcementMode: enforcementModeOr(
       b.inchargeEnforcementMode,
       DEFAULT_SCHEDULING_CONFIG.inchargeEnforcementMode,
+    ),
+    inchargeShareScoringEnabled: boolOr(
+      b.inchargeShareScoringEnabled,
+      DEFAULT_SCHEDULING_CONFIG.inchargeShareScoringEnabled,
     ),
   };
 }
