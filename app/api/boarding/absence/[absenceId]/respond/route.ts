@@ -1,0 +1,98 @@
+/**
+ * Accept or decline a cover request.
+ *
+ * Only an ACCEPTED cover transfers duty. Declining leaves the absentee excused
+ * and the share unmarked — responsibility is never forced onto someone who did
+ * not agree to it.
+ */
+import { NextResponse, type NextRequest } from 'next/server';
+import { withAuth, type AuthContext } from '@/lib/api/with-auth';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+import { notifyProfile } from '@/lib/notifications/notify';
+import { emailIlikePattern } from '@/lib/identity/email-match';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+
+async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
+  if (auth.isSuperAdmin) return true;
+  const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: permission });
+  return !!data;
+}
+
+async function respond(
+  request: NextRequest,
+  auth: AuthContext,
+  absenceId: string,
+) {
+  try {
+    if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    const body = (await request.json().catch(() => ({}))) as { accept?: boolean };
+    if (typeof body.accept !== 'boolean') {
+      return NextResponse.json({ error: 'accept must be true or false' }, { status: 400 });
+    }
+
+    const svc = createServiceRoleClient();
+    const { data: absence } = await svc
+      .from('tms_incharge_absence')
+      .select('id, staff_email, covering_assignment_id, absence_date, cover_status')
+      .eq('id', absenceId)
+      .maybeSingle();
+    if (!absence) return NextResponse.json({ error: 'Absence not found' }, { status: 404 });
+
+    const { data: prof } = await auth.supabase.from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    const email = (prof?.email as string | undefined)?.toLowerCase();
+    if (!email) return NextResponse.json({ error: 'Your profile has no email' }, { status: 400 });
+
+    // Only the nominated colleague may answer. Anyone else answering would be
+    // taking on — or refusing — a duty that was never offered to them.
+    const { data: coverAssignment } = absence.covering_assignment_id
+      ? await svc.from('tms_staff_route_assignment').select('staff_email').eq('id', absence.covering_assignment_id).maybeSingle()
+      : { data: null };
+    const nominatedEmail = (coverAssignment as { staff_email: string } | null)?.staff_email?.toLowerCase() ?? null;
+    if (!nominatedEmail || nominatedEmail !== email) {
+      return NextResponse.json({ error: 'This cover request was not addressed to you' }, { status: 403 });
+    }
+
+    const { error } = await svc
+      .from('tms_incharge_absence')
+      .update({
+        cover_status: body.accept ? 'accepted' : 'declined',
+        responded_at: new Date().toISOString(),
+      })
+      .eq('id', absenceId);
+    if (error) {
+      console.error('absence respond error:', error);
+      return NextResponse.json({ error: 'Failed to record your response' }, { status: 500 });
+    }
+
+    const { data: absenteeProfile } = await svc
+      .from('profiles').select('id').ilike('email', emailIlikePattern(absence.staff_email)).maybeSingle();
+    const absenteeId = (absenteeProfile as { id: string } | null)?.id;
+    if (absenteeId) {
+      await notifyProfile(svc, {
+        profileId: absenteeId,
+        actorId: auth.userId,
+        title: body.accept ? 'Your cover request was accepted' : 'Your cover request was declined',
+        body: body.accept
+          ? `A colleague will mark your students on ${absence.absence_date}.`
+          : `Nobody has accepted cover for ${absence.absence_date}. You are still excused for that day, but your students will go unmarked.`,
+        url: '/boarding/in-charge',
+      });
+    }
+
+    return NextResponse.json({ success: true, data: { cover_status: body.accept ? 'accepted' : 'declined' } });
+  } catch (e) {
+    console.error('boarding absence respond error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export const POST = withAuth(async (request, auth) => {
+  // Next 15 hands params as a Promise; read the id off the URL instead so the
+  // handler keeps the plain withAuth signature the rest of the module uses.
+  const segments = new URL(request.url).pathname.split('/');
+  const absenceId = segments[segments.indexOf('absence') + 1] ?? '';
+  if (!absenceId) return NextResponse.json({ error: 'absenceId is required' }, { status: 400 });
+  return respond(request, auth, absenceId);
+});
