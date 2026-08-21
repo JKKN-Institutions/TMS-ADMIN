@@ -5,6 +5,10 @@ import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { loadRouteAttendanceRoster, buildRosterRows, type OrderedStop, type RosterRow } from '@/lib/booking/roster';
 import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { loadRouteAllocation } from '@/lib/boarding/allocation-repo';
+import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
+import { loadSchedulingConfig } from '@/lib/settings/scheduling';
+import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -46,6 +50,10 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
     const direction: 'onward' | 'return' = url.searchParams.get('direction') === 'return' ? 'return' : 'onward';
 
     const svc = createServiceRoleClient();
+    const cfg = await loadSchedulingConfig(svc);
+    const { data: callerProfile } = await auth.supabase
+      .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
 
     let routeIds = await getAssignedRouteIdsForUser(auth);
     if (routeIds.length === 0 && auth.isSuperAdmin) {
@@ -57,6 +65,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       data: {
         date, direction, rows: [] as RosterRow[],
         counts: { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 },
+        share: { total: 0, marked: 0, remaining: 0 },
       },
     };
     if (routeIds.length === 0) return NextResponse.json(empty);
@@ -93,12 +102,63 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
     const rows: RosterRow[] = [];
     for (const rt of routes) {
       const riders = await loadRouteAttendanceRoster(svc, rt.id, date);
-      rows.push(...buildRosterRows(riders, { id: rt.id, route_number: rt.route_number }, stopsByRoute.get(rt.id) ?? [], attByLearner));
+
+      let ownership: Parameters<typeof buildRosterRows>[4];
+      if (cfg.inchargeShareScoringEnabled) {
+        const [allocation, staff] = await Promise.all([
+          loadRouteAllocation(svc, rt.id),
+          getBoardingStaffForRoute(svc, rt.id),
+        ]);
+        const nameByEmail = new Map(staff.map((s) => [s.email, s.name] as const));
+        const ownerByLearner = new Map<string, { staff_email: string; name: string }>();
+        for (const [learnerId, owner] of allocation) {
+          ownerByLearner.set(learnerId, {
+            staff_email: owner.staff_email,
+            name: nameByEmail.get(owner.staff_email) ?? owner.staff_email,
+          });
+        }
+
+        // "Mine" is my own share plus any share I accepted cover for today.
+        const mine = new Set<string>();
+        if (callerEmail) {
+          mine.add(callerEmail);
+          const { data: myAssignment } = await svc
+            .from('tms_staff_route_assignment')
+            .select('id').eq('route_id', rt.id).eq('staff_email', callerEmail).eq('is_active', true).maybeSingle();
+          const myAssignmentId = (myAssignment as { id: string } | null)?.id ?? null;
+          if (myAssignmentId) {
+            const { data: absData } = await svc
+              .from('tms_incharge_absence')
+              .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+              .eq('route_id', rt.id).eq('absence_date', date);
+            const covered = delegatedTo(myAssignmentId, date, (absData ?? []) as AbsenceRow[]);
+            if (covered.length) {
+              const { data: coveredRows } = await svc
+                .from('tms_staff_route_assignment').select('staff_email').in('id', covered);
+              for (const c of (coveredRows ?? []) as { staff_email: string }[]) mine.add(c.staff_email.toLowerCase());
+            }
+          }
+        }
+        ownership = { ownerByLearner, mine };
+      }
+
+      rows.push(...buildRosterRows(
+        riders,
+        { id: rt.id, route_number: rt.route_number },
+        stopsByRoute.get(rt.id) ?? [],
+        attByLearner,
+        ownership,
+      ));
     }
 
     const present = rows.filter((r) => r.status === 'present').length;
     const absent = rows.filter((r) => r.status === 'absent').length;
     const booked = rows.filter((r) => r.booked).length;
+    // Share counts are over the caller's OWN markable learners only: a share
+    // that reads "12 of 12 marked" while the bus still has 30 unmarked riders
+    // is the correct answer to "am I done?".
+    const mineRows = rows.filter((r) => r.is_mine && r.booked);
+    const mineMarked = mineRows.filter((r) => r.status !== 'unmarked').length;
     return NextResponse.json({
       success: true,
       data: {
@@ -112,6 +172,11 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
           unmarked: rows.length - present - absent,
           booked,
           withoutTicket: rows.length - booked,
+        },
+        share: {
+          total: mineRows.length,
+          marked: mineMarked,
+          remaining: mineRows.length - mineMarked,
         },
       },
     });

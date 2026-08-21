@@ -157,6 +157,15 @@ export interface RosterRow {
   scanned_at: string | null;
   /** false = on the bus roster but holds no ticket (no booking) for this day. */
   booked: boolean;
+  /**
+   * The in-charge who owns this learner's attendance, or null when the route
+   * has no in-charges (three routes) or the allocation has not been computed.
+   * Ownership is INDEPENDENT of ticket state and attendance state.
+   */
+  owner_email: string | null;
+  owner_name: string | null;
+  /** True when the requesting staff owns this learner, or covers their owner today. */
+  is_mine: boolean;
 }
 
 /**
@@ -171,6 +180,12 @@ export function buildRosterRows(
   route: { id: string; route_number: string | null },
   orderedStops: OrderedStop[],
   attendanceByLearner: Map<string, { status: string; method: string | null; scanned_at: string | null }>,
+  ownership?: {
+    /** learner_id -> owning in-charge. */
+    ownerByLearner: Map<string, { staff_email: string; name: string }>;
+    /** Emails whose learners belong to the caller (their own + any covered today). */
+    mine: Set<string>;
+  },
 ): RosterRow[] {
   const byId = new Map(orderedStops.map((s) => [s.id, s] as const));
   const orderOf = (stopId: string | null) =>
@@ -183,6 +198,7 @@ export function buildRosterRows(
     const status: RosterRow['status'] =
       att?.status === 'present' ? 'present' : att?.status === 'absent' ? 'absent' : 'unmarked';
     const marked = status !== 'unmarked';
+    const owner = ownership?.ownerByLearner.get(rider.learner_id) ?? null;
     return {
       learner_id: rider.learner_id,
       name: rider.name,
@@ -198,6 +214,12 @@ export function buildRosterRows(
       // Ticket state is INDEPENDENT of attendance state: a rider with no booking
       // can still carry a real manual mark, and must keep showing it.
       booked: rider.booked !== false,
+      owner_email: owner?.staff_email ?? null,
+      owner_name: owner?.name ?? null,
+      // No ownership data at all (flag off, or the table is empty) means the
+      // old behaviour: everything is markable. The mark API is the authority
+      // that enforces the restriction; this flag only drives the UI.
+      is_mine: ownership ? Boolean(owner && ownership.mine.has(owner.staff_email)) : true,
     };
   });
 
