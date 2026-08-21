@@ -33,22 +33,36 @@ async function respond(
     }
 
     const svc = createServiceRoleClient();
-    const { data: absence } = await svc
+    const { data: absence, error: absenceError } = await svc
       .from('tms_incharge_absence')
       .select('id, staff_email, covering_assignment_id, absence_date, cover_status')
       .eq('id', absenceId)
       .maybeSingle();
+    if (absenceError) {
+      console.error('absence respond: absence lookup error:', absenceError);
+      return NextResponse.json({ error: 'Failed to load the absence' }, { status: 500 });
+    }
     if (!absence) return NextResponse.json({ error: 'Absence not found' }, { status: 404 });
 
-    const { data: prof } = await auth.supabase.from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    const { data: prof, error: profError } = await auth.supabase.from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+    if (profError) {
+      console.error('absence respond: caller profile lookup error:', profError);
+      return NextResponse.json({ error: 'Failed to load your profile' }, { status: 500 });
+    }
     const email = (prof?.email as string | undefined)?.toLowerCase();
     if (!email) return NextResponse.json({ error: 'Your profile has no email' }, { status: 400 });
 
     // Only the nominated colleague may answer. Anyone else answering would be
-    // taking on — or refusing — a duty that was never offered to them.
-    const { data: coverAssignment } = absence.covering_assignment_id
+    // taking on — or refusing — a duty that was never offered to them. A real
+    // query error must not collapse into "not addressed to you" — that tells
+    // someone they lack authority they actually have.
+    const { data: coverAssignment, error: coverError } = absence.covering_assignment_id
       ? await svc.from('tms_staff_route_assignment').select('staff_email').eq('id', absence.covering_assignment_id).maybeSingle()
-      : { data: null };
+      : { data: null, error: null };
+    if (coverError) {
+      console.error('absence respond: cover assignment lookup error:', coverError);
+      return NextResponse.json({ error: 'Failed to verify the cover request' }, { status: 500 });
+    }
     const nominatedEmail = (coverAssignment as { staff_email: string } | null)?.staff_email?.toLowerCase() ?? null;
     if (!nominatedEmail || nominatedEmail !== email) {
       return NextResponse.json({ error: 'This cover request was not addressed to you' }, { status: 403 });

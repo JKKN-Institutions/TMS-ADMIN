@@ -25,8 +25,12 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
   return !!data;
 }
 
+// Throws on a real query error (caught by each caller's try/catch → 500).
+// Returns null only for the genuine "no email on this profile" case, which
+// callers treat as a business state, not a failure.
 async function callerEmailOf(auth: AuthContext): Promise<string | null> {
-  const { data } = await auth.supabase.from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+  const { data, error } = await auth.supabase.from('profiles').select('email').eq('id', auth.userId).maybeSingle();
+  if (error) throw new Error(`callerEmailOf query failed: ${error.message}`);
   return (data?.email as string | undefined)?.toLowerCase() ?? null;
 }
 
@@ -36,17 +40,30 @@ interface AbsenceDbRow {
   covering_assignment_id: string | null; cover_status: string;
 }
 
-/** Decorate raw rows with route numbers and staff display names. */
+/**
+ * Decorate raw rows with route numbers and staff display names.
+ *
+ * Both lookups here throw on a real query error rather than falling back to
+ * the raw id: this data feeds directly into what an in-charge reads as "who
+ * covers me" / "which route", so a silent fallback could show a wrong-looking
+ * but plausible id instead of surfacing the failure. Callers' try/catch turns
+ * the throw into a 500. This is stricter than the name-resolution fallback
+ * below (nameByEmail), which is allowed to degrade to the raw email because
+ * getBoardingStaffForRoute already treats an unresolved name as normal, not
+ * an error.
+ */
 async function decorate(svc: ReturnType<typeof createServiceRoleClient>, rows: AbsenceDbRow[]) {
   if (rows.length === 0) return [];
   const routeIds = [...new Set(rows.map((r) => r.route_id))];
-  const { data: routes } = await svc.from('tms_route').select('id, route_number').in('id', routeIds);
+  const { data: routes, error: routesError } = await svc.from('tms_route').select('id, route_number').in('id', routeIds);
+  if (routesError) throw new Error(`decorate: route lookup failed: ${routesError.message}`);
   const numById = new Map(((routes ?? []) as { id: string; route_number: string | null }[]).map((r) => [r.id, r.route_number]));
 
   const coveringIds = [...new Set(rows.map((r) => r.covering_assignment_id).filter(Boolean))] as string[];
   const emailByAssignment = new Map<string, string>();
   if (coveringIds.length) {
-    const { data } = await svc.from('tms_staff_route_assignment').select('id, staff_email').in('id', coveringIds);
+    const { data, error: coverError } = await svc.from('tms_staff_route_assignment').select('id, staff_email').in('id', coveringIds);
+    if (coverError) throw new Error(`decorate: covering-assignment lookup failed: ${coverError.message}`);
     for (const a of (data ?? []) as { id: string; staff_email: string }[]) emailByAssignment.set(a.id, a.staff_email.toLowerCase());
   }
 
@@ -84,22 +101,37 @@ async function getAbsences(_request: NextRequest, auth: AuthContext) {
     const svc = createServiceRoleClient();
     const today = istToday();
 
-    const { data: myAssignments } = await svc
+    const { data: myAssignments, error: myAssignmentsError } = await svc
       .from('tms_staff_route_assignment').select('id').eq('staff_email', email).eq('is_active', true);
+    if (myAssignmentsError) {
+      console.error('boarding absence: myAssignments query error:', myAssignmentsError);
+      return NextResponse.json({ error: 'Failed to load your route assignments' }, { status: 500 });
+    }
     const myIds = ((myAssignments ?? []) as { id: string }[]).map((a) => a.id);
 
-    const { data: mineRows } = await svc
+    const { data: mineRows, error: mineError } = await svc
       .from('tms_incharge_absence').select('*')
       .ilike('staff_email', emailIlikePattern(email))
       .gte('absence_date', today)
       .order('absence_date', { ascending: true });
+    if (mineError) {
+      console.error('boarding absence: mineRows query error:', mineError);
+      return NextResponse.json({ error: 'Failed to load your absences' }, { status: 500 });
+    }
 
-    const { data: reqRows } = myIds.length
+    // An empty list here MUST mean "genuinely no requests" — never "the query
+    // failed" — because this drives whether a nominee sees a pending cover
+    // request at all.
+    const { data: reqRows, error: reqError } = myIds.length
       ? await svc.from('tms_incharge_absence').select('*')
           .in('covering_assignment_id', myIds)
           .gte('absence_date', today)
           .order('absence_date', { ascending: true })
-      : { data: [] as AbsenceDbRow[] };
+      : { data: [] as AbsenceDbRow[], error: null };
+    if (reqError) {
+      console.error('boarding absence: reqRows query error:', reqError);
+      return NextResponse.json({ error: 'Failed to load cover requests' }, { status: 500 });
+    }
 
     return NextResponse.json({
       success: true,
@@ -144,9 +176,15 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
-    const { data: mine } = await svc
+    const { data: mine, error: mineError } = await svc
       .from('tms_staff_route_assignment').select('id')
       .eq('route_id', routeId).eq('staff_email', email).eq('is_active', true).maybeSingle();
+    if (mineError) {
+      // A query failure here must not be reported as "you are not assigned" —
+      // that tells someone they lack authority they actually have.
+      console.error('boarding absence: mine assignment query error:', mineError);
+      return NextResponse.json({ error: 'Failed to verify your route assignment' }, { status: 500 });
+    }
     const assignmentId = (mine as { id: string } | null)?.id;
     if (!assignmentId) return NextResponse.json({ error: 'You are not assigned to this route' }, { status: 403 });
 
@@ -156,9 +194,13 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
       if (coveringEmail === email) {
         return NextResponse.json({ error: 'You cannot nominate yourself as cover' }, { status: 400 });
       }
-      const { data: cover } = await svc
+      const { data: cover, error: coverError } = await svc
         .from('tms_staff_route_assignment').select('id')
         .eq('route_id', routeId).eq('staff_email', coveringEmail).eq('is_active', true).maybeSingle();
+      if (coverError) {
+        console.error('boarding absence: cover assignment query error:', coverError);
+        return NextResponse.json({ error: 'Failed to verify the covering colleague' }, { status: 500 });
+      }
       coveringAssignmentId = (cover as { id: string } | null)?.id ?? null;
       if (!coveringAssignmentId) {
         return NextResponse.json({ error: 'That colleague is not an in-charge on this route' }, { status: 400 });
