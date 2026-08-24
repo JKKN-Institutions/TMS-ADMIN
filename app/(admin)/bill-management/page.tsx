@@ -137,15 +137,6 @@ export default function BillManagementPage() {
     return [...s].sort().map((n) => ({ label: n, value: n }));
   }, [rows]);
 
-  // Derived from the loaded rows so the dropdown never offers a department that
-  // has no bills in the selected year. Staff rows carry a department too, so this
-  // narrows both populations.
-  const billDepartmentOptions = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of rows) if (r.department_name) s.add(r.department_name);
-    return [...s].sort().map((n) => ({ label: n, value: n }));
-  }, [rows]);
-
   const unbilledInstitutionOptions = useMemo(() => {
     const s = new Set<string>();
     for (const p of unbilled?.people ?? []) if (p.institution_name) s.add(p.institution_name);
@@ -255,9 +246,6 @@ export default function BillManagementPage() {
           filters={[
             ...(billInstitutionOptions.length
               ? [{ columnId: 'institution', title: 'Institution', options: billInstitutionOptions }]
-              : []),
-            ...(billDepartmentOptions.length
-              ? [{ columnId: 'department', title: 'Department', options: billDepartmentOptions }]
               : []),
             ...(billRouteOptions.length
               ? [{ columnId: 'route', title: 'Route', options: billRouteOptions }]
