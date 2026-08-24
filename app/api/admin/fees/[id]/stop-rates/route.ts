@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { logActivity } from '@/lib/activity/log';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -164,13 +165,26 @@ async function upsert(request: NextRequest, auth: AuthContext) {
       if (error) return NextResponse.json({ error: 'Failed to save stop rates' }, { status: 500 });
     }
     if (toDelete.length) {
-      const { error } = await supabase
-        .from('tms_fee_structure_stop_rate')
-        .delete()
-        .eq('fee_structure_id', id)
-        .in('stop_id', toDelete);
-      if (error) return NextResponse.json({ error: 'Failed to clear stop rates' }, { status: 500 });
+      // Chunked: a full-sheet import can blank hundreds of stops, and ~500 uuids
+      // in one .in() comes back as an HTTP 400 from the gateway.
+      for (let i = 0; i < toDelete.length; i += 150) {
+        const { error } = await supabase
+          .from('tms_fee_structure_stop_rate')
+          .delete()
+          .eq('fee_structure_id', id)
+          .in('stop_id', toDelete.slice(i, i + 150));
+        if (error) return NextResponse.json({ error: 'Failed to clear stop rates' }, { status: 500 });
+      }
     }
+
+    await logActivity(auth, request, {
+      module: 'fees',
+      action: 'update',
+      entityType: 'tms_fee_structure_stop_rate',
+      entityId: id,
+      description: `Updated stop rates: ${toUpsert.length} saved, ${toDelete.length} cleared`,
+      metadata: { saved: toUpsert.length, cleared: toDelete.length },
+    });
 
     return NextResponse.json({
       success: true,
