@@ -204,6 +204,7 @@ export function FineDialog({
               <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                 <tr>
                   <th className="px-3 py-2">Learner</th>
+                  <th className="px-3 py-2">Route</th>
                   <th className="px-3 py-2">Stop</th>
                   <th className="px-3 py-2 text-right">Fine</th>
                 </tr>
@@ -216,6 +217,9 @@ export function FineDialog({
                       {c.code ? (
                         <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">{c.code}</span>
                       ) : null}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300">
+                      {c.route_number ?? '—'}
                     </td>
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{c.stop_name ?? '—'}</td>
                     <td className="px-3 py-2 text-right">
