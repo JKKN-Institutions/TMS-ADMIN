@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Download, Loader2, UploadCloud } from 'lucide-react';
+import { Copy, Download, Loader2, UploadCloud } from 'lucide-react';
 import { DataTable } from '@/components/ui/data-table';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { fetchTransportYearOptions } from '../fee-api';
 import { getFineRateColumns, type FineRateRow } from './fine-rate-columns';
+import { CopyRatesDialog } from './copy-rates-dialog';
 
 async function fetchFineRates(year: string): Promise<FineRateRow[]> {
   const res = await fetch(`/api/admin/fees/fine-rates?year=${encodeURIComponent(year)}`, {
@@ -31,6 +32,7 @@ export default function FineRatesPage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [importErrors, setImportErrors] = useState<ImportRowError[] | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const { data: years = [] } = useQuery({
     queryKey: ['transport-year-options'],
@@ -159,6 +161,15 @@ export default function FineRatesPage() {
         searchPlaceholder="Search route or stop..."
         toolbarActions={() => (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCopyOpen(true)}
+              disabled={!year}
+              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <Copy className="h-4 w-4" />
+              Copy from fee structure
+            </button>
             <a
               href={`/api/admin/fees/fine-rates/template?year=${encodeURIComponent(year)}`}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -195,6 +206,18 @@ export default function FineRatesPage() {
             </button>
           </div>
         )}
+      />
+
+      <CopyRatesDialog
+        open={copyOpen}
+        year={year}
+        onClose={() => setCopyOpen(false)}
+        onDone={() => {
+          // Drop any typed-but-unsaved drafts: they were entered against the
+          // pre-copy amounts and saving them afterwards would silently undo the copy.
+          setDraft({});
+          qc.invalidateQueries({ queryKey: ['fine-rates', year] });
+        }}
       />
     </div>
   );

@@ -48,6 +48,35 @@ export function parseFineRatesBody(
   return { ok: true, year: body.year, rates };
 }
 
+export interface FineRateCopyBody {
+  year: string;
+  fee_structure_id: string;
+  /** 'preview' writes nothing — it only reports what an apply would change. */
+  mode: 'preview' | 'apply';
+  /** false leaves stops that already carry a hand-set fine untouched. */
+  overwrite: boolean;
+}
+
+export function parseFineRateCopyBody(raw: unknown): Parsed<FineRateCopyBody> {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  if (!isNonEmptyString(body.year)) return { ok: false, error: 'A transport year is required.' };
+  if (!isNonEmptyString(body.fee_structure_id)) {
+    return { ok: false, error: 'Choose a fee structure to copy from.' };
+  }
+  const mode = body.mode === 'apply' ? 'apply' : 'preview';
+  return {
+    ok: true,
+    value: {
+      year: body.year,
+      fee_structure_id: body.fee_structure_id,
+      mode,
+      // Defaults to false: an unspecified overwrite must never destroy a
+      // hand-set fine amount.
+      overwrite: body.overwrite === true,
+    },
+  };
+}
+
 export function parseCreateFineBody(raw: unknown): Parsed<CreateFineBody> {
   const body = (raw ?? {}) as Record<string, unknown>;
 
