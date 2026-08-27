@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { Check, Eye, MoreHorizontal, X } from 'lucide-react';
+import { Eye, MoreHorizontal, X } from 'lucide-react';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import {
   DropdownMenu,
@@ -34,7 +34,6 @@ export function VacateStatusBadge({ status }: { status?: string }) {
 
 export function getVacateColumns(
   onView: (r: VacateRequestDTO) => void,
-  onApprove: (r: VacateRequestDTO) => void,
   onReject: (r: VacateRequestDTO) => void,
   canManage: boolean,
 ): ColumnDef<VacateRequestDTO>[] {
@@ -119,9 +118,6 @@ export function getVacateColumns(
                 {canManage && r.status === 'pending' && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => open(() => onApprove(r))}>
-                      <Check className="text-green-600" /> Approve &amp; cancel bill
-                    </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => open(() => onReject(r))}>
                       <X className="text-red-600" /> Reject
                     </DropdownMenuItem>

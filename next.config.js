@@ -82,6 +82,14 @@ const nextConfig = {
         destination: '/auth/login',
         permanent: true,
       },
+      {
+        // In-Charge Coverage folded into the enforcement board as a tab. Kept as
+        // a redirect so existing bookmarks and links land on the same board
+        // rather than a 404.
+        source: '/incharge-coverage',
+        destination: '/staff-route-assignments/enforcement?tab=coverage',
+        permanent: false,
+      },
     ];
   },
 };

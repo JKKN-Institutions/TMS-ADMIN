@@ -7,7 +7,6 @@ import { AlertCircle, CheckCircle2, Clock, LogOut, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DataTable } from '@/components/ui/data-table';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePermissions } from '@/hooks/use-permissions';
 import { getVacateColumns, VacateStatusBadge } from './columns';
 import type { VacateRequestDTO } from '@/lib/vacate/types';
@@ -42,47 +41,32 @@ export default function VacateRequestsPage() {
   const { data: list = [], isLoading, error } = useQuery({ queryKey: ['admin-vacate-requests'], queryFn: fetchList });
   const [openId, setOpenId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState('');
-  // Approve permanently cancels a learner's bills and cannot be undone ('approved'
-  // is terminal), so BOTH approve entry points — the row menu and the panel button —
-  // route through this confirmation rather than firing on a single click.
-  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const selected = openId ? list.find((r) => r.id === openId) ?? null : null;
-  const confirming = confirmId ? list.find((r) => r.id === confirmId) ?? null : null;
 
   const decide = useMutation({
-    mutationFn: async (payload: { id: string; action: 'approve' | 'reject'; note?: string }) => {
+    mutationFn: async (payload: { id: string; note?: string }) => {
       const res = await fetch(`/api/admin/vacate-requests/${payload.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ action: payload.action, note: payload.note }),
+        body: JSON.stringify({ action: 'reject', note: payload.note }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Failed');
-      return json as { cancelledBillCount?: number };
+      return json as Record<string, never>;
     },
-    onSuccess: (json, payload) => {
-      toast.success(
-        payload.action === 'approve'
-          ? `Approved — ${json.cancelledBillCount ?? 0} term(s) cancelled`
-          : 'Request rejected',
-      );
+    onSuccess: () => {
+      toast.success('Request rejected');
       setOpenId(null);
       setRejectNote('');
-      setConfirmId(null);
       qc.invalidateQueries({ queryKey: ['admin-vacate-requests'] });
     },
-    // Leave the confirm dialog OPEN on failure so the error is read next to the
-    // action that caused it and the approver can retry without re-finding the row.
+    // Leave the panel OPEN on failure so the error is read next to the action
+    // that caused it and the approver can retry without re-finding the row.
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed'),
   });
 
-  // Opens the confirmation; the actual mutation fires from the dialog's onConfirm.
-  const onApprove = (r: VacateRequestDTO) => {
-    if (decide.isPending) return;
-    setConfirmId(r.id);
-  };
   const onReject = (r: VacateRequestDTO) => {
     setOpenId(r.id);
     setRejectNote('');
@@ -90,7 +74,7 @@ export default function VacateRequestsPage() {
   const onView = (r: VacateRequestDTO) => setOpenId(r.id);
 
   const columns = useMemo(
-    () => getVacateColumns(onView, onApprove, onReject, canManage),
+    () => getVacateColumns(onView, onReject, canManage),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canManage, decide.isPending],
   );
@@ -111,7 +95,8 @@ export default function VacateRequestsPage() {
       <div>
         <h1 className="text-xl font-semibold">Transport Vacate Requests</h1>
         <p className="text-sm text-muted-foreground">
-          Approve to cancel the learner&apos;s current-year transport bill and clear their route, or reject with a reason.
+          Historical record of transport vacate requests. Learners can no longer submit new requests, and
+          transport fees are not cancelled once the transport service has been availed.
         </p>
       </div>
 
@@ -192,16 +177,10 @@ export default function VacateRequestsPage() {
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
-                    onClick={() => decide.mutate({ id: selected.id, action: 'reject', note: rejectNote })}
+                    onClick={() => decide.mutate({ id: selected.id, note: rejectNote })}
                     disabled={!rejectNote.trim() || decide.isPending}
                   >
                     Reject
-                  </Button>
-                  <Button
-                    onClick={() => setConfirmId(selected.id)}
-                    disabled={decide.isPending}
-                  >
-                    Approve &amp; cancel bill
                   </Button>
                 </div>
               </div>
@@ -209,39 +188,6 @@ export default function VacateRequestsPage() {
           </div>
         </div>
       )}
-
-      {/* Irreversible-action gate. Spells out exactly what will be destroyed — who,
-          how much, and which route — because 'approved' is terminal: there is no
-          un-approve, and the cancelled bills are not restored by anything in the UI. */}
-      <ConfirmDialog
-        open={!!confirming}
-        onOpenChange={(next) => {
-          if (!next) setConfirmId(null);
-        }}
-        title="Approve vacate & cancel bill?"
-        description={
-          confirming ? (
-            <>
-              This permanently cancels{' '}
-              <strong>
-                {confirming.learnerName}
-                {confirming.rollNumber ? ` (${confirming.rollNumber})` : ''}
-              </strong>
-              &apos;s remaining current-year transport fees
-              {confirming.amountToCancel > 0 ? ` — ${inr(confirming.amountToCancel)}` : ''} and removes their
-              route assignment
-              {confirming.routeLabel ? ` (${confirming.routeLabel})` : ''}. The learner is notified.{' '}
-              <strong>This cannot be undone.</strong>
-            </>
-          ) : null
-        }
-        confirmLabel="Approve & cancel bill"
-        danger
-        loading={decide.isPending}
-        onConfirm={() => {
-          if (confirmId) decide.mutate({ id: confirmId, action: 'approve' });
-        }}
-      />
     </div>
   );
 }

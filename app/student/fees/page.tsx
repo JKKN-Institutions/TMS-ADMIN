@@ -2,7 +2,6 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Receipt, AlertTriangle, CheckCircle2, Info, RefreshCw, Loader2 } from 'lucide-react';
-import VacateTransportCard from '@/components/student/vacate-transport-card';
 
 interface Term {
   term_no: number;
@@ -105,8 +104,6 @@ export default function StudentFeesPage() {
           Refresh
         </button>
       </div>
-
-      <VacateTransportCard />
 
       {/* Status banner */}
       {!data.allowed ? (

@@ -28,7 +28,7 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
     const body = (await request.json().catch(() => ({}))) as { action?: string; note?: string };
     const svc = createServiceRoleClient();
 
-    // Resolve the learner for notify/logging (works for both actions).
+    // Resolve the learner for notify/logging.
     const { data: reqRow } = await svc
       .from('tms_transport_vacate_request')
       .select('learner_id, status')
@@ -36,39 +36,6 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
       .maybeSingle();
     if (!reqRow) return NextResponse.json({ error: 'Request not found' }, { status: 404 });
     const learnerId = (reqRow as { learner_id: string }).learner_id;
-
-    if (body.action === 'approve') {
-      const { data, error } = await svc.rpc('tms_approve_transport_vacate', {
-        p_request_id: id,
-        p_approver: auth.userId,
-      });
-      if (error) {
-        const msg = error.message || '';
-        if (msg.includes('not_pending')) return NextResponse.json({ error: 'Request is no longer pending' }, { status: 409 });
-        if (msg.includes('stale_year')) return NextResponse.json({ error: 'This request is from a previous transport year and can no longer be approved. Ask the learner to submit a new request.' }, { status: 409 });
-        if (msg.includes('not_found')) return NextResponse.json({ error: 'Request not found' }, { status: 404 });
-        console.error('vacate approve RPC error:', error);
-        return NextResponse.json({ error: 'Failed to approve' }, { status: 500 });
-      }
-      const count = (data as { cancelled_bill_count?: number } | null)?.cancelled_bill_count ?? 0;
-      await notifyLearner(svc, {
-        learnerId,
-        actorId: auth.userId,
-        title: 'Transport vacate approved',
-        body: `Your request to leave the bus was approved. ${count} current-year fee term(s) were cancelled and your route was removed.`,
-        url: '/student/fees',
-      });
-      await logActivity(auth, request, {
-        module: 'transport-vacate',
-        action: 'approve',
-        entityType: 'tms_transport_vacate_request',
-        entityId: id,
-        entityLabel: learnerId,
-        description: 'Approved transport vacate',
-        metadata: { cancelled_bill_count: count },
-      });
-      return NextResponse.json({ success: true, cancelledBillCount: count });
-    }
 
     if (body.action === 'reject') {
       const note = body.note?.trim();
@@ -80,7 +47,7 @@ async function handlePatch(request: NextRequest, auth: AuthContext) {
         learnerId,
         actorId: auth.userId,
         title: 'Transport vacate declined',
-        body: `Your request to leave the bus was declined: ${note}. You may submit a new request.`,
+        body: `Your request to leave the bus was declined: ${note}`,
         url: '/student/fees',
       });
       await logActivity(auth, request, {

@@ -24,7 +24,6 @@ import {
   Wallet,
   Bug,
   LogOut,
-  ListChecks,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -65,7 +64,6 @@ export const allNavigation: NavItem[] = [
   { name: 'Route Optimization', href: '/route-optimization', icon: Zap, permission: TMS_PERMISSIONS.ROUTES_EDIT, group: 'transport' },
   { name: 'Staff Assignments', href: '/staff-route-assignments', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
   { name: 'Attendance Enforcement', href: '/staff-route-assignments/enforcement', icon: ShieldAlert, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
-  { name: 'In-Charge Coverage', href: '/incharge-coverage', icon: ListChecks, permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, group: 'transport' },
   { name: 'Transport Years', href: '/transport-years', icon: CalendarRange, permission: TMS_PERMISSIONS.TRANSPORT_YEARS_VIEW, group: 'transport' },
   { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
