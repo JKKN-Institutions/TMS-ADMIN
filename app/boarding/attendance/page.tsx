@@ -116,7 +116,23 @@ export default function BoardingAttendancePage() {
           return;
         }
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark attendance');
-        toast.success(`Marked ${row.name} ${status}`);
+        // A 200 does NOT mean everything asked for happened. The response
+        // reports three separate things — what was written, what was already
+        // true, and what a colleague holds — and claiming a flat "Marked X" over
+        // the top of the last two is how someone else's mark gets quietly
+        // assumed away. Mirrors markBatchMessage in lib/boarding/mark-batch.ts.
+        const left = Array.isArray(json.locked) ? json.locked.length : 0;
+        if (left > 0) {
+          toast.warning(
+            `Not changed — already marked by ${json.locked[0]?.markedByName ?? 'another staff member'}.`,
+          );
+        } else if (json.updated === 0 && json.skipped > 0) {
+          toast.success(`${row.name} was already marked ${status}`);
+        } else if (json.updated === 0) {
+          toast.warning(`${row.name} was not marked — they are not on this route.`);
+        } else {
+          toast.success(`Marked ${row.name} ${status}`);
+        }
         qc.invalidateQueries({ queryKey: ['boarding-roster'] });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to mark attendance');

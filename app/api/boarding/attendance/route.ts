@@ -5,6 +5,7 @@ import { logActivity } from '@/lib/activity/log';
 import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
+import { summarizeMarkBatch, type RpcMarkOutcome } from '@/lib/boarding/mark-batch';
 import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
@@ -27,16 +28,6 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 
 interface MarkInput { learnerId: string; status: 'present' | 'absent' }
 interface StudentLite { id: string; transport_route_id: string | null; transport_stop_id: string | null }
-
-/** One learner's result from the tms_mark_attendance RPC. */
-interface MarkOutcome {
-  learner_id: string;
-  outcome: 'inserted' | 'updated_own' | 'overridden' | 'noop_same_status' | 'locked';
-  /** The row as it was when this call reached it — for a 'locked' row, what still stands. */
-  existing_status: 'present' | 'absent' | null;
-  existing_by: string | null;
-  existing_at: string | null;
-}
 
 /**
  * The learner ids this caller may mark on this route and date, split two ways:
@@ -236,32 +227,29 @@ async function mark(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Failed to save attendance' }, { status: 500 });
     }
 
-    const results = (outcomes ?? []) as MarkOutcome[];
-    const written = results.filter((r) => r.outcome !== 'locked' && r.outcome !== 'noop_same_status').length;
-    const skipped = results.filter((r) => r.outcome === 'noop_same_status').length;
-    const overrides = results.filter((r) => r.outcome === 'overridden').length;
-    const lockedRows = results.filter((r) => r.outcome === 'locked');
+    // Shaped by a pure helper (lib/boarding/mark-batch.ts) so the partial-lock
+    // rules are testable without a database: which batches are a 409, which are
+    // a success that still has something to report, and what was dropped before
+    // it ever reached the RPC.
+    const summary = summarizeMarkBatch((outcomes ?? []) as RpcMarkOutcome[], marks.length);
+    const { written, skipped, overrides } = summary;
 
-    // Name the owners so the client can say WHO holds the mark, not merely that
-    // something is locked. The raw profiles.id is resolved here and stripped
+    // Name the owners so the client can say WHO holds each mark, not merely that
+    // something is locked. The raw profiles.id is resolved here and STRIPPED
     // before the response leaves the server.
-    const lockedNames = lockedRows.length
-      ? await loadMarkerNames(svc, lockedRows.map((r) => r.existing_by))
+    const lockedNames = summary.locked.length
+      ? await loadMarkerNames(svc, summary.locked.map((l) => l.markedBy))
       : new Map<string, string>();
-    const locked = lockedRows.map((r) => ({
-      learnerId: r.learner_id,
-      status: r.existing_status,
-      markedByName: (r.existing_by && lockedNames.get(r.existing_by)) || 'another staff member',
-      markedAt: r.existing_at,
+    const locked = summary.locked.map((l) => ({
+      learnerId: l.learnerId,
+      status: l.status,
+      markedByName: (l.markedBy && lockedNames.get(l.markedBy)) || 'another staff member',
+      markedAt: l.markedAt,
     }));
 
-    // A single locked mark with nothing else in the batch is the common case --
-    // one tap on a stale screen -- and deserves a 409 the client can turn into a
-    // named message. 403 would be wrong: this staffer MAY use the endpoint, this
-    // one row is taken. But when the rest of the batch was already correct
-    // (skipped > 0), the batch as a whole did what was asked: 19 rows needing
-    // nothing must not read as a failure over 1 locked row.
-    if (written === 0 && locked.length > 0 && skipped === 0) {
+    // 409 only when ownership is the WHOLE story. 403 would be wrong -- this
+    // staffer MAY use the endpoint, these rows are taken.
+    if (summary.disposition === 'all_locked') {
       const first = locked[0];
       return NextResponse.json(
         {
@@ -280,11 +268,14 @@ async function mark(request: NextRequest, auth: AuthContext) {
       description:
         `Manually marked attendance for ${written} learner(s) on route ${routeId} (${direction})` +
         (overrides > 0 ? ` — ${overrides} replaced an earlier mark` : ''),
-      metadata: { routeId, direction, count: written, skipped, overrides, locked: locked.length },
+      metadata: { routeId, direction, count: written, skipped, overrides, locked: locked.length, dropped: summary.dropped },
     });
     // A partially locked batch still succeeds: one taken row must not fail the
-    // other nineteen. `locked` tells the client which ones to redraw.
-    return NextResponse.json({ success: true, updated: written, skipped, locked });
+    // other nineteen. `locked` and `dropped` tell the client what did NOT
+    // happen, so it can never render this as a clean sweep.
+    return NextResponse.json({
+      success: true, updated: written, skipped, locked, dropped: summary.dropped,
+    });
   } catch (e) {
     console.error('boarding manual mark error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
