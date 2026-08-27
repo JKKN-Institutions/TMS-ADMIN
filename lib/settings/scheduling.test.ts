@@ -22,7 +22,6 @@ describe('parseSchedulingConfig', () => {
       sameDayCutoffHour: 6,
       autoNotifyPassengers: false,
       autoGenerateBills: false,
-      inchargeEnforcementMode: 'shadow',
       inchargeShareScoringEnabled: false,
     });
   });
@@ -181,29 +180,6 @@ describe('allowSameDayBooking', () => {
   it('falls back to 6 for a malformed same-day cutoff hour', () => {
     expect(parseSchedulingConfig({ sameDayBookingCutoffHour: 'dawn' }).sameDayCutoffHour).toBe(6);
     expect(parseSchedulingConfig({ sameDayBookingCutoffHour: NaN }).sameDayCutoffHour).toBe(6);
-  });
-});
-
-describe('inchargeEnforcementMode', () => {
-  it('defaults to shadow when absent', () => {
-    expect(parseSchedulingConfig({}).inchargeEnforcementMode).toBe('shadow');
-    expect(DEFAULT_SCHEDULING_CONFIG.inchargeEnforcementMode).toBe('shadow');
-  });
-
-  it('defaults to shadow for a null or malformed blob', () => {
-    expect(parseSchedulingConfig(null).inchargeEnforcementMode).toBe('shadow');
-    expect(parseSchedulingConfig('nonsense').inchargeEnforcementMode).toBe('shadow');
-  });
-
-  it('accepts each valid mode', () => {
-    for (const mode of ['off', 'shadow', 'enforce'] as const) {
-      expect(parseSchedulingConfig({ inchargeEnforcementMode: mode }).inchargeEnforcementMode).toBe(mode);
-    }
-  });
-
-  it('falls back to shadow for an unknown value rather than enforcing', () => {
-    expect(parseSchedulingConfig({ inchargeEnforcementMode: 'ENFORCE' }).inchargeEnforcementMode).toBe('shadow');
-    expect(parseSchedulingConfig({ inchargeEnforcementMode: 42 }).inchargeEnforcementMode).toBe('shadow');
   });
 });
 

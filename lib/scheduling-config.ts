@@ -8,8 +8,6 @@ export interface SchedulingSettings {
   sameDayBookingCutoffHour: number;
   autoNotifyPassengers: boolean;
   autoGenerateBills: boolean;
-  /** In-charge attendance enforcement. Ships in shadow — see lib/settings/scheduling.ts. */
-  inchargeEnforcementMode: 'off' | 'shadow' | 'enforce';
 }
 
 export const defaultSchedulingSettings: SchedulingSettings = {
@@ -20,5 +18,4 @@ export const defaultSchedulingSettings: SchedulingSettings = {
   sameDayBookingCutoffHour: 6, // 6 AM — before the buses roll
   autoNotifyPassengers: true,
   autoGenerateBills: false,
-  inchargeEnforcementMode: 'shadow',
 };

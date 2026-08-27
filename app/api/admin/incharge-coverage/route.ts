@@ -121,7 +121,7 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
         if (share.length === 0) emptyShares += 1;
         if (isExcused(a.id, date, absences)) continue;
         // Duty is the own share PLUS any share accepted as cover today —
-        // must match the cron (app/api/cron/incharge-attendance/route.ts)
+        // must match lib/boarding/share-coverage.ts
         // exactly, or the board shows green while the cron strikes/bills
         // someone for a covered share it holds them answerable for. Both
         // shares are already loaded in `sharesByAssignment`, so this union

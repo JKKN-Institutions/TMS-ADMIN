@@ -16,14 +16,14 @@
  * toggle and re-granted themselves the exemption. This function is that seam,
  * closed.
  *
- * The probation exception is load-bearing, not a loophole: accepting the pledge
- * is precisely how a billed staffer is meant to return, and the pledge route
- * creates the probation row before it assigns. Without this branch the guard
- * would reject the one path back that the design promises.
+ * This guard is NOT part of attendance enforcement (removed 2026-08-27) — it
+ * protects the fee exemption itself, which outlives it. What DID go with
+ * enforcement is the probation exception: accepting an attendance pledge used
+ * to buy a billed staffer their way back in. With no pledge to accept, settling
+ * the bill is the only route back, and this is a plain bill check.
  */
 export interface SelfAssignInput {
   hasOutstandingBill: boolean;
-  hasActiveProbation: boolean;
 }
 
 export type SelfAssignVerdict =
@@ -31,7 +31,7 @@ export type SelfAssignVerdict =
   | { allowed: false; reason: 'outstanding_bill' };
 
 export function maySelfAssign(input: SelfAssignInput): SelfAssignVerdict {
-  if (input.hasOutstandingBill && !input.hasActiveProbation) {
+  if (input.hasOutstandingBill) {
     return { allowed: false, reason: 'outstanding_bill' };
   }
   return { allowed: true };
