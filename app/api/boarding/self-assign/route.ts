@@ -7,7 +7,6 @@ import { logActivity } from '@/lib/activity/log';
 import { resolveStaffId } from '@/lib/identity/staff-lookup';
 import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
 import { maySelfAssign } from '@/lib/boarding/self-assign-guard';
-import { emailIlikePattern } from '@/lib/identity/email-match';
 
 /**
  * A bus_required staffer accepts the boarding in-charge duty.
@@ -53,9 +52,9 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
 
     // ── Fee gate ───────────────────────────────────────────────────────────────
     // The in-charge duty carries a fee exemption, so a staffer who already owes
-    // transport fees cannot hand themselves that exemption. An ACTIVE probation
-    // is the sanctioned way back (see /api/boarding/incharge-pledge), so it
-    // passes through here.
+    // transport fees cannot hand themselves that exemption. Settling the bill is
+    // now the only way back — the attendance-pledge exception went out with the
+    // enforcement module (removed 2026-08-27).
     const { data: currentYear } = await svc
       .from('tms_transport_year')
       .select('id')
@@ -92,23 +91,15 @@ async function postSelfAssign(request: NextRequest, auth: AuthContext) {
       personId: staffId,
       transportYearId: currentYear.id as string,
     });
-    const { data: probation } = await svc
-      .from('tms_incharge_probation')
-      .select('id')
-      .ilike('staff_email', emailIlikePattern(email))
-      .eq('status', 'active')
-      .maybeSingle();
-
     const verdict = maySelfAssign({
       hasOutstandingBill: billState.hasOutstanding,
-      hasActiveProbation: Boolean(probation?.id),
     });
     if (!verdict.allowed) {
       return NextResponse.json(
         {
           error:
-            'Transport fees are outstanding on your account. Accept the attendance ' +
-            'commitment or settle the fees to continue as bus in-charge.',
+            'Transport fees are outstanding on your account. Please settle the ' +
+            'fees to continue as bus in-charge.',
           reason: verdict.reason,
         },
         { status: 403 },

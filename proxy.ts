@@ -23,12 +23,6 @@ const PUBLIC_PATHS = new Set([
   // stays absent, matching on source text — so do not write that prefix as a
   // quoted string anywhere in this file, not even in a comment.
   '/api/cron/auto-generate-bills',
-  // Bus in-charge attendance enforcement. Punitive action is additionally
-  // gated by the inchargeEnforcementMode setting, which ships as 'shadow':
-  // the job records strikes but notifies, removes and bills nobody until an
-  // admin switches it to 'enforce'.
-  '/api/cron/incharge-attendance',
-  '/api/cron/incharge-month-verdict',
   // Recomputes in-charge share ownership only — moves no money, removes no
   // role. Safety net for the recompute hooks on the assignment/enrollment
   // APIs.

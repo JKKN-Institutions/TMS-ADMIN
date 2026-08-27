@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bus, Check, Loader2, LogOut } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/providers/auth-provider';
-import RemovalBillNotice from '@/components/boarding/removal-bill-notice';
 
 interface AbsenceRecord {
   id: string;
@@ -202,10 +201,10 @@ export default function InChargePage() {
   const [declined, setDeclined] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // The layout already redirected here on 'choose' | 'pledge' | 'must_pay', but it
+  // The layout already redirected here on 'choose' | 'must_pay', but it
   // deliberately doesn't thread that decision down (see layout.tsx) -- this page
-  // re-fetches for itself and decides which of the three screens to show.
-  const [gate, setGate] = useState<'choose' | 'pledge' | 'must_pay' | null>(null);
+  // re-fetches for itself and decides which of the two screens to show.
+  const [gate, setGate] = useState<'choose' | 'must_pay' | null>(null);
   const [amount, setAmount] = useState(0);
 
   useEffect(() => {
@@ -217,29 +216,11 @@ export default function InChargePage() {
       const json = await res.json().catch(() => ({}));
       if (cancelled) return;
       const g = json?.data?.gate;
-      setGate(g === 'pledge' || g === 'must_pay' ? g : 'choose');
+      setGate(g === 'must_pay' ? 'must_pay' : 'choose');
       setAmount(Number(json?.data?.outstandingAmount ?? 0));
     })();
     return () => { cancelled = true; };
   }, []);
-
-  const handleAcceptPledge = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch('/api/boarding/incharge-pledge', {
-        method: 'POST', credentials: 'same-origin',
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to accept the commitment');
-      toast.success('Commitment accepted — you are the bus in-charge again');
-      // Hard nav: the layout caches its gate decision in state, so a soft
-      // router.replace() would bounce off the stale 'pledge' redirect.
-      window.location.assign('/boarding/attendance');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to accept the commitment');
-      setSaving(false);
-    }
-  };
 
   const handleConfirm = async () => {
     if (!willing) {
@@ -267,7 +248,7 @@ export default function InChargePage() {
     }
   };
 
-  if (gate === 'must_pay' || (gate === 'pledge' && declined)) {
+  if (gate === 'must_pay') {
     return (
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
@@ -298,58 +279,9 @@ export default function InChargePage() {
     );
   }
 
-  if (gate === 'pledge') {
-    return (
-      <div className="w-full max-w-md">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-7">
-          <div className="text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500 sm:h-14 sm:w-14">
-              <Bus className="h-6 w-6 text-white sm:h-7 sm:w-7" />
-            </div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-              Transport fee bill
-            </h1>
-            {amount > 0 && (
-              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
-                ₹{amount.toLocaleString('en-IN')}
-              </p>
-            )}
-          </div>
-
-          <div className="mt-5 rounded-xl border border-green-300 bg-green-50 p-4 dark:border-green-500/40 dark:bg-green-500/10">
-            <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-100">
-              If you mark attendance for your bus <strong>every service day</strong> from
-              today until the end of this month, this bill will be{' '}
-              <strong>cancelled</strong> and you continue as bus in-charge.
-            </p>
-          </div>
-
-          <button
-            onClick={handleAcceptPledge}
-            disabled={saving}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {saving ? 'Accepting…' : 'OK, I accept'}
-          </button>
-          <button
-            onClick={() => setDeclined(true)}
-            disabled={saving}
-            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 px-5 py-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            Not OK
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   if (declined) {
     return (
       <div className="w-full max-w-md">
-        {/* Shown in BOTH states: a removed in-charge who then declines still has
-            a bill to understand, and this is the only screen that reaches them. */}
-        <RemovalBillNotice />
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
             <Bus className="h-6 w-6 text-gray-400" />
@@ -373,7 +305,6 @@ export default function InChargePage() {
 
   return (
     <div className="w-full max-w-md">
-      <RemovalBillNotice />
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-7">
         <div className="text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-green-600 sm:h-14 sm:w-14">

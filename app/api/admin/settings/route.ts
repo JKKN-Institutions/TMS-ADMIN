@@ -13,7 +13,6 @@ interface SchedulingSettingsData {
   sameDayBookingCutoffHour: number;
   autoNotifyPassengers: boolean;
   autoGenerateBills: boolean;
-  inchargeEnforcementMode: 'off' | 'shadow' | 'enforce';
 }
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -38,7 +37,6 @@ function toBlobShape(cfg: ReturnType<typeof parseSchedulingConfig>): SchedulingS
     sameDayBookingCutoffHour: cfg.sameDayCutoffHour,
     autoNotifyPassengers: cfg.autoNotifyPassengers,
     autoGenerateBills: cfg.autoGenerateBills,
-    inchargeEnforcementMode: cfg.inchargeEnforcementMode,
   };
 }
 
@@ -50,10 +48,6 @@ function validate(settings: Record<string, unknown>): string | null {
   const days = settings.bookingDaysAhead;
   if (typeof days !== 'number' || days < 1 || days > 14) {
     return 'Booking days available must be between 1 and 14';
-  }
-  const mode = settings.inchargeEnforcementMode;
-  if (mode !== undefined && !['off', 'shadow', 'enforce'].includes(mode as string)) {
-    return 'Enforcement mode must be off, shadow, or enforce';
   }
   // Optional — a client that predates same-day booking simply omits these, and
   // parseSchedulingConfig fills the safe defaults (feature off).

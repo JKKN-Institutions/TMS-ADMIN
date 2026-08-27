@@ -11,10 +11,12 @@ describe('proxy cron allowlist', () => {
     expect(SRC).toContain("'/api/cron/auto-generate-bills'");
   });
 
-  it('allowlists the in-charge attendance cron by EXACT path', () => {
-    // Deliberately woken: enforcement is additionally gated by the
-    // inchargeEnforcementMode setting, which ships as 'shadow'.
-    expect(SRC).toContain("'/api/cron/incharge-attendance'");
+  it('no longer allowlists the retired enforcement crons', () => {
+    // Attendance enforcement was removed 2026-08-27. The routes are gone, so
+    // leaving their paths here would hold an un-gated hole open for whatever
+    // later claims those URLs.
+    expect(SRC).not.toContain("'/api/cron/incharge-attendance'");
+    expect(SRC).not.toContain("'/api/cron/incharge-month-verdict'");
   });
 
   it('does NOT allowlist the whole /api/cron/ prefix', () => {

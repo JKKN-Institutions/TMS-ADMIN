@@ -7,9 +7,6 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { resolveStaffId } from '@/lib/identity/staff-lookup';
 import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
 import { deriveInChargeGate } from '@/lib/boarding/incharge-gate';
-import { serviceDays, monthWindow } from '@/lib/boarding/incharge-month';
-import { istToday } from '@/lib/booking/window';
-import { emailIlikePattern } from '@/lib/identity/email-match';
 
 /**
  * Boarding-portal access gate. A staffer may use the portal only if they are
@@ -30,7 +27,6 @@ async function getAccess(auth: AuthContext) {
       return NextResponse.json({ success: true, data: {
         allowed: true, assignedRouteCount: 0, eligible: false, hasRoute: false,
         superAdmin: true, gate: 'in_duty', outstandingAmount: 0,
-        probationThisMonth: 'none',
       } });
     }
     // Eligibility is computed regardless of the scan permission — an eligible-but-
@@ -56,8 +52,6 @@ async function getAccess(auth: AuthContext) {
 
     let hasOutstandingBill = false;
     let outstandingAmount = 0;
-    let probationThisMonth: 'none' | 'active' | 'failed' = 'none';
-    let remainingServiceDays = 0;
 
     const { data: prof } = await svc
       .from('profiles').select('email').eq('id', auth.userId).maybeSingle();
@@ -83,43 +77,12 @@ async function getAccess(auth: AuthContext) {
     const feeCheckReason: 'no_current_year' | 'staff_unresolved' | null =
       !currentYear?.id ? 'no_current_year' : !staffId ? 'staff_unresolved' : null;
 
-    if (hasOutstandingBill && email) {
-      const today = istToday();
-      const win = monthWindow(today);
-
-      const { data: probRows } = await svc
-        .from('tms_incharge_probation')
-        .select('status')
-        .ilike('staff_email', emailIlikePattern(email))
-        .gte('window_end', win.start);
-      const statuses = ((probRows ?? []) as Array<{ status: string }>).map((r) => r.status);
-      if (statuses.includes('active')) probationThisMonth = 'active';
-      else if (statuses.includes('failed')) probationThisMonth = 'failed';
-
-      // Days left to mark on THEIR route. If the pledge cannot be honoured
-      // there is no point offering it, so this decides pledge vs must_pay.
-      if (elig.routeId) {
-        const { data: booked } = await svc
-          .from('tms_booking')
-          .select('travel_date')
-          .eq('route_id', elig.routeId)
-          .gte('travel_date', today)
-          .lte('travel_date', win.end);
-        remainingServiceDays = serviceDays(
-          ((booked ?? []) as Array<{ travel_date: string }>).map((b) => b.travel_date),
-          today, win.end,
-        ).length;
-      }
-    }
-
     let gate = deriveInChargeGate({
       allowed,
       eligible: elig.eligible,
       assignedRouteCount: elig.assignedRouteCount,
       hasRoute: elig.hasRoute,
       hasOutstandingBill,
-      probationThisMonth,
-      remainingServiceDays,
     });
     // Only 'choose' is at risk here -- it is the one gate that offers an action
     // (self-assign) whose own fail-closed checks we could not evaluate.
@@ -142,7 +105,6 @@ async function getAccess(auth: AuthContext) {
         hasRoute: elig.hasRoute,
         gate,
         outstandingAmount,
-        probationThisMonth,
         ...(feeCheckReason ? { reason: feeCheckReason } : {}),
       },
     });
@@ -151,7 +113,7 @@ async function getAccess(auth: AuthContext) {
     // Fail closed — if we can't confirm access, don't grant it.
     return NextResponse.json({ success: true, data: {
       allowed: false, assignedRouteCount: 0, eligible: false, hasRoute: false,
-      gate: 'denied', outstandingAmount: 0, probationThisMonth: 'none',
+      gate: 'denied', outstandingAmount: 0,
     } });
   }
 }

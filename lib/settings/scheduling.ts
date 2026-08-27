@@ -1,15 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-/**
- * How hard the in-charge attendance enforcement cron acts on its own findings.
- * `shadow` evaluates and persists strikes but notifies nobody and removes
- * nobody, so the admin dashboard accumulates real data before anyone is
- * punished. Distinct from the route's `dryRun` flag, which persists nothing.
- */
-export type InchargeEnforcementMode = 'off' | 'shadow' | 'enforce';
-
-const ENFORCEMENT_MODES: readonly InchargeEnforcementMode[] = ['off', 'shadow', 'enforce'];
-
 /** Effective, normalized scheduling config consumed by the booking gate + reminders. */
 export interface SchedulingConfig {
   enableBookingTimeWindow: boolean;
@@ -25,8 +15,6 @@ export interface SchedulingConfig {
   autoNotifyPassengers: boolean;
   /** Master switch for the automatic bill generation sweep. Opt-in. */
   autoGenerateBills: boolean;
-  /** Master switch for in-charge attendance enforcement. Ships in shadow. */
-  inchargeEnforcementMode: InchargeEnforcementMode;
   /**
    * Score in-charge attendance against each staffer's OWN share rather than
    * the route as a whole. Ships OFF.
@@ -42,10 +30,9 @@ export interface SchedulingConfig {
    * 112 under the route rule, August 109 against 112. Per-share bills FEWER
    * people, not more.
    *
-   * It still ships OFF and the safety argument is unchanged: this flag and
-   * inchargeEnforcementMode must BOTH be on before any money moves. "Fewer in
-   * aggregate" is not "nobody new" -- per-share moves individuals in both
-   * directions, so WHO is billed changes even where the total falls.
+   * Attendance enforcement was removed 2026-08-27, so this flag no longer
+   * gates any billing. It now only decides whose roster rows an in-charge is
+   * shown and scored against on the boarding screens.
    */
   inchargeShareScoringEnabled: boolean;
 }
@@ -58,7 +45,6 @@ export const DEFAULT_SCHEDULING_CONFIG: SchedulingConfig = {
   sameDayCutoffHour: 6,
   autoNotifyPassengers: true,
   autoGenerateBills: false,
-  inchargeEnforcementMode: 'shadow',
   inchargeShareScoringEnabled: false,
 };
 
@@ -70,14 +56,6 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 
 function boolOr(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
-}
-
-// An unrecognised value must never read as 'enforce' — punitive action is
-// opt-in, so anything unexpected falls back to the safe shadow default.
-function enforcementModeOr(value: unknown, fallback: InchargeEnforcementMode): InchargeEnforcementMode {
-  return ENFORCEMENT_MODES.includes(value as InchargeEnforcementMode)
-    ? (value as InchargeEnforcementMode)
-    : fallback;
 }
 
 /** Pure: normalize a stored settings_data blob into a SchedulingConfig (defaults + clamps). */
@@ -92,10 +70,6 @@ export function parseSchedulingConfig(raw: unknown): SchedulingConfig {
     sameDayCutoffHour: clampInt(b.sameDayBookingCutoffHour, 0, 23, DEFAULT_SCHEDULING_CONFIG.sameDayCutoffHour),
     autoNotifyPassengers: boolOr(b.autoNotifyPassengers, DEFAULT_SCHEDULING_CONFIG.autoNotifyPassengers),
     autoGenerateBills: boolOr(b.autoGenerateBills, DEFAULT_SCHEDULING_CONFIG.autoGenerateBills),
-    inchargeEnforcementMode: enforcementModeOr(
-      b.inchargeEnforcementMode,
-      DEFAULT_SCHEDULING_CONFIG.inchargeEnforcementMode,
-    ),
     inchargeShareScoringEnabled: boolOr(
       b.inchargeShareScoringEnabled,
       DEFAULT_SCHEDULING_CONFIG.inchargeShareScoringEnabled,
