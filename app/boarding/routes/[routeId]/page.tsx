@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, Users, ListChecks, ChevronLeft, ChevronRight, CalendarClock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -34,6 +34,7 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
   const { routeId } = use(params);
   const { can, isSuperAdmin } = usePermissions();
   const canManage = isSuperAdmin || can('tms.attendance.manage');
+  const qc = useQueryClient();
 
   // Which day's roster. Today is markable; other days are read-only previews
   // (advance bookings for future dates, history for past dates).
@@ -109,7 +110,23 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
         body: JSON.stringify({ routeId, direction: 'onward', marks }),
       });
       const json = await res.json();
+      // Every requested mark was locked by a colleague (or already-true), and
+      // nothing was written — revert. `prev` is already correct for any noop
+      // rows in the batch (their requested status equalled what was there).
+      if (res.status === 409 && json?.reason === 'locked') {
+        setStudents(prev);
+        toast.error(json.error || 'Another staff member has already marked this student.');
+        return;
+      }
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save');
+      if (json.locked?.length > 0) {
+        toast.error(`${json.locked.length} mark(s) belong to another in-charge and were not changed.`);
+      } else if (json.updated === 0 && json.skipped > 0) {
+        toast('Already set to that status — nothing changed.');
+      }
+      // Always resync — the optimistic guess above may not match what the
+      // server actually wrote when a batch was partially locked or a noop.
+      qc.invalidateQueries({ queryKey: ['boarding-roster'] });
     } catch (e) {
       setStudents(prev);
       toast.error(e instanceof Error ? e.message : 'Failed to save attendance');

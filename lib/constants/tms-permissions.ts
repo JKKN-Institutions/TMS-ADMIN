@@ -35,6 +35,15 @@ export const TMS_PERMISSIONS = {
   ATTENDANCE_VIEW: 'tms.attendance.view',
   ATTENDANCE_SCAN: 'tms.attendance.scan',
   ATTENDANCE_MANAGE: 'tms.attendance.manage',
+  /**
+   * Change a mark made by ANOTHER staff member, on any route, outside the
+   * marking window. Separate from ATTENDANCE_MANAGE because transport_boarding
+   * (all 112 boarding staff) and transport_head both hold that one — gating the
+   * override on it would grant it to the very population it constrains.
+   * Pinned to transport_head in
+   * 20260729120100_seed_tms_attendance_override_permission.sql.
+   */
+  ATTENDANCE_OVERRIDE: 'tms.attendance.override',
 
   TRACKING_VIEW: 'tms.tracking.view',
   TRACKING_SHARE: 'tms.tracking.share',

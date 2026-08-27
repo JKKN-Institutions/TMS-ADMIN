@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { groupRosterByStop, buildRosterRows, mergeAttendanceRoster, type RosterRider, type OrderedStop, type RosterRow } from './roster';
+import {
+  groupRosterByStop, buildRosterRows, mergeAttendanceRoster,
+  type RosterRider, type OrderedStop, type RosterRow, type RosterAttendance, type RosterViewer,
+} from './roster';
+
+/** The signed-in staff member most tests render for: an ordinary boarding staffer. */
+const VIEWER: RosterViewer = { actorId: 'me', isOverrideHolder: false, isSuperAdmin: false };
+
+/** An attendance row with the fields a test does not care about defaulted away. */
+const attOf = (o: Partial<RosterAttendance> & { status: string }): RosterAttendance => ({
+  method: null,
+  scanned_at: null,
+  scanned_by: null,
+  marked_by_name: null,
+  previous_status: null,
+  previous_by_name: null,
+  previous_at: null,
+  ...o,
+});
 
 const stops: OrderedStop[] = [
   { id: 's2', name: 'Second', time: '07:20', order: 2 },
@@ -53,8 +71,8 @@ describe('buildRosterRows', () => {
     ({ learner_id, roll, stop_id, name });
 
   it('marks a rider present when an attendance row exists for the leg', () => {
-    const att = new Map([['a', { status: 'present', method: 'qr_scan', scanned_at: '2026-07-11T02:00:00Z' }]]);
-    const rows = buildRosterRows([r('a', '10', 's1')], route, stops, att);
+    const att = new Map([['a', attOf({ status: 'present', method: 'qr_scan', scanned_at: '2026-07-11T02:00:00Z' })]]);
+    const rows = buildRosterRows([r('a', '10', 's1')], route, stops, att, VIEWER);
     expect(rows[0].status).toBe('present');
     expect(rows[0].method).toBe('qr_scan');
     expect(rows[0].scanned_at).toBe('2026-07-11T02:00:00Z');
@@ -62,8 +80,8 @@ describe('buildRosterRows', () => {
   });
 
   it('marks a rider absent (carrying method/time) when an absent row exists; no row → unmarked', () => {
-    const att = new Map([['a', { status: 'absent', method: 'manual', scanned_at: 'x' }]]);
-    const rows = buildRosterRows([r('a', '10', 's1'), r('b', '20', 's2')], route, stops, att);
+    const att = new Map([['a', attOf({ status: 'absent', method: 'manual', scanned_at: 'x' })]]);
+    const rows = buildRosterRows([r('a', '10', 's1'), r('b', '20', 's2')], route, stops, att, VIEWER);
     const a = rows.find((x) => x.learner_id === 'a')!;
     const b = rows.find((x) => x.learner_id === 'b')!;
     expect(a.status).toBe('absent'); // three-state model: 'absent' is a first-class status
@@ -75,14 +93,14 @@ describe('buildRosterRows', () => {
   });
 
   it('resolves the leg-appropriate stop name + time and sorts by stop order then roll', () => {
-    const rows = buildRosterRows([r('a', '30', 's2'), r('b', '10', 's1'), r('c', '20', 's1')], route, stops, new Map());
+    const rows = buildRosterRows([r('a', '30', 's2'), r('b', '10', 's1'), r('c', '20', 's1')], route, stops, new Map(), VIEWER);
     expect(rows.map((x) => x.learner_id)).toEqual(['b', 'c', 'a']); // s1(order1): roll10,20 ; then s2
     expect(rows[0].stop_name).toBe('First');
     expect(rows[0].stop_time).toBe('07:00');
   });
 
   it('buckets riders with null/unknown stops as "Stop not set" and trails them', () => {
-    const rows = buildRosterRows([r('a', '10', null), r('b', '20', 's1'), r('c', '30', 'ghost')], route, stops, new Map());
+    const rows = buildRosterRows([r('a', '10', null), r('b', '20', 's1'), r('c', '30', 'ghost')], route, stops, new Map(), VIEWER);
     expect(rows[0].learner_id).toBe('b');
     const trailing = rows.slice(1);
     expect(trailing.every((x) => x.stop_name === 'Stop not set' && x.stop_time === null)).toBe(true);
@@ -136,7 +154,7 @@ describe('buildRosterRows — ticket state', () => {
   it('carries booked:false through to the row', () => {
     const rows = buildRosterRows(
       [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1', booked: false }],
-      route, stops, new Map()
+      route, stops, new Map(), VIEWER
     );
     expect(rows[0].booked).toBe(false);
     expect(rows[0].status).toBe('unmarked');
@@ -145,18 +163,124 @@ describe('buildRosterRows — ticket state', () => {
   it('defaults booked to true when the rider carries no flag (booking-only callers)', () => {
     const rows = buildRosterRows(
       [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1' }],
-      route, stops, new Map()
+      route, stops, new Map(), VIEWER
     );
     expect(rows[0].booked).toBe(true);
   });
 
   it('still reports a real attendance mark on a rider without a ticket', () => {
-    const att = new Map([['a', { status: 'present', method: 'manual', scanned_at: 't' }]]);
+    const att = new Map([['a', attOf({ status: 'present', method: 'manual', scanned_at: 't' })]]);
     const rows = buildRosterRows(
       [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1', booked: false }],
-      route, stops, att
+      route, stops, att, VIEWER
     );
     expect(rows[0].status).toBe('present');
     expect(rows[0].booked).toBe(false);
+  });
+});
+
+/**
+ * The two gates in series. Gate A (scope) asks whose JOB this learner is; Gate B
+ * (arbitration) asks who owns this ROW. Neither subsumes the other, and the
+ * roster's single can_edit flag has to fold both without the two disagreeing.
+ */
+describe('buildRosterRows — scope and arbitration compose', () => {
+  const route = { id: 'r1', route_number: '05' };
+  const OWNER = 'owner@jkkn.ac.in';
+  const OTHER_IC = 'other@jkkn.ac.in';
+  const only = (learnerId: string) => [{ learner_id: learnerId, name: 'A', roll: '10', stop_id: 's1' }];
+
+  const ownedBy = (email: string, myEmail: string | null, mine: string[]) => ({
+    ownerByLearner: new Map([['a', { staff_email: email, name: 'In-charge' }]]),
+    mine: new Set(mine),
+    myEmail,
+  });
+
+  it('leaves an unmarked row editable when no allocation exists at all', () => {
+    const rows = buildRosterRows(only('a'), route, stops, new Map(), VIEWER);
+    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].lock_reason).toBeNull();
+  });
+
+  it("locks a colleague's mark when there is no allocation (arbitration alone)", () => {
+    const att = new Map([['a', attOf({ status: 'present', scanned_by: 'someone-else' })]]);
+    const rows = buildRosterRows(only('a'), route, stops, att, VIEWER);
+    expect(rows[0].can_edit).toBe(false);
+    expect(rows[0].lock_reason).toBe('locked');
+  });
+
+  // Scope is checked FIRST: naming the owner is more actionable than "locked",
+  // and it says less about who marked what.
+  it("reports not_my_share, not locked, for another in-charge's learner", () => {
+    const att = new Map([['a', attOf({ status: 'present', scanned_by: 'someone-else' })]]);
+    const rows = buildRosterRows(
+      only('a'), route, stops, att, VIEWER, ownedBy(OTHER_IC, OWNER, [OWNER]),
+    );
+    expect(rows[0].lock_reason).toBe('not_my_share');
+    expect(rows[0].owner_email).toBe(OTHER_IC);
+  });
+
+  // The fallback the whole design turns on: ~11% of the bus has no owner, and
+  // those learners must stay markable by anyone on the route.
+  it('leaves an UNOWNED learner editable by anyone on the route', () => {
+    const rows = buildRosterRows(only('a'), route, stops, new Map(), VIEWER, {
+      ownerByLearner: new Map(),
+      mine: new Set([OWNER]),
+      myEmail: OWNER,
+    });
+    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].lock_reason).toBeNull();
+    expect(rows[0].owner_email).toBeNull();
+  });
+
+  it("lets the owner replace a coverer's mark on their own learner", () => {
+    const att = new Map([['a', attOf({ status: 'absent', scanned_by: 'the-coverer' })]]);
+    const rows = buildRosterRows(
+      only('a'), route, stops, att, VIEWER, ownedBy(OWNER, OWNER, [OWNER]),
+    );
+    expect(rows[0].can_edit).toBe(true);
+  });
+
+  // Same row, same marker — but the viewer is merely covering, not the owner.
+  // Cover transfers duty, not authority over data already written.
+  it("refuses a coverer replacing the owner's mark", () => {
+    const att = new Map([['a', attOf({ status: 'absent', scanned_by: 'the-owner-profile' })]]);
+    const rows = buildRosterRows(
+      only('a'), route, stops, att, VIEWER,
+      // In scope (OWNER's share is covered by me) but myEmail !== the owner.
+      ownedBy(OWNER, 'coverer@jkkn.ac.in', [OWNER]),
+    );
+    expect(rows[0].can_edit).toBe(false);
+    expect(rows[0].lock_reason).toBe('locked');
+  });
+
+  it('lets an override holder through the scope gate on any learner', () => {
+    const rows = buildRosterRows(
+      only('a'), route, stops, new Map(),
+      { actorId: 'me', isOverrideHolder: true, isSuperAdmin: false },
+      ownedBy(OTHER_IC, null, []),
+    );
+    expect(rows[0].can_edit).toBe(true);
+  });
+
+  // A rider with no ticket is not markable at all, whoever they belong to, so
+  // that reason outranks both gates.
+  it('reports no_ticket ahead of either gate', () => {
+    const rows = buildRosterRows(
+      [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1', booked: false }],
+      route, stops, new Map(), VIEWER, ownedBy(OTHER_IC, OWNER, [OWNER]),
+    );
+    expect(rows[0].lock_reason).toBe('no_ticket');
+  });
+
+  it('surfaces the replaced mark when one was overridden', () => {
+    const att = new Map([['a', attOf({
+      status: 'present', scanned_by: 'me', marked_by_name: 'Me',
+      previous_status: 'absent', previous_by_name: 'Saranya G', previous_at: 't',
+    })]]);
+    const rows = buildRosterRows(only('a'), route, stops, att, VIEWER);
+    expect(rows[0].previous_status).toBe('absent');
+    expect(rows[0].previous_by_name).toBe('Saranya G');
+    expect(rows[0].marked_by_name).toBe('Me');
   });
 });

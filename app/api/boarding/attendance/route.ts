@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
+import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
 import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
@@ -102,8 +102,16 @@ async function mark(request: NextRequest, auth: AuthContext) {
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (marks.length === 0) return NextResponse.json({ error: 'No marks provided' }, { status: 400 });
 
-    // Authority: staff may only mark for routes they're assigned to.
-    if (!auth.isSuperAdmin) {
+    // Resolved once, early. An override holder (tms.attendance.override --
+    // transport_head) is the designated correction path for a colleague's mark.
+    // Without exempting them from the two gates that follow, the permission
+    // grants nothing reachable: its sole holder is not assigned to most routes,
+    // and corrections are needed exactly when the window has already closed.
+    const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
+
+    // Authority: staff may only mark for routes they're assigned to -- override
+    // holders exempt, since correcting a route they don't work is the point.
+    if (!auth.isSuperAdmin && !isOverrideHolder) {
       const assigned = await getAssignedRouteIdsForUser(auth);
       if (!assigned.includes(routeId)) {
         return NextResponse.json({ error: 'You are not assigned to this route' }, { status: 403 });
@@ -112,14 +120,19 @@ async function mark(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    // Time-window gate: manual marking follows the same window as the scanner.
-    const windows = await loadAttendanceWindows(svc);
-    if (!isDirectionOpen(windows[direction])) {
-      const w = windows[direction];
-      return NextResponse.json({
-        error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
-        reason: 'window_closed',
-      }, { status: 409 });
+    // Time-window gate: manual marking follows the same window as the scanner
+    // -- except for override holders, who exist specifically to fix a mark
+    // AFTER the window closes, the only time a wrong mark is otherwise
+    // unfixable.
+    if (!auth.isSuperAdmin && !isOverrideHolder) {
+      const windows = await loadAttendanceWindows(svc);
+      if (!isDirectionOpen(windows[direction])) {
+        const w = windows[direction];
+        return NextResponse.json({
+          error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+          reason: 'window_closed',
+        }, { status: 409 });
+      }
     }
 
     const cfg = await loadSchedulingConfig(svc);
@@ -188,17 +201,22 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // two, so two of a route's dozen staff tapping the same learner in the same
     // second both saw "unmarked" and the second silently overwrote the first.
     //
-    // p_allow_override is TRUE here on purpose: this change buys atomicity and
-    // the previous_* audit trail, and deliberately does not yet change WHO
-    // wins. PR B narrows this flag to what lib/boarding/attendance-ownership.ts
-    // decides, with no further migration.
+    // GATE B, enforced in the database. The RPC's own WHERE already permits an
+    // unowned row, your own row, and a same-status no-op; p_allow_override is
+    // the ONE remaining question it cannot answer for itself -- may this actor
+    // replace a COLLEAGUE'S differing mark? Only the designated correction path
+    // may. That mirrors decideMark's final branch exactly.
+    //
+    // NOTE: this rule is now expressed twice -- here in SQL, and in
+    // lib/boarding/attendance-ownership.ts for the roster's can_edit hint.
+    // They must agree; nothing mechanically proves they do.
     const { data: outcomes, error } = await svc.rpc('tms_mark_attendance', {
       p_marks: rows,
       p_trip_date: today,
       p_direction: direction,
       p_actor: auth.userId,
       p_method: 'manual',
-      p_allow_override: true,
+      p_allow_override: isOverrideHolder || auth.isSuperAdmin,
     });
     if (error) {
       console.error('boarding manual mark error:', error);
@@ -209,6 +227,38 @@ async function mark(request: NextRequest, auth: AuthContext) {
     const written = results.filter((r) => r.outcome !== 'locked' && r.outcome !== 'noop_same_status').length;
     const skipped = results.filter((r) => r.outcome === 'noop_same_status').length;
     const overrides = results.filter((r) => r.outcome === 'overridden').length;
+    const lockedRows = results.filter((r) => r.outcome === 'locked');
+
+    // Name the owners so the client can say WHO holds the mark, not merely that
+    // something is locked. The raw profiles.id is resolved here and stripped
+    // before the response leaves the server.
+    const lockedNames = lockedRows.length
+      ? await loadMarkerNames(svc, lockedRows.map((r) => r.previous_by))
+      : new Map<string, string>();
+    const locked = lockedRows.map((r) => ({
+      learnerId: r.learner_id,
+      status: r.previous_status,
+      markedByName: (r.previous_by && lockedNames.get(r.previous_by)) || 'another staff member',
+      markedAt: r.previous_at,
+    }));
+
+    // A single locked mark with nothing else in the batch is the common case --
+    // one tap on a stale screen -- and deserves a 409 the client can turn into a
+    // named message. 403 would be wrong: this staffer MAY use the endpoint, this
+    // one row is taken. But when the rest of the batch was already correct
+    // (skipped > 0), the batch as a whole did what was asked: 19 rows needing
+    // nothing must not read as a failure over 1 locked row.
+    if (written === 0 && locked.length > 0 && skipped === 0) {
+      const first = locked[0];
+      return NextResponse.json(
+        {
+          error: `Already marked ${first.status} by ${first.markedByName}. Only they or the transport office can change it.`,
+          reason: 'locked',
+          locked,
+        },
+        { status: 409 },
+      );
+    }
 
     await logActivity(auth, request, {
       module: 'boarding',
@@ -217,9 +267,11 @@ async function mark(request: NextRequest, auth: AuthContext) {
       description:
         `Manually marked attendance for ${written} learner(s) on route ${routeId} (${direction})` +
         (overrides > 0 ? ` — ${overrides} replaced an earlier mark` : ''),
-      metadata: { routeId, direction, count: written, skipped, overrides },
+      metadata: { routeId, direction, count: written, skipped, overrides, locked: locked.length },
     });
-    return NextResponse.json({ success: true, updated: written, skipped });
+    // A partially locked batch still succeeds: one taken row must not fail the
+    // other nineteen. `locked` tells the client which ones to redraw.
+    return NextResponse.json({ success: true, updated: written, skipped, locked });
   } catch (e) {
     console.error('boarding manual mark error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -55,9 +55,19 @@ export default function BoardingAttendancePage() {
   const { data: winData } = useQuery({ queryKey: ['boarding-attendance-window'], queryFn: fetchWindows });
   const windows = winData?.windows ?? DEFAULT_WINDOWS;
 
+  const legOpenNow = isDirectionOpen(windows.onward);
+  const canMarkNow = isToday && legOpenNow;
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['boarding-roster', date, direction],
     queryFn: () => fetchRoster(date, direction),
+    // A route can have a dozen staff splitting this roster, and the global
+    // defaults (staleTime 60s, refetchOnWindowFocus false, no interval) mean a
+    // page held open on a moving bus never shows a colleague's marks at all.
+    // Poll only while marking is possible -- a past day cannot change, so
+    // polling it is pure load.
+    refetchInterval: canMarkNow ? 15_000 : false,
+    refetchOnWindowFocus: true,
   });
   useEffect(() => {
     if (isError) toast.error(error instanceof Error ? error.message : 'Failed to load roster');
@@ -97,6 +107,14 @@ export default function BoardingAttendancePage() {
           body: JSON.stringify({ routeId: row.route_id, direction, marks: [{ learnerId: row.learner_id, status }] }),
         });
         const json = await res.json();
+        // 409 = a colleague owns this mark. The roster is polled, not live, so
+        // this is reachable from a stale screen even though the button rendered
+        // -- refetch so the row redraws as Locked.
+        if (res.status === 409 && json?.reason === 'locked') {
+          toast.error(json.error || 'Another staff member has already marked this student.');
+          qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+          return;
+        }
         if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark attendance');
         toast.success(`Marked ${row.name} ${status}`);
         qc.invalidateQueries({ queryKey: ['boarding-roster'] });

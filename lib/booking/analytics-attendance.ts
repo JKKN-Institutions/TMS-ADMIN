@@ -14,7 +14,7 @@
  */
 import { pct } from './analytics-dims';
 import type {
-  AttendanceBlock, AttendanceRow, BookingRow, LabelMap, Labels, LearnerDim, ShowRow,
+  AttendanceBlock, AttendanceRow, BookingRow, LabelMap, Labels, LearnerDim, MarkerRow, ShowRow,
 } from './analytics-types';
 
 interface Tally {
@@ -81,6 +81,32 @@ export interface AttendanceInput {
   learners: Map<string, LearnerDim>;
   labels: Labels;
   unavailable?: boolean;
+  /**
+   * Lowercased emails of the ACTIVE in-charges on the in-scope routes — the
+   * population "marked nothing" is measured against.
+   *
+   * OPTIONAL, unlike buildRosterRows' `viewer`, and for the opposite reason: an
+   * empty list cannot unlock anything. It degrades to an honest "0 of 0 assigned
+   * in-charges" rather than fabricating absentees, and the route always passes it.
+   */
+  assignedStaffEmails?: string[];
+  /** Marker profiles.id → their lowercased email, for the intersection below. */
+  markerEmailById?: Map<string, string>;
+  /**
+   * Whether the analysed range extends to today. The assignment roster has no
+   * effective-dating, so `assignedStaffTotal` is always "who is assigned NOW" —
+   * only honest to headline as a per-range figure when the range reaches today.
+   * Defaults false so the caveat-bearing note stays hidden unless a caller opts in.
+   */
+  rangeIncludesToday?: boolean;
+  /**
+   * True when a filter OTHER than route narrows the attendance population. The
+   * assignment roster can only be scoped by route, so under any other filter the
+   * numerator is a slice while the denominator stays whole — and an assignment-based
+   * "who marked nothing" claim stops being meaningful. Defaults true so a caller that
+   * forgets it suppresses the claim rather than overstating it.
+   */
+  numeratorFiltered?: boolean;
 }
 
 export function aggregateAttendance({
@@ -92,6 +118,10 @@ export function aggregateAttendance({
   learners,
   labels,
   unavailable = false,
+  assignedStaffEmails = [],
+  markerEmailById = new Map(),
+  rangeIncludesToday = false,
+  numeratorFiltered = true,
 }: AttendanceInput): AttendanceBlock {
   const key = (learner: string, date: string) => `${learner}:${date}`;
 
@@ -167,6 +197,42 @@ export function aggregateAttendance({
     rows: AttendanceRow[], pick: (a: AttendanceRow) => T, value: T
   ) => rows.filter((a) => pick(a) === value).length;
 
+  // Who did the marking. Routes commonly have 4-12 in-charges sharing one roster,
+  // and scanned_by has been recorded since the scanner shipped without ever being
+  // read — so a route where four of twelve staff did everything has looked
+  // identical to one where all twelve did.
+  //
+  // Measured over the COMPOSITION population, like byStatus/byDirection/byMethod.
+  // The join population is deliberately un-narrowed and would ignore the tab's
+  // filters entirely.
+  const staffTally = new Map<string, { marks: number; present: number; absent: number }>();
+  for (const a of attendanceForComposition) {
+    if (!a.scanned_by) continue;
+    const t = staffTally.get(a.scanned_by) ?? { marks: 0, present: 0, absent: 0 };
+    t.marks += 1;
+    if (a.status === 'present') t.present += 1;
+    else t.absent += 1;
+    staffTally.set(a.scanned_by, t);
+  }
+  const markedByStaff: MarkerRow[] = [...staffTally.entries()]
+    .map(([id, t]) => ({ id, label: labels.staff.get(id) ?? id, ...t }))
+    .sort((a, b) => b.marks - a.marks || a.label.localeCompare(b.label));
+
+  // Intersect on EMAIL, not on profile id. tms_staff_route_assignment.staff_email
+  // is a raw string (all lowercase in prod) while 6 profiles.email values carry
+  // uppercase, so an id-side or exact-string join silently drops those staff and
+  // reports working in-charges as having marked nothing.
+  //
+  // Intersecting rather than subtracting also keeps this correct when a marker
+  // holds no assignment at all — a super admin marking a route would otherwise
+  // drive the count negative.
+  const assigned = new Set(assignedStaffEmails);
+  const assignedWhoMarked = new Set(
+    [...staffTally.keys()]
+      .map((id) => markerEmailById.get(id) ?? '')
+      .filter((email) => assigned.has(email)),
+  );
+
   return {
     unavailable,
     // Coverage counts SCANNED SUBSETS of the analysed bookings, not raw
@@ -236,5 +302,10 @@ export function aggregateAttendance({
     // [0,15] off this array under a "Top 15" label — so the chart showed the
     // alphabetically-first 15 with the tallest bar buried mid-list.
     byDepartment: showRows(deptMap, labels.departments),
+    markedByStaff,
+    staffWithNoMarks: assigned.size - assignedWhoMarked.size,
+    assignedStaffTotal: assigned.size,
+    rangeIncludesToday,
+    numeratorFiltered,
   };
 }

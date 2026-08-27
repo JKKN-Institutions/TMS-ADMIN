@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X, Ticket, TicketX } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -158,10 +158,23 @@ export function getRosterColumns(opts: {
       size: 110,
       cell: ({ row }) =>
         row.original.status !== 'unmarked' ? (
-          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
-            {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
-            {fmtTime(row.original.scanned_at)}
-          </span>
+          <div className="whitespace-nowrap">
+            <span className="inline-flex items-center gap-1.5 text-gray-500">
+              {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
+              {fmtTime(row.original.scanned_at)}
+            </span>
+            {/* A dozen in-charges share this roster, so an unattributed mark
+                cannot be acted on: "who already did this?" is the question. */}
+            {row.original.marked_by_name && (
+              <div className="text-xs text-gray-400">by {row.original.marked_by_name}</div>
+            )}
+            {row.original.previous_status && (
+              <div className="text-xs text-amber-700 dark:text-amber-300">
+                was {row.original.previous_status}
+                {row.original.previous_by_name ? ` · ${row.original.previous_by_name}` : ''}
+              </div>
+            )}
+          </div>
         ) : (
           <span className="text-gray-400">—</span>
         ),
@@ -181,11 +194,25 @@ export function getRosterColumns(opts: {
         // mark control; the Ticket column already says why.
         if (!row.original.booked) return <span className="text-xs text-gray-400">—</span>;
         const busy = opts.busyId === row.original.learner_id;
-        // Ownership gate: the in-charge can see the whole bus but only marks their own
-        // share. Not-mine rows keep the button visible (so the state stays legible) but
-        // disabled, with a tooltip naming whose share it is.
-        const disabled = !row.original.is_mine || busy;
-        const title = !row.original.is_mine ? `${row.original.owner_name ?? 'Another in-charge'} marks this student` : undefined;
+        // ONE server-decided flag folds both gates -- scope (whose share is this
+        // learner?) and arbitration (whose mark is already on this row?). The
+        // client never re-derives either; lock_reason only picks the wording.
+        const r = row.original;
+        if (r.lock_reason === 'locked') {
+          return (
+            <span
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              title={`${r.marked_by_name ?? 'Another staff member'} marked this student. Only they or the transport office can change it.`}
+            >
+              <Lock className="h-3.5 w-3.5" /> Locked
+            </span>
+          );
+        }
+        const disabled = !r.can_edit || busy;
+        const title =
+          r.lock_reason === 'not_my_share'
+            ? `${r.owner_name ?? 'Another in-charge'} marks this student`
+            : undefined;
         // Single toggle showing the NEXT action: present → mark Absent, else → mark Present.
         const next: 'present' | 'absent' = row.original.status === 'present' ? 'absent' : 'present';
         return next === 'present' ? (

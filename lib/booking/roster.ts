@@ -12,6 +12,9 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
+// The arbitration rule lives with the boarding domain that enforces it, so the
+// roster's can_edit flag and the API routes' write gate can never disagree.
+import { decideMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
 import { bookedCount, routeCapacity } from './repo';
 
 export interface RosterRider {
@@ -166,6 +169,51 @@ export interface RosterRow {
   owner_name: string | null;
   /** True when the requesting staff owns this learner, or covers their owner today. */
   is_mine: boolean;
+  /** Who actually marked this row, resolved to a name; null when unmarked or orphaned. */
+  marked_by_name: string | null;
+  /**
+   * Whether THIS viewer may change the row, folding BOTH gates: scope (is this
+   * learner mine?) and arbitration (is this row someone else's?). A rendering
+   * hint only — the write routes re-decide server-side, so a client that
+   * ignores it is still denied.
+   *
+   * Deliberately a single flag. Two independent booleans for "can I press this
+   * button" is exactly the drift this change exists to prevent.
+   */
+  can_edit: boolean;
+  /** Why can_edit is false, so the UI can say which gate closed. */
+  lock_reason: 'not_my_share' | 'locked' | 'no_ticket' | null;
+  /** Set only when this mark replaced an earlier one (scan or transport-head override). */
+  previous_status: 'present' | 'absent' | null;
+  previous_by_name: string | null;
+  previous_at: string | null;
+}
+
+/** One learner's attendance for the leg, with marker names already resolved. */
+export interface RosterAttendance {
+  status: string;
+  method: string | null;
+  scanned_at: string | null;
+  scanned_by: string | null;
+  marked_by_name: string | null;
+  previous_status: string | null;
+  previous_by_name: string | null;
+  previous_at: string | null;
+}
+
+/**
+ * Everything the row-level gates need about the signed-in staff member.
+ *
+ * `viewer` is REQUIRED rather than optional on purpose: an omitted viewer would
+ * have to default to something, and any default that unlocks rows silently
+ * disables the lock for every caller that forgets it. `ownership` stays
+ * optional because its absence has a real, safe meaning — no allocation exists,
+ * so Gate A does not apply.
+ */
+export interface RosterViewer {
+  actorId: string;
+  isOverrideHolder: boolean;
+  isSuperAdmin: boolean;
 }
 
 /**
@@ -179,12 +227,15 @@ export function buildRosterRows(
   riders: RosterRider[],
   route: { id: string; route_number: string | null },
   orderedStops: OrderedStop[],
-  attendanceByLearner: Map<string, { status: string; method: string | null; scanned_at: string | null }>,
+  attendanceByLearner: Map<string, RosterAttendance>,
+  viewer: RosterViewer,
   ownership?: {
     /** learner_id -> owning in-charge. */
     ownerByLearner: Map<string, { staff_email: string; name: string }>;
     /** Emails whose learners belong to the caller (their own + any covered today). */
     mine: Set<string>;
+    /** The caller's OWN email, to tell owning a learner from merely covering them. */
+    myEmail: string | null;
   },
 ): RosterRow[] {
   const byId = new Map(orderedStops.map((s) => [s.id, s] as const));
@@ -199,6 +250,55 @@ export function buildRosterRows(
       att?.status === 'present' ? 'present' : att?.status === 'absent' ? 'absent' : 'unmarked';
     const marked = status !== 'unmarked';
     const owner = ownership?.ownerByLearner.get(rider.learner_id) ?? null;
+    const booked = rider.booked !== false;
+
+    // ── Gate A: scope. Is this learner mine to touch at all? ──
+    // No ownership data (flag off, or the allocation is empty) means the
+    // pre-shares behaviour: everything on the route is in scope. An UNOWNED
+    // learner is in scope for everyone on the route too — that is the fallback
+    // that keeps the ~11% the allocation has not reached markable.
+    const inScope =
+      !ownership || !owner
+        ? true
+        : ownership.mine.has(owner.staff_email) || viewer.isOverrideHolder || viewer.isSuperAdmin;
+    // Owning a learner is narrower than having them in scope: a coverer has
+    // them in scope but does not own them, and that difference decides who may
+    // replace whose mark below.
+    const isLearnerOwner = Boolean(
+      owner && ownership?.myEmail && owner.staff_email === ownership.myEmail,
+    );
+
+    // ── Gate B: arbitration. Is this row already someone else's? ──
+    // The row's toggle offers the OPPOSITE status, so that is the write whose
+    // permission decides whether a control renders at all.
+    const notLocked =
+      !marked ||
+      decideMark({
+        existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
+        requestedStatus: status === 'present' ? 'absent' : 'present',
+        actorId: viewer.actorId,
+        isOverrideHolder: viewer.isOverrideHolder,
+        isSuperAdmin: viewer.isSuperAdmin,
+        viaScan: false,
+        isLearnerOwner,
+      }).action !== 'deny';
+
+    // Precedence matches the write routes: scope before arbitration. "Ask
+    // Priya, they own this student" is more actionable than "someone locked
+    // this row", and it leaks less about who marked what.
+    const lock_reason: RosterRow['lock_reason'] = !booked
+      ? 'no_ticket'
+      : !inScope
+        ? 'not_my_share'
+        : !notLocked
+          ? 'locked'
+          : null;
+
+    const prev =
+      marked && (att!.previous_status === 'present' || att!.previous_status === 'absent')
+        ? (att!.previous_status as 'present' | 'absent')
+        : null;
+
     return {
       learner_id: rider.learner_id,
       name: rider.name,
@@ -213,13 +313,16 @@ export function buildRosterRows(
       scanned_at: marked ? att!.scanned_at : null,
       // Ticket state is INDEPENDENT of attendance state: a rider with no booking
       // can still carry a real manual mark, and must keep showing it.
-      booked: rider.booked !== false,
+      booked,
       owner_email: owner?.staff_email ?? null,
       owner_name: owner?.name ?? null,
-      // No ownership data at all (flag off, or the table is empty) means the
-      // old behaviour: everything is markable. The mark API is the authority
-      // that enforces the restriction; this flag only drives the UI.
-      is_mine: ownership ? Boolean(owner && ownership.mine.has(owner.staff_email)) : true,
+      is_mine: inScope,
+      marked_by_name: marked ? att!.marked_by_name : null,
+      can_edit: lock_reason === null,
+      lock_reason,
+      previous_status: prev,
+      previous_by_name: prev ? att!.previous_by_name : null,
+      previous_at: prev ? att!.previous_at : null,
     };
   });
 

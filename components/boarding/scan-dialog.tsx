@@ -16,6 +16,10 @@ type ScanResult = {
   reason?: 'not_booked' | 'window_closed';
   seatsRemaining?: number;
   overCapacity?: boolean;
+  /** The learner was already marked present — nothing was written this time. */
+  alreadyMarked?: { by: string; at: string | null };
+  /** This scan corrected an earlier absent mark made by someone else. */
+  overrode?: { from: 'present' | 'absent'; by: string; at: string | null };
   error?: string;
 };
 
@@ -233,12 +237,31 @@ export default function ScanDialog({
             {result.ok ? (
               <div>
                 <p className="font-medium text-green-700 dark:text-green-300">
-                  ✓ Marked present ({result.direction}){result.walkUp ? ' · walk-up' : ''}
+                  {result.alreadyMarked
+                    ? '✓ Already marked present'
+                    : `✓ Marked present (${result.direction})`}
+                  {result.walkUp ? ' · walk-up' : ''}
                 </p>
                 <p>
                   {result.learner?.name}
                   {result.learner?.rollNumber ? ` · ${result.learner.rollNumber}` : ''}
                 </p>
+                {/* A dozen in-charges can share this route. Naming who marked
+                    first stops the second scanner wondering if the scan failed. */}
+                {result.alreadyMarked && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Marked by {result.alreadyMarked.by}
+                    {result.alreadyMarked.at
+                      ? ` at ${new Date(result.alreadyMarked.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                      : ''}
+                    . Nothing changed.
+                  </p>
+                )}
+                {result.overrode && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    ⚠ Was marked {result.overrode.from} by {result.overrode.by} — corrected to present.
+                  </p>
+                )}
                 {result.overCapacity && (
                   <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">⚠ Bus over capacity — boarded as overflow.</p>
                 )}
