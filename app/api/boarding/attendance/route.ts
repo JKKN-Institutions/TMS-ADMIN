@@ -32,14 +32,21 @@ interface StudentLite { id: string; transport_route_id: string | null; transport
 interface MarkOutcome {
   learner_id: string;
   outcome: 'inserted' | 'updated_own' | 'overridden' | 'noop_same_status' | 'locked';
-  previous_status: 'present' | 'absent' | null;
-  previous_by: string | null;
-  previous_at: string | null;
+  /** The row as it was when this call reached it — for a 'locked' row, what still stands. */
+  existing_status: 'present' | 'absent' | null;
+  existing_by: string | null;
+  existing_at: string | null;
 }
 
 /**
- * The learner ids this caller may mark on this route and date: their own share
- * plus any share they accepted cover for.
+ * The learner ids this caller may mark on this route and date, split two ways:
+ *
+ *   all — their own share PLUS any share they accepted cover for. This is Gate
+ *         A: may they touch the learner at all?
+ *   own — their own share ONLY. Narrower, and it decides a different question:
+ *         owning a learner lets you replace a COVERER's mark on them, while a
+ *         coverer may never replace the owner's. Cover transfers duty, not
+ *         authority over data already written.
  *
  * Returns null when the share restriction does not apply — the flag is off, or
  * the caller is a super admin, or the route has no allocation at all. A null
@@ -49,7 +56,7 @@ interface MarkOutcome {
 async function markableLearnerIds(
   svc: SupabaseClient,
   opts: { callerEmail: string | null; routeId: string; date: string; isSuperAdmin: boolean; enabled: boolean },
-): Promise<Set<string> | null> {
+): Promise<{ all: Set<string>; own: Set<string> } | null> {
   if (!opts.enabled || opts.isSuperAdmin || !opts.callerEmail) return null;
 
   const { data: myAssignment } = await svc
@@ -62,7 +69,8 @@ async function markableLearnerIds(
   const myAssignmentId = (myAssignment as { id: string } | null)?.id ?? null;
   if (!myAssignmentId) return null; // Not an in-charge here; the route check already passed.
 
-  const ids = new Set(await loadShareLearnerIds(svc, myAssignmentId));
+  const own = new Set(await loadShareLearnerIds(svc, myAssignmentId));
+  const ids = new Set(own);
 
   const { data: absData } = await svc
     .from('tms_incharge_absence')
@@ -76,7 +84,7 @@ async function markableLearnerIds(
   // An allocation that produced nothing for this person is a coverage gap, not
   // a lockout. Restricting them to an empty set would make the route
   // unmarkable, which is worse than the problem this feature solves.
-  return ids.size > 0 ? ids : null;
+  return ids.size > 0 ? { all: ids, own } : null;
 }
 
 async function mark(request: NextRequest, auth: AuthContext) {
@@ -155,7 +163,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     });
 
     if (markable) {
-      const outside = marks.filter((m) => !markable.has(m.learnerId)).map((m) => m.learnerId);
+      const outside = marks.filter((m) => !markable.all.has(m.learnerId)).map((m) => m.learnerId);
       if (outside.length > 0) {
         // Name the owner. A bare 403 tells the in-charge nothing they can act
         // on, and "ask Priya, they own this student" is the whole point of
@@ -190,6 +198,11 @@ async function mark(request: NextRequest, auth: AuthContext) {
         route_id: routeId,
         stop_id: stopByLearner.get(m.learnerId) ?? null,
         status: m.status,
+        // PER-LEARNER entitlement. p_allow_override below is a per-CALL flag and
+        // cannot express this: within one batch the caller may own some learners
+        // and merely cover others, and only the owned ones outrank a coverer's
+        // existing mark. Mirrors decideMark's isLearnerOwner.
+        allow_override: markable ? markable.own.has(m.learnerId) : false,
       }));
 
     if (rows.length === 0) {
@@ -233,13 +246,13 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // something is locked. The raw profiles.id is resolved here and stripped
     // before the response leaves the server.
     const lockedNames = lockedRows.length
-      ? await loadMarkerNames(svc, lockedRows.map((r) => r.previous_by))
+      ? await loadMarkerNames(svc, lockedRows.map((r) => r.existing_by))
       : new Map<string, string>();
     const locked = lockedRows.map((r) => ({
       learnerId: r.learner_id,
-      status: r.previous_status,
-      markedByName: (r.previous_by && lockedNames.get(r.previous_by)) || 'another staff member',
-      markedAt: r.previous_at,
+      status: r.existing_status,
+      markedByName: (r.existing_by && lockedNames.get(r.existing_by)) || 'another staff member',
+      markedAt: r.existing_at,
     }));
 
     // A single locked mark with nothing else in the batch is the common case --
@@ -429,7 +442,7 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     });
 
     if (markable) {
-      const outside = learnerIds.filter((id) => !markable.has(id));
+      const outside = learnerIds.filter((id) => !markable.all.has(id));
       if (outside.length > 0) {
         return NextResponse.json({
           error: 'Some of these students belong to another in-charge on this route.',

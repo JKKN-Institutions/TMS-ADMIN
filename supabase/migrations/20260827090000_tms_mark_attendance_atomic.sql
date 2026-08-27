@@ -19,12 +19,17 @@
 -- inside a database function. A trigger remains available later as
 -- defence-in-depth against direct SQL, but it cannot be the primary mechanism.
 --
--- BEHAVIOUR-PRESERVING ON PURPOSE. Both call sites pass p_allow_override => true
--- in this change, which reproduces today's last-write-wins exactly. This
--- migration buys atomicity and the previous_* audit trail, and nothing else. The
--- follow-up (PR B) narrows that flag to what lib/boarding/attendance-ownership.ts
--- decides, at which point the lock becomes real — as a code change, with no
--- further migration.
+-- WHO MAY REPLACE WHOSE MARK. The WHERE below settles three of the four cases
+-- on its own -- an orphaned row, your own row, and a same-status no-op need no
+-- caller input. Only the fourth needs an answer from outside: may this actor
+-- replace a COLLEAGUE'S differing mark? Two flags carry it, OR'd together:
+--   p_allow_override      -- the caller's own entitlement (transport_head, a
+--                            super admin, or a QR scan, which is physical proof)
+--   marks[].allow_override -- a PER-LEARNER entitlement, because owning a learner
+--                            outranks a coverer who marked them, and that cannot
+--                            be expressed once for a whole batch.
+-- Together these mirror lib/boarding/attendance-ownership.ts decideMark exactly.
+-- lib/boarding/attendance-sql-parity.test.ts pins the correspondence.
 --
 -- Additive only: no column is dropped, and the unique
 -- (learner_id, trip_date, direction) key is untouched. Attendance stays SHARED
@@ -37,14 +42,24 @@ create or replace function public.tms_mark_attendance(
   p_direction      text,
   p_actor          uuid,
   p_method         text default 'manual',
+  -- Call-level permission to replace ANOTHER staff member's differing mark.
+  -- Per-mark `allow_override` in p_marks is OR'd with this: some entitlements
+  -- are the caller's (transport_head, super admin, a QR scan) and some are
+  -- per-learner (owning the learner outranks a coverer who marked them), and a
+  -- single call-level flag cannot express the second.
   p_allow_override boolean default false
 )
 returns table (
   learner_id      uuid,
   outcome         text,
-  previous_status text,
-  previous_by     uuid,
-  previous_at     timestamptz
+  -- The row AS IT WAS when this call reached it. For an 'overridden' outcome
+  -- that is what got replaced; for a 'locked' outcome it is what still stands
+  -- and who holds it. Named existing_* rather than previous_* precisely because
+  -- those two readings differ -- the table's own previous_* columns mean only
+  -- the first.
+  existing_status text,
+  existing_by     uuid,
+  existing_at     timestamptz
 )
 language plpgsql
 as $$
@@ -100,7 +115,11 @@ begin
     on conflict (learner_id, trip_date, direction) do update
     set status              = excluded.status,
         method              = excluded.method,
-        is_walk_up          = excluded.is_walk_up,
+        -- Only the SCANNER knows about walk-ups. A manual mark carries no
+        -- is_walk_up key at all, and must not silently clear the flag on a
+        -- learner the scanner recorded as boarding without a booking.
+        is_walk_up          = case when m ? 'is_walk_up'
+                                   then excluded.is_walk_up else t.is_walk_up end,
         scanned_by          = excluded.scanned_by,
         scanned_at          = excluded.scanned_at,
         -- One level of history, and only when this write actually REPLACED
@@ -126,14 +145,15 @@ begin
         and (
           t.scanned_by is null                 -- orphaned: the marker's profile was deleted
           or t.scanned_by = p_actor            -- your own mark is always yours to correct
-          or p_allow_override                  -- caller decided this write may replace another's
+          or p_allow_override                  -- caller-level entitlement
+          or coalesce((m->>'allow_override')::boolean, false)  -- per-learner entitlement
         )
     returning true into v_written;
 
     learner_id      := v_learner;
-    previous_status := v_prev.status;
-    previous_by     := v_prev.scanned_by;
-    previous_at     := v_prev.scanned_at;
+    existing_status := v_prev.status;
+    existing_by     := v_prev.scanned_by;
+    existing_at     := v_prev.scanned_at;
 
     if v_written then
       outcome := case

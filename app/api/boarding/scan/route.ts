@@ -36,9 +36,10 @@ interface LearnerLite {
 interface ScanOutcome {
   learner_id: string;
   outcome: 'inserted' | 'updated_own' | 'overridden' | 'noop_same_status' | 'locked';
-  previous_status: 'present' | 'absent' | null;
-  previous_by: string | null;
-  previous_at: string | null;
+  /** The row as it was when this scan reached it. */
+  existing_status: 'present' | 'absent' | null;
+  existing_by: string | null;
+  existing_at: string | null;
 }
 
 /**
@@ -211,7 +212,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       description:
         `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}` +
         (alreadyPresent ? ' — already present, nothing written' : '') +
-        (outcome?.outcome === 'overridden' ? ` — replaced an earlier "${outcome.previous_status}" mark` : ''),
+        (outcome?.outcome === 'overridden' ? ` — replaced an earlier "${outcome.existing_status}" mark` : ''),
       metadata: {
         learnerId: learner.id,
         direction,
