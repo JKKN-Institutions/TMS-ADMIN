@@ -5,17 +5,8 @@ import { logActivity } from '@/lib/activity/log';
 import { grantBoardingRole, maybeRevokeBoardingRole } from '@/lib/boarding/roles';
 import { countRouteRoster } from '@/lib/passengers/route-roster';
 import { recomputeRouteAllocation } from '@/lib/boarding/allocation-repo';
+import { requireAssign } from '@/lib/staff-assignments/permissions';
 import type { SupabaseClient } from '@supabase/supabase-js';
-
-// Service-role client bypasses RLS, so writes are gated by an explicit
-// tms.drivers.assign check here (defense-in-depth; super admins bypass).
-async function requireAssign(auth: AuthContext): Promise<boolean> {
-  if (auth.isSuperAdmin) return true;
-  const { data } = await auth.supabase.rpc('user_has_permission', {
-    permission_name: 'tms.drivers.assign',
-  });
-  return !!data;
-}
 
 // Columns of tms_route we surface alongside each assignment (joined in JS).
 // NOTE: current_passengers is intentionally NOT selected — it is a dead column
