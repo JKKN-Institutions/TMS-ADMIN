@@ -32,6 +32,15 @@ interface LearnerLite {
   transport_stop_id: string | null;
 }
 
+/** One learner's result from the tms_mark_attendance RPC. */
+interface ScanOutcome {
+  learner_id: string;
+  outcome: 'inserted' | 'updated_own' | 'overridden' | 'noop_same_status' | 'locked';
+  previous_status: 'present' | 'absent' | null;
+  previous_by: string | null;
+  previous_at: string | null;
+}
+
 /**
  * Resolve the learner behind a scan input. Two shapes are accepted:
  *  - the signed QR / long token, whose identity is embedded → verified directly;
@@ -161,30 +170,37 @@ async function scan(request: NextRequest, auth: AuthContext) {
       overCapacity = seats <= 0;
     }
 
-    const up = await svc
-      .from('tms_attendance')
-      .upsert(
+    // Atomic: decision and write in one statement (see the migration comment on
+    // tms_mark_attendance). p_allow_override stays TRUE here even after PR B —
+    // a scanned pass is physical proof the learner boarded, so a scan may
+    // always replace an earlier mark. It only ever requests 'present', so that
+    // can only ever be absent → present; a scan can never mark someone absent.
+    const up = await svc.rpc('tms_mark_attendance', {
+      p_marks: [
         {
           learner_id: learner.id,
           route_id: learner.transport_route_id,
           stop_id: learner.transport_stop_id,
-          trip_date: today,
-          direction,
           status: 'present',
-          method: 'qr_scan',
           is_walk_up: isWalkUp,
-          scanned_by: auth.userId,
-          scanned_at: new Date().toISOString(),
         },
-        { onConflict: 'learner_id,trip_date,direction' }
-      )
-      .select('id')
-      .maybeSingle();
+      ],
+      p_trip_date: today,
+      p_direction: direction,
+      p_actor: auth.userId,
+      p_method: 'qr_scan',
+      p_allow_override: true,
+    });
 
     if (up.error) {
-      console.error('boarding scan upsert error:', up.error);
+      console.error('boarding scan write error:', up.error);
       return NextResponse.json({ ok: false, error: 'Failed to record attendance' }, { status: 500 });
     }
+
+    // A re-scan of an already-present learner writes NOTHING, so credit for the
+    // mark stays with whoever actually scanned them first.
+    const outcome = (up.data as ScanOutcome[] | null)?.[0] ?? null;
+    const alreadyPresent = outcome?.outcome === 'noop_same_status';
 
     await logActivity(auth, request, {
       module: 'boarding',
@@ -192,8 +208,17 @@ async function scan(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_attendance',
       entityId: learner.id,
       entityLabel: learner.roll_number ?? name,
-      description: `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}`,
-      metadata: { learnerId: learner.id, direction, rollNumber: learner.roll_number, walkUp: isWalkUp },
+      description:
+        `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}` +
+        (alreadyPresent ? ' — already present, nothing written' : '') +
+        (outcome?.outcome === 'overridden' ? ` — replaced an earlier "${outcome.previous_status}" mark` : ''),
+      metadata: {
+        learnerId: learner.id,
+        direction,
+        rollNumber: learner.roll_number,
+        walkUp: isWalkUp,
+        outcome: outcome?.outcome ?? null,
+      },
     });
     return NextResponse.json({
       ok: true,
@@ -201,6 +226,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       direction,
       walkUp: isWalkUp,
       overCapacity: overCapacity || undefined,
+      alreadyPresent: alreadyPresent || undefined,
     });
   } catch (e) {
     console.error('boarding scan error:', e);

@@ -28,6 +28,15 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 interface MarkInput { learnerId: string; status: 'present' | 'absent' }
 interface StudentLite { id: string; transport_route_id: string | null; transport_stop_id: string | null }
 
+/** One learner's result from the tms_mark_attendance RPC. */
+interface MarkOutcome {
+  learner_id: string;
+  outcome: 'inserted' | 'updated_own' | 'overridden' | 'noop_same_status' | 'locked';
+  previous_status: 'present' | 'absent' | null;
+  previous_by: string | null;
+  previous_at: string | null;
+}
+
 /**
  * The learner ids this caller may mark on this route and date: their own share
  * plus any share they accepted cover for.
@@ -161,41 +170,56 @@ async function mark(request: NextRequest, auth: AuthContext) {
       if (s.transport_route_id === routeId) stopByLearner.set(s.id, s.transport_stop_id ?? null);
     }
 
-    const now = new Date().toISOString();
     const rows = marks
       .filter((m) => stopByLearner.has(m.learnerId) && (m.status === 'present' || m.status === 'absent'))
       .map((m) => ({
         learner_id: m.learnerId,
         route_id: routeId,
         stop_id: stopByLearner.get(m.learnerId) ?? null,
-        trip_date: today,
-        direction,
         status: m.status,
-        method: 'manual',
-        scanned_by: auth.userId,
-        scanned_at: now,
       }));
 
     if (rows.length === 0) {
       return NextResponse.json({ error: 'No valid learners for this route' }, { status: 400 });
     }
 
-    const { error } = await svc
-      .from('tms_attendance')
-      .upsert(rows, { onConflict: 'learner_id,trip_date,direction' });
+    // Atomic: the decision and the write are ONE statement per learner, inside
+    // the database. The read-then-upsert this replaces held nothing between the
+    // two, so two of a route's dozen staff tapping the same learner in the same
+    // second both saw "unmarked" and the second silently overwrote the first.
+    //
+    // p_allow_override is TRUE here on purpose: this change buys atomicity and
+    // the previous_* audit trail, and deliberately does not yet change WHO
+    // wins. PR B narrows this flag to what lib/boarding/attendance-ownership.ts
+    // decides, with no further migration.
+    const { data: outcomes, error } = await svc.rpc('tms_mark_attendance', {
+      p_marks: rows,
+      p_trip_date: today,
+      p_direction: direction,
+      p_actor: auth.userId,
+      p_method: 'manual',
+      p_allow_override: true,
+    });
     if (error) {
       console.error('boarding manual mark error:', error);
       return NextResponse.json({ error: 'Failed to save attendance' }, { status: 500 });
     }
 
+    const results = (outcomes ?? []) as MarkOutcome[];
+    const written = results.filter((r) => r.outcome !== 'locked' && r.outcome !== 'noop_same_status').length;
+    const skipped = results.filter((r) => r.outcome === 'noop_same_status').length;
+    const overrides = results.filter((r) => r.outcome === 'overridden').length;
+
     await logActivity(auth, request, {
       module: 'boarding',
       action: 'mark',
       entityType: 'tms_attendance',
-      description: `Manually marked attendance for ${rows.length} learner(s) on route ${routeId} (${direction})`,
-      metadata: { routeId, direction, count: rows.length },
+      description:
+        `Manually marked attendance for ${written} learner(s) on route ${routeId} (${direction})` +
+        (overrides > 0 ? ` — ${overrides} replaced an earlier mark` : ''),
+      metadata: { routeId, direction, count: written, skipped, overrides },
     });
-    return NextResponse.json({ success: true, updated: rows.length });
+    return NextResponse.json({ success: true, updated: written, skipped });
   } catch (e) {
     console.error('boarding manual mark error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
