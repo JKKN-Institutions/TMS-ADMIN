@@ -30,10 +30,20 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
 }
 
 /**
- * Three states, not two. "Without ticket" and "Rode without ticket" look alike
- * but mean very different things: the first is the ~1,000 riders a day who did
- * not book, most of whom stayed home; the second is the far smaller set someone
- * actually watched board. Rendering them identically would waste the record.
+ * Three states, not two — and the two unbooked ones must not READ alike.
+ *
+ * They were first shipped as "Without ticket" and "Rode without ticket", which
+ * differ by one word and are indistinguishable when an in-charge scans the list
+ * on a moving bus. Staff could not tell them apart, so the labels were changed
+ * to share no leading words at all:
+ *
+ *   Not booked                 — no booking today. A QUESTION, not an accusation:
+ *                                ~1,000 riders a day, most of whom stayed home.
+ *                                Nothing has been recorded about them.
+ *   Travelled without booking  — the ANSWER. An in-charge saw this student board
+ *                                anyway and said so.
+ *
+ * Same student before and after the Boarded tap; the badge is what changes.
  */
 function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
   if (booked)
@@ -44,13 +54,13 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
     );
   if (walkUp)
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">
-        <TicketX className="h-3 w-3" /> Rode without ticket
+      <span className="inline-flex items-start gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">
+        <TicketX className="mt-0.5 h-3 w-3 shrink-0" /> Travelled without booking
       </span>
     );
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
-      <TicketX className="h-3 w-3" /> Without ticket
+      <TicketX className="h-3 w-3 shrink-0" /> Not booked
     </span>
   );
 }
@@ -65,7 +75,7 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
  * /api/boarding/attendance.
  *
  * Rows cover the WHOLE allocated bus. A student who did not book carries a
- * "Without ticket" badge and gets a DIFFERENT control from a booked one: a
+ * "Not booked" badge and gets a DIFFERENT control from a booked one: a
  * single amber "Boarded" button rather than a Present/Absent toggle, because
  * the only fact worth recording about an unbooked student is that they rode
  * anyway. That write is flagged is_walk_up server-side, the badge turns red,
@@ -164,7 +174,10 @@ export function getRosterColumns(opts: {
       // roster — so it gets its own filter value rather than sharing one.
       accessorFn: (r) => (r.booked ? 'booked' : r.is_walk_up ? 'rode_without_ticket' : 'without_ticket'),
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
-      size: 160,
+      // Wide enough for "Travelled without booking" to sit on one line on a
+      // laptop; it wraps inside the pill on a phone rather than truncating,
+      // because a half-shown label is exactly the confusion being fixed.
+      size: 190,
       cell: ({ row }) => <TicketBadge booked={row.original.booked} walkUp={row.original.is_walk_up} />,
     },
     ...(opts.hasOwners ? [ownerColumn] : []),
@@ -235,7 +248,7 @@ export function getRosterColumns(opts: {
                 type="button"
                 onClick={() => opts.onMark(r, 'present')}
                 disabled={busy}
-                title="Record that this student boarded without booking a seat"
+                title="Only if you can see this student on the bus: record that they travelled without booking a seat"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
               >
                 <TicketX className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Boarded'}

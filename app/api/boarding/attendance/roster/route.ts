@@ -45,11 +45,11 @@ function chunk<T>(arr: T[], size = 150): T[][] {
  * staff's assigned routes for the day, not just the ones who booked: the route's
  * allocated learners unioned with the day's bookings (see
  * loadRouteAttendanceRoster), each joined to their attendance for the selected
- * leg and tagged `booked`. Students without a booking are listed as "Without
- * ticket" so the in-charge can see the whole bus rather than the small booked
+ * leg and tagged `booked`. Students without a booking are listed as "Not
+ * booked" so the in-charge can see the whole bus rather than the small booked
  * slice of it, and can record the ones who actually board — those marks carry
- * is_walk_up, which is what separates "rode without a ticket" from the far
- * larger "did not book, and stayed home".
+ * is_walk_up and read "Travelled without booking", which is what separates them
+ * from the far larger "did not book, and stayed home".
  *
  * Route-scoped to the staff's assigned routes (super admins see all). Counts are
  * derived from the produced rows so Marked + Unmarked === Total always holds.

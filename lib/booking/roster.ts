@@ -381,7 +381,7 @@ export function buildRosterRows(
  *   - allocated ∩ booked → booked: true, and the BOOKING's stop wins (a student
  *     may board somewhere other than their profile stop on a given day; a null
  *     booking stop falls back to the allocated one).
- *   - allocated only     → booked: false ("Without ticket").
+ *   - allocated only     → booked: false (shown as "Not booked").
  *   - booked only        → kept and appended. A booking on a route the student is
  *     not allocated to is a data oddity, but dropping it would make a real rider
  *     vanish from the very screen used to account for them.

@@ -208,8 +208,8 @@ export default function BoardingAttendancePage() {
       title: 'Ticket',
       options: [
         { label: 'Booked', value: 'booked' },
-        { label: 'Rode without ticket', value: 'rode_without_ticket' },
-        { label: 'Without ticket', value: 'without_ticket' },
+        { label: 'Travelled without booking', value: 'rode_without_ticket' },
+        { label: 'Not booked', value: 'without_ticket' },
       ],
     },
     { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
@@ -217,13 +217,13 @@ export default function BoardingAttendancePage() {
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Ticket', 'Rode Without Ticket', 'Status', 'Method', 'Marked At'];
+    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Booking', 'Travelled Without Booking', 'Status', 'Method', 'Marked At'];
     const lines = [header.map(esc).join(',')];
     for (const r of rowsToExport) {
-      // Ticket and the walk-up flag are separate columns rather than three
-      // values in one, so the export can be filtered on "did they ride without
-      // a ticket" without string-matching a label.
-      const ticket = r.booked ? 'Booked' : 'Without ticket';
+      // Booking state and the travelled-anyway flag are separate columns rather
+      // than three values in one, so the export can be filtered on "did they
+      // travel without booking" without string-matching a label.
+      const ticket = r.booked ? 'Booked' : 'Not booked';
       lines.push([r.name, r.roll, r.route_number, r.stop_name, ticket, r.is_walk_up ? 'Yes' : 'No', r.status, r.method, r.scanned_at].map(esc).join(','));
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -247,19 +247,31 @@ export default function BoardingAttendancePage() {
           {hasOwners ? (
             <>
               The whole bus is listed so you can see it is covered, but you mark only
-              your own share. Students owned by another in-charge show their name. If a
-              student boards without booking, tap <span className="font-medium">Boarded</span> to
-              record it — they will be notified.
+              your own share. Students owned by another in-charge show their name.
             </>
           ) : (
             <>
-              Everyone allocated to your route. Students who booked a seat can be scanned or marked
-              present or absent. Anyone <span className="font-medium">Without ticket</span> who
-              still boards, tap <span className="font-medium">Boarded</span> — that records them as
-              travelling without a ticket and notifies them.
+              Everyone allocated to your route. Students who booked a seat can be scanned
+              or marked present or absent.
             </>
           )}
         </p>
+
+        {/* The rule, stated as an ACTION rather than a definition. The two
+            unbooked states confused staff when they were only distinguishable
+            by their badge wording, so the screen now says outright when to tap
+            and — just as importantly — when to do nothing. Most "Not booked"
+            students simply stayed home and must be left alone. */}
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <p className="font-medium">Students marked “Not booked” did not book a seat today.</p>
+          <p className="mt-1">
+            Most of them stayed at home — <span className="font-medium">leave those alone</span>. Only
+            if you can actually see one of them on your bus, tap{' '}
+            <span className="font-medium">Boarded</span>. They are then recorded as{' '}
+            <span className="font-medium">Travelled without booking</span> and notified. Tapped by
+            mistake? Use <span className="font-medium">Undo</span>.
+          </p>
+        </div>
       </div>
 
       {/* Analytics tiles + day picker */}
@@ -269,26 +281,28 @@ export default function BoardingAttendancePage() {
             "Marked" would conflate present with absent, and the Absent tile
             would vanish from a screen in-charges read every day. Off the flag
             this must be exactly the pre-share set of tiles. */}
-        {/* "No ticket" and "Rode no ticket" are deliberately BOTH shown. The
-            first is most of the roster on any given day and means very little
-            on its own; the second is the number this screen now exists to
-            produce. Collapsing them into one tile would hide the signal inside
-            the noise. */}
+        {/* "Not booked" and "Travelled without booking" are deliberately BOTH
+            shown. The first is most of the roster on any given day and means
+            very little on its own; the second is the number this screen now
+            exists to produce. Collapsing them into one tile would hide the
+            signal inside the noise. The labels share no leading words on
+            purpose — the first pair shipped as "Without ticket" / "Rode without
+            ticket" and staff could not tell them apart at a glance. */}
         <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-5">
           {hasOwners ? (
             <>
               <Tile label="My share" value={share.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
               <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
               <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
-              <Tile label="Rode no ticket" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Travelled without booking" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
               <Tile label="On bus" value={counts.total} tone="gray" icon={<ListChecks className="h-4 w-4" />} />
             </>
           ) : (
             <>
               <Tile label="Present" value={counts.present} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
               <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
-              <Tile label="Rode no ticket" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
-              <Tile label="No ticket" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Travelled without booking" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Not booked" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
               <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
             </>
           )}
