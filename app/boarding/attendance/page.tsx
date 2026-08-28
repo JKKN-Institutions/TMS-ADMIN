@@ -17,7 +17,7 @@ interface RosterResponse {
   date: string;
   direction: AttDirection;
   rows: RosterRow[];
-  counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number };
+  counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number; boardedWithoutTicket: number };
   share: { total: number; marked: number; remaining: number };
 }
 
@@ -74,7 +74,7 @@ export default function BoardingAttendancePage() {
   }, [isError, error]);
 
   const rows = data?.rows ?? [];
-  const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 };
+  const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 };
   const share = data?.share ?? { total: 0, marked: 0, remaining: 0 };
   // Derived from the data, not the flag: the page has no access to the setting, and
   // deriving it from the rows keeps the column/filter in sync with what actually
@@ -123,13 +123,24 @@ export default function BoardingAttendancePage() {
         // assumed away. Mirrors markBatchMessage in lib/boarding/mark-batch.ts.
         const left = Array.isArray(json.locked) ? json.locked.length : 0;
         if (left > 0) {
-          toast.warning(
+          // react-hot-toast has no `.warning` — it was `toast.warning` here,
+          // which is undefined and throws, so the one message this branch
+          // exists to show never rendered. The project's warning form is a
+          // plain toast with an icon.
+          toast(
             `Not changed — already marked by ${json.locked[0]?.markedByName ?? 'another staff member'}.`,
+            { icon: '⚠️' },
           );
+        } else if (json.walkUps > 0) {
+          // Never announce this as a plain "Marked present". The in-charge has
+          // just recorded a rule breach against a named student and been told
+          // the student was notified — that has to be visible, not buried in a
+          // toast that looks like every other mark.
+          toast.success(`${row.name} recorded as travelling without a ticket. They have been notified.`);
         } else if (json.updated === 0 && json.skipped > 0) {
           toast.success(`${row.name} was already marked ${status}`);
         } else if (json.updated === 0) {
-          toast.warning(`${row.name} was not marked — they are not on this route.`);
+          toast(`${row.name} was not marked — they are not on this route.`, { icon: '⚠️' });
         } else {
           toast.success(`Marked ${row.name} ${status}`);
         }
@@ -143,26 +154,77 @@ export default function BoardingAttendancePage() {
     [direction, qc]
   );
 
+  /**
+   * Clear a without-ticket boarding record.
+   *
+   * This is the FIRST caller of the long-existing DELETE endpoint. A booked
+   * student can be corrected by toggling Present↔Absent, but "boarded without a
+   * ticket" has no opposite state — without this, a mistap would be permanent
+   * from the in-charge's side, on a record the student has been notified about.
+   */
+  const undo = useCallback(
+    async (row: RosterRow) => {
+      setBusyId(row.learner_id);
+      try {
+        const res = await fetch('/api/boarding/attendance', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ routeId: row.route_id, direction, learnerIds: [row.learner_id] }),
+        });
+        const json = await res.json();
+        // Same stale-screen case as marking: the roster polls every 15s, so a
+        // colleague's claim on the row can land between render and click.
+        if (res.status === 409) {
+          toast.error(json.error || 'Another staff member recorded this.');
+          qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+          return;
+        }
+        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to clear the record');
+        toast.success(
+          json.cleared > 0 ? `Cleared the record for ${row.name}` : `Nothing to clear for ${row.name}`,
+        );
+        qc.invalidateQueries({ queryKey: ['boarding-roster'] });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to clear the record');
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [direction, qc]
+  );
+
   const columns = useMemo(
-    () => getRosterColumns({ canMark, busyId, onMark: mark, hasOwners }),
-    [canMark, busyId, mark, hasOwners]
+    () => getRosterColumns({ canMark, busyId, onMark: mark, onUndo: undo, hasOwners }),
+    [canMark, busyId, mark, undo, hasOwners]
   );
 
   const filters: DataTableFilter[] = [
     ...(hasOwners
       ? [{ columnId: 'owner', title: 'In-charge', options: [{ label: 'My share', value: 'mine' }, { label: 'Others', value: 'others' }] }]
       : []),
-    { columnId: 'ticket', title: 'Ticket', options: [{ label: 'Booked', value: 'booked' }, { label: 'Without ticket', value: 'without_ticket' }] },
+    {
+      columnId: 'ticket',
+      title: 'Ticket',
+      options: [
+        { label: 'Booked', value: 'booked' },
+        { label: 'Rode without ticket', value: 'rode_without_ticket' },
+        { label: 'Without ticket', value: 'without_ticket' },
+      ],
+    },
     { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
   ];
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Ticket', 'Status', 'Method', 'Marked At'];
+    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Ticket', 'Rode Without Ticket', 'Status', 'Method', 'Marked At'];
     const lines = [header.map(esc).join(',')];
     for (const r of rowsToExport) {
+      // Ticket and the walk-up flag are separate columns rather than three
+      // values in one, so the export can be filtered on "did they ride without
+      // a ticket" without string-matching a label.
       const ticket = r.booked ? 'Booked' : 'Without ticket';
-      lines.push([r.name, r.roll, r.route_number, r.stop_name, ticket, r.status, r.method, r.scanned_at].map(esc).join(','));
+      lines.push([r.name, r.roll, r.route_number, r.stop_name, ticket, r.is_walk_up ? 'Yes' : 'No', r.status, r.method, r.scanned_at].map(esc).join(','));
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -185,12 +247,16 @@ export default function BoardingAttendancePage() {
           {hasOwners ? (
             <>
               The whole bus is listed so you can see it is covered, but you mark only
-              your own share. Students owned by another in-charge show their name.
+              your own share. Students owned by another in-charge show their name. If a
+              student boards without booking, tap <span className="font-medium">Boarded</span> to
+              record it — they will be notified.
             </>
           ) : (
             <>
-              Everyone allocated to your route — students who booked a seat can be scanned or marked present;
-              the rest are listed as <span className="font-medium">Without ticket</span>.
+              Everyone allocated to your route. Students who booked a seat can be scanned or marked
+              present or absent. Anyone <span className="font-medium">Without ticket</span> who
+              still boards, tap <span className="font-medium">Boarded</span> — that records them as
+              travelling without a ticket and notifies them.
             </>
           )}
         </p>
@@ -203,19 +269,26 @@ export default function BoardingAttendancePage() {
             "Marked" would conflate present with absent, and the Absent tile
             would vanish from a screen in-charges read every day. Off the flag
             this must be exactly the pre-share set of tiles. */}
-        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* "No ticket" and "Rode no ticket" are deliberately BOTH shown. The
+            first is most of the roster on any given day and means very little
+            on its own; the second is the number this screen now exists to
+            produce. Collapsing them into one tile would hide the signal inside
+            the noise. */}
+        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-5">
           {hasOwners ? (
             <>
               <Tile label="My share" value={share.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
               <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
               <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
-              <Tile label="On bus" value={counts.total} tone="gray" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Rode no ticket" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="On bus" value={counts.total} tone="gray" icon={<ListChecks className="h-4 w-4" />} />
             </>
           ) : (
             <>
               <Tile label="Present" value={counts.present} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
               <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
-              <Tile label="Without ticket" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Rode no ticket" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="No ticket" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
               <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
             </>
           )}

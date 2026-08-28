@@ -27,6 +27,7 @@ interface AttRow {
   method: string | null;
   scanned_at: string | null;
   scanned_by: string | null;
+  is_walk_up: boolean | null;
   previous_status: string | null;
   previous_scanned_by: string | null;
   previous_scanned_at: string | null;
@@ -46,7 +47,9 @@ function chunk<T>(arr: T[], size = 150): T[][] {
  * loadRouteAttendanceRoster), each joined to their attendance for the selected
  * leg and tagged `booked`. Students without a booking are listed as "Without
  * ticket" so the in-charge can see the whole bus rather than the small booked
- * slice of it; the client offers no mark action for them.
+ * slice of it, and can record the ones who actually board — those marks carry
+ * is_walk_up, which is what separates "rode without a ticket" from the far
+ * larger "did not book, and stayed home".
  *
  * Route-scoped to the staff's assigned routes (super admins see all). Counts are
  * derived from the produced rows so Marked + Unmarked === Total always holds.
@@ -101,7 +104,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       success: true,
       data: {
         date, direction, rows: [] as RosterRow[],
-        counts: { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0 },
+        counts: { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 },
         share: { total: 0, marked: 0, remaining: 0 },
       },
     };
@@ -132,7 +135,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       const { data, error } = await svc
         .from('tms_attendance')
         .select(
-          'learner_id, status, method, scanned_at, scanned_by, previous_status, previous_scanned_by, previous_scanned_at',
+          'learner_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
         )
         .in('route_id', c)
         .eq('trip_date', date)
@@ -160,6 +163,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
         scanned_at: a.scanned_at,
         scanned_by: a.scanned_by,
         marked_by_name: a.scanned_by ? markerNames.get(a.scanned_by) ?? null : null,
+        is_walk_up: a.is_walk_up === true,
         previous_status: a.previous_status,
         previous_by_name: a.previous_scanned_by ? markerNames.get(a.previous_scanned_by) ?? null : null,
         previous_at: a.previous_scanned_at,
@@ -276,6 +280,12 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
     const present = rows.filter((r) => r.status === 'present').length;
     const absent = rows.filter((r) => r.status === 'absent').length;
     const booked = rows.filter((r) => r.booked).length;
+    // Two DIFFERENT numbers, and conflating them would destroy the distinction
+    // this feature exists to draw:
+    //   withoutTicket        — allocated to the bus but did not book (~1,000/day).
+    //                          Most of them simply stayed home.
+    //   boardedWithoutTicket — someone actually saw them board and said so.
+    const boardedWithoutTicket = rows.filter((r) => r.is_walk_up).length;
     // Share counts are over the caller's OWN markable learners only: a share
     // that reads "12 of 12 marked" while the bus still has 30 unmarked riders
     // is the correct answer to "am I done?".
@@ -294,6 +304,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
           unmarked: rows.length - present - absent,
           booked,
           withoutTicket: rows.length - booked,
+          boardedWithoutTicket,
         },
         share: {
           total: mineRows.length,

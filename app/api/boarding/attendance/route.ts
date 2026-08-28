@@ -2,10 +2,12 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
+import { notifyLearner } from '@/lib/notifications/notify';
 import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
 import { summarizeMarkBatch, type RpcMarkOutcome } from '@/lib/boarding/mark-batch';
+import { canClearMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
 import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
@@ -19,6 +21,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * the staff must be assigned to the route. Each learner is verified to actually
  * belong to the route before writing. Idempotent via the same
  * (learner, trip_date, direction) upsert key the QR scanner uses.
+ *
+ * WITHOUT-TICKET TRAVEL. A learner with no booking for the day may be marked
+ * present, and that write carries is_walk_up = true — the record of someone who
+ * rode without a ticket. The flag is derived server-side from tms_booking, never
+ * accepted from the client, and 'absent' is REJECTED for such a learner: not
+ * booking and not travelling is simply not travelling. The learner is notified
+ * once, on the first mark only.
  */
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -28,6 +37,19 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 
 interface MarkInput { learnerId: string; status: 'present' | 'absent' }
 interface StudentLite { id: string; transport_route_id: string | null; transport_stop_id: string | null }
+
+/**
+ * Split an id list into ≤150-id chunks (API-gateway limit on `.in()`).
+ *
+ * A bulk mark can carry the whole roster, and a `.in()` over that many ids
+ * returns HTTP 400 rather than rows — which, unchecked, reads as "nobody
+ * booked" and would flag the entire batch as travelling without a ticket.
+ */
+function chunk<T>(arr: T[], size = 150): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 /**
  * The learner ids this caller may mark on this route and date, split two ways:
@@ -173,13 +195,60 @@ async function mark(request: NextRequest, auth: AuthContext) {
 
     // Verify each learner actually belongs to this route; grab their stop id.
     const learnerIds = [...new Set(marks.map((m) => m.learnerId).filter(Boolean))];
-    const { data: studs } = await svc
-      .from('learners_profiles')
-      .select('id, transport_route_id, transport_stop_id')
-      .in('id', learnerIds);
     const stopByLearner = new Map<string, string | null>();
-    for (const s of (studs ?? []) as StudentLite[]) {
-      if (s.transport_route_id === routeId) stopByLearner.set(s.id, s.transport_stop_id ?? null);
+    for (const c of chunk(learnerIds)) {
+      const { data: studs } = await svc
+        .from('learners_profiles')
+        .select('id, transport_route_id, transport_stop_id')
+        .in('id', c);
+      for (const s of (studs ?? []) as StudentLite[]) {
+        if (s.transport_route_id === routeId) stopByLearner.set(s.id, s.transport_stop_id ?? null);
+      }
+    }
+
+    // ── Ticket state, derived HERE and never trusted from the client ──
+    // This flag is what separates "rode without booking" from an ordinary
+    // boarding, and it has downstream weight: walk-ups come off the route's
+    // remaining seats (lib/booking/repo.ts seatsRemaining) and feed the admin
+    // Walk-ups KPI. A client that could set it could hide an unticketed rider
+    // by simply claiming they booked.
+    //
+    // Keyed on `today` — the trip_date these marks land on — so the flag can
+    // never describe a different day than the row storing it.
+    const bookedLearners = new Set<string>();
+    for (const c of chunk(learnerIds)) {
+      const { data: bookings, error: bookingError } = await svc
+        .from('tms_booking')
+        .select('learner_id')
+        .eq('travel_date', today)
+        .in('learner_id', c);
+      if (bookingError) {
+        // Failing OPEN here would flag every learner in the batch as a walk-up
+        // — a false accusation, at scale, written to a permanent record. Fail
+        // the batch instead and let the in-charge retry.
+        console.error('boarding manual mark: failed to load bookings:', bookingError);
+        return NextResponse.json({ error: 'Failed to check bookings for the day' }, { status: 500 });
+      }
+      for (const b of (bookings ?? []) as { learner_id: string }[]) bookedLearners.add(b.learner_id);
+    }
+
+    // There is no absent-without-a-ticket. A learner who neither booked nor
+    // travelled simply did not travel; recording that as an absence would bury
+    // the ~50 real absences a day under ~1,000 non-events. The client never
+    // offers the control, and this is the authority that makes it true.
+    const absentWithoutTicket = marks.filter(
+      (m) => m.status === 'absent' && stopByLearner.has(m.learnerId) && !bookedLearners.has(m.learnerId),
+    );
+    if (absentWithoutTicket.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            'A student with no booking for today cannot be marked absent — they can only be recorded as having boarded without a ticket.',
+          reason: 'absent_without_ticket',
+          learners: absentWithoutTicket.map((m) => m.learnerId),
+        },
+        { status: 400 },
+      );
     }
 
     const rows = marks
@@ -189,6 +258,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
         route_id: routeId,
         stop_id: stopByLearner.get(m.learnerId) ?? null,
         status: m.status,
+        is_walk_up: !bookedLearners.has(m.learnerId),
         // PER-LEARNER entitlement. p_allow_override below is a per-CALL flag and
         // cannot express this: within one batch the caller may own some learners
         // and merely cover others, and only the owned ones outrank a coverer's
@@ -261,20 +331,56 @@ async function mark(request: NextRequest, auth: AuthContext) {
       );
     }
 
+    // ── Tell the student they were recorded riding without a booking ──
+    // Only on 'inserted': an override or a re-mark of a row that already
+    // existed would notify the same person about the same trip twice, and the
+    // message reads as an accusation. One trip, one message.
+    //
+    // Best-effort by contract — notifyLearner never throws, so a notification
+    // failure cannot undo a mark that is already recorded.
+    const walkUpIds = new Set(rows.filter((r) => r.is_walk_up).map((r) => r.learner_id));
+    const notified = ((outcomes ?? []) as RpcMarkOutcome[]).filter(
+      (o) => o.outcome === 'inserted' && walkUpIds.has(o.learner_id),
+    );
+    if (notified.length > 0) {
+      const { data: rt } = await svc
+        .from('tms_route').select('route_number').eq('id', routeId).maybeSingle();
+      const routeNumber = (rt as { route_number: string | null } | null)?.route_number;
+      const onRoute = routeNumber ? ` on route ${routeNumber}` : '';
+      const day = new Date(`${today}T00:00:00Z`).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+      });
+      for (const o of notified) {
+        await notifyLearner(svc, {
+          learnerId: o.learner_id,
+          actorId: auth.userId,
+          title: 'Travelled without a booking',
+          body: `You were recorded travelling${onRoute} on ${day} without a booking for the day. Please book your seat before travelling.`,
+          category: 'transport',
+          url: '/student/attendance',
+        });
+      }
+    }
+
     await logActivity(auth, request, {
       module: 'boarding',
       action: 'mark',
       entityType: 'tms_attendance',
       description:
         `Manually marked attendance for ${written} learner(s) on route ${routeId} (${direction})` +
+        (notified.length > 0 ? ` — ${notified.length} without a ticket` : '') +
         (overrides > 0 ? ` — ${overrides} replaced an earlier mark` : ''),
-      metadata: { routeId, direction, count: written, skipped, overrides, locked: locked.length, dropped: summary.dropped },
+      metadata: {
+        routeId, direction, count: written, skipped, overrides,
+        locked: locked.length, dropped: summary.dropped, walkUps: notified.length,
+      },
     });
     // A partially locked batch still succeeds: one taken row must not fail the
     // other nineteen. `locked` and `dropped` tell the client what did NOT
     // happen, so it can never render this as a clean sweep.
     return NextResponse.json({
       success: true, updated: written, skipped, locked, dropped: summary.dropped,
+      walkUps: notified.length,
     });
   } catch (e) {
     console.error('boarding manual mark error:', e);
@@ -440,6 +546,59 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
           reason: 'not_your_share',
         }, { status: 403 });
       }
+    }
+
+    // ── Arbitration, which this endpoint never had ──
+    // Until now nothing in the UI called DELETE, so "any assigned staff may
+    // wipe any mark on the route" was unreachable rather than safe. The Undo
+    // control on a without-ticket row makes it reachable, so the rule that
+    // guards every other write applies here too: your own mark, an orphaned
+    // one, or the transport office. canClearMark is the same authority the
+    // roster's can_edit hint is rendered from.
+    const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
+    // Chunked, and the error CHECKED. An oversized `.in()` returns HTTP 400 with
+    // no rows, and an empty result here reads as "no existing mark" — which
+    // canClearMark answers with `true`. That is the one direction this gate must
+    // never fail in, so it fails closed instead.
+    const existingByLearner = new Map<string, { status: MarkStatus; scannedBy: string | null }>();
+    for (const c of chunk(learnerIds)) {
+      const { data: existingRows, error: existingError } = await svc
+        .from('tms_attendance')
+        .select('learner_id, status, scanned_by')
+        .eq('route_id', routeId)
+        .eq('trip_date', today)
+        .eq('direction', direction)
+        .in('learner_id', c);
+      if (existingError) {
+        console.error('boarding clear mark: failed to load existing marks:', existingError);
+        return NextResponse.json({ error: 'Failed to load attendance' }, { status: 500 });
+      }
+      for (const r of (existingRows ?? []) as Array<{ learner_id: string; status: MarkStatus; scanned_by: string | null }>) {
+        existingByLearner.set(r.learner_id, { status: r.status, scannedBy: r.scanned_by });
+      }
+    }
+    const heldByOthers = learnerIds.filter(
+      (id) =>
+        !canClearMark({
+          existing: existingByLearner.get(id) ?? null,
+          actorId: auth.userId,
+          isOverrideHolder,
+          isSuperAdmin: auth.isSuperAdmin,
+        }),
+    );
+    if (heldByOthers.length > 0) {
+      const names = await loadMarkerNames(
+        svc,
+        heldByOthers.map((id) => existingByLearner.get(id)?.scannedBy ?? null),
+      );
+      const firstBy = existingByLearner.get(heldByOthers[0])?.scannedBy;
+      return NextResponse.json(
+        {
+          error: `Marked by ${(firstBy && names.get(firstBy)) || 'another staff member'}. Only they or the transport office can clear it.`,
+          reason: 'locked',
+        },
+        { status: 409 },
+      );
     }
 
     const { data, error } = await svc

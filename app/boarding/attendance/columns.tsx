@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -29,12 +29,26 @@ function StatusBadge({ status }: { status: RosterRow['status'] }) {
   );
 }
 
-function TicketBadge({ booked }: { booked: boolean }) {
-  return booked ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-      <Ticket className="h-3 w-3" /> Booked
-    </span>
-  ) : (
+/**
+ * Three states, not two. "Without ticket" and "Rode without ticket" look alike
+ * but mean very different things: the first is the ~1,000 riders a day who did
+ * not book, most of whom stayed home; the second is the far smaller set someone
+ * actually watched board. Rendering them identically would waste the record.
+ */
+function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
+  if (booked)
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+        <Ticket className="h-3 w-3" /> Booked
+      </span>
+    );
+  if (walkUp)
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">
+        <TicketX className="h-3 w-3" /> Rode without ticket
+      </span>
+    );
+  return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
       <TicketX className="h-3 w-3" /> Without ticket
     </span>
@@ -50,14 +64,21 @@ function TicketBadge({ booked }: { booked: boolean }) {
  * Status badge shows the current state. Clicking POSTs that status to
  * /api/boarding/attendance.
  *
- * Rows now cover the WHOLE allocated bus, so a student who did not book appears
- * with a "Without ticket" badge and no mark control — they are visible to the
- * in-charge but are not part of the day's attendance.
+ * Rows cover the WHOLE allocated bus. A student who did not book carries a
+ * "Without ticket" badge and gets a DIFFERENT control from a booked one: a
+ * single amber "Boarded" button rather than a Present/Absent toggle, because
+ * the only fact worth recording about an unbooked student is that they rode
+ * anyway. That write is flagged is_walk_up server-side, the badge turns red,
+ * and the row's control becomes "Undo" — the sole correction path, so it is
+ * gated by the same ownership rule (can_edit, from canClearMark) as everything
+ * else on this screen.
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
   busyId: string | null;
   onMark: (row: RosterRow, status: 'present' | 'absent') => void;
+  /** Clear a without-ticket boarding record — the only correction path those rows have. */
+  onUndo: (row: RosterRow) => void;
   // Whether ANY row in the current response carries an owner. While the
   // share-scoring flag is off, owner_name is null on every row and this is
   // false — in that state the In-charge column is omitted entirely rather
@@ -138,10 +159,13 @@ export function getRosterColumns(opts: {
       id: 'ticket',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Ticket" />,
       // Filter values are the strings the page's filter options emit, not booleans.
-      accessorFn: (r) => (r.booked ? 'booked' : 'without_ticket'),
+      // 'rode_without_ticket' is a strict subset of the unbooked riders, and is
+      // the one the transport office actually wants to pull out of a 1,600-row
+      // roster — so it gets its own filter value rather than sharing one.
+      accessorFn: (r) => (r.booked ? 'booked' : r.is_walk_up ? 'rode_without_ticket' : 'without_ticket'),
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
-      size: 130,
-      cell: ({ row }) => <TicketBadge booked={row.original.booked} />,
+      size: 160,
+      cell: ({ row }) => <TicketBadge booked={row.original.booked} walkUp={row.original.is_walk_up} />,
     },
     ...(opts.hasOwners ? [ownerColumn] : []),
     {
@@ -189,11 +213,61 @@ export function getRosterColumns(opts: {
         // Marking is gated to the travel day AND an open attendance window; otherwise
         // no control shows at all (present and absent are both disabled by timing).
         if (!opts.canMark) return null;
-        // No booking → no attendance for the day. The row stays visible (the
-        // in-charge still needs to see who is on the bus roster) but carries no
-        // mark control; the Ticket column already says why.
-        if (!row.original.booked) return <span className="text-xs text-gray-400">—</span>;
         const busy = opts.busyId === row.original.learner_id;
+
+        // ── Without a ticket: one action, not a toggle ──
+        // A student who neither booked nor travelled is simply not on the bus,
+        // so there is no Absent to offer — the only fact worth recording is
+        // that they boarded anyway. Once recorded, the opposite of "boarded" is
+        // not "absent", it is "I got that wrong", so the row offers Undo.
+        if (!row.original.booked) {
+          const r = row.original;
+          if (r.status === 'unmarked') {
+            if (r.lock_reason === 'not_my_share') {
+              return (
+                <span className="text-xs text-gray-400" title={`${r.owner_name ?? 'Another in-charge'} marks this student`}>
+                  —
+                </span>
+              );
+            }
+            return (
+              <button
+                type="button"
+                onClick={() => opts.onMark(r, 'present')}
+                disabled={busy}
+                title="Record that this student boarded without booking a seat"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+              >
+                <TicketX className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Boarded'}
+              </button>
+            );
+          }
+          // Already recorded. Undo is the ONLY correction path for these rows,
+          // so it must respect the same ownership rule as every other write --
+          // can_edit already folds it in (canClearMark, server-side).
+          if (!r.can_edit) {
+            return (
+              <span
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                title={`${r.marked_by_name ?? 'Another staff member'} recorded this. Only they or the transport office can clear it.`}
+              >
+                <Lock className="h-3.5 w-3.5" /> Locked
+              </span>
+            );
+          }
+          return (
+            <button
+              type="button"
+              onClick={() => opts.onUndo(r)}
+              disabled={busy}
+              title="Clear this record"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <Undo2 className="h-3.5 w-3.5" /> {busy ? 'Clearing…' : 'Undo'}
+            </button>
+          );
+        }
+
         // ONE server-decided flag folds both gates -- scope (whose share is this
         // learner?) and arbitration (whose mark is already on this row?). The
         // client never re-derives either; lock_reason only picks the wording.

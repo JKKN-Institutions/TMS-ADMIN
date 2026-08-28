@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 // The arbitration rule lives with the boarding domain that enforces it, so the
 // roster's can_edit flag and the API routes' write gate can never disagree.
-import { decideMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
+import { decideMark, canClearMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
 import { bookedCount, routeCapacity } from './repo';
 
 export interface RosterRider {
@@ -161,6 +161,16 @@ export interface RosterRow {
   /** false = on the bus roster but holds no ticket (no booking) for this day. */
   booked: boolean;
   /**
+   * True when this mark records a boarding with NO booking for the day -- the
+   * "travelled without a ticket" record. Distinct from `!booked`, and the
+   * difference is the whole point: `!booked` means the learner did not book,
+   * which most days simply means they stayed home. `is_walk_up` means someone
+   * actually saw them on the bus and said so.
+   *
+   * Always implies status === 'present'; there is no absent-without-a-ticket.
+   */
+  is_walk_up: boolean;
+  /**
    * The in-charge who owns this learner's attendance, or null when the route
    * has no in-charges (three routes) or the allocation has not been computed.
    * Ownership is INDEPENDENT of ticket state and attendance state.
@@ -181,8 +191,16 @@ export interface RosterRow {
    * button" is exactly the drift this change exists to prevent.
    */
   can_edit: boolean;
-  /** Why can_edit is false, so the UI can say which gate closed. */
-  lock_reason: 'not_my_share' | 'locked' | 'no_ticket' | null;
+  /**
+   * Why can_edit is false, so the UI can say which gate closed.
+   *
+   * 'no_ticket' is deliberately NOT a value here. Holding no ticket used to
+   * lock the row ahead of both real gates, which is exactly what made an
+   * unticketed rider impossible to record. An unticketed row now runs the same
+   * scope and arbitration gates as any other; what its ticket state changes is
+   * which ACTION is offered (present-only), not whether it is editable.
+   */
+  lock_reason: 'not_my_share' | 'locked' | null;
   /** Set only when this mark replaced an earlier one (scan or transport-head override). */
   previous_status: 'present' | 'absent' | null;
   previous_by_name: string | null;
@@ -196,6 +214,7 @@ export interface RosterAttendance {
   scanned_at: string | null;
   scanned_by: string | null;
   marked_by_name: string | null;
+  is_walk_up: boolean;
   previous_status: string | null;
   previous_by_name: string | null;
   previous_at: string | null;
@@ -269,30 +288,46 @@ export function buildRosterRows(
     );
 
     // ── Gate B: arbitration. Is this row already someone else's? ──
-    // The row's toggle offers the OPPOSITE status, so that is the write whose
-    // permission decides whether a control renders at all.
-    const notLocked =
-      !marked ||
-      decideMark({
-        existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
-        requestedStatus: status === 'present' ? 'absent' : 'present',
-        actorId: viewer.actorId,
-        isOverrideHolder: viewer.isOverrideHolder,
-        isSuperAdmin: viewer.isSuperAdmin,
-        viaScan: false,
-        isLearnerOwner,
-      }).action !== 'deny';
+    // Permission has to be asked about the action the UI will actually OFFER,
+    // and that differs by ticket state. Asking decideMark about a present→absent
+    // flip on a no-ticket row would gate its button on a write that can never
+    // be requested.
+    //
+    //   booked, marked      → a status toggle       → decideMark (opposite status)
+    //   no ticket, unmarked → "Boarded (no ticket)" → a plain write, nothing to arbitrate
+    //   no ticket, marked   → "Undo"                → a delete → canClearMark
+    const notLocked = !marked
+      ? true
+      : !booked
+        ? canClearMark({
+            existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
+            actorId: viewer.actorId,
+            isOverrideHolder: viewer.isOverrideHolder,
+            isSuperAdmin: viewer.isSuperAdmin,
+          })
+        : decideMark({
+            existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
+            requestedStatus: status === 'present' ? 'absent' : 'present',
+            actorId: viewer.actorId,
+            isOverrideHolder: viewer.isOverrideHolder,
+            isSuperAdmin: viewer.isSuperAdmin,
+            viaScan: false,
+            isLearnerOwner,
+          }).action !== 'deny';
 
     // Precedence matches the write routes: scope before arbitration. "Ask
     // Priya, they own this student" is more actionable than "someone locked
     // this row", and it leaks less about who marked what.
-    const lock_reason: RosterRow['lock_reason'] = !booked
-      ? 'no_ticket'
-      : !inScope
-        ? 'not_my_share'
-        : !notLocked
-          ? 'locked'
-          : null;
+    //
+    // Ticket state is NOT a gate here. It used to short-circuit ahead of both
+    // of these, which meant the ~1,000 riders a day who board without booking
+    // could be SEEN on this screen and never recorded. The one action a
+    // no-ticket row offers is "boarded", and the write route enforces that.
+    const lock_reason: RosterRow['lock_reason'] = !inScope
+      ? 'not_my_share'
+      : !notLocked
+        ? 'locked'
+        : null;
 
     const prev =
       marked && (att!.previous_status === 'present' || att!.previous_status === 'absent')
@@ -314,6 +349,10 @@ export function buildRosterRows(
       // Ticket state is INDEPENDENT of attendance state: a rider with no booking
       // can still carry a real manual mark, and must keep showing it.
       booked,
+      // Read from the stored row, NOT derived from `!booked`. A booking made
+      // after the mark (or cancelled after it) must not silently rewrite what
+      // the in-charge recorded at the time they saw the student board.
+      is_walk_up: marked ? att!.is_walk_up : false,
       owner_email: owner?.staff_email ?? null,
       owner_name: owner?.name ?? null,
       is_mine: inScope,
