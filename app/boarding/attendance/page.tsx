@@ -266,21 +266,48 @@ export default function BoardingAttendancePage() {
             and — just as importantly — when to do nothing. Most "Not booked"
             students simply stayed home and must be left alone. */}
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          <p className="font-medium">Students marked “Not booked” did not book a seat today.</p>
+          {/* The KEY to the action column. The buttons are single letters so a
+              1,600-row roster stays readable on a phone, which means their
+              meaning has to live somewhere on the page — this is that place.
+              Each button also carries a title + aria-label (see MarkButton in
+              columns.tsx); this legend is what serves a sighted in-charge who
+              cannot hover on a touchscreen. Keep the swatches the same colours
+              as the buttons: matching them is the whole point. */}
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-medium">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-green-600 text-xs font-semibold text-white">
+                P
+              </span>
+              Present
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-red-600 text-xs font-semibold text-white">
+                A
+              </span>
+              Absent
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-600 text-xs font-semibold text-white">
+                B
+              </span>
+              Boarded without booking
+            </span>
+          </p>
+          <p className="mt-2 font-medium">Students marked “Not booked” did not book a seat today.</p>
           <p className="mt-1">
             Most of them stayed at home — <span className="font-medium">leave those alone</span>. Only
             if you can actually see one of them on your bus, tap{' '}
-            <span className="font-medium">Boarded</span>. They are then recorded as{' '}
+            <span className="font-medium">B</span>. They are then recorded as{' '}
             <span className="font-medium">Travelled without booking</span> and notified.
           </p>
           {/* Both corrections, spelled out, because they are NOT the same act
-              and staff were reaching for the wrong one. Tapping Boarded on
-              someone who then did not travel needs Absent (a second fact about
-              the student); a mistap on the wrong row needs Undo (this record
+              and staff were reaching for the wrong one. Tapping B on someone
+              who then did not travel needs A (a second fact about the
+              student); a mistap on the wrong row needs Undo (this record
               should not exist). Undo only appears on records you made. */}
           <p className="mt-1">
-            Got it wrong? Tap <span className="font-medium">Absent</span> if they did not travel, or{' '}
-            <span className="font-medium">Undo</span> to remove the record altogether.
+            Got it wrong? Tap <span className="font-medium">A</span> if they did not travel, or the{' '}
+            <span className="font-medium">undo arrow</span> to remove the record altogether.
           </p>
         </div>
       </div>

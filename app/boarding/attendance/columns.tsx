@@ -66,12 +66,75 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
 }
 
 /**
+ * One square letter button — P / A / B — used for every marking action.
+ *
+ * The action column is read on a phone, standing on a moving bus, against a
+ * roster that can run to 1,600 rows, so the labels are single letters rather
+ * than words. The letter IS the glyph: pairing it with a lucide icon at 32px
+ * crowds both, so the icons that used to sit in these buttons were dropped.
+ *
+ * ACCESSIBILITY IS NOT OPTIONAL HERE. A bare "P" tells a screen reader nothing
+ * and tells a new in-charge nothing, so every button carries both a `title`
+ * (hover / long-press) and an `aria-label` spelling out the action in full.
+ * The page's help block also lists the three letters. Never ship one of these
+ * without both attributes.
+ *
+ * `busy` shows a centred dot rather than the old "Saving…" text, which no
+ * longer fits — a mid-save tap still gets feedback instead of a dead button.
+ */
+const TONE_CLASSES = {
+  green: 'bg-green-600 hover:bg-green-700 text-white',
+  red: 'bg-red-600 hover:bg-red-700 text-white',
+  blue: 'bg-blue-600 hover:bg-blue-700 text-white',
+  neutral:
+    'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800',
+} as const;
+
+function MarkButton({
+  letter,
+  tone,
+  title,
+  ariaLabel,
+  onClick,
+  disabled,
+  busy,
+}: {
+  letter: string;
+  tone: keyof typeof TONE_CLASSES;
+  title: string;
+  ariaLabel: string;
+  onClick: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${TONE_CLASSES[tone]}`}
+    >
+      {busy ? '·' : letter}
+    </button>
+  );
+}
+
+/**
  * Full-bus columns for the Attendance page. Route/Status are filterable.
  * The Action column is shown only when `canMark` (the travel day AND the
  * attendance window is open — onward-only, see lib/boarding/attendance-window.ts).
  * Every row offers BOTH outcomes, minus whichever one it already holds:
- * unmarked → [Present] [Absent], present → [Absent], absent → [Present]. The
- * Status badge shows the current state; clicking POSTs to /api/boarding/attendance.
+ * unmarked → [P] [A], present → [A], absent → [P]. The Status badge shows the
+ * current state; clicking POSTs to /api/boarding/attendance.
+ *
+ * The three action letters — P present, A absent, B boarded-without-booking —
+ * are spelled out in the page's help block and in every button's title +
+ * aria-label (see MarkButton). They are letters because this column is read on
+ * a phone against a roster of up to ~1,600 rows; the Status badge, the stat
+ * tiles and the filters deliberately keep FULL WORDS, since those are labels
+ * rather than controls and lose clarity for no space saved.
  *
  * It was a single toggle showing only the NEXT action, which meant an UNMARKED
  * student offered "Present" and nothing else — reaching absent required marking
@@ -80,20 +143,22 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
  * states you are not currently in.
  *
  * Rows cover the WHOLE allocated bus, and a student who did not book carries a
- * "Not booked" badge. Those rows once offered present ONLY — a one-way amber
+ * "Not booked" badge. Those rows once offered present ONLY — a one-way
  * "Boarded" button whose sole reverse was Undo — which left a rider recorded as
  * boarded who had not boarded with no way to be marked absent. They now get the
- * SAME pair of outcomes as a booked rider; ticket state changes the wording and
- * the weight of the present action, not which outcomes exist:
+ * SAME pair of outcomes as a booked rider; ticket state changes which LETTER the
+ * present action carries and what it asserts, not which outcomes exist:
  *
- *   "Boarded" (amber, not green) — asserts the student rode without booking.
- *   The server flags it is_walk_up, the ticket badge turns red, and the student
- *   is notified once. Absent is an ordinary no-show and is never a walk-up.
+ *   B (blue) — asserts the student rode without booking. The server flags it
+ *   is_walk_up, the ticket badge turns red, and the student is notified once.
+ *   A booked rider's equivalent is P, which asserts nothing beyond attendance.
+ *   Absent is an ordinary no-show either way and is never a walk-up.
  *
- * Undo (clear the row back to unmarked) remains available alongside the toggle
+ * Undo (clear the row back to unmarked) remains available alongside the pair
  * on unbooked rows, gated on `can_clear` — canClearMark, strictly narrower than
  * the `can_edit` that gates the status flip, because erasing a record the
- * student was notified about is not the same act as correcting it.
+ * student was notified about is not the same act as correcting it. It stays an
+ * ICON, not a letter: letters in this column mean outcomes, and Undo is not one.
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
@@ -232,12 +297,11 @@ export function getRosterColumns(opts: {
       id: 'action',
       enableHiding: false,
       enableSorting: false,
-      // Sized for the widest cell this column produces — an unmarked no-ticket
-      // row's [Boarded][Absent], or a recorded one's [action][Undo]. It was 120,
-      // enough for the single toggle that used to live here; leaving it there
-      // would wrap or clip the second button on the exact rows the pair was
-      // added for.
-      size: 230,
+      // Sized for the widest cell this column produces: an unbooked row's
+      // [B][A][undo] — three 32px squares plus two 6px gaps, ~108px — with a
+      // little slack. This was 230 while the buttons carried words; letters
+      // buy back ~110px of a phone screen, which is the point of the change.
+      size: 120,
       header: () => null,
       cell: ({ row }) => {
         // Marking is gated to the travel day AND an open attendance window; otherwise
@@ -277,41 +341,50 @@ export function getRosterColumns(opts: {
             );
           }
           const boarded = (
-            <button
-              type="button"
+            <MarkButton
+              letter="B"
+              // Blue, not the amber this shipped with. Amber carried a warning
+              // weight that matched the act -- B asserts a rule breach and
+              // notifies the student -- so with a neutral colour that signal now
+              // lives ENTIRELY in the title below. Keep the wording explicit.
+              tone="blue"
+              title="Only if you can see this student on the bus: record that they travelled without booking a seat"
+              ariaLabel="Mark boarded without booking"
               onClick={() => opts.onMark(r, 'present')}
               disabled={busy}
-              title="Only if you can see this student on the bus: record that they travelled without booking a seat"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
-            >
-              <TicketX className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Boarded'}
-            </button>
+              busy={busy}
+            />
           );
           const absent = (
-            <button
-              type="button"
+            <MarkButton
+              letter="A"
+              tone="red"
+              title="Record that this student did not travel today"
+              ariaLabel="Mark absent"
               onClick={() => opts.onMark(r, 'absent')}
               disabled={busy}
-              title="Record that this student did not travel today"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-            >
-              <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}
-            </button>
+              busy={busy}
+            />
           );
           // Undo survives the toggle rather than being replaced by it: flipping
           // to absent asserts a second fact about the student, where Undo says
           // the record should never have existed. It stays gated on can_clear,
           // which is STRICTLY narrower than can_edit — only the marker or the
           // transport office may erase a record the student was notified about.
+          // Icon-only, to sit beside two letter buttons rather than ending the
+          // row with a word-width control. It keeps the icon (rather than
+          // becoming a "U") because Undo is not a mark: letters mean outcomes,
+          // and giving this one a letter would put it in that vocabulary.
           const undo = r.can_clear ? (
             <button
               type="button"
               onClick={() => opts.onUndo(r)}
               disabled={busy}
               title="Clear this record entirely"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              aria-label="Clear this record entirely"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              <Undo2 className="h-3.5 w-3.5" /> {busy ? 'Clearing…' : 'Undo'}
+              <Undo2 className="h-3.5 w-3.5" />
             </button>
           ) : null;
 
@@ -359,26 +432,30 @@ export function getRosterColumns(opts: {
         return (
           <div className="flex items-center gap-1.5">
             {r.status !== 'present' && (
-              <button
-                type="button"
+              <MarkButton
+                letter="P"
+                tone="green"
+                // `title` here is the not-my-share explanation when the row is
+                // out of scope, and otherwise the plain action. It must never
+                // fall through to undefined: on a letter button the tooltip is
+                // the ONLY place the word "Present" appears.
+                title={title ?? 'Record that this student travelled today'}
+                ariaLabel="Mark present"
                 onClick={() => opts.onMark(r, 'present')}
                 disabled={disabled}
-                title={title}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
-              >
-                <Check className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Present'}
-              </button>
+                busy={busy}
+              />
             )}
             {r.status !== 'absent' && (
-              <button
-                type="button"
+              <MarkButton
+                letter="A"
+                tone="red"
+                title={title ?? 'Record that this student did not travel today'}
+                ariaLabel="Mark absent"
                 onClick={() => opts.onMark(r, 'absent')}
                 disabled={disabled}
-                title={title}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-              >
-                <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}
-              </button>
+                busy={busy}
+              />
             )}
           </div>
         );
