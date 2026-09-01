@@ -187,18 +187,31 @@ export interface RosterRow {
    * hint only — the write routes re-decide server-side, so a client that
    * ignores it is still denied.
    *
-   * Deliberately a single flag. Two independent booleans for "can I press this
-   * button" is exactly the drift this change exists to prevent.
+   * One flag for the STATUS write, whatever the row's ticket state. Every row
+   * now offers the same Present↔Absent toggle, so there is one question to
+   * answer and one answer to give.
    */
   can_edit: boolean;
+  /**
+   * May the actor DELETE this mark outright (the Undo control)?
+   *
+   * Separate from can_edit because it is a genuinely different write with a
+   * genuinely narrower rule — canClearMark, not decideMark. An in-charge who
+   * owns a learner may correct a coverer's status, but may not erase a record
+   * the student has already been notified about; only the marker or the
+   * transport office can do that. Collapsing the two into can_edit is what
+   * made a wrongly-recorded boarding uncorrectable: the row was gated on the
+   * delete rule while the UI only ever needed the status rule.
+   */
+  can_clear: boolean;
   /**
    * Why can_edit is false, so the UI can say which gate closed.
    *
    * 'no_ticket' is deliberately NOT a value here. Holding no ticket used to
    * lock the row ahead of both real gates, which is exactly what made an
    * unticketed rider impossible to record. An unticketed row now runs the same
-   * scope and arbitration gates as any other; what its ticket state changes is
-   * which ACTION is offered (present-only), not whether it is editable.
+   * scope and arbitration gates as any other, and — since boarding staff need
+   * to record a no-show as readily as a boarding — the same pair of actions.
    */
   lock_reason: 'not_my_share' | 'locked' | null;
   /** Set only when this mark replaced an earlier one (scan or transport-head override). */
@@ -288,32 +301,37 @@ export function buildRosterRows(
     );
 
     // ── Gate B: arbitration. Is this row already someone else's? ──
-    // Permission has to be asked about the action the UI will actually OFFER,
-    // and that differs by ticket state. Asking decideMark about a present→absent
-    // flip on a no-ticket row would gate its button on a write that can never
-    // be requested.
+    // Permission is asked about the action the UI will actually OFFER, and
+    // every row — ticket or not — now offers the SAME status toggle. That was
+    // not always true: a no-ticket row used to offer only "Boarded" and, once
+    // recorded, only "Undo", so its gate was computed from canClearMark. The
+    // delete rule is strictly narrower than the status rule, which meant a
+    // wrongly-recorded boarding was locked against people who were entitled to
+    // correct it — the row said "Boarded" and offered no way back.
     //
-    //   booked, marked      → a status toggle       → decideMark (opposite status)
-    //   no ticket, unmarked → "Boarded (no ticket)" → a plain write, nothing to arbitrate
-    //   no ticket, marked   → "Undo"                → a delete → canClearMark
+    //   marked  → a status toggle → decideMark (opposite status)
+    //   Undo    → a delete        → canClearMark, tracked separately as can_clear
     const notLocked = !marked
       ? true
-      : !booked
-        ? canClearMark({
-            existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
-            actorId: viewer.actorId,
-            isOverrideHolder: viewer.isOverrideHolder,
-            isSuperAdmin: viewer.isSuperAdmin,
-          })
-        : decideMark({
-            existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
-            requestedStatus: status === 'present' ? 'absent' : 'present',
-            actorId: viewer.actorId,
-            isOverrideHolder: viewer.isOverrideHolder,
-            isSuperAdmin: viewer.isSuperAdmin,
-            viaScan: false,
-            isLearnerOwner,
-          }).action !== 'deny';
+      : decideMark({
+          existing: { status: status as MarkStatus, scannedBy: att!.scanned_by },
+          requestedStatus: status === 'present' ? 'absent' : 'present',
+          actorId: viewer.actorId,
+          isOverrideHolder: viewer.isOverrideHolder,
+          isSuperAdmin: viewer.isSuperAdmin,
+          viaScan: false,
+          isLearnerOwner,
+        }).action !== 'deny';
+
+    // The delete gate, answered independently and never folded into can_edit.
+    const clearable =
+      inScope &&
+      canClearMark({
+        existing: marked ? { status: status as MarkStatus, scannedBy: att!.scanned_by } : null,
+        actorId: viewer.actorId,
+        isOverrideHolder: viewer.isOverrideHolder,
+        isSuperAdmin: viewer.isSuperAdmin,
+      });
 
     // Precedence matches the write routes: scope before arbitration. "Ask
     // Priya, they own this student" is more actionable than "someone locked
@@ -358,6 +376,7 @@ export function buildRosterRows(
       is_mine: inScope,
       marked_by_name: marked ? att!.marked_by_name : null,
       can_edit: lock_reason === null,
+      can_clear: clearable,
       lock_reason,
       previous_status: prev,
       previous_by_name: prev ? att!.previous_by_name : null,

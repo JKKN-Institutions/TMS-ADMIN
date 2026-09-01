@@ -222,26 +222,28 @@ describe('buildRosterRows — without-ticket travel', () => {
   });
 
   // ── The arbitration SWITCH ──
-  // A marked no-ticket row offers Undo (a delete), not a status flip, so it must
-  // be gated by canClearMark. These two cases are precisely where the wrong
-  // helper gives the wrong answer.
+  // Undo is a DELETE, so it is gated by canClearMark and surfaced as can_clear
+  // — never as can_edit, which answers the separate question of whether the
+  // STATUS may be flipped. These cases are where the two helpers diverge, and
+  // asking the wrong one is what locked a wrongly-recorded boarding shut.
   it('lets the staffer who recorded a no-ticket boarding undo it', () => {
     const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'me' })]]);
     const rows = buildRosterRows(unbooked, route, stops, att, VIEWER);
-    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].can_clear).toBe(true);
   });
 
   it("refuses to let one staffer undo another's no-ticket record", () => {
     const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'someone-else' })]]);
     const rows = buildRosterRows(unbooked, route, stops, att, VIEWER);
-    expect(rows[0].can_edit).toBe(false);
+    expect(rows[0].can_clear).toBe(false);
     expect(rows[0].lock_reason).toBe('locked');
   });
 
-  // decideMark would let an OWNER flip a colleague's status mark; canClearMark
+  // decideMark lets an OWNER flip a colleague's status mark; canClearMark
   // deliberately does not extend that to deletion. Only the marker or the
-  // transport office may erase a record the student has been notified about.
-  it("refuses the owner too — deleting is narrower than overriding", () => {
+  // transport office may erase a record the student has been notified about —
+  // so the owner gets the toggle and is still refused the delete.
+  it("refuses the owner the DELETE — clearing is narrower than overriding", () => {
     const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'the-coverer' })]]);
     const rows = buildRosterRows(
       unbooked, route, stops, att, VIEWER,
@@ -251,7 +253,8 @@ describe('buildRosterRows — without-ticket travel', () => {
         myEmail: 'me@jkkn.ac.in',
       },
     );
-    expect(rows[0].can_edit).toBe(false);
+    expect(rows[0].can_clear).toBe(false);
+    expect(rows[0].can_edit).toBe(true);
   });
 
   it('lets the transport office clear anyone\'s no-ticket record', () => {
@@ -260,7 +263,7 @@ describe('buildRosterRows — without-ticket travel', () => {
       unbooked, route, stops, att,
       { actorId: 'me', isOverrideHolder: true, isSuperAdmin: false },
     );
-    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].can_clear).toBe(true);
   });
 });
 
@@ -378,5 +381,93 @@ describe('buildRosterRows — scope and arbitration compose', () => {
     expect(rows[0].previous_status).toBe('absent');
     expect(rows[0].previous_by_name).toBe('Saranya G');
     expect(rows[0].marked_by_name).toBe('Me');
+  });
+});
+
+/**
+ * ── Absent is now offerable WITHOUT a ticket ──
+ *
+ * Shipped first as present-only: an unbooked rider could be recorded "boarded"
+ * and never anything else, on the reasoning that ~1,000 riders a day hold no
+ * booking and marking them absent would bury the ~50 real absences.
+ *
+ * That produced a reachable dead end, and it is the bug this block exists for.
+ * A rider recorded as boarded who did NOT board could not be corrected to
+ * absent — the roster showed "Boarded" with no opposite, and the only reverse
+ * (Undo) is owner-only, so a colleague saw a Locked pill and nothing else.
+ *
+ * The volume argument still holds, but nothing is recorded unless a staffer
+ * taps, so the cost of offering the control is bounded by real taps rather than
+ * by the size of the unbooked population.
+ *
+ * The row now carries TWO flags because it offers TWO different writes:
+ *   can_edit  — may flip the status (decideMark).
+ *   can_clear — may delete the record outright (canClearMark, strictly narrower).
+ */
+describe('buildRosterRows — present/absent without a ticket', () => {
+  const stops: OrderedStop[] = [{ id: 's1', name: 'First', time: '07:00', order: 1 }];
+  const route = { id: 'r1', route_number: '05' };
+  const unbooked = [{ learner_id: 'a', name: 'A', roll: '10', stop_id: 's1', booked: false }];
+
+  it('lets the staffer who recorded a boarding flip it to absent', () => {
+    const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'me' })]]);
+    const rows = buildRosterRows(unbooked, route, stops, att, VIEWER);
+    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].lock_reason).toBeNull();
+  });
+
+  // The reported bug, as a test. Before this change the row's can_edit was
+  // computed from canClearMark, so an OWNER standing behind a coverer's mark
+  // was refused the status flip as well as the delete — the two questions had
+  // been collapsed into one answer.
+  it('lets the learner\'s owner override a coverer\'s mark but NOT delete it', () => {
+    const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'the-coverer' })]]);
+    const rows = buildRosterRows(
+      unbooked, route, stops, att, VIEWER,
+      {
+        ownerByLearner: new Map([['a', { staff_email: 'me@jkkn.ac.in', name: 'In-charge' }]]),
+        mine: new Set(['me@jkkn.ac.in']),
+        myEmail: 'me@jkkn.ac.in',
+      },
+    );
+    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].can_clear).toBe(false);
+  });
+
+  it("still refuses an unrelated staffer both writes", () => {
+    const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'someone-else' })]]);
+    const rows = buildRosterRows(unbooked, route, stops, att, VIEWER);
+    expect(rows[0].can_edit).toBe(false);
+    expect(rows[0].can_clear).toBe(false);
+    expect(rows[0].lock_reason).toBe('locked');
+  });
+
+  it('lets the transport office do both', () => {
+    const att = new Map([['a', attOf({ status: 'present', is_walk_up: true, scanned_by: 'someone-else' })]]);
+    const rows = buildRosterRows(
+      unbooked, route, stops, att,
+      { actorId: 'me', isOverrideHolder: true, isSuperAdmin: false },
+    );
+    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].can_clear).toBe(true);
+  });
+
+  // An unbooked rider marked ABSENT did not ride, so they cannot also be a
+  // walk-up. The flag means "boarded without a booking" and is meaningless on
+  // an absence — it feeds seatsRemaining and the Walk-ups KPI, both of which
+  // would be wrong if an absence counted as a rider.
+  it('reports no walk-up on an absent unbooked rider', () => {
+    const att = new Map([['a', attOf({ status: 'absent', is_walk_up: false, scanned_by: 'me' })]]);
+    const rows = buildRosterRows(unbooked, route, stops, att, VIEWER);
+    expect(rows[0].status).toBe('absent');
+    expect(rows[0].is_walk_up).toBe(false);
+    expect(rows[0].can_edit).toBe(true);
+  });
+
+  // An unmarked row has nothing to arbitrate and nothing to clear.
+  it('leaves an unmarked unbooked rider fully open', () => {
+    const rows = buildRosterRows(unbooked, route, stops, new Map(), VIEWER);
+    expect(rows[0].can_edit).toBe(true);
+    expect(rows[0].can_clear).toBe(true);
   });
 });

@@ -157,10 +157,13 @@ export default function BoardingAttendancePage() {
   /**
    * Clear a without-ticket boarding record.
    *
-   * This is the FIRST caller of the long-existing DELETE endpoint. A booked
-   * student can be corrected by toggling Present↔Absent, but "boarded without a
-   * ticket" has no opposite state — without this, a mistap would be permanent
-   * from the in-charge's side, on a record the student has been notified about.
+   * This is the only caller of the DELETE endpoint. It is no longer the sole
+   * correction path for an unbooked rider — those rows now carry the same
+   * Present↔Absent toggle as booked ones — but the two corrections mean
+   * different things and both are needed: Absent records that the student did
+   * not travel, Undo records that the row should never have existed. Only Undo
+   * removes a notification the student has already received, which is why it is
+   * gated on the narrower `can_clear`.
    */
   const undo = useCallback(
     async (row: RosterRow) => {
@@ -268,8 +271,16 @@ export default function BoardingAttendancePage() {
             Most of them stayed at home — <span className="font-medium">leave those alone</span>. Only
             if you can actually see one of them on your bus, tap{' '}
             <span className="font-medium">Boarded</span>. They are then recorded as{' '}
-            <span className="font-medium">Travelled without booking</span> and notified. Tapped by
-            mistake? Use <span className="font-medium">Undo</span>.
+            <span className="font-medium">Travelled without booking</span> and notified.
+          </p>
+          {/* Both corrections, spelled out, because they are NOT the same act
+              and staff were reaching for the wrong one. Tapping Boarded on
+              someone who then did not travel needs Absent (a second fact about
+              the student); a mistap on the wrong row needs Undo (this record
+              should not exist). Undo only appears on records you made. */}
+          <p className="mt-1">
+            Got it wrong? Tap <span className="font-medium">Absent</span> if they did not travel, or{' '}
+            <span className="font-medium">Undo</span> to remove the record altogether.
           </p>
         </div>
       </div>

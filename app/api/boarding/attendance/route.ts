@@ -232,24 +232,22 @@ async function mark(request: NextRequest, auth: AuthContext) {
       for (const b of (bookings ?? []) as { learner_id: string }[]) bookedLearners.add(b.learner_id);
     }
 
-    // There is no absent-without-a-ticket. A learner who neither booked nor
-    // travelled simply did not travel; recording that as an absence would bury
-    // the ~50 real absences a day under ~1,000 non-events. The client never
-    // offers the control, and this is the authority that makes it true.
-    const absentWithoutTicket = marks.filter(
-      (m) => m.status === 'absent' && stopByLearner.has(m.learnerId) && !bookedLearners.has(m.learnerId),
-    );
-    if (absentWithoutTicket.length > 0) {
-      return NextResponse.json(
-        {
-          error:
-            'A student with no booking for today cannot be marked absent — they can only be recorded as having boarded without a ticket.',
-          reason: 'absent_without_ticket',
-          learners: absentWithoutTicket.map((m) => m.learnerId),
-        },
-        { status: 400 },
-      );
-    }
+    // ── Absent WITHOUT a ticket is allowed ──
+    // This used to be a 400 (`absent_without_ticket`): a learner with no
+    // booking could be recorded as having boarded and as nothing else. The
+    // reasoning was volume — ~1,000 riders a day hold no booking, and marking
+    // them all absent would bury the ~50 real absences.
+    //
+    // In practice it created a dead end that boarding staff hit within days of
+    // release. A rider recorded "Boarded" who had NOT boarded could not be
+    // corrected to absent: the row showed a boarding with no opposite, and the
+    // only reverse (Undo) is owner-only, so a colleague saw a lock and nothing
+    // else. Staff need the same present/absent pair on every rider.
+    //
+    // The volume concern is handled by the flag below rather than by refusing
+    // the write: an absence is never a walk-up, so it stays out of the Walk-ups
+    // KPI and out of seatsRemaining, and it remains distinguishable from a
+    // booked absence by joining tms_booking on the day.
 
     const rows = marks
       .filter((m) => stopByLearner.has(m.learnerId) && (m.status === 'present' || m.status === 'absent'))
@@ -258,7 +256,15 @@ async function mark(request: NextRequest, auth: AuthContext) {
         route_id: routeId,
         stop_id: stopByLearner.get(m.learnerId) ?? null,
         status: m.status,
-        is_walk_up: !bookedLearners.has(m.learnerId),
+        // "Boarded without a booking" — a claim about RIDING, so it can only
+        // be true of a PRESENT mark. Deriving it from the booking alone (as
+        // this did while absent-without-a-ticket was rejected outright) would
+        // now flag every unbooked ABSENCE as a walk-up, and the flag has teeth:
+        // walk-ups come off the route's remaining seats in seatsRemaining and
+        // feed the admin Walk-ups KPI. A student marked absent would have been
+        // counted as occupying a seat they were just recorded as not taking,
+        // and would have been notified that they travelled without booking.
+        is_walk_up: m.status === 'present' && !bookedLearners.has(m.learnerId),
         // PER-LEARNER entitlement. p_allow_override below is a per-CALL flag and
         // cannot express this: within one batch the caller may own some learners
         // and merely cover others, and only the owned ones outrank a coverer's

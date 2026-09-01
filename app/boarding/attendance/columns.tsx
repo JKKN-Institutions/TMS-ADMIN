@@ -67,21 +67,33 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
 
 /**
  * Full-bus columns for the Attendance page. Route/Status are filterable.
- * The Action column is a single toggle button, shown only when `canMark` (the
- * travel day AND the attendance window is open — onward-only, see
- * lib/boarding/attendance-window.ts) AND the student holds a ticket for the day.
- * It shows the NEXT action: unmarked/absent → "Present", present → "Absent"; the
- * Status badge shows the current state. Clicking POSTs that status to
- * /api/boarding/attendance.
+ * The Action column is shown only when `canMark` (the travel day AND the
+ * attendance window is open — onward-only, see lib/boarding/attendance-window.ts).
+ * Every row offers BOTH outcomes, minus whichever one it already holds:
+ * unmarked → [Present] [Absent], present → [Absent], absent → [Present]. The
+ * Status badge shows the current state; clicking POSTs to /api/boarding/attendance.
  *
- * Rows cover the WHOLE allocated bus. A student who did not book carries a
- * "Not booked" badge and gets a DIFFERENT control from a booked one: a
- * single amber "Boarded" button rather than a Present/Absent toggle, because
- * the only fact worth recording about an unbooked student is that they rode
- * anyway. That write is flagged is_walk_up server-side, the badge turns red,
- * and the row's control becomes "Undo" — the sole correction path, so it is
- * gated by the same ownership rule (can_edit, from canClearMark) as everything
- * else on this screen.
+ * It was a single toggle showing only the NEXT action, which meant an UNMARKED
+ * student offered "Present" and nothing else — reaching absent required marking
+ * them present first and flipping, writing a boarding that never happened. A
+ * toggle cannot express a three-state row: it only ever reaches one of the two
+ * states you are not currently in.
+ *
+ * Rows cover the WHOLE allocated bus, and a student who did not book carries a
+ * "Not booked" badge. Those rows once offered present ONLY — a one-way amber
+ * "Boarded" button whose sole reverse was Undo — which left a rider recorded as
+ * boarded who had not boarded with no way to be marked absent. They now get the
+ * SAME pair of outcomes as a booked rider; ticket state changes the wording and
+ * the weight of the present action, not which outcomes exist:
+ *
+ *   "Boarded" (amber, not green) — asserts the student rode without booking.
+ *   The server flags it is_walk_up, the ticket badge turns red, and the student
+ *   is notified once. Absent is an ordinary no-show and is never a walk-up.
+ *
+ * Undo (clear the row back to unmarked) remains available alongside the toggle
+ * on unbooked rows, gated on `can_clear` — canClearMark, strictly narrower than
+ * the `can_edit` that gates the status flip, because erasing a record the
+ * student was notified about is not the same act as correcting it.
  */
 export function getRosterColumns(opts: {
   canMark: boolean;
@@ -220,7 +232,12 @@ export function getRosterColumns(opts: {
       id: 'action',
       enableHiding: false,
       enableSorting: false,
-      size: 120,
+      // Sized for the widest cell this column produces — an unmarked no-ticket
+      // row's [Boarded][Absent], or a recorded one's [action][Undo]. It was 120,
+      // enough for the single toggle that used to live here; leaving it there
+      // would wrap or clip the second button on the exact rows the pair was
+      // added for.
+      size: 230,
       header: () => null,
       cell: ({ row }) => {
         // Marking is gated to the travel day AND an open attendance window; otherwise
@@ -228,56 +245,82 @@ export function getRosterColumns(opts: {
         if (!opts.canMark) return null;
         const busy = opts.busyId === row.original.learner_id;
 
-        // ── Without a ticket: one action, not a toggle ──
-        // A student who neither booked nor travelled is simply not on the bus,
-        // so there is no Absent to offer — the only fact worth recording is
-        // that they boarded anyway. Once recorded, the opposite of "boarded" is
-        // not "absent", it is "I got that wrong", so the row offers Undo.
+        // ── Without a ticket: BOTH actions, same as a booked rider ──
+        // This shipped as present-only — one amber "Boarded" button whose only
+        // reverse was Undo — on the reasoning that an unbooked student who did
+        // not travel is simply not on the bus, so there is nothing to record.
+        //
+        // Staff hit the dead end that creates within days: a rider recorded
+        // "Boarded" who had NOT boarded showed a boarding with no opposite, and
+        // Undo is owner-only, so a colleague saw a Locked pill and no way back.
+        // Every rider now gets the same present/absent pair; what ticket state
+        // still changes is the WORDING and the weight of the present action,
+        // because for an unbooked rider that action asserts a rule breach and
+        // notifies the student.
         if (!row.original.booked) {
           const r = row.original;
-          if (r.status === 'unmarked') {
-            if (r.lock_reason === 'not_my_share') {
-              return (
-                <span className="text-xs text-gray-400" title={`${r.owner_name ?? 'Another in-charge'} marks this student`}>
-                  —
-                </span>
-              );
-            }
+          if (r.lock_reason === 'not_my_share') {
             return (
-              <button
-                type="button"
-                onClick={() => opts.onMark(r, 'present')}
-                disabled={busy}
-                title="Only if you can see this student on the bus: record that they travelled without booking a seat"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
-              >
-                <TicketX className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Boarded'}
-              </button>
+              <span className="text-xs text-gray-400" title={`${r.owner_name ?? 'Another in-charge'} marks this student`}>
+                —
+              </span>
             );
           }
-          // Already recorded. Undo is the ONLY correction path for these rows,
-          // so it must respect the same ownership rule as every other write --
-          // can_edit already folds it in (canClearMark, server-side).
-          if (!r.can_edit) {
+          if (r.lock_reason === 'locked') {
             return (
               <span
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                title={`${r.marked_by_name ?? 'Another staff member'} recorded this. Only they or the transport office can clear it.`}
+                title={`${r.marked_by_name ?? 'Another staff member'} recorded this. Only they or the transport office can change it.`}
               >
                 <Lock className="h-3.5 w-3.5" /> Locked
               </span>
             );
           }
-          return (
+          const boarded = (
+            <button
+              type="button"
+              onClick={() => opts.onMark(r, 'present')}
+              disabled={busy}
+              title="Only if you can see this student on the bus: record that they travelled without booking a seat"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+            >
+              <TicketX className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Boarded'}
+            </button>
+          );
+          const absent = (
+            <button
+              type="button"
+              onClick={() => opts.onMark(r, 'absent')}
+              disabled={busy}
+              title="Record that this student did not travel today"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}
+            </button>
+          );
+          // Undo survives the toggle rather than being replaced by it: flipping
+          // to absent asserts a second fact about the student, where Undo says
+          // the record should never have existed. It stays gated on can_clear,
+          // which is STRICTLY narrower than can_edit — only the marker or the
+          // transport office may erase a record the student was notified about.
+          const undo = r.can_clear ? (
             <button
               type="button"
               onClick={() => opts.onUndo(r)}
               disabled={busy}
-              title="Clear this record"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              title="Clear this record entirely"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <Undo2 className="h-3.5 w-3.5" /> {busy ? 'Clearing…' : 'Undo'}
             </button>
+          ) : null;
+
+          return (
+            <div className="flex items-center gap-1.5">
+              {r.status !== 'present' && boarded}
+              {r.status !== 'absent' && absent}
+              {r.status !== 'unmarked' && undo}
+            </div>
           );
         }
 
@@ -300,28 +343,44 @@ export function getRosterColumns(opts: {
           r.lock_reason === 'not_my_share'
             ? `${r.owner_name ?? 'Another in-charge'} marks this student`
             : undefined;
-        // Single toggle showing the NEXT action: present → mark Absent, else → mark Present.
-        const next: 'present' | 'absent' = row.original.status === 'present' ? 'absent' : 'present';
-        return next === 'present' ? (
-          <button
-            type="button"
-            onClick={() => opts.onMark(row.original, 'present')}
-            disabled={disabled}
-            title={title}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
-          >
-            <Check className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Present'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => opts.onMark(row.original, 'absent')}
-            disabled={disabled}
-            title={title}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-          >
-            <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}
-          </button>
+        // Both outcomes, minus whichever one the row already holds.
+        //
+        // This was a SINGLE toggle showing only the next action — unmarked
+        // rendered "Present" alone, so an UNMARKED booked student could not be
+        // marked absent in one tap. Reaching absent meant marking them present
+        // first and then flipping, which writes a boarding that never happened
+        // (notifying nobody, but leaving a present mark in the audit trail and
+        // a moment where the roster says a no-show boarded). A toggle is the
+        // wrong shape for a three-state row: it can only ever offer one of the
+        // two remaining states.
+        //
+        // Unmarked → [Present] [Absent]; present → [Absent]; absent → [Present],
+        // matching the unbooked rows above so the whole column reads one way.
+        return (
+          <div className="flex items-center gap-1.5">
+            {r.status !== 'present' && (
+              <button
+                type="button"
+                onClick={() => opts.onMark(r, 'present')}
+                disabled={disabled}
+                title={title}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+              >
+                <Check className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Present'}
+              </button>
+            )}
+            {r.status !== 'absent' && (
+              <button
+                type="button"
+                onClick={() => opts.onMark(r, 'absent')}
+                disabled={disabled}
+                title={title}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                <X className="h-3.5 w-3.5" /> {busy ? 'Saving…' : 'Absent'}
+              </button>
+            )}
+          </div>
         );
       },
     },
