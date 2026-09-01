@@ -11,7 +11,55 @@ import {
   type AnalyticsFilters, type AnalyticsPayload, type AttendanceRow, type BookingRow,
   type LabelMap, type Labels, type LearnerDim,
 } from '@/lib/booking/analytics';
+import type { WalkUpLearnerRow } from '@/lib/booking/analytics-types';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+/**
+ * Fill in name + roll number on the ranked without-booking travellers, in place.
+ *
+ * Kept OUT of the pure aggregator on purpose: identity is I/O, and which
+ * learners need it is only known once the ranking has run. The list is already
+ * capped (WALK_UP_LEARNER_LIMIT) so this is a single small query, but it is
+ * chunked anyway — the cap is the aggregator's business and this should not
+ * quietly break if it is ever raised.
+ *
+ * Best-effort. A failed lookup leaves the rows with their ids, which the table
+ * renders as an unnamed row; it must never fail a whole analytics page over
+ * cosmetic labels.
+ */
+async function attachWalkUpLearnerIdentity(
+  svc: SupabaseClient,
+  rows: WalkUpLearnerRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    const ids = rows.map((r) => r.id);
+    const byId = new Map<string, { name: string; roll: string | null }>();
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data, error } = await svc
+        .from('learners_profiles')
+        .select('id, first_name, last_name, roll_number')
+        .in('id', ids.slice(i, i + 150));
+      if (error) throw error;
+      for (const l of (data ?? []) as Array<{
+        id: string; first_name: string | null; last_name: string | null; roll_number: string | null;
+      }>) {
+        byId.set(l.id, {
+          name: `${l.first_name ?? ''} ${l.last_name ?? ''}`.trim() || 'Learner',
+          roll: l.roll_number,
+        });
+      }
+    }
+    for (const r of rows) {
+      const info = byId.get(r.id);
+      if (!info) continue;
+      r.label = info.name;
+      r.roll = info.roll;
+    }
+  } catch (e) {
+    console.error('analytics: failed to resolve walk-up learner names (non-fatal):', e);
+  }
+}
 
 /**
  * Bookings & Attendance analytics, aggregated server-side over the live
@@ -382,6 +430,12 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         capacities
       ),
     };
+
+    // Learner identity for the ranked without-booking list. Deliberately AFTER
+    // aggregation: the aggregator has already cut the range's distinct
+    // travellers (thousands over a month at current volume) down to twenty, so
+    // this resolves twenty names rather than every walk-up in the range.
+    await attachWalkUpLearnerIdentity(svc, payload.attendance.topWalkUpLearners);
 
     return NextResponse.json({ success: true, data: payload });
   } catch (e) {

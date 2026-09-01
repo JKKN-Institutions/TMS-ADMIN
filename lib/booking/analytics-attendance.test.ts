@@ -494,3 +494,119 @@ describe('aggregateAttendance — who marked', () => {
     expect(aggregateAttendance({ ...base, numeratorFiltered: false }).numeratorFiltered).toBe(false);
   });
 });
+
+/**
+ * Without-booking travel. The trap this suite exists to pin: `is_walk_up` is a
+ * per-ROW flag while "had a booking" is a per-learner-DAY fact, so the numerator
+ * and the denominator must be attributed using the SAME chosen row — otherwise a
+ * route can report more without-booking travel than it recorded boardings.
+ */
+describe('aggregateAttendance — without-booking travel', () => {
+  const labels2: Labels = {
+    routes: new Map([['R1', '05 · Sankari'], ['R2', '18 · Tiruchengode']]),
+    stops: new Map(), institutions: new Map(), departments: new Map(),
+    programs: new Map(), staff: new Map(),
+  };
+  const agg2 = (bookings: BookingRow[], attendance: AttendanceRow[]) =>
+    aggregateAttendance({
+      bookings,
+      bookingsForWalkUp: bookings,
+      attendanceAll: attendance,
+      attendanceForJoin: attendance,
+      attendanceForComposition: attendance,
+      learners,
+      labels: labels2,
+    });
+
+  it('reports the route rate as a share of that route own boardings', () => {
+    // R1: 2 boardings, 1 unbooked => 50%. R2: 1 boarding, 1 unbooked => 100%.
+    const bookings = [bk('L1', '2026-07-09', 'R1')];
+    const attendance = [
+      at('L1', '2026-07-09', { route_id: 'R1' }),
+      at('L2', '2026-07-09', { route_id: 'R1', is_walk_up: true }),
+      at('L3', '2026-07-09', { route_id: 'R2', is_walk_up: true }),
+    ];
+    const r = agg2(bookings, attendance);
+    const byId = new Map(r.walkUpByRoute.map((x) => [x.id, x]));
+    expect(byId.get('R1')).toMatchObject({ boardings: 2, walkUps: 1, rate: 50 });
+    expect(byId.get('R2')).toMatchObject({ boardings: 1, walkUps: 1, rate: 100 });
+    // Worst SHARE first, not the biggest raw count.
+    expect(r.walkUpByRoute[0].id).toBe('R2');
+  });
+
+  it('resolves the route label rather than leaking the id', () => {
+    const r = agg2([], [at('L1', '2026-07-09', { route_id: 'R2', is_walk_up: true })]);
+    expect(r.walkUpByRoute[0].label).toBe('18 · Tiruchengode');
+  });
+
+  // The bug the single-pass attribution prevents: one leg flagged, one not.
+  it('never lets a route exceed 100% when only one leg carries the flag', () => {
+    const attendance = [
+      at('L1', '2026-07-09', { route_id: 'R1', direction: 'onward', is_walk_up: false }),
+      at('L1', '2026-07-09', { route_id: 'R2', direction: 'return', is_walk_up: true }),
+    ];
+    const r = agg2([bk('L1', '2026-07-09', 'R1')], attendance);
+    for (const row of r.walkUpByRoute) {
+      expect(row.rate).toBeLessThanOrEqual(100);
+      expect(row.walkUps).toBeLessThanOrEqual(row.boardings);
+    }
+  });
+
+  it('counts a learner marked on both legs of one day exactly once', () => {
+    const attendance = [
+      at('L1', '2026-07-09', { direction: 'onward', is_walk_up: true }),
+      at('L1', '2026-07-09', { direction: 'return', is_walk_up: true }),
+    ];
+    const r = agg2([], attendance);
+    expect(r.kpis.walkUps).toBe(1);
+    expect(r.walkUpPerDay).toEqual([{ date: '2026-07-09', walkUps: 1, boardings: 1 }]);
+    expect(r.topWalkUpLearners[0].days).toBe(1);
+  });
+
+  it('ranks learners by DISTINCT DAYS, ascending id breaking ties', () => {
+    const attendance = [
+      at('L1', '2026-07-09', { is_walk_up: true }),
+      at('L1', '2026-07-10', { is_walk_up: true }),
+      at('L1', '2026-07-11', { is_walk_up: true }),
+      at('L2', '2026-07-09', { is_walk_up: true }),
+      at('L3', '2026-07-09', { is_walk_up: true }),
+    ];
+    const r = agg2([], attendance);
+    expect(r.topWalkUpLearners.map((l) => [l.id, l.days])).toEqual([
+      ['L1', 3], ['L2', 1], ['L3', 1],
+    ]);
+    expect(r.walkUpLearnerTotal).toBe(3);
+  });
+
+  // Identity is I/O and belongs to the API, which fills these for the survivors
+  // only. A non-empty label here would mean the aggregator had started doing
+  // lookups it cannot do.
+  it('leaves learner name and roll for the API to fill', () => {
+    const r = agg2([], [at('L1', '2026-07-09', { is_walk_up: true })]);
+    expect(r.topWalkUpLearners[0]).toMatchObject({ id: 'L1', label: '', roll: null });
+    expect(r.topWalkUpLearners[0].routeLabel).toBe('05 · Sankari');
+  });
+
+  it('attributes a learner to their LATEST route when they moved mid-range', () => {
+    const attendance = [
+      at('L1', '2026-07-09', { route_id: 'R1', is_walk_up: true }),
+      at('L1', '2026-07-11', { route_id: 'R2', is_walk_up: true }),
+    ];
+    const r = agg2([], attendance);
+    expect(r.topWalkUpLearners[0].routeLabel).toBe('18 · Tiruchengode');
+  });
+
+  it('omits routes with no without-booking travel from the chart', () => {
+    const r = agg2([bk('L1', '2026-07-09', 'R1')], [at('L1', '2026-07-09', { route_id: 'R1' })]);
+    expect(r.walkUpByRoute).toEqual([]);
+    // ...but the day still appears, with its boardings, so the trend has a baseline.
+    expect(r.walkUpPerDay).toEqual([{ date: '2026-07-09', walkUps: 0, boardings: 1 }]);
+  });
+
+  it('ignores absent marks entirely — nobody travels by being absent', () => {
+    const r = agg2([], [at('L1', '2026-07-09', { status: 'absent', is_walk_up: true })]);
+    expect(r.kpis.walkUps).toBe(0);
+    expect(r.topWalkUpLearners).toEqual([]);
+    expect(r.walkUpByRoute).toEqual([]);
+  });
+});

@@ -130,6 +130,48 @@ export interface MarkerRow extends FacetOption {
   absent: number;
 }
 
+/**
+ * One route's without-booking boardings, as a SHARE of what that route recorded.
+ *
+ * The share is the point. A raw count ranks the routes whose in-charges mark
+ * diligently as the worst offenders — route 18 showed 45 in the first two days
+ * purely because its staff adopted the button early. `boardings` is the same
+ * deduped learner-day population `walkUps` is drawn from, so `rate` is <= 100
+ * by construction rather than by hope.
+ */
+export interface WalkUpRouteRow extends FacetOption {
+  /** Distinct learner-days marked present on this route. */
+  boardings: number;
+  /** Of those, how many had no booking for the day. */
+  walkUps: number;
+  /** walkUps / boardings, one decimal place. */
+  rate: number;
+}
+
+/**
+ * A learner ranked by how many DAYS they were recorded travelling without a
+ * booking — the question "is this the same people every day, or a different
+ * crowd?", which a total count cannot answer.
+ *
+ * `label` and `roll` are left EMPTY by the aggregator and filled in by the API
+ * afterwards. Learner identity is not in LearnerDim, and resolving names for
+ * every walk-up in a range (~7,000 rows a month at current volume) to then show
+ * twenty of them would be a large query for data that never reaches the screen.
+ * Rank first, then look up only the survivors.
+ */
+export interface WalkUpLearnerRow {
+  /** learners_profiles.id */
+  id: string;
+  /** Display name. Empty until the API resolves it. */
+  label: string;
+  /** Roll number. Null until the API resolves it, and stays null if unset. */
+  roll: string | null;
+  /** The route they were most recently recorded on, already label-resolved. */
+  routeLabel: string | null;
+  /** Distinct days recorded without a booking in the range. */
+  days: number;
+}
+
 export interface AttendanceBlock {
   unavailable: boolean;
   coverage: {
@@ -160,6 +202,19 @@ export interface AttendanceBlock {
   };
   perDay: { date: string; booked: number; boarded: number; noShows: number }[];
   noShowByRoute: ShowRow[];
+  /** Without-booking boardings per route, worst SHARE first. */
+  walkUpByRoute: WalkUpRouteRow[];
+  /**
+   * Without-booking boardings per day, with that day's total boardings as the
+   * denominator. Both are needed: a rising raw count during the feature's first
+   * weeks measures in-charges adopting the button, not students changing
+   * behaviour, and only the share separates the two.
+   */
+  walkUpPerDay: { date: string; walkUps: number; boardings: number }[];
+  /** Most frequent without-booking travellers, capped — see walkUpLearnerTotal. */
+  topWalkUpLearners: WalkUpLearnerRow[];
+  /** How many distinct learners were recorded at all, so the UI can say "top 20 of N". */
+  walkUpLearnerTotal: number;
   byDirection: { onward: number; return: number };
   byMethod: { qr_scan: number; manual: number };
   byStatus: { present: number; absent: number };

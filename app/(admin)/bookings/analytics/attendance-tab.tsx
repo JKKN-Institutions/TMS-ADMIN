@@ -14,7 +14,7 @@ import {
   Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
-  AlertTriangle, CheckCircle2, QrCode, ScanLine, UserX, Users, XCircle,
+  AlertTriangle, CheckCircle2, QrCode, ScanLine, TicketX, UserX, Users, XCircle,
 } from 'lucide-react';
 import {
   ChartCard, EmptyState, Legend, Meter, StatTile, VizTable, VizTooltip, axisLine, axisTick, card,
@@ -81,6 +81,49 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
         <Bar dataKey="noShows" name="No-shows" fill="var(--viz-serious)" radius={[0, 4, 4, 0]} maxBarSize={18}>
           <LabelList dataKey="noShows" position="right" fill="var(--viz-tick)" fontSize={11} />
         </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  // ── Without-booking travel ───────────────────────────────────────────────
+  // Plotted as a RATE, never a raw count. Route 18 recorded 45 in the feature's
+  // first two days purely because its in-charges adopted the button early, and a
+  // count-ranked chart would put the best-instrumented bus at the top and read
+  // as an accusation against it.
+  const walkRouteRows = data.walkUpByRoute.slice(0, CHART_TOP_N);
+  const walkUpByRoute = (
+    <ResponsiveContainer width="100%" height={Math.max(220, walkRouteRows.length * 30 + 24)}>
+      <BarChart data={walkRouteRows} layout="vertical" margin={{ top: 4, right: 52, bottom: 4, left: 8 }} barCategoryGap="28%">
+        <CartesianGrid {...gridProps} horizontal={false} />
+        <XAxis type="number" tick={axisTick} axisLine={axisLine} tickLine={false} unit="%" domain={[0, 100]} />
+        <YAxis
+          type="category"
+          dataKey="label"
+          width={150}
+          tick={axisTick}
+          axisLine={false}
+          tickLine={false}
+          tickFormatter={(v: string) => (v.length > 22 ? `${v.slice(0, 21)}…` : v)}
+        />
+        <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip valueFmt={(v: number) => `${v.toFixed(1)}% without a booking`} />} />
+        <Bar dataKey="rate" name="Without booking" fill="var(--viz-warning)" radius={[0, 4, 4, 0]} maxBarSize={18}>
+          <LabelList dataKey="rate" position="right" fill="var(--viz-tick)" fontSize={11} formatter={(v: number) => `${v.toFixed(0)}%`} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const walkUpPerDay = (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data.walkUpPerDay} margin={{ top: 12, right: 12, bottom: 4, left: 4 }} barCategoryGap="24%" barGap={2}>
+        <CartesianGrid {...gridProps} vertical={false} />
+        <XAxis dataKey="date" tick={axisTick} axisLine={axisLine} tickLine={false} minTickGap={24} />
+        <YAxis tick={axisTick} axisLine={false} tickLine={false} allowDecimals={false} width={44} />
+        <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip />} />
+        {/* Total boardings sit behind the walk-ups so the day's scale is visible.
+            Without it a day where in-charges marked almost nobody looks calm. */}
+        <Bar dataKey="boardings" name="Boardings" fill="var(--viz-context)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+        <Bar dataKey="walkUps" name="Without booking" fill="var(--viz-warning)" radius={[4, 4, 0, 0]} maxBarSize={26} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -152,7 +195,7 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
         <Meter
           label="Show-up rate"
           rate={k.showUpRate}
-          caption={`${num(k.boarded)} boarded of ${num(k.bookedOnScannedDays)} booked on scanned days${k.walkUps > 0 ? ` · ${num(k.walkUps)} walk-ups` : ''}`}
+          caption={`${num(k.boarded)} boarded of ${num(k.bookedOnScannedDays)} booked on scanned days${k.walkUps > 0 ? ` · ${num(k.walkUps)} without a booking` : ''}`}
         />
       </div>
 
@@ -177,6 +220,57 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
         csv={{ filename: 'no-shows-by-route.csv', head: ['Route', 'Booked', 'Boarded', 'No-shows', 'No-show %'], rows: data.noShowByRoute.map((r) => [r.label, r.booked, r.boarded, r.noShows, r.rate]) }}
       />
 
+      <ChartCard
+        title="Travelled without booking, by route"
+        subtitle={
+          data.walkUpByRoute.length > CHART_TOP_N
+            ? `Top ${CHART_TOP_N} of ${num(data.walkUpByRoute.length)} routes — share of each route's own recorded boardings`
+            : "Share of each route's own recorded boardings, so a diligently-marked bus is not penalised"
+        }
+        hasData={data.walkUpByRoute.length > 0}
+        emptyMessage="No without-booking travel recorded in this range."
+        chart={walkUpByRoute}
+        table={<VizTable head={['Route', 'Boardings', 'Without booking', '%']} rows={data.walkUpByRoute.map((r) => [r.label, num(r.boardings), num(r.walkUps), `${r.rate.toFixed(1)}%`])} />}
+        csv={{ filename: 'travelled-without-booking-by-route.csv', head: ['Route', 'Boardings', 'Without booking', 'Percent'], rows: data.walkUpByRoute.map((r) => [r.label, r.boardings, r.walkUps, r.rate]) }}
+      />
+
+      <ChartCard
+        title="Travelled without booking, per day"
+        subtitle="Counts rise as more in-charges start recording — early movement measures adoption of the button, not a change in student behaviour"
+        hasData={data.walkUpPerDay.some((d) => d.walkUps > 0)}
+        emptyMessage="No without-booking travel recorded in this range."
+        legend={<Legend items={[{ label: 'Boardings', color: 'var(--viz-context)' }, { label: 'Without booking', color: 'var(--viz-warning)', Icon: TicketX }]} />}
+        chart={walkUpPerDay}
+        table={<VizTable head={['Date', 'Boardings', 'Without booking']} rows={data.walkUpPerDay.map((d) => [d.date, num(d.boardings), num(d.walkUps)])} />}
+        csv={{ filename: 'travelled-without-booking-per-day.csv', head: ['Date', 'Boardings', 'Without booking'], rows: data.walkUpPerDay.map((d) => [d.date, d.boardings, d.walkUps]) }}
+      />
+
+      <section className={`${card} p-5`}>
+        <div className="mb-4">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <TicketX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            Most frequent without a booking
+          </h3>
+          {/* Ranked by DAYS, not by marks. The question the office is asking is
+              "is this the same people every day?", and over the first two days
+              route 18's 45 boardings came from 43 different learners — a total
+              count alone would have implied the opposite. */}
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {data.walkUpLearnerTotal > data.topWalkUpLearners.length
+              ? `Top ${num(data.topWalkUpLearners.length)} of ${num(data.walkUpLearnerTotal)} learners recorded in this range, by number of days.`
+              : 'Learners recorded travelling without a booking, by number of days.'}
+          </p>
+        </div>
+        {data.topWalkUpLearners.length === 0 ? (
+          <EmptyState message="No without-booking travel recorded in this range." />
+        ) : (
+          <VizTable
+            head={['Learner', 'Roll No.', 'Route', 'Days']}
+            rows={data.topWalkUpLearners.map((l) => [l.label || 'Learner', l.roll ?? '—', l.routeLabel ?? '—', num(l.days)])}
+          />
+        )}
+      </section>
+
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <section className={`${card} p-5`}>
           <div className="mb-4">
@@ -191,7 +285,7 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Cell label="Present" value={num(data.byStatus.present)} Icon={CheckCircle2} color="var(--viz-good)" />
               <Cell label="Absent" value={num(data.byStatus.absent)} Icon={XCircle} color="var(--viz-critical)" />
-              <Cell label="Walk-ups" value={num(k.walkUps)} Icon={AlertTriangle} color="var(--viz-warning)" />
+              <Cell label="Without booking" value={num(k.walkUps)} Icon={AlertTriangle} color="var(--viz-warning)" />
               <Cell label="Onward" value={num(data.byDirection.onward)} Icon={ScanLine} color="var(--viz-accent)" />
               <Cell label="Return" value={num(data.byDirection.return)} Icon={ScanLine} color="var(--viz-context)" />
               <Cell label="QR / manual" value={`${num(data.byMethod.qr_scan)} / ${num(data.byMethod.manual)}`} Icon={QrCode} color="var(--viz-neutral)" />

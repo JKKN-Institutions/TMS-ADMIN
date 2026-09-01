@@ -15,7 +15,18 @@
 import { pct } from './analytics-dims';
 import type {
   AttendanceBlock, AttendanceRow, BookingRow, LabelMap, Labels, LearnerDim, MarkerRow, ShowRow,
+  WalkUpLearnerRow, WalkUpRouteRow,
 } from './analytics-types';
+
+/**
+ * How many ranked without-booking travellers leave the aggregator.
+ *
+ * Bounds the API's follow-up name lookup, not just the table: at ~358 a day the
+ * distinct-learner count over a month runs into the thousands, and resolving
+ * names for all of them to render twenty is the one real cost this feature can
+ * add to an endpoint that is otherwise pure computation over rows already held.
+ */
+const WALK_UP_LEARNER_LIMIT = 20;
 
 interface Tally {
   booked: number;
@@ -181,17 +192,83 @@ export function aggregateAttendance({
     }
   }
 
-  // A boarding with no matching booking (or an explicit is_walk_up flag), counted
-  // once per learner-day.
-  const walkUps = new Set(
-    attendanceForJoin
-      .filter(
-        (a) =>
-          a.status === 'present' &&
-          (a.is_walk_up || !bookingKeys.has(key(a.learner_id, a.trip_date)))
-      )
-      .map((a) => key(a.learner_id, a.trip_date))
-  ).size;
+  // ── Without-booking travel ────────────────────────────────────────────────
+  // A boarding with no matching booking (or an explicit is_walk_up flag),
+  // counted once per learner-day.
+  //
+  // ONE pass builds both the numerator and the denominator, and the same chosen
+  // row attributes both. That is not tidiness: is_walk_up is a per-ROW flag
+  // while "had a booking" is a per-learner-DAY fact, so a learner marked on both
+  // legs can have one row flagged and one not. Picking the walk-up row for the
+  // numerator and a different present row for the denominator would attribute
+  // them to different routes and let a route report a rate above 100%.
+  const boardingByKey = new Map<string, AttendanceRow>();
+  const walkUpKeys = new Set<string>();
+  for (const a of attendanceForJoin) {
+    if (a.status !== 'present') continue;
+    const k = key(a.learner_id, a.trip_date);
+    // First present row wins, so attribution is stable across both tallies.
+    if (!boardingByKey.has(k)) boardingByKey.set(k, a);
+    if (a.is_walk_up || !bookingKeys.has(k)) walkUpKeys.add(k);
+  }
+  const walkUps = walkUpKeys.size;
+
+  // Per route and per day, walk-ups over that population's own boardings.
+  interface WalkTally { boardings: number; walkUps: number }
+  const bump = (m: Map<string, WalkTally>, id: string, isWalkUp: boolean) => {
+    const t = m.get(id) ?? { boardings: 0, walkUps: 0 };
+    t.boardings += 1;
+    if (isWalkUp) t.walkUps += 1;
+    m.set(id, t);
+  };
+  const walkRouteMap = new Map<string, WalkTally>();
+  const walkDayMap = new Map<string, WalkTally>();
+  // learner -> { days recorded without a booking, most recent route }
+  const walkLearnerMap = new Map<string, { days: number; lastDate: string; routeId: string | null }>();
+
+  for (const [k, row] of boardingByKey) {
+    const isWalkUp = walkUpKeys.has(k);
+    if (row.route_id) bump(walkRouteMap, row.route_id, isWalkUp);
+    bump(walkDayMap, row.trip_date, isWalkUp);
+    if (!isWalkUp) continue;
+    const prev = walkLearnerMap.get(row.learner_id);
+    walkLearnerMap.set(row.learner_id, {
+      days: (prev?.days ?? 0) + 1,
+      // Keep the LATEST route: a learner who changed buses mid-range should be
+      // listed against the one the office would go looking for them on.
+      lastDate: !prev || row.trip_date > prev.lastDate ? row.trip_date : prev.lastDate,
+      routeId: !prev || row.trip_date > prev.lastDate ? row.route_id : prev.routeId,
+    });
+  }
+
+  const walkUpByRoute: WalkUpRouteRow[] = [...walkRouteMap.entries()]
+    .map(([id, t]) => ({
+      id,
+      label: labels.routes.get(id) ?? id,
+      boardings: t.boardings,
+      walkUps: t.walkUps,
+      rate: pct(t.walkUps, t.boardings),
+    }))
+    // Rate first — the point of the card. Count breaks ties so a route with a
+    // single boarding, all of it unbooked, does not outrank a busy one at 100%.
+    .filter((r) => r.walkUps > 0)
+    .sort((a, b) => b.rate - a.rate || b.walkUps - a.walkUps || a.label.localeCompare(b.label));
+
+  const walkUpPerDay = [...walkDayMap.entries()]
+    .map(([date, t]) => ({ date, walkUps: t.walkUps, boardings: t.boardings }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // label/roll are deliberately left blank: the API fills them for the survivors
+  // only. See WalkUpLearnerRow.
+  const rankedWalkUpLearners: WalkUpLearnerRow[] = [...walkLearnerMap.entries()]
+    .map(([id, t]) => ({
+      id,
+      label: '',
+      roll: null,
+      routeLabel: t.routeId ? labels.routes.get(t.routeId) ?? null : null,
+      days: t.days,
+    }))
+    .sort((a, b) => b.days - a.days || a.id.localeCompare(b.id));
 
   const count = <T extends string>(
     rows: AttendanceRow[], pick: (a: AttendanceRow) => T, value: T
@@ -285,6 +362,12 @@ export function aggregateAttendance({
       }))
       .sort((a, b) => a.date.localeCompare(b.date)),
     noShowByRoute: showRows(routeMap, labels.routes),
+    walkUpByRoute,
+    walkUpPerDay,
+    // Capped here rather than in the tab so the API only ever resolves names for
+    // rows that will be rendered.
+    topWalkUpLearners: rankedWalkUpLearners.slice(0, WALK_UP_LEARNER_LIMIT),
+    walkUpLearnerTotal: rankedWalkUpLearners.length,
     byDirection: {
       onward: count(attendanceForComposition, (a) => a.direction, 'onward'),
       return: count(attendanceForComposition, (a) => a.direction, 'return'),
