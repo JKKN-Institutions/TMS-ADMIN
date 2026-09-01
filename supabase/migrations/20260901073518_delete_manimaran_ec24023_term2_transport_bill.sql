@@ -1,0 +1,53 @@
+-- One-off correction for MANIMARAN P (EC24023, manimaranp2024ece@jkkn.ac.in),
+-- learner afdcfa60-a3ae-490f-9eac-dd9013d4c836, transport year 2026-2027.
+--
+-- The transport office confirmed this learner owes Term 1 only (repriced to
+-- Rs.500 and already PAID in full). Term 2 (Rs.2,500, unpaid, due 2026-08-31)
+-- should never have been raised, and once it fell overdue on 2026-09-01 the
+-- tms_student_transport_access gate locked the learner out of the student
+-- portal with reason 'overdue'.
+--
+-- DELETING THE MONEY ROW, NOT THE LEDGER ROW -- and the direction matters.
+--
+-- The obvious statement, `delete from tms_fee_bill`, CANNOT WORK on any bill
+-- that has a linked billing row. tms_fee_bill.billing_student_bill_id is
+-- ON DELETE CASCADE, and tms_fee_bill_cleanup_linked_billing() is a BEFORE
+-- DELETE trigger that deletes the parent billing_student_bills row -- so the
+-- cascade comes straight back at the tms_fee_bill row already being deleted:
+--
+--   delete tms_fee_bill -> BEFORE trigger deletes billing_student_bills
+--                       -> FK CASCADE deletes tms_fee_bill (same row, mid-delete)
+--                       -> ERROR 27000 "tuple to be deleted was already
+--                          modified by an operation triggered by the current
+--                          command"
+--
+-- Deleting the PARENT instead unwinds cleanly: the FK cascade removes the
+-- tms_fee_bill row, and when its BEFORE DELETE trigger re-reads the billing
+-- row it is already gone, so the trigger's own `IF NOT FOUND THEN RETURN OLD`
+-- guard makes it a no-op. (This asymmetry is a latent bug in the cleanup
+-- trigger, not a quirk of this learner -- any future code path that deletes a
+-- linked tms_fee_bill row directly will hit the same 27000.)
+--
+-- Verified before running: bill 48571f88 had ZERO dependent rows in every one
+-- of the eight tables referencing billing_student_bills (receipt items, payment
+-- transaction items, instalments, apportionments, late charges, refund request
+-- links, consumed credits, supersessions), so nothing is orphaned. The
+-- safety_log_delete trigger on billing_student_bills only writes a webhook_logs
+-- audit entry despite its prevent_mass_delete() name; it blocks nothing.
+--
+-- Term 1 is deliberately UNTOUCHED, including its stale ledger amount (the
+-- tms_fee_bill row reads 3000 while the money row reads 500, from an earlier
+-- repricing that wrote only billing_student_bills). That drift moves no gate
+-- and no balance -- every consumer reads the money row -- and is a separate,
+-- wider issue than this one learner.
+--
+-- Guarded on status so a re-run can never delete a bill that has since been
+-- settled.
+--
+-- Verified after running:
+--   tms_fee_bill            -> term 1 only
+--   billing_student_bills   -> the 500 paid row only
+--   tms_student_transport_access -> allowed=true, reason='current', owed=0
+delete from public.billing_student_bills
+where id = '48571f88-9652-4145-b8db-609246c252bb'
+  and status = 'unpaid';
