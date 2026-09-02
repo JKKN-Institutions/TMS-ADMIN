@@ -31,6 +31,13 @@ export interface Term1Instalments {
  * instalments does not lock the learner out. A bill WITHOUT instalments — every
  * bill written before this change — keeps the old whole-bill rule. Both shapes
  * exist in production until year end.
+ *
+ * A CANCELLED money row (billing_student_bills.status = 'cancelled') never
+ * clears the gate even if it carries instalments and even if its
+ * balance_amount reads as 0 — a voided bill computes `paid == final_amount`,
+ * which would otherwise read as instalment-1-settled. Reject it explicitly
+ * before the instalment branch, the same way the whole-bill branch already
+ * rejects it by requiring `moneyStatus === 'paid'`.
  */
 export function isTerm1Paid(
   ledgerStatus: string | null | undefined,
@@ -38,11 +45,19 @@ export function isTerm1Paid(
   schedule?: Term1Instalments,
 ): boolean {
   if (ledgerStatus !== 'generated') return false;
+  if (moneyStatus === 'cancelled') return false;
   const lines = schedule?.instalments ?? [];
   if (!lines.length) return moneyStatus === 'paid';
   const allocated = allocateWaterfall(schedule?.paid ?? 0, lines);
   return allocated[0] >= lines[0].amount;
 }
+
+type LedgerRow = {
+  person_id: string;
+  status: string | null;
+  billing_student_bill_id: string | null;
+  term_no: number | null;
+};
 
 /**
  * Every learner whose Term 1 is cleared for the given transport year.
@@ -69,34 +84,48 @@ export async function term1PaidLearnerIds(
     throw error;
   }
 
-  type LedgerRow = {
-    person_id: string;
-    status: string | null;
-    billing_student_bill_id: string | null;
-    term_no: number | null;
-  };
-
   // A learner may have more than one ledger row for the year (legacy per-term
-  // rows, or a grain change mid-year). Only their EARLIEST term obligation
-  // gates Term-1 access — picking any row would let a paid later term clear a
-  // learner whose actual term-1 row is unpaid. Keep the lowest term_no per
-  // person.
-  const firstTermRow = new Map<string, LedgerRow>();
+  // rows, or two applicable fee structures both writing term_no = 1). Only
+  // their EARLIEST term_no obligation(s) gate Term-1 access — picking any row
+  // would let a paid later term clear a learner whose actual term-1 row is
+  // unpaid. Group by person, then keep every row that shares the lowest
+  // term_no for that person (there is no secondary ORDER BY, so ties are
+  // possible and must not be resolved by whichever row PostgREST happens to
+  // return first).
+  const rowsByPerson = new Map<string, LedgerRow[]>();
   for (const r of (ledger ?? []) as LedgerRow[]) {
-    const existing = firstTermRow.get(r.person_id);
-    if (!existing || (r.term_no ?? Infinity) < (existing.term_no ?? Infinity)) {
-      firstTermRow.set(r.person_id, r);
-    }
+    const list = rowsByPerson.get(r.person_id) ?? [];
+    list.push(r);
+    rowsByPerson.set(r.person_id, list);
   }
 
-  const byBillId = new Map<string, string>();
-  for (const r of firstTermRow.values()) {
-    if (r.status === 'generated' && r.billing_student_bill_id) {
-      byBillId.set(r.billing_student_bill_id, r.person_id);
+  // Per person: the set of bill ids that ALL must clear for the person to
+  // count as Term-1-paid. A tie at the lowest term_no requires EVERY tied row
+  // to clear — fail-closed, never "any one of them is enough".
+  const neededBillsByPerson = new Map<string, string[]>();
+  for (const [personId, rows] of rowsByPerson) {
+    const minTermNo = Math.min(...rows.map((r) => r.term_no ?? Infinity));
+    const firstTermRows = rows.filter((r) => (r.term_no ?? Infinity) === minTermNo);
+
+    let unclearable = false;
+    const billIds: string[] = [];
+    for (const r of firstTermRows) {
+      if (r.status !== 'generated' || !r.billing_student_bill_id) {
+        unclearable = true; // e.g. cancelled/staff_deferred sibling at the same term_no
+        continue;
+      }
+      billIds.push(r.billing_student_bill_id);
     }
+    if (unclearable || billIds.length === 0) continue; // never added to `out`
+    neededBillsByPerson.set(personId, billIds);
   }
 
-  const ids = [...byBillId.keys()];
+  const billIdToPerson = new Map<string, string>();
+  for (const [personId, billIds] of neededBillsByPerson) {
+    for (const billId of billIds) billIdToPerson.set(billId, personId);
+  }
+
+  const ids = [...billIdToPerson.keys()];
 
   // Instalment schedules for the same bills, in the platform's allocation order.
   // Chunked and error-checked for the same reason as the bills below: a quietly
@@ -112,6 +141,12 @@ export async function term1PaidLearnerIds(
     if (instError) {
       // 42P01 only: the table genuinely may not exist on an old branch DB.
       if ((instError as { code?: string }).code !== '42P01') throw instError;
+      // Silent degradation to the whole-bill rule for every learner in this
+      // batch is a real behaviour change — surface it so it shows up in cron
+      // logs instead of only in a support ticket.
+      console.warn(
+        '[term1PaidLearnerIds] billing_bill_instalments missing (42P01) — falling back to the whole-bill rule for this batch',
+      );
       break;
     }
     for (const row of (data ?? []) as Array<{ bill_id: string; amount: number | string }>) {
@@ -121,6 +156,8 @@ export async function term1PaidLearnerIds(
     }
   }
 
+  // Per person: how many of their required bills have actually cleared.
+  const clearedCount = new Map<string, number>();
   for (let i = 0; i < ids.length; i += IN_CHUNK) {
     const { data, error: chunkError } = await svc
       .from('billing_student_bills')
@@ -132,12 +169,18 @@ export async function term1PaidLearnerIds(
       final_amount: number | string | null; balance_amount: number | string | null;
     };
     for (const b of (data ?? []) as MoneyRow[]) {
-      const personId = byBillId.get(b.id);
+      const personId = billIdToPerson.get(b.id);
       if (!personId) continue;
       const lines = schedules.get(b.id) ?? [];
       const paid = Math.max(0, Number(b.final_amount ?? 0) - Number(b.balance_amount ?? b.final_amount ?? 0));
-      if (isTerm1Paid('generated', b.status, { paid, instalments: lines })) out.add(personId);
+      if (isTerm1Paid('generated', b.status, { paid, instalments: lines })) {
+        clearedCount.set(personId, (clearedCount.get(personId) ?? 0) + 1);
+      }
     }
+  }
+
+  for (const [personId, billIds] of neededBillsByPerson) {
+    if ((clearedCount.get(personId) ?? 0) === billIds.length) out.add(personId);
   }
   return out;
 }
