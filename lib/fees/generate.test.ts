@@ -376,3 +376,83 @@ describe('generateBills — learner bills are one bill with instalments', () => 
     expect((res.data as Record<string, unknown>).skipped).toBe(1);
   });
 });
+
+describe('generateBills — partial legacy ledger is reported, not hidden', () => {
+  // A learner billed under the OLD per-term grain can hold fewer ledger rows
+  // than they have terms. Person-level idempotency skips them wholesale, and
+  // their schedule is fixed at generation time, so they will never be topped
+  // up. `underCovered` is the only signal an operator gets.
+  it('counts a skipped learner whose ledger rows do not cover all their terms', async () => {
+    const svc = flatFixture({ tms_fee_bill: [{ person_id: 'L1', term_no: 1 }] });
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'dry_run', actorId: 'admin-1',
+    });
+    if (!res.ok) throw new Error('expected ok');
+    const p = res.data as Record<string, unknown>;
+    expect(p.alreadyBilledPairs).toBe(1);
+    expect(p.underCovered).toBe(1);   // L1: 1 ledger row vs 2 resolved terms
+  });
+
+  it('counts nothing when the skipped learner is fully covered', async () => {
+    const svc = flatFixture({
+      tms_fee_bill: [{ person_id: 'L1', term_no: 1 }, { person_id: 'L1', term_no: 2 }],
+    });
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'dry_run', actorId: 'admin-1',
+    });
+    if (!res.ok) throw new Error('expected ok');
+    const p = res.data as Record<string, unknown>;
+    expect(p.alreadyBilledPairs).toBe(1);
+    expect(p.underCovered).toBe(0);
+  });
+});
+
+describe('generateBills — tiered bill description', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T06:00:00Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('joins the transport year and the band label with a single separator', async () => {
+    const svc = makeFakeSupabase({
+      tms_fee_structure: [{
+        id: 'fs1', name: 'Arts Self', status: 'active', audience: 'student',
+        fee_mode: 'tiered', transport_year_id: 'ty1', institution_ids: null,
+        staff_role_keys: null, lifecycle_statuses: null,
+      }],
+      tms_transport_year: [{ start_date: '2026-06-01', name: '2026-2027' }],
+      tms_fee_structure_year_band: [{
+        id: 'b1', fee_structure_id: 'fs1', band_order: 1, label: 'Year 1',
+        study_years: [1], total_amount: 5500, split_count: 2,
+      }],
+      tms_fee_structure_term: [
+        { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: 'b1' },
+        { term_no: 2, term_label: 'Term 2', amount: 2500, due_date: '2026-08-31', year_band_id: 'b1' },
+      ],
+      learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: 'ad1', academic_year_id: null }],
+      admission_years: [{ id: 'ad1', year: 2026 }],   // admitted 2026 -> study year 1 -> band b1
+      tms_fee_override: [],
+      tms_fee_bill: [],
+      billing_categories: [{ id: 'cat1' }],
+      academic_years: [],
+    });
+
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect((res.data as Record<string, unknown>).learnerBilled).toBe(1);
+
+    const bills = svc.calls
+      .filter((c) => c.table === 'billing_student_bills')
+      .flatMap((c) => c.ops.filter(([op]) => op === 'insert').map(([, args]) => args[0])) as Array<
+      Record<string, unknown>[]
+    >;
+    expect(bills).toHaveLength(1);
+    expect(bills[0][0].bill_description).toBe('Transport Fee - 2026-2027 - Year 1');
+  });
+});

@@ -415,6 +415,13 @@ export async function generateBills(
       (existing ?? []).map((r) => `${r.person_id}:${r.term_no}`)
     );
     const billedPersons = new Set((existing ?? []).map((r) => r.person_id as string));
+    // How many ledger rows each person already holds. Used only to REPORT the
+    // legacy partial-ledger gap (see `underCovered` below); it is deliberately
+    // not part of the idempotency decision.
+    const existingRowsByPerson = new Map<string, number>();
+    for (const row of (existing ?? []) as Array<{ person_id: string }>) {
+      existingRowsByPerson.set(row.person_id, (existingRowsByPerson.get(row.person_id) ?? 0) + 1);
+    }
 
     // Anyone already billed by ANOTHER structure for the same transport year?
     // resolvedIds can be the whole applicable population (~1k). A single .in() over
@@ -456,11 +463,20 @@ export async function generateBills(
 
     let toGenerate = 0;
     let alreadyBilled = 0;
+    // Learners skipped as already-billed whose EXISTING ledger rows do not cover
+    // all of their resolved terms. A non-zero value means those learners hold a
+    // PARTIAL legacy ledger — billed for some terms under the old per-term grain
+    // — and they will never be topped up: a learner's schedule is now fixed at
+    // generation time, so re-running this structure skips them wholesale. Without
+    // this count they are indistinguishable from correctly-complete people.
+    let underCovered = 0;
     for (const r of resolved) {
       if (r.person.person_type === 'learner') {
         // One bill per learner, regardless of how many terms it holds.
-        if (billedPersons.has(r.person.person_id)) alreadyBilled++;
-        else if (foldTermsIntoBill(r.terms)) toGenerate++;
+        if (billedPersons.has(r.person.person_id)) {
+          alreadyBilled++;
+          if ((existingRowsByPerson.get(r.person.person_id) ?? 0) < r.terms.length) underCovered++;
+        } else if (foldTermsIntoBill(r.terms)) toGenerate++;
       } else {
         for (const t of r.terms) {
           if (billedKey.has(`${r.person.person_id}:${t.term_no}`)) alreadyBilled++;
@@ -520,6 +536,7 @@ export async function generateBills(
       staffCount,
       termsPerPerson: isTiered ? null : flatTerms.length,
       alreadyBilledPairs: alreadyBilled,
+      underCovered,
       toGeneratePairs: toGenerate,
       conflictCount,
       conflictsSkipped,
@@ -621,10 +638,8 @@ export async function generateBills(
 
     for (const r of resolved) {
       const p = r.person;
-      const bandPrefix = r.band?.label ? `${r.band.label} - ` : '';
       const acadYearId = p.person_type === 'learner' ? p.academic_year_id : null;
       const acadYearName = acadYearId ? acadYearNameById.get(acadYearId) ?? null : null;
-      const ayPart = acadYearName ? `${acadYearName} - ` : '';
 
       if (p.person_type === 'learner') {
         if (billedPersons.has(p.person_id)) { skipped++; continue; }
@@ -642,11 +657,13 @@ export async function generateBills(
             fee_source: 'ad_hoc',
             // No term suffix: the schedule lives in billing_bill_instalments now.
             // The transport year is named explicitly so the description keeps
-            // carrying the year even when academic_year_id is NULL.
-            bill_description: `${catName} - ${tyName ?? ayPart.replace(/ - $/, '')} ${bandPrefix}`
-              .replace(/\s+/g, ' ')
-              .replace(/[\s-]+$/, '')
-              .trim(),
+            // carrying the year even when academic_year_id is NULL. Parts are
+            // joined with ONE separator, so a flat bill reads
+            // "Transport Fee - 2026-2027" and a tiered one
+            // "Transport Fee - 2026-2027 - Year 1" — never a missing or trailing dash.
+            bill_description: [catName, tyName ?? acadYearName, r.band?.label ?? null]
+              .filter((part): part is string => Boolean(part))
+              .join(' - '),
             due_date: folded.dueDate,
             quantity: 1,
             unit_amount: folded.total,
