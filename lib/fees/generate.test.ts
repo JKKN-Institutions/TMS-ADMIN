@@ -65,7 +65,9 @@ describe('generateBills — flat dry run (characterization)', () => {
     expect(p.overridden).toBe(0);
     expect(p.termsPerPerson).toBe(2);
     expect(p.totalPerPerson).toBe(5500);
-    expect(p.toGeneratePairs).toBe(4);      // 2 learners x 2 terms
+    // Was 4 (2 learners x 2 terms). Learner bills are now one bill per person
+    // per year with the terms as instalments, so the counter counts BILLS: 2.
+    expect(p.toGeneratePairs).toBe(2);      // 2 learners x 1 bill each
     expect(p.alreadyBilledPairs).toBe(0);
     expect(p.conflictCount).toBe(0);
     expect(p.staffDeferred).toBe(false);
@@ -84,8 +86,11 @@ describe('generateBills — flat dry run (characterization)', () => {
     });
     if (!res.ok) throw new Error('expected ok');
     const p = res.data as Record<string, unknown>;
+    // Learner idempotency is person-level now: L1's single term-1 ledger row
+    // marks the WHOLE person as billed, so 1 already-billed and only L2 (one
+    // bill) left to generate. Was 1 / 3 under the per-term grain.
     expect(p.alreadyBilledPairs).toBe(1);
-    expect(p.toGeneratePairs).toBe(3);
+    expect(p.toGeneratePairs).toBe(1);
   });
 
   it('rejects a structure that is not active', async () => {
@@ -254,5 +259,120 @@ describe('generateBills — auto-only policies', () => {
       (c) => c.table === 'tms_fee_generation_run' && c.ops.some(([op]) => op === 'insert')
     );
     expect(runInserts).toHaveLength(0);
+  });
+});
+
+describe('generateBills — learner bills are one bill with instalments', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T06:00:00Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function inserts(svc: ReturnType<typeof makeFakeSupabase>, table: string) {
+    return svc.calls
+      .filter((c) => c.table === table)
+      .flatMap((c) => c.ops.filter(([op]) => op === 'insert').map(([, args]) => args[0]));
+  }
+
+  it('writes ONE billing_student_bills row per learner for a two-term structure', async () => {
+    const svc = flatFixture();
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1',
+      mode: 'generate',
+      actorId: 'admin-1',
+    });
+    expect(res.ok).toBe(true);
+
+    const bills = inserts(svc, 'billing_student_bills') as Array<Record<string, unknown>[]>;
+    // Two learners in the fixture, two terms each -> 2 bills, not 4.
+    expect(bills).toHaveLength(2);
+    expect(bills[0][0].final_amount).toBe(5500);
+    expect(bills[0][0].balance_amount).toBe(5500);
+    expect(bills[0][0].due_date).toBe('2026-07-31');
+  });
+
+  it('writes every instalment of a bill in ONE array insert', async () => {
+    // trg_bbi_validate_sum is deferrable: one row at a time fails the sum check.
+    const svc = flatFixture();
+    await generateBills(svc as never, { feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1' });
+
+    const batches = inserts(svc, 'billing_bill_instalments') as Array<Record<string, unknown>[]>;
+    expect(batches).toHaveLength(2); // one batch per learner
+    expect(batches[0]).toHaveLength(2); // both instalments in that batch
+    expect(batches[0].map((i) => i.sequence_no)).toEqual([1, 2]);
+    expect(batches[0].map((i) => i.amount)).toEqual([3000, 2500]);
+    expect(batches[0].map((i) => i.due_date)).toEqual(['2026-07-31', '2026-08-31']);
+  });
+
+  it('writes ONE tms_fee_bill row carrying the YEAR total, at term_no 1', async () => {
+    // uq_tms_fee_bill_billing_student_bill forbids two ledger rows per bill.
+    const svc = flatFixture();
+    await generateBills(svc as never, { feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1' });
+
+    const ledger = inserts(svc, 'tms_fee_bill') as Array<Record<string, unknown>[]>;
+    expect(ledger).toHaveLength(2);
+    expect(ledger[0][0].term_no).toBe(1);
+    expect(ledger[0][0].amount).toBe(5500);
+    expect(ledger[0][0].due_date).toBe('2026-07-31');
+  });
+
+  it('names the bill with the transport year and no term suffix', async () => {
+    // The year must survive: term_number is NULL on transport bills and
+    // transport_year_id is unreliable there, so this text is the only record.
+    const svc = flatFixture();
+    await generateBills(svc as never, { feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1' });
+    const bills = inserts(svc, 'billing_student_bills') as Array<Record<string, unknown>[]>;
+    expect(bills[0][0].bill_description).toBe('Transport Fee - 2026-2027');
+  });
+
+  it('deletes the bill when the instalment insert fails, leaving no orphan', async () => {
+    const failing = makeFakeSupabase(
+      {
+        tms_fee_structure: [{
+          id: 'fs1', name: 'Transport Fees Test', status: 'active', audience: 'student',
+          fee_mode: 'flat', transport_year_id: 'ty1', institution_ids: null,
+          staff_role_keys: null, lifecycle_statuses: null,
+        }],
+        tms_transport_year: [{ start_date: '2026-06-01', name: '2026-2027' }],
+        tms_fee_structure_term: [
+          { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
+          { term_no: 2, term_label: 'Term 2', amount: 2500, due_date: '2026-08-31', year_band_id: null },
+        ],
+        learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+        admission_years: [],
+        tms_fee_override: [],
+        tms_fee_bill: [],
+      },
+      { insertErrors: { billing_bill_instalments: { message: 'sum mismatch' } } }
+    );
+
+    const res = await generateBills(failing as never, {
+      feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect((res.data as Record<string, unknown>).errors).toBe(1);
+    expect((res.data as Record<string, unknown>).learnerBilled).toBe(0);
+    // The money row must have been compensated away.
+    const deletes = failing.calls.filter(
+      (c) => c.table === 'billing_student_bills' && c.ops.some(([op]) => op === 'delete')
+    );
+    expect(deletes).toHaveLength(1);
+  });
+
+  it('skips a learner who already has ANY ledger row for the structure and year', async () => {
+    // Idempotency is person-level now: a legacy learner with term 1 AND term 2
+    // rows must not be re-billed as a single merged bill.
+    const svc = flatFixture({ tms_fee_bill: [{ person_id: 'L1', term_no: 1 }, { person_id: 'L1', term_no: 2 }] });
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect((res.data as Record<string, unknown>).learnerBilled).toBe(1); // only L2
+    expect((res.data as Record<string, unknown>).skipped).toBe(1);
   });
 });
