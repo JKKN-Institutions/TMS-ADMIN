@@ -153,4 +153,70 @@ describe('term1PaidLearnerIds', () => {
     expect(ids.has('L4')).toBe(true); // whole-bill rule: status paid
     expect(warnSpy).toHaveBeenCalled();
   });
+
+  it('clears a learner with two tied term_no=1 rows when BOTH bills clear', async () => {
+    // Reachable in prod: a learner applicable to two fee structures in the same
+    // transport year gets two separate term_no = 1 ledger rows on generateBills.
+    const svc = makeFakeSupabase({
+      tms_fee_bill: [
+        { person_id: 'L5', status: 'generated', billing_student_bill_id: 'b6', term_no: 1 },
+        { person_id: 'L5', status: 'generated', billing_student_bill_id: 'b7', term_no: 1 },
+      ],
+      billing_student_bills: [
+        { id: 'b6', status: 'paid', final_amount: 3000, balance_amount: 0 },
+        { id: 'b7', status: 'paid', final_amount: 2000, balance_amount: 0 },
+      ],
+      billing_bill_instalments: [],
+    });
+
+    const ids = await term1PaidLearnerIds(svc as never, 'ty1');
+    expect(ids.has('L5')).toBe(true);
+  });
+
+  it('does NOT clear a learner with two tied term_no=1 rows when only one bill clears, regardless of row order', async () => {
+    // The whole point of the finding: pre-fix, whichever row PostgREST happened
+    // to return first decided the outcome. Run the same scenario with the two
+    // ledger rows in both orders and assert false both times.
+    const makeSvc = (rows: Array<{ person_id: string; status: string; billing_student_bill_id: string; term_no: number }>) =>
+      makeFakeSupabase({
+        tms_fee_bill: rows,
+        billing_student_bills: [
+          { id: 'b8', status: 'paid', final_amount: 3000, balance_amount: 0 },
+          { id: 'b9', status: 'partially_paid', final_amount: 2000, balance_amount: 2000 },
+        ],
+        billing_bill_instalments: [],
+      });
+
+    const clearedFirst = [
+      { person_id: 'L6', status: 'generated', billing_student_bill_id: 'b8', term_no: 1 },
+      { person_id: 'L6', status: 'generated', billing_student_bill_id: 'b9', term_no: 1 },
+    ];
+    const unclearedFirst = [
+      { person_id: 'L6', status: 'generated', billing_student_bill_id: 'b9', term_no: 1 },
+      { person_id: 'L6', status: 'generated', billing_student_bill_id: 'b8', term_no: 1 },
+    ];
+
+    const idsA = await term1PaidLearnerIds(makeSvc(clearedFirst) as never, 'ty1');
+    expect(idsA.has('L6')).toBe(false);
+
+    const idsB = await term1PaidLearnerIds(makeSvc(unclearedFirst) as never, 'ty1');
+    expect(idsB.has('L6')).toBe(false);
+  });
+
+  it('does NOT clear a learner with two tied term_no=1 rows when one ledger row is cancelled', async () => {
+    const svc = makeFakeSupabase({
+      tms_fee_bill: [
+        { person_id: 'L7', status: 'generated', billing_student_bill_id: 'b10', term_no: 1 },
+        { person_id: 'L7', status: 'cancelled', billing_student_bill_id: 'b11', term_no: 1 },
+      ],
+      billing_student_bills: [
+        { id: 'b10', status: 'paid', final_amount: 3000, balance_amount: 0 },
+        { id: 'b11', status: 'cancelled', final_amount: 2000, balance_amount: 0 },
+      ],
+      billing_bill_instalments: [],
+    });
+
+    const ids = await term1PaidLearnerIds(svc as never, 'ty1');
+    expect(ids.has('L7')).toBe(false);
+  });
 });
