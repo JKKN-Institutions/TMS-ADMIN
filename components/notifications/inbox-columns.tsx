@@ -202,7 +202,7 @@ export function getInboxColumns(
               <DropdownMenuContent align="end" className="min-w-[11rem]">
                 <DropdownMenuLabel>Action</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => open(() => onOpen(n))}>
-                  <Eye className="text-gray-500" /> {n.url ? 'Open' : 'View'}
+                  <Eye className="text-gray-500" /> View
                 </DropdownMenuItem>
                 {!n.readAt && (
                   <>
