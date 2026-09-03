@@ -34,14 +34,20 @@ export function calculateTrend(current: number, previous: number, timeframe: str
 }
 
 /**
- * Generate mock trend data for demonstration (when real previous data isn't available)
+ * Trend for a stat card, or `undefined` when there is no baseline to compare to.
+ *
+ * This replaces the former `generateMockTrend()`, which invented a previous
+ * value with `Math.random()`. Every stat card in the app therefore displayed a
+ * fabricated percentage that changed on each refresh while the underlying count
+ * stayed put. An absent arrow is honest; a random one is not — so callers that
+ * cannot supply `previous` now get no arrow at all.
  */
-export function generateMockTrend(current: number, baseVariance: number = 0.15): TrendData {
-  // Generate a reasonable previous value based on current with some variance
-  const variance = (Math.random() - 0.5) * baseVariance * 2;
-  const previous = current * (1 - variance);
-  
-  return calculateTrend(current, previous, 'vs last month');
+export function trendOf(
+  stat: { current: number; previous?: number | null },
+  timeframe: string = 'vs last month'
+): TrendData | undefined {
+  if (stat.previous === undefined || stat.previous === null) return undefined;
+  return calculateTrend(stat.current, stat.previous, timeframe);
 }
 
 /**
@@ -122,36 +128,28 @@ export function createDashboardStats(data: {
       title: 'Total Students',
       value: safeNumber(data.totalStudents.current),
       subtitle: 'Enrolled students',
-      trend: data.totalStudents.previous 
-        ? calculateTrend(data.totalStudents.current, data.totalStudents.previous, 'vs last month')
-        : generateMockTrend(data.totalStudents.current, 0.1),
+      trend: trendOf(data.totalStudents),
       color: 'blue'
     },
     {
       title: 'Active Routes',
       value: safeNumber(data.totalRoutes.current),
       subtitle: 'Currently running',
-      trend: data.totalRoutes.previous 
-        ? calculateTrend(data.totalRoutes.current, data.totalRoutes.previous, 'vs last month')
-        : generateMockTrend(data.totalRoutes.current, 0.05),
+      trend: trendOf(data.totalRoutes),
       color: 'green'
     },
     {
       title: 'Total Drivers',
       value: safeNumber(data.totalDrivers.current),
       subtitle: 'Available staff',
-      trend: data.totalDrivers.previous 
-        ? calculateTrend(data.totalDrivers.current, data.totalDrivers.previous, 'vs last month')
-        : generateMockTrend(data.totalDrivers.current, 0.08),
+      trend: trendOf(data.totalDrivers),
       color: 'purple'
     },
     {
       title: 'Fleet Vehicles',
       value: safeNumber(data.totalVehicles.current),
       subtitle: 'Active fleet',
-      trend: data.totalVehicles.previous 
-        ? calculateTrend(data.totalVehicles.current, data.totalVehicles.previous, 'vs last month')
-        : generateMockTrend(data.totalVehicles.current, 0.03),
+      trend: trendOf(data.totalVehicles),
       color: 'orange'
     }
   ];
@@ -173,29 +171,25 @@ export function createRouteStats(data: {
     {
       title: 'Total Routes',
       value: safeNumber(data.totalRoutes),
-      color: 'blue',
-      trend: generateMockTrend(data.totalRoutes, 0.05)
+      color: 'blue'
     },
     {
       title: 'Active Routes',
       value: safeNumber(data.activeRoutes),
       subtitle: `${utilizationPercentage}% utilized`,
-      color: 'green',
-      trend: generateMockTrend(data.activeRoutes, 0.08)
+      color: 'green'
     },
     {
       title: 'Total Occupancy',
       value: `${safeNumber(data.totalOccupancy)}/${safeNumber(data.totalCapacity)}`,
       subtitle: 'Passengers/Capacity',
-      color: 'purple',
-      trend: generateMockTrend(utilizationPercentage, 0.12)
+      color: 'purple'
     },
     {
       title: 'Avg Utilization',
       value: `${data.avgUtilization || utilizationPercentage}%`,
       subtitle: 'Fleet efficiency',
-      color: 'cyan',
-      trend: generateMockTrend(data.avgUtilization || utilizationPercentage, 0.10)
+      color: 'cyan'
     }
   ];
 }
@@ -216,36 +210,31 @@ export function createStudentStats(data: {
     {
       title: 'Total Students',
       value: safeNumber(data.totalStudents),
-      color: 'blue',
-      trend: generateMockTrend(data.totalStudents, 0.08)
+      color: 'blue'
     },
     {
       title: 'Enrolled',
       value: safeNumber(data.enrolledStudents),
       subtitle: `${enrollmentPercentage}% of total`,
-      color: 'green',
-      trend: generateMockTrend(data.enrolledStudents, 0.12)
+      color: 'green'
     },
     {
       title: 'Pending',
       value: safeNumber(data.pendingStudents),
       subtitle: 'Awaiting approval',
-      color: 'yellow',
-      trend: generateMockTrend(data.pendingStudents, 0.20)
+      color: 'yellow'
     },
     {
       title: 'Active Transport',
       value: safeNumber(data.activeTransport),
       subtitle: 'Using transport',
-      color: 'purple',
-      trend: generateMockTrend(data.activeTransport, 0.10)
+      color: 'purple'
     },
     {
       title: 'Pending Payments',
       value: safeNumber(data.pendingPayments),
       subtitle: 'Outstanding dues',
-      color: 'red',
-      trend: generateMockTrend(data.pendingPayments, 0.15)
+      color: 'red'
     }
   ];
 }
@@ -265,29 +254,25 @@ export function createVehicleStats(data: {
     {
       title: 'Total Vehicles',
       value: safeNumber(data.totalVehicles),
-      color: 'blue',
-      trend: generateMockTrend(data.totalVehicles, 0.05)
+      color: 'blue'
     },
     {
       title: 'Active',
       value: safeNumber(data.activeVehicles),
       subtitle: `${activePercentage}% operational`,
-      color: 'green',
-      trend: generateMockTrend(data.activeVehicles, 0.08)
+      color: 'green'
     },
     {
       title: 'Maintenance',
       value: safeNumber(data.maintenanceVehicles),
       subtitle: 'Under service',
-      color: 'yellow',
-      trend: generateMockTrend(data.maintenanceVehicles, 0.25)
+      color: 'yellow'
     },
     {
       title: 'Out of Service',
       value: safeNumber(data.outOfService),
       subtitle: 'Inactive',
-      color: 'red',
-      trend: generateMockTrend(data.outOfService, 0.30)
+      color: 'red'
     }
   ];
 }
@@ -308,29 +293,25 @@ export function createDriverStats(data: {
     {
       title: 'Total Drivers',
       value: safeNumber(data.totalDrivers),
-      color: 'blue',
-      trend: generateMockTrend(data.totalDrivers, 0.05)
+      color: 'blue'
     },
     {
       title: 'Active',
       value: safeNumber(data.activeDrivers),
       subtitle: `${activePercentage}% available`,
-      color: 'green',
-      trend: generateMockTrend(data.activeDrivers, 0.08)
+      color: 'green'
     },
     {
       title: 'On Leave',
       value: safeNumber(data.onLeave),
       subtitle: 'Temporarily unavailable',
-      color: 'yellow',
-      trend: generateMockTrend(data.onLeave, 0.20)
+      color: 'yellow'
     },
     {
       title: 'Avg Rating',
       value: `${safeNumber(data.avgRating, 4.0).toFixed(1)}/5`,
       subtitle: 'Performance score',
-      color: 'purple',
-      trend: generateMockTrend(data.avgRating * 20, 0.05)
+      color: 'purple'
     }
   ];
 }
@@ -349,29 +330,25 @@ export function createScheduleStats(data: {
     {
       title: 'Total Trips This Month',
       value: safeNumber(data.totalSchedules),
-      color: 'blue',
-      trend: generateMockTrend(data.totalSchedules, 0.12)
+      color: 'blue'
     },
     {
       title: 'Active Routes',
       value: safeNumber(data.activeRoutes),
       subtitle: 'Currently running',
-      color: 'green',
-      trend: generateMockTrend(data.activeRoutes, 0.05)
+      color: 'green'
     },
     {
       title: 'Student Bookings',
       value: safeNumber(data.totalBookings),
       subtitle: 'This month',
-      color: 'purple',
-      trend: generateMockTrend(data.totalBookings, 0.18)
+      color: 'purple'
     },
     {
       title: 'Monthly Revenue',
       value: formatCurrency(data.totalRevenue),
       subtitle: 'Total earnings',
-      color: 'cyan',
-      trend: generateMockTrend(data.totalRevenue, 0.23)
+      color: 'cyan'
     }
   ];
 } 
