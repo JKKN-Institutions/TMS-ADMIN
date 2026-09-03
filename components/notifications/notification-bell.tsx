@@ -9,9 +9,13 @@ import PushToggle from '@/components/pwa/push-toggle';
 /**
  * Portal-agnostic notification bell for the TMS notification module. Shows an unread
  * badge and a dropdown of the user's recent notifications, wired to the shared hook
- * (live via Realtime). Clicking an item marks it read and follows its url. Mounted in
- * the admin / learner / driver / boarding headers. `viewAllHref` adds a footer link to
- * the portal's full inbox page when one exists.
+ * (live via Realtime). Clicking an item marks it read and opens the portal's notification
+ * view page. Mounted in the admin / learner / driver / boarding headers.
+ *
+ * `viewAllHref` is the portal's inbox base path (e.g. "/student/notifications"): it backs
+ * both the footer "View all" link AND the per-item view route `${viewAllHref}/${id}`.
+ * Without it the bell can only deep-link via `n.url`, which does nothing at all for the
+ * notifications that carry no url — the bug this indirection exists to prevent.
  */
 export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -50,10 +54,13 @@ export default function NotificationBell({ viewAllHref }: { viewAllHref?: string
 
   const onItemClick = (n: TmsNotificationItem) => {
     if (!n.readAt) markRead([n.id]);
-    if (n.url) {
-      setOpen(false);
-      router.push(n.url);
-    }
+    // Always open the notification's own view page; the deep link (n.url) is offered
+    // there as a "Go to related page" action. Falling back to n.url only matters for a
+    // mount with no viewAllHref, and doing nothing is never an option.
+    const href = viewAllHref ? `${viewAllHref}/${n.id}` : n.url;
+    if (!href) return;
+    setOpen(false);
+    router.push(href);
   };
 
   const recent = items.slice(0, 12);

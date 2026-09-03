@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useMemo, useRef } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { CheckCheck } from 'lucide-react';
 import { DataTable } from '@/components/ui/data-table';
 import { useTmsNotifications, type TmsNotificationItem } from '@/hooks/use-tms-notifications';
@@ -30,18 +30,30 @@ const STATUS_OPTIONS = [
 export default function NotificationInbox() {
   const { items, unreadCount, isLoading, error, markRead, markAllRead } = useTmsNotifications();
   const router = useRouter();
+  // This component IS the inbox page, so its own pathname is the base for the per-item
+  // view route (…/notifications → …/notifications/<recipientId>). Derived rather than
+  // passed so all four portal pages keep rendering <NotificationInbox /> with no props.
+  const basePath = (usePathname() ?? '').replace(/\/+$/, '');
 
-  // Open = mark the item read (if unread) and follow its url. Shared by the title-click
-  // and the row action menu.
+  // Open = mark the item read (if unread) and go to its view page. Shared by the
+  // title-click and the row action menu. Previously this followed n.url and did nothing
+  // at all when the notification had none.
   const onOpen = (n: TmsNotificationItem) => {
     if (!n.readAt) markRead([n.id]);
-    if (n.url) router.push(n.url);
+    const href = basePath ? `${basePath}/${n.id}` : n.url;
+    if (href) router.push(href);
   };
 
+  // The column defs must keep a stable identity (TanStack rebuilds the table otherwise),
+  // but the handlers must NOT be frozen at first render: `markRead` closes over `items`,
+  // which is still empty while the inbox loads, so a memoized copy silently filtered every
+  // id away and mark-as-read did nothing. Route through a ref so the table holds stable
+  // callbacks that always invoke the current closures.
+  const handlers = useRef({ onOpen, markRead });
+  handlers.current = { onOpen, markRead };
+
   const columns = useMemo(
-    () => getInboxColumns(onOpen, (n) => markRead([n.id])),
-    // onOpen/markRead are stable-enough for the table; deps intentionally omitted.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => getInboxColumns((n) => handlers.current.onOpen(n), (n) => handlers.current.markRead([n.id])),
     [],
   );
 
