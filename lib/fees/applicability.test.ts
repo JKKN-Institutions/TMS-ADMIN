@@ -6,14 +6,16 @@ import { DEFAULT_LIFECYCLE_STATUSES } from './types';
 // The fake client does not filter — it records the ops a query issued. That is
 // what we want here: the whole bug was in WHICH lifecycle states get pushed
 // down to PostgREST, so assert on the `in` argument itself.
+const LEARNER_SOURCE = 'tms_billable_learner';
+
 function lifecycleFilterOf(svc: ReturnType<typeof makeFakeSupabase>): unknown[] {
-  const call = svc.calls.find((c) => c.table === 'learners_profiles');
+  const call = svc.calls.find((c) => c.table === LEARNER_SOURCE);
   const op = call?.ops.find(([name, args]) => name === 'in' && args[0] === 'lifecycle_status');
   return op?.[1][1] as unknown[];
 }
 
 const EMPTY = () =>
-  makeFakeSupabase({ learners_profiles: [], staff: [], admission_years: [] });
+  makeFakeSupabase({ [LEARNER_SOURCE]: [], staff: [], admission_years: [] });
 
 describe('resolveApplicablePeople — learner lifecycle gate', () => {
   it('bills the states a bus-pass applicant can sit in, not just active', async () => {
@@ -63,5 +65,21 @@ describe('resolveApplicablePeople — learner lifecycle gate', () => {
     });
 
     expect(lifecycleFilterOf(svc)).toEqual(['active']);
+  });
+
+  it('reads the bus-pass-applicant view, never learners_profiles directly', async () => {
+    // Querying the table would bill anyone flagged bus_required by the ADMISSION
+    // FORM as well -- 267 learners who never applied for transport.
+    const svc = EMPTY();
+    await resolveApplicablePeople(svc as never, {
+      audience: 'student',
+      institution_ids: null,
+      staff_role_keys: null,
+      lifecycle_statuses: null,
+    });
+
+    const tables = svc.calls.map((c) => c.table);
+    expect(tables).toContain(LEARNER_SOURCE);
+    expect(tables).not.toContain('learners_profiles');
   });
 });

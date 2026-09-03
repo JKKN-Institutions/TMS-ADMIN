@@ -20,7 +20,7 @@ function flatFixture(overrides: Record<string, unknown[]> = {}) {
       { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
       { term_no: 2, term_label: 'Term 2', amount: 2500, due_date: '2026-08-31', year_band_id: null },
     ],
-    learners_profiles: [
+    tms_billable_learner: [
       { id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null },
       { id: 'L2', institution_id: 'i1', admission_year_id: null, academic_year_id: null },
     ],
@@ -127,7 +127,7 @@ describe('generateBills — flat dry run (characterization)', () => {
         tms_fee_structure_term: [
           { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
         ],
-        learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+        tms_billable_learner: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
         admission_years: [],
         tms_fee_bill: [],
       },
@@ -155,7 +155,7 @@ describe('generateBills — orphan compensation', () => {
         tms_fee_structure_term: [
           { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
         ],
-        learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+        tms_billable_learner: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
         admission_years: [],
         tms_fee_override: [],
         tms_fee_bill: [],
@@ -194,7 +194,7 @@ describe('generateBills — auto-only policies', () => {
       tms_fee_structure_term: [
         { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
       ],
-      learners_profiles: [
+      tms_billable_learner: [
         { id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null },
         { id: 'L2', institution_id: 'i1', admission_year_id: null, academic_year_id: null },
       ],
@@ -239,7 +239,7 @@ describe('generateBills — auto-only policies', () => {
       tms_fee_structure_term: [
         { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
       ],
-      learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+      tms_billable_learner: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
       admission_years: [],
       tms_fee_override: [],
       tms_fee_bill: [{ person_id: 'L1', term_no: 1 }],   // already billed
@@ -341,7 +341,7 @@ describe('generateBills — learner bills are one bill with instalments', () => 
           { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
           { term_no: 2, term_label: 'Term 2', amount: 2500, due_date: '2026-08-31', year_band_id: null },
         ],
-        learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
+        tms_billable_learner: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: null }],
         admission_years: [],
         tms_fee_override: [],
         tms_fee_bill: [],
@@ -432,7 +432,7 @@ describe('generateBills — tiered bill description', () => {
         { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: 'b1' },
         { term_no: 2, term_label: 'Term 2', amount: 2500, due_date: '2026-08-31', year_band_id: 'b1' },
       ],
-      learners_profiles: [{ id: 'L1', institution_id: 'i1', admission_year_id: 'ad1', academic_year_id: null }],
+      tms_billable_learner: [{ id: 'L1', institution_id: 'i1', admission_year_id: 'ad1', academic_year_id: null }],
       admission_years: [{ id: 'ad1', year: 2026 }],   // admitted 2026 -> study year 1 -> band b1
       tms_fee_override: [],
       tms_fee_bill: [],

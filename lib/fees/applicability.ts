@@ -2,8 +2,18 @@
 // Resolve the population a fee structure applies to.
 //
 // Conditions: INSTITUTION (multi-valued institution_ids; empty/NULL = any) and,
-// for learners, LIFECYCLE STATUS (lifecycle_statuses; empty/NULL = ['active'],
-// the default every existing structure uses). Staff additionally filter by role.
+// for learners, LIFECYCLE STATUS (lifecycle_statuses; empty/NULL =
+// DEFAULT_LIFECYCLE_STATUSES). Staff additionally filter by role.
+//
+// Learners are read from the VIEW tms_billable_learner, not the table. The view
+// is learners_profiles narrowed to people who applied through MyJKKN's Bus Pass
+// Request. bus_required alone is NOT enough: the admission form writes that same
+// column, so keying on it billed 267 learners who never asked for transport.
+//
+// The match lives in SQL because it needs three identity paths (profile_id,
+// college_email, student_email) -- profile_id is NULL on ~28% of learner rows --
+// and because shipping the id set here would mean a ~1600-UUID .in() filter that
+// this gateway rejects. See migration 20260903080000.
 //
 // For learners we also resolve each person's ADMISSION YEAR (the integer
 // admission_years.year) so tiered structures can derive year of study downstream
@@ -39,7 +49,7 @@ export async function resolveApplicablePeople(
         : [...DEFAULT_LIFECYCLE_STATUSES];
 
     let q = supabase
-      .from('learners_profiles')
+      .from('tms_billable_learner')
       .select('id, institution_id, admission_year_id, academic_year_id')
       .eq('bus_required', true)
       .in('lifecycle_status', statuses);
