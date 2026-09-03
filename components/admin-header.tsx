@@ -187,7 +187,7 @@ export default function AdminHeader({ title, collapsed, onToggleCollapse }: Admi
       </div>
 
       <div className="flex items-center gap-1 sm:gap-2">
-        <NotificationBell />
+        <NotificationBell viewAllHref="/my-notifications" />
         <ThemeToggle />
         <ProfileMenu />
       </div>
