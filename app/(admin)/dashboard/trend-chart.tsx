@@ -22,17 +22,17 @@ export function TrendChart({ trend }: { trend: DashboardTrendPoint[] }) {
     label: shortDayLabel(p.date),
   }));
 
-  // A week of all-zero rows is not "data" — it means booking or attendance
+  // A fortnight of all-zero rows is not "data" — it means booking or attendance
   // capture is not running, and an empty state says that far more clearly than
   // a flat line pinned to the axis.
   const hasData = rows.some((r) => r.bookings > 0 || r.present > 0);
 
   return (
     <ChartCard
-      title="Last 7 days"
+      title="Demand, last 14 days"
       subtitle="Seats booked against learners actually boarded"
       hasData={hasData}
-      emptyMessage="No bookings or boardings recorded in the last 7 days"
+      emptyMessage="No bookings or boardings recorded in the last 14 days"
       legend={
         <Legend
           items={[
@@ -42,7 +42,7 @@ export function TrendChart({ trend }: { trend: DashboardTrendPoint[] }) {
         />
       }
       csv={{
-        filename: 'dashboard-last-7-days.csv',
+        filename: 'dashboard-last-14-days.csv',
         head: ['Date', 'Booked', 'Boarded', 'Boarding rate %'],
         rows: rows.map((r) => [r.date, r.bookings, r.present, percentOf(r.present, r.bookings) ?? '']),
       }}

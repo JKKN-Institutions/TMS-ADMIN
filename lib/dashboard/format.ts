@@ -42,6 +42,26 @@ export function shortDayLabel(date: string): string {
 }
 
 /**
+ * '07:30:00' -> '7:30 am'.
+ *
+ * Times are stored as a bare clock string with no timezone, because they mean
+ * "7:30 in the morning, local" rather than an instant. So this formats the
+ * string directly instead of building a Date, which would drag the browser's
+ * timezone into a value that has none.
+ */
+export function formatTime(hhmmss: string | null): string {
+  if (!hhmmss) return '—';
+  const [h, m] = hhmmss.split(':');
+  const hour = Number(h);
+  const minute = Number(m);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return '—';
+
+  const suffix = hour < 12 ? 'am' : 'pm';
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelve}:${String(minute).padStart(2, '0')} ${suffix}`;
+}
+
+/**
  * Share of `part` in `whole` as a whole-number percentage.
  * Returns null — not 0 — when there is no denominator, so the UI can omit the
  * figure instead of claiming a 0% boarding rate on a day with no bookings.

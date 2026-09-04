@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2 } from 'lucide-react';
+import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import { RouteImportDialog } from './route-import-dialog';
@@ -149,20 +149,27 @@ const RoutesPage = () => {
             page.
           </p>
         </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {/* Analytics is a read-only view, so it is NOT behind canManage —
+              anyone who can see the routes list can see how they ran today. */}
+          <button onClick={() => router.push('/routes/analytics')} className={outlineBtn}>
+            <BarChart3 className="h-4 w-4" /> Analytics
+          </button>
+          {canManage && (
             <button onClick={() => setIsImportOpen(true)} className={outlineBtn}>
               <Upload className="h-4 w-4" /> Import Routes
             </button>
-            {/* Add Route is an in-module page (no popup), matching the drivers module. */}
+          )}
+          {/* Add Route is an in-module page (no popup), matching the drivers module. */}
+          {canManage && (
             <button
               onClick={() => router.push('/routes/new')}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
             >
               <Plus className="h-4 w-4" /> Add Route
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

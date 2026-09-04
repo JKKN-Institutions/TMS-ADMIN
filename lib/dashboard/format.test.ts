@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { relativeTime, shortDayLabel, percentOf } from './format';
+import { formatTime, relativeTime, shortDayLabel, percentOf } from './format';
 
 describe('relativeTime', () => {
   const now = new Date('2026-09-03T12:00:00Z');
@@ -53,5 +53,35 @@ describe('percentOf', () => {
     // A day with no bookings has no boarding rate — 0% would be a claim we
     // cannot support.
     expect(percentOf(0, 0)).toBeNull();
+  });
+});
+
+describe('formatTime', () => {
+  it('renders a morning departure in 12-hour form', () => {
+    expect(formatTime('07:30:00')).toBe('7:30 am');
+  });
+
+  it('renders an afternoon time as pm', () => {
+    expect(formatTime('16:45:00')).toBe('4:45 pm');
+  });
+
+  it('renders noon as 12 pm, not 0 pm', () => {
+    expect(formatTime('12:00:00')).toBe('12:00 pm');
+  });
+
+  it('renders midnight as 12 am, not 0 am', () => {
+    expect(formatTime('00:05:00')).toBe('12:05 am');
+  });
+
+  it('pads single-digit minutes', () => {
+    expect(formatTime('08:05:00')).toBe('8:05 am');
+  });
+
+  it('shows a dash when no time is recorded', () => {
+    expect(formatTime(null)).toBe('—');
+  });
+
+  it('shows a dash for an unparseable value', () => {
+    expect(formatTime('not-a-time')).toBe('—');
   });
 });

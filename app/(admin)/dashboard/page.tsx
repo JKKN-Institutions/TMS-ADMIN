@@ -1,23 +1,40 @@
 'use client';
 
+// Admin dashboard, laid out as an operations console.
+//
+// Reading order: what the operation consists of (KPI cards) -> how demand is
+// moving and how full the buses are -> what needs attention -> today's boarding
+// and route performance -> fleet, money and recent activity.
+//
+// Two deliberate omissions:
+//   - No live vehicle map. Measured 2026-09-04: 0 of 35 buses reporting, 0 GPS
+//     devices registered. A map hero would render empty, and an "Online 0 /
+//     Offline 35" card is worse than no card. Revisit once GPS is rolled out.
+//   - No nine-column route board. That lives at Routes > Analytics, which is
+//     where you go to dig; the compact table here is a top-N, not a copy.
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Activity, AlertTriangle, BarChart3, Bus, Calendar, Car, CalendarCheck, ClipboardCheck,
-  GraduationCap, Plus, Receipt, RefreshCw, Route as RouteIcon, Settings, TrendingDown,
-  TrendingUp, UserCheck, Wallet, type LucideIcon,
+  GraduationCap, Receipt, RefreshCw, Route as RouteIcon, Settings, UserCheck, Wallet,
+  type LucideIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useAuth } from '@/providers/auth-provider';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { trendOf, type TrendData } from '@/lib/stat-utils';
 import { percentOf } from '@/lib/dashboard/format';
+import { LOW_OCCUPANCY_PCT, routeOccupancy } from '@/lib/dashboard/occupancy';
 import type { DashboardPayload } from '@/lib/dashboard/types';
-import { VIZ_CSS, card, inr, inrCompact, num } from '../_viz/kit';
-import { ActivityPanel, AlertsPanel, MiniStat, Panel, Row } from './panels';
+import { VIZ_CSS, inr, inrCompact, num, panel } from '../_viz/kit';
+import { ActivityPanel, Panel, Row } from './panels';
+import {
+  AttentionStat, FeesDonut, HourBars, JumpCard, JumpGrid, KpiCard, KpiGrid,
+  TurnoutRing, UtilisationBars, WarningPanel,
+} from './console';
+import { RoutePerformance } from './route-performance';
 import { TrendChart } from './trend-chart';
 
 async function fetchDashboard(): Promise<DashboardPayload> {
@@ -28,52 +45,10 @@ async function fetchDashboard(): Promise<DashboardPayload> {
   return result.data as DashboardPayload;
 }
 
-// ── Headline cards ───────────────────────────────────────────────────────────
-// icon and href travel WITH the card definition. The previous page picked both
-// by array index (`index === 0 ? Users : ...`, `routes[index]`), so reordering
-// the cards silently mismatched every icon and link.
-const HEADLINE = [
-  {
-    key: 'learners' as const,
-    title: 'Transport learners',
-    sub: 'Bus required, active',
-    icon: GraduationCap,
-    href: '/passengers/learners',
-    permission: TMS_PERMISSIONS.ENROLLMENT_VIEW,
-  },
-  {
-    key: 'routes' as const,
-    title: 'Routes',
-    sub: 'In the catalogue',
-    icon: RouteIcon,
-    href: '/routes',
-    permission: TMS_PERMISSIONS.ROUTES_VIEW,
-  },
-  {
-    key: 'drivers' as const,
-    title: 'Drivers',
-    sub: 'On staff',
-    icon: UserCheck,
-    href: '/drivers',
-    permission: TMS_PERMISSIONS.DRIVERS_VIEW,
-  },
-  {
-    key: 'vehicles' as const,
-    title: 'Fleet',
-    sub: 'Vehicles on record',
-    icon: Car,
-    href: '/vehicles',
-    permission: TMS_PERMISSIONS.VEHICLES_VIEW,
-  },
-];
-
 const QUICK_ACTIONS: Array<{
-  title: string;
-  desc: string;
-  icon: LucideIcon;
-  href: string;
-  permission: string;
+  title: string; desc: string; icon: LucideIcon; href: string; permission: string;
 }> = [
+  { title: 'Route analytics', desc: 'Every route, booked vs boarded', icon: RouteIcon, href: '/routes/analytics', permission: TMS_PERMISSIONS.ROUTES_VIEW },
   { title: 'Live tracking', desc: 'See every bus on the map', icon: Bus, href: '/track-all', permission: TMS_PERMISSIONS.TRACKING_VIEW },
   { title: 'Bookings', desc: 'Who is travelling and when', icon: CalendarCheck, href: '/bookings', permission: TMS_PERMISSIONS.BOOKINGS_VIEW },
   { title: 'Attendance', desc: 'Mark and review boardings', icon: ClipboardCheck, href: '/bookings/analytics', permission: TMS_PERMISSIONS.BOOKINGS_VIEW },
@@ -113,285 +88,351 @@ export default function DashboardPage() {
     }
   };
 
-  // While permissions are still resolving, show nothing rather than a menu that
-  // pops items in a moment later. `can` returns false for everything mid-load.
   const quickActions = useMemo(
     () => (permsLoading ? [] : QUICK_ACTIONS.filter((a) => can(a.permission))),
     [can, permsLoading]
   );
+  const occupancy = useMemo(() => routeOccupancy(data?.routes ?? []), [data?.routes]);
 
-  const headline = useMemo(
-    () => HEADLINE.filter((h) => can(h.permission)),
-    [can]
-  );
+  const loading = isPending || permsLoading;
+  const today = data?.today;
+  const prev = data?.yesterday ?? null;
+  const turnout = today ? percentOf(today.present, today.bookings) : null;
 
-  // Each headline card links somewhere, so rendering before permissions resolve
-  // would briefly offer links the user cannot open and then remove them —
-  // a layout shift AND a dead end. Skeletons until both are ready.
-  const showSkeletons = isPending || permsLoading;
+  // Deltas are only drawn when a comparable earlier day was found; the API
+  // walks back past non-running days so Monday isn't compared to a blank Sunday.
+  const delta = (now?: number, before?: number) =>
+    now === undefined || before === undefined ? null : now - before;
 
-  const greetingName = profile?.full_name || profile?.email || 'Admin';
-  const boardingRate = data ? percentOf(data.today.present, data.today.bookings) : null;
+  // A KPI card links into its module only when the viewer can open it, so a
+  // card never offers a jump that lands on /unauthorized. The figure itself
+  // stays visible either way — the dashboard's own permission already allowed
+  // it to be counted.
+  const jump = (href: string, permission: string) =>
+    can(permission) ? href : undefined;
 
   return (
-    <div className="viz-scope space-y-6">
+    <div className="viz-scope space-y-5">
       <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
 
-      {/* Header — stacks on mobile so the title can't collide with the actions */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Header — greeting left, date right */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="break-words text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Welcome back, {greetingName}
+          <h1 className="break-words text-2xl font-bold tracking-tight text-foreground">
+            Good {partOfDay()}, {firstName(profile?.full_name) || 'there'}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {data
-              ? `Transport at a glance for ${formatHeaderDate(data.today.date)}.`
-              : 'Loading today’s transport picture…'}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Transport management overview</p>
         </div>
-        <div className="flex items-center gap-3 sm:shrink-0">
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 sm:flex-none"
-          >
-            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
-          {can(TMS_PERMISSIONS.ENROLLMENT_VIEW) && (
+        <div className="flex flex-col items-start gap-2 sm:items-end sm:shrink-0">
+          <p className="text-sm text-muted-foreground">
+            {data ? formatHeaderDate(data.today.date) : 'Loading'}
+          </p>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => router.push('/passengers/learners')}
-              className="inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-lg border border-transparent bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:flex-none"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-lg border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Plus className="mr-2 h-4 w-4" />
-              Add learner
+              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
+              {refreshing ? 'Refreshing' : 'Refresh'}
             </button>
-          )}
+            {can(TMS_PERMISSIONS.ROUTES_VIEW) && (
+              <button
+                onClick={() => router.push('/routes/analytics')}
+                className="inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-lg bg-green-600 px-3.5 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+              >
+                <RouteIcon className="mr-2 h-4 w-4" aria-hidden />
+                Route analytics
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* A metric whose query failed must not read as a confident zero. */}
       {data && data.degraded.length > 0 && (
         <div
-          className={`${card} flex items-start gap-3 border-l-4 p-4`}
+          className={`${panel} flex items-start gap-3 border-l-4 p-4`}
           style={{ borderLeftColor: 'var(--viz-warning)' }}
           role="status"
         >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--viz-warning)' }} />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--viz-warning)' }} aria-hidden />
           <div className="min-w-0 text-sm">
             <p className="font-medium text-foreground">Some figures could not be loaded</p>
-            <p className="mt-0.5 text-muted-foreground">
-              {data.degraded.join(', ')} — these are shown as 0 and should not be relied on.
+            <p className="mt-0.5 break-words text-muted-foreground">
+              {data.degraded.join(', ')} — shown as 0, so don’t rely on them.
             </p>
           </div>
         </div>
       )}
 
-      {/* Headline counts */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {showSkeletons
-          ? Array.from({ length: 4 }, (_, i) => <CardSkeleton key={i} />)
-          : headline.map((h) => (
-              <HeadlineCard
-                key={h.key}
-                title={h.title}
-                sub={h.sub}
-                icon={h.icon}
-                href={h.href}
-                value={data?.counts[h.key].current ?? 0}
-                trend={data ? trendOf(data.counts[h.key], 'vs 30 days ago') : undefined}
-              />
-            ))}
+      {/* KPI cards — every figure jumps into the module that owns it */}
+      {loading ? (
+        <KpiSkeleton />
+      ) : (
+        <KpiGrid>
+          <KpiCard
+            label="Learners"
+            value={num(data?.counts.learners.current ?? 0)}
+            sub="bus required, active"
+            icon={GraduationCap}
+            href={jump('/passengers/learners', TMS_PERMISSIONS.ENROLLMENT_VIEW)}
+          />
+          {/* A count of expired documents is a problem, not a footnote, so the
+              sub-line is toned rather than left as grey small print. */}
+          <KpiCard
+            label="Buses"
+            value={num(data?.fleet.buses ?? 0)}
+            sub={`${num(data?.fleet.expiredDocs ?? 0)} with an expired document`}
+            subTone={(data?.fleet.expiredDocs ?? 0) > 0 ? 'var(--viz-warning)' : undefined}
+            icon={Car}
+            href={jump('/vehicles', TMS_PERMISSIONS.VEHICLES_VIEW)}
+          />
+          <KpiCard
+            label="Routes"
+            value={num(data?.fleet.routesActive ?? 0)}
+            sub={`${num(data?.fleet.routesWithoutBus ?? 0)} without a bus`}
+            subTone={(data?.fleet.routesWithoutBus ?? 0) > 0 ? 'var(--viz-warning)' : undefined}
+            icon={RouteIcon}
+            href={jump('/routes', TMS_PERMISSIONS.ROUTES_VIEW)}
+          />
+          <KpiCard
+            label="Drivers"
+            value={num(data?.counts.drivers.current ?? 0)}
+            sub={`${num(data?.fleet.routesWithoutDriver ?? 0)} routes without one`}
+            subTone={(data?.fleet.routesWithoutDriver ?? 0) > 0 ? 'var(--viz-warning)' : undefined}
+            icon={UserCheck}
+            href={jump('/drivers', TMS_PERMISSIONS.DRIVERS_VIEW)}
+          />
+          <KpiCard
+            label="Collected today"
+            value={inr(data?.finance.collectedToday ?? 0)}
+            sub={`${inrCompact(data?.finance.collectedMonth ?? 0)} this month`}
+            tone="var(--viz-good)"
+            icon={Wallet}
+            href={jump('/fees', TMS_PERMISSIONS.FEES_VIEW)}
+          />
+          <KpiCard
+            label="Attendance"
+            value={turnout === null ? '—' : `${turnout}%`}
+            sub={`${num(today?.present ?? 0)} of ${num(today?.bookings ?? 0)} booked`}
+            delta={delta(today?.present, prev?.present)}
+            icon={ClipboardCheck}
+            href={jump('/bookings/analytics', TMS_PERMISSIONS.BOOKINGS_VIEW)}
+          />
+        </KpiGrid>
+      )}
+
+      {/* Daily onboarding trend beside bus utilisation */}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <div className="xl:col-span-2">
+          {loading ? <ChartSkeleton /> : <TrendChart trend={data?.trend ?? []} />}
+        </div>
+
+        <section className={`${panel} p-5`}>
+          <h2 className="text-base font-semibold text-foreground">Bus utilisation</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Seats booked against the assigned bus, fullest first
+          </p>
+          <div className="mt-4">
+            {loading ? <RowsSkeleton rows={5} /> : <UtilisationBars rows={occupancy} />}
+          </div>
+        </section>
       </div>
 
-      {/* Today + money */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Panel title="Today" icon={Activity} action={{ label: 'Bookings', href: '/bookings' }}>
-          {isPending ? (
-            <RowsSkeleton rows={3} />
+      {/* Needs attention — full width: three counted categories, then the list */}
+      <section className={`${panel} overflow-hidden`}>
+        <header
+          className="flex items-center gap-2.5 border-b px-5 py-3.5"
+          style={{ borderColor: 'var(--viz-panel-border)' }}
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" style={{ color: 'var(--viz-warning)' }} aria-hidden />
+          <h2 className="text-sm font-semibold text-foreground">Needs attention</h2>
+        </header>
+
+        {loading ? (
+          <div className="p-5">
+            <RowsSkeleton rows={4} />
+          </div>
+        ) : (
+          <>
+            <div
+              className="flex flex-col divide-y sm:flex-row sm:divide-x sm:divide-y-0"
+              style={{ borderColor: 'var(--viz-panel-border)' }}
+            >
+              <AttentionStat
+                label="Bus pass requests"
+                value={data?.attention.busPassOpen ?? 0}
+                caption={`${num(data?.attention.busPassLast30 ?? 0)} raised in 30 days`}
+                change={percentChange(data?.attention.busPassLast30, data?.attention.busPassPrev30)}
+                href="/enrollment-requests"
+              />
+              <AttentionStat
+                label="Document expiry"
+                value={data?.attention.docsExpired ?? 0}
+                caption={`${num(data?.attention.docsDueSoon ?? 0)} more due within 60 days`}
+                href="/vehicles"
+              />
+              <AttentionStat
+                label="Low occupancy"
+                value={data?.attention.lowOccupancy ?? 0}
+                caption={`of ${num(data?.attention.routesWithCapacity ?? 0)} routes, under ${LOW_OCCUPANCY_PCT}% full`}
+                href="/routes/analytics"
+              />
+            </div>
+            <div className="border-t p-5" style={{ borderColor: 'var(--viz-panel-border)' }}>
+              <WarningPanel
+                alerts={data?.alerts ?? []}
+                unknown={(data?.degraded.length ?? 0) > 0}
+                onRetry={handleRefresh}
+              />
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Boarding today beside route performance */}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <section className={`${panel} p-5`}>
+          <h2 className="text-base font-semibold text-foreground">Boarding today</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Riders scanned against seats booked
+          </p>
+          {loading ? (
+            <RingSkeleton />
           ) : (
-            <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-4">
-                <MiniStat
-                  label="Seats booked"
-                  value={data?.today.bookings ?? 0}
-                  sub={`${num(data?.today.bookingsTomorrow ?? 0)} booked for tomorrow`}
-                />
-                <MiniStat
-                  label="Boarded"
-                  value={data?.today.present ?? 0}
-                  sub={boardingRate === null ? 'No bookings to compare' : `${boardingRate}% of booked`}
-                />
-              </div>
-              <div className="border-t border-border pt-1">
-                <Row label="Marked absent" value={num(data?.today.absent ?? 0)} />
-                <Row label="Trips today" value={num(data?.today.tripsToday ?? 0)} />
-                <Row
-                  label="Trips running now"
-                  value={num(data?.today.tripsActive ?? 0)}
-                  href="/track-all"
-                />
-              </div>
+            <div className="mt-5 space-y-6">
+              <TurnoutRing
+                percent={turnout}
+                boarded={today?.present ?? 0}
+                booked={today?.bookings ?? 0}
+              />
+              <HourBars hours={today?.hourly ?? []} />
+            </div>
+          )}
+        </section>
+
+        <div className="xl:col-span-2">
+          {loading ? <ChartSkeleton /> : <RoutePerformance routes={data?.routes ?? []} />}
+        </div>
+      </div>
+
+      {/* Fleet, money and activity */}
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-3">
+        <Panel title="Fleet readiness" icon={Car} action={{ label: 'Vehicles', href: '/vehicles' }}>
+          {loading ? (
+            <RowsSkeleton rows={5} />
+          ) : (
+            <div>
+              <Row label="Buses on record" value={num(data?.fleet.buses ?? 0)} href="/vehicles" />
+              <Row
+                label="Expired documents"
+                value={num(data?.fleet.expiredDocs ?? 0)}
+                tone={(data?.fleet.expiredDocs ?? 0) > 0 ? 'var(--viz-critical)' : undefined}
+                href="/vehicles"
+              />
+              <Row label="Active routes" value={num(data?.fleet.routesActive ?? 0)} href="/routes" />
+              <Row
+                label="Routes without a bus"
+                value={num(data?.fleet.routesWithoutBus ?? 0)}
+                tone={(data?.fleet.routesWithoutBus ?? 0) > 0 ? 'var(--viz-serious)' : undefined}
+                href="/routes"
+              />
+              <Row
+                label="Routes without a driver"
+                value={num(data?.fleet.routesWithoutDriver ?? 0)}
+                tone={(data?.fleet.routesWithoutDriver ?? 0) > 0 ? 'var(--viz-serious)' : undefined}
+                href="/routes"
+              />
             </div>
           )}
         </Panel>
 
         <Panel title="Transport fees" icon={Wallet} action={{ label: 'Fees', href: '/fees' }}>
-          {isPending ? (
-            <RowsSkeleton rows={5} />
-          ) : (
-            <div className="space-y-5">
-              <div>
-                <p className="text-xs text-muted-foreground">Collected today</p>
-                <p
-                  className="mt-0.5 text-2xl font-semibold tabular-nums"
-                  style={{ color: 'var(--viz-good)' }}
-                  title={inr(data?.finance.collectedToday ?? 0)}
-                >
-                  {inr(data?.finance.collectedToday ?? 0)}
-                </p>
-              </div>
-              <div className="border-t border-border pt-1">
-                <Row label="This month" value={inrCompact(data?.finance.collectedMonth ?? 0)} />
-                <Row label="Collected to date" value={inrCompact(data?.finance.collectedTotal ?? 0)} />
-                <Row
-                  label="Outstanding"
-                  value={inrCompact(data?.finance.outstanding ?? 0)}
-                  tone="var(--viz-serious)"
-                  href="/fees"
-                />
-                <Row
-                  label="Overdue bills"
-                  value={num(data?.finance.overdueBills ?? 0)}
-                  tone="var(--viz-critical)"
-                  href="/fees"
-                />
-                <Row label="Bills paid" value={num(data?.finance.paidBills ?? 0)} />
-              </div>
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Needs attention" icon={AlertTriangle}>
-          {isPending ? (
+          {loading ? (
             <RowsSkeleton rows={4} />
           ) : (
-            <AlertsPanel alerts={data?.alerts ?? []} unknown={(data?.degraded.length ?? 0) > 0} />
+            <FeesDonut
+              paid={data?.finance.paidBills ?? 0}
+              unpaid={data?.finance.unpaidBills ?? 0}
+              outstanding={inrCompact(data?.finance.outstanding ?? 0)}
+              collected={inr(data?.finance.collectedToday ?? 0)}
+            />
           )}
         </Panel>
-      </div>
 
-      {/* Trend + activity */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          {isPending ? <ChartSkeleton /> : <TrendChart trend={data?.trend ?? []} />}
-        </div>
         <Panel
           title="Recent activity"
           icon={Activity}
           action={can(TMS_PERMISSIONS.ACTIVITY_VIEW) ? { label: 'All', href: '/activity-log' } : undefined}
         >
-          {isPending ? (
+          {loading ? (
             <RowsSkeleton rows={6} />
           ) : (
-            <ActivityPanel
-              items={data?.activity ?? []}
-              canView={can(TMS_PERMISSIONS.ACTIVITY_VIEW)}
-            />
+            <ActivityPanel items={data?.activity ?? []} canView={can(TMS_PERMISSIONS.ACTIVITY_VIEW)} />
           )}
         </Panel>
       </div>
 
-      {/* Quick actions — only what this user may actually open */}
+      {/* Jump to — the same card language as the KPI band, so the page has one
+          idea of what a link into a module looks like. The heading sits outside
+          the cards rather than wrapping them in a panel: a box of boxes reads
+          as a settings list, which is what these shortcuts used to look like. */}
       {quickActions.length > 0 && (
-        <div>
-          <h2 className="mb-3 text-sm font-semibold text-foreground">Quick actions</h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {quickActions.map((action) => (
-              <Link
-                key={action.href}
-                href={action.href}
-                className={`${card} group flex items-center gap-3 p-4 transition-colors hover:bg-muted`}
-              >
-                <span className="shrink-0 rounded-lg bg-muted p-2 text-muted-foreground transition-colors group-hover:text-foreground">
-                  <action.icon className="h-5 w-5" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-foreground">{action.title}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{action.desc}</span>
-                </span>
-              </Link>
-            ))}
+        <section aria-labelledby="jump-to">
+          <h2 id="jump-to" className="text-sm font-semibold text-foreground">Jump to</h2>
+          <div className="mt-3">
+            <JumpGrid>
+              {quickActions.map((action) => (
+                <JumpCard
+                  key={action.href}
+                  title={action.title}
+                  desc={action.desc}
+                  icon={action.icon}
+                  href={action.href}
+                />
+              ))}
+            </JumpGrid>
           </div>
-        </div>
+        </section>
       )}
     </div>
   );
 }
 
-// ── Pieces ───────────────────────────────────────────────────────────────────
+// ── Loading states ───────────────────────────────────────────────────────────
+// Skeletons rather than the old full-screen spinner, which returned a
+// `min-h-screen` centred loader and blanked the entire admin shell on first
+// paint. These hold the layout so nothing jumps when data lands.
 
-function HeadlineCard({
-  title, sub, icon: Icon, href, value, trend,
-}: {
-  title: string;
-  sub: string;
-  icon: LucideIcon;
-  href: string;
-  value: number;
-  trend?: TrendData;
-}) {
-  // `trend` is undefined whenever no baseline was measurable. It used to be
-  // filled in with Math.random(), so every card always showed an arrow.
-  const showTrend = trend !== undefined && trend.direction !== 'neutral';
-  const up = trend?.direction === 'up';
-
+function KpiSkeleton() {
   return (
-    <Link href={href} className={`${card} block p-5 transition-colors hover:bg-muted`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums text-foreground">
-            {num(value)}
-          </p>
-          <div className="mt-1 flex items-center gap-1.5 text-xs">
-            {showTrend ? (
-              <>
-                {up ? (
-                  <TrendingUp className="h-3.5 w-3.5" style={{ color: 'var(--viz-good)' }} />
-                ) : (
-                  <TrendingDown className="h-3.5 w-3.5" style={{ color: 'var(--viz-serious)' }} />
-                )}
-                <span className="text-muted-foreground">
-                  {trend!.value.toFixed(1)}% {trend!.timeframe}
-                </span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">{sub}</span>
-            )}
-          </div>
+    // Same grid, same card box and the same three text lines as the real
+    // cards, so the row does not jump when the data lands.
+    <div className="grid animate-pulse grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-6">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className={`${panel} min-h-[7rem] space-y-3 p-4`}>
+          <div className="h-7 w-7 rounded-lg bg-muted" />
+          <div className="h-3 w-16 rounded bg-muted" />
+          <div className="h-6 w-14 rounded bg-muted" />
+          <div className="h-3 w-20 rounded bg-muted" />
         </div>
-        <span className="shrink-0 rounded-lg bg-muted p-2 text-muted-foreground">
-          <Icon className="h-5 w-5" />
-        </span>
-      </div>
-    </Link>
+      ))}
+    </div>
   );
 }
 
-/**
- * Skeletons rather than the old full-screen spinner, which returned a
- * `min-h-screen` centred loader and blanked the entire admin shell on first
- * paint. These keep the layout stable so nothing jumps when data lands.
- */
-function CardSkeleton() {
+function RingSkeleton() {
   return (
-    <div className={`${card} p-5`}>
-      <div className="animate-pulse space-y-3">
-        <div className="h-3 w-24 rounded bg-muted" />
-        <div className="h-7 w-16 rounded bg-muted" />
-        <div className="h-3 w-32 rounded bg-muted" />
+    <div className="mt-5 animate-pulse space-y-6">
+      <div className="flex items-center gap-5">
+        <div className="h-[132px] w-[132px] shrink-0 rounded-full bg-muted" />
+        <div className="space-y-2">
+          <div className="h-4 w-28 rounded bg-muted" />
+          <div className="h-4 w-24 rounded bg-muted" />
+        </div>
       </div>
+      <div className="h-16 w-full rounded bg-muted" />
     </div>
   );
 }
@@ -411,18 +452,40 @@ function RowsSkeleton({ rows }: { rows: number }) {
 
 function ChartSkeleton() {
   return (
-    <div className={`${card} p-5`}>
-      <div className="animate-pulse space-y-4">
-        <div className="h-4 w-32 rounded bg-muted" />
-        <div className="h-[260px] w-full rounded bg-muted" />
-      </div>
+    <div className={`${panel} animate-pulse p-5`}>
+      <div className="h-4 w-32 rounded bg-muted" />
+      <div className="mt-4 h-[260px] w-full rounded bg-muted" />
     </div>
   );
 }
 
-/** "Thursday, 3 September" — the IST date the server measured "today" as. */
+// ── Small helpers ────────────────────────────────────────────────────────────
+
+/** "Thursday, 4 September" — the IST date the server measured "today" as. */
 function formatHeaderDate(date: string): string {
   const d = new Date(`${date}T00:00:00`);
   if (Number.isNaN(d.getTime())) return date;
   return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+/** Greeting matched to the two times of day this screen is actually used. */
+function partOfDay(now: Date = new Date()): string {
+  const h = now.getHours();
+  if (h < 12) return 'morning';
+  if (h < 17) return 'afternoon';
+  return 'evening';
+}
+
+/**
+ * Percentage change between two measured periods, or null when the earlier
+ * period is empty — a jump from zero has no meaningful percentage, and printing
+ * "+Infinity%" or an arbitrary "+100%" would be inventing a figure.
+ */
+function percentChange(now?: number, before?: number): number | null {
+  if (now === undefined || before === undefined || before === 0) return null;
+  return Math.round(((now - before) / before) * 100);
+}
+
+function firstName(fullName?: string | null): string {
+  return (fullName ?? '').trim().split(/\s+/)[0] ?? '';
 }
