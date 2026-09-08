@@ -456,3 +456,64 @@ describe('generateBills — tiered bill description', () => {
     expect(bills[0][0].bill_description).toBe('Transport Fee - 2026-2027 - Year 1');
   });
 });
+
+describe('generateBills — the bill academic year follows the transport year', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T06:00:00Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function fixture(academicYears: Array<Record<string, unknown>>) {
+    return makeFakeSupabase({
+      tms_fee_structure: [{
+        id: 'fs1', name: 'Flat', status: 'active', audience: 'student', fee_mode: 'flat',
+        transport_year_id: 'ty1', institution_ids: null, staff_role_keys: null, lifecycle_statuses: null,
+      }],
+      tms_transport_year: [{ start_date: '2026-06-01', name: '2026-2027' }],
+      tms_fee_structure_term: [
+        { term_no: 1, term_label: 'Term 1', amount: 3000, due_date: '2026-07-31', year_band_id: null },
+      ],
+      // The learner's PROFILE still points at last year's academic year.
+      tms_billable_learner: [{ id: 'L1', institution_id: 'i1', admission_year_id: null, academic_year_id: 'ay-25' }],
+      admission_years: [],
+      tms_fee_override: [],
+      tms_fee_bill: [],
+      billing_categories: [{ id: 'cat1' }],
+      academic_years: academicYears,
+    });
+  }
+
+  async function billedAcademicYear(svc: ReturnType<typeof makeFakeSupabase>) {
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1',
+    });
+    expect(res.ok).toBe(true);
+    const bills = svc.calls
+      .filter((c) => c.table === 'billing_student_bills')
+      .flatMap((c) => c.ops.filter(([op]) => op === 'insert').map(([, args]) => args[0])) as Array<
+      Record<string, unknown>[]
+    >;
+    expect(bills).toHaveLength(1);
+    return bills[0][0];
+  }
+
+  it('stamps the transport year academic year, not the stale profile one', async () => {
+    const row = await billedAcademicYear(fixture([
+      { id: 'ay-25', institution_id: 'i1', academic_year_name: '2025-2026' },
+      { id: 'ay-26', institution_id: 'i1', academic_year_name: '2026-2027' },
+    ]));
+    expect(row.academic_year_id).toBe('ay-26');
+    expect(row.bill_description).toBe('Transport Fee - 2026-2027');
+  });
+
+  it('falls back to the profile academic year when the institution has no row for this year', async () => {
+    const row = await billedAcademicYear(fixture([
+      { id: 'ay-25', institution_id: 'i1', academic_year_name: '2025-2026' },
+      { id: 'ay-26-other', institution_id: 'i2', academic_year_name: '2026-2027' },
+    ]));
+    expect(row.academic_year_id).toBe('ay-25');
+  });
+});

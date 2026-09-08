@@ -13,6 +13,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveApplicablePeople, type ApplicablePerson } from './applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from './types';
 import { currentYearOf } from './year-of-study';
+import { academicYearByInstitution, resolveBillAcademicYear } from './bill-academic-year';
 import {
   resolvePersonTerms,
   UNRESOLVED_LABEL,
@@ -564,10 +565,12 @@ export async function generateBills(
       .maybeSingle();
     const categoryId = cat?.id ?? null;
 
-    // Each learner's academic year comes from their PROFILE (resolveApplicablePeople
-    // already loaded learners_profiles.academic_year_id). Resolve the distinct ids ->
-    // display name in one query; the number of distinct academic years is tiny (one or
-    // two per institution), so a single .in() stays well under the gateway limit.
+    // A bill belongs to the TRANSPORT year being generated, so its academic_year_id
+    // must be the academic year of the same name ('2026-2027') for the learner's
+    // institution — NOT learners_profiles.academic_year_id, which lags whenever a
+    // profile has not been rolled over yet and used to stamp bills with a stale year.
+    // We still load the learners' own academic years so the description fallback and
+    // the no-row-for-this-institution fallback keep working.
     const learnerAyIds = [
       ...new Set(
         resolved
@@ -575,7 +578,19 @@ export async function generateBills(
           .map((r) => r.person.academic_year_id as string)
       ),
     ];
+    const learnerInstitutionIds = [
+      ...new Set(
+        resolved
+          .filter((r) => r.person.person_type === 'learner' && r.person.institution_id)
+          .map((r) => r.person.institution_id as string)
+      ),
+    ];
+
     const acadYearNameById = new Map<string, string>();
+    let ayByInstitution = new Map<string, string>();
+
+    // Both sets are tiny — one or two academic years per institution across at most a
+    // handful of institutions — so each .in() stays far below the gateway's limit.
     if (learnerAyIds.length) {
       const { data: ays, error: ayErr } = await svc
         .from('academic_years')
@@ -587,6 +602,21 @@ export async function generateBills(
       for (const a of (ays ?? []) as Array<{ id: string; academic_year_name: string | null }>) {
         if (a.academic_year_name) acadYearNameById.set(a.id, a.academic_year_name);
       }
+    }
+
+    if (tyName && learnerInstitutionIds.length) {
+      const { data: tyAys, error: tyAyErr } = await svc
+        .from('academic_years')
+        .select('id, institution_id, academic_year_name')
+        .eq('academic_year_name', tyName)
+        .in('institution_id', learnerInstitutionIds);
+      if (tyAyErr) {
+        return { ok: false, status: 500, error: 'Failed to resolve academic years for bill naming.' };
+      }
+      ayByInstitution = academicYearByInstitution(
+        (tyAys ?? []) as Array<{ id: string; institution_id: string | null; academic_year_name: string | null }>,
+        tyName
+      );
     }
 
     // Auto-only: at a 15-minute cadence across 3 structures an unconditional run
@@ -638,7 +668,10 @@ export async function generateBills(
 
     for (const r of resolved) {
       const p = r.person;
-      const acadYearId = p.person_type === 'learner' ? p.academic_year_id : null;
+      const acadYearId =
+        p.person_type === 'learner'
+          ? resolveBillAcademicYear(ayByInstitution, p.institution_id, p.academic_year_id)
+          : null;
       const acadYearName = acadYearId ? acadYearNameById.get(acadYearId) ?? null : null;
 
       if (p.person_type === 'learner') {
