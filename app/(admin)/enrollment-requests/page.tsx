@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bus } from 'lucide-react';
+import { Bus, ChevronDown, Download, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
 import type { LearnerPassenger } from '@/lib/passengers/types';
 import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getEnrollmentColumns } from './columns';
+import { exportEnrollment } from './enrollment-export';
 
 interface RouteOpt {
   id: string;
@@ -120,6 +127,17 @@ export default function EnrollmentRequestsPage() {
     [learners]
   );
 
+  // The table owns filter state, so the export must be fed the rows the user can
+  // actually see — otherwise 'export the unallocated learners' silently ships all
+  // of them. Stable via useCallback: DataTable lists this in an effect dep array.
+  const [visibleRows, setVisibleRows] = useState<LearnerPassenger[]>([]);
+  const [isFiltered, setIsFiltered] = useState(false);
+  const handleFilteredRows = useCallback((rows: LearnerPassenger[], filtered: boolean) => {
+    setVisibleRows(rows);
+    setIsFiltered(filtered);
+  }, []);
+  const exportRows = visibleRows.length || isFiltered ? visibleRows : learners;
+
   const selectedRoute = routes.find((r) => r.id === routeId);
 
   return (
@@ -164,6 +182,30 @@ export default function EnrollmentRequestsPage() {
           isLoading={isLoading}
           searchPlaceholder="Search name, roll no, email..."
           filters={filters}
+          onFilteredRowsChange={handleFilteredRows}
+          toolbarActions={() => (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                disabled={exportRows.length === 0}
+              >
+                <Download className="h-4 w-4" /> Export
+                {isFiltered ? ` (${exportRows.length})` : ''}
+                <ChevronDown className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => exportEnrollment(exportRows, 'xlsx')}>
+                  <FileSpreadsheet className="text-gray-500" /> Export as Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => exportEnrollment(exportRows, 'csv')}>
+                  <FileText className="text-gray-500" /> Export as CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => exportEnrollment(exportRows, 'json')}>
+                  <FileJson className="text-gray-500" /> Export as JSON
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         />
       )}
 
