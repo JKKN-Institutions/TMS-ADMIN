@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { MapPin, Users, Briefcase, Download, Phone, Clock } from 'lucide-react';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
+import { groupByStop } from '@/lib/passengers/group-by-stop';
 
 // ── Shapes returned by the two roster APIs (/learners and /staff). ────────────
 interface LearnerApiRow {
@@ -52,14 +53,6 @@ interface Person {
   evening: string | null;
 }
 
-interface StopGroup {
-  key: string;
-  stop_name: string;
-  pickup: string | null;
-  evening: string | null;
-  people: Person[];
-}
-
 const learnerStatusStyle: Record<string, string> = {
   active: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400',
   admitted: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
@@ -77,25 +70,6 @@ function Badge({ person }: { person: Person }) {
       {person.meta}
     </span>
   );
-}
-
-// Roster arrives pre-sorted by stop sequence, so a linear pass groups it.
-function groupByStop(people: Person[]): StopGroup[] {
-  const groups: StopGroup[] = [];
-  for (const p of people) {
-    const key = p.stop_id ?? 'none';
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) last.people.push(p);
-    else
-      groups.push({
-        key,
-        stop_name: p.stop_name ?? 'No stop assigned',
-        pickup: p.pickup,
-        evening: p.evening,
-        people: [p],
-      });
-  }
-  return groups;
 }
 
 function downloadCsv(route: RouteInfo, people: Person[]) {
