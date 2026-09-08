@@ -16,6 +16,7 @@ import {
   type GeneratePreview, type CoverageResult,
 } from '../fee-api';
 import { feeStatusBadge, audienceBadge, inr } from '../columns';
+import { DEFAULT_LIFECYCLE_STATUSES } from '@/lib/fees/types';
 
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -221,7 +222,10 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Learner statuses billed</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {(fee.lifecycle_statuses && fee.lifecycle_statuses.length ? fee.lifecycle_statuses : ['active']).map((s) => (
+                {(fee.lifecycle_statuses && fee.lifecycle_statuses.length
+                  ? fee.lifecycle_statuses
+                  : [...DEFAULT_LIFECYCLE_STATUSES]
+                ).map((s) => (
                   <span
                     key={s}
                     className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium capitalize text-gray-700 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"

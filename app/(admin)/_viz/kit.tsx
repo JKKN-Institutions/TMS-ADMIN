@@ -17,6 +17,14 @@ export const VIZ_CSS = `
   --viz-good:#0ca30c; --viz-warning:#fab219; --viz-serious:#ec835a; --viz-critical:#d03b3b;
   --viz-neutral:#94a3b8;
   --viz-grid:#eef2f6; --viz-axis:#cbd5e1; --viz-tick:#64748b;
+
+  /* Elevation tiers. A dense console needs cards to sit ON something rather
+     than float on the same value as the page, otherwise every panel edge has
+     to be drawn with a border and the layout reads as a wireframe. */
+  --viz-panel:#ffffff;
+  --viz-panel-raised:#ffffff;
+  --viz-panel-border:color-mix(in oklab,#0f172a 10%,transparent);
+  --viz-inset:color-mix(in oklab,#0f172a 4%,transparent);
 }
 .dark .viz-scope{
   --viz-surface:#020817;
@@ -25,6 +33,17 @@ export const VIZ_CSS = `
   --viz-good:#0ca30c; --viz-warning:#fab219; --viz-serious:#ec835a; --viz-critical:#d03b3b;
   --viz-neutral:#475569;
   --viz-grid:#1e293b; --viz-axis:#334155; --viz-tick:#94a3b8;
+
+  /* Dark gets a genuine two-step elevation, which is what makes the reference
+     dashboards read as depth rather than as flat boxes on black. */
+  --viz-panel:#0b1220;
+  --viz-panel-raised:#111a2e;
+  --viz-panel-border:color-mix(in oklab,#94a3b8 14%,transparent);
+  --viz-inset:color-mix(in oklab,#000000 28%,transparent);
+}
+/* Respect a user's reduced-motion preference across every viz surface. */
+@media (prefers-reduced-motion: reduce){
+  .viz-scope *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
 }
 `;
 
@@ -61,6 +80,19 @@ export type StatusMeta = { label: string; color: string; Icon: LucideIcon };
 
 // ── Small building blocks ────────────────────────────────────────────────────
 export const card = 'rounded-xl border border-border bg-card text-card-foreground';
+
+/**
+ * Elevated panel for the operations console.
+ *
+ * Unlike `card` (which follows the app's shadcn tokens) this uses the viz
+ * elevation tiers, so in dark mode the panel sits visibly above the page
+ * instead of being the same value as it. Only valid inside `.viz-scope`.
+ */
+export const panel =
+  'rounded-2xl border text-card-foreground [background:var(--viz-panel)] [border-color:var(--viz-panel-border)]';
+
+/** A recessed area inside a panel — chart wells, meter tracks, code-ish blocks. */
+export const inset = 'rounded-xl [background:var(--viz-inset)]';
 
 // Stat tile: label (sentence case) · value (semibold) · sub.
 export function StatTile({

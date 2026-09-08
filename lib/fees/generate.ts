@@ -13,6 +13,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveApplicablePeople, type ApplicablePerson } from './applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from './types';
 import { currentYearOf } from './year-of-study';
+import { academicYearByInstitution, resolveBillAcademicYear } from './bill-academic-year';
 import {
   resolvePersonTerms,
   UNRESOLVED_LABEL,
@@ -26,6 +27,7 @@ import type { TermOverride } from './overrides';
 import { buildStaffBillNotification } from './staff-bill-notification';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { countBornOverdue } from './born-overdue';
+import { foldTermsIntoBill } from './instalments';
 import { istToday } from '@/lib/booking/window';
 
 export interface GenerateOptions {
@@ -110,10 +112,14 @@ export async function generateBills(
     // the date used to resolve each learner's academic_year. Needed for dry-run too.
     const { data: ty } = await svc
       .from('tms_transport_year')
-      .select('start_date')
+      .select('start_date, name')
       .eq('id', fs.transport_year_id)
       .maybeSingle();
     const tyStart: string | null = ty?.start_date ?? null;
+    // Carried into bill_description: term_number is NULL on transport bills and
+    // transport_year_id is unreliable there, so the description text is the only
+    // dependable record of which year a bill belongs to.
+    const tyName: string | null = (ty as { name?: string } | null)?.name ?? null;
     const currentYear = currentYearOf(tyStart);
 
     // Load the terms that drive billing: flat = structure terms; tiered = bands+terms.
@@ -403,7 +409,20 @@ export async function generateBills(
       .select('person_id, term_no')
       .eq('fee_structure_id', id)
       .eq('transport_year_id', fs.transport_year_id);
-    const billedKey = new Set((existing ?? []).map((r) => `${r.person_id}:${r.term_no}`));
+    // Learners now get ONE bill per structure+year, so their idempotency key is
+    // the person alone — a legacy learner with separate term-1 and term-2 rows
+    // must not be re-billed as a merged bill. Staff keep the per-term grain.
+    const billedKey = new Set(
+      (existing ?? []).map((r) => `${r.person_id}:${r.term_no}`)
+    );
+    const billedPersons = new Set((existing ?? []).map((r) => r.person_id as string));
+    // How many ledger rows each person already holds. Used only to REPORT the
+    // legacy partial-ledger gap (see `underCovered` below); it is deliberately
+    // not part of the idempotency decision.
+    const existingRowsByPerson = new Map<string, number>();
+    for (const row of (existing ?? []) as Array<{ person_id: string }>) {
+      existingRowsByPerson.set(row.person_id, (existingRowsByPerson.get(row.person_id) ?? 0) + 1);
+    }
 
     // Anyone already billed by ANOTHER structure for the same transport year?
     // resolvedIds can be the whole applicable population (~1k). A single .in() over
@@ -445,10 +464,25 @@ export async function generateBills(
 
     let toGenerate = 0;
     let alreadyBilled = 0;
+    // Learners skipped as already-billed whose EXISTING ledger rows do not cover
+    // all of their resolved terms. A non-zero value means those learners hold a
+    // PARTIAL legacy ledger — billed for some terms under the old per-term grain
+    // — and they will never be topped up: a learner's schedule is now fixed at
+    // generation time, so re-running this structure skips them wholesale. Without
+    // this count they are indistinguishable from correctly-complete people.
+    let underCovered = 0;
     for (const r of resolved) {
-      for (const t of r.terms) {
-        if (billedKey.has(`${r.person.person_id}:${t.term_no}`)) alreadyBilled++;
-        else toGenerate++;
+      if (r.person.person_type === 'learner') {
+        // One bill per learner, regardless of how many terms it holds.
+        if (billedPersons.has(r.person.person_id)) {
+          alreadyBilled++;
+          if ((existingRowsByPerson.get(r.person.person_id) ?? 0) < r.terms.length) underCovered++;
+        } else if (foldTermsIntoBill(r.terms)) toGenerate++;
+      } else {
+        for (const t of r.terms) {
+          if (billedKey.has(`${r.person.person_id}:${t.term_no}`)) alreadyBilled++;
+          else toGenerate++;
+        }
       }
     }
     const learnerCount = resolved.filter((r) => r.person.person_type === 'learner').length;
@@ -468,15 +502,22 @@ export async function generateBills(
     // Bills that would be (or were) created already past due. Due dates are
     // copied verbatim from the structure — this is a report, not a correction.
     const today = istToday();
-    const projectedBornOverdue = resolved.reduce(
-      (n, r) =>
+    const projectedBornOverdue = resolved.reduce((n, r) => {
+      if (r.person.person_type === 'learner') {
+        // A learner's single bill is born overdue when its FIRST instalment is
+        // already past due.
+        if (billedPersons.has(r.person.person_id)) return n;
+        const folded = foldTermsIntoBill(r.terms);
+        return n + (folded && folded.dueDate < today ? 1 : 0);
+      }
+      return (
         n +
         countBornOverdue(
           r.terms.filter((t) => !billedKey.has(`${r.person.person_id}:${t.term_no}`)),
           today
-        ),
-      0
-    );
+        )
+      );
+    }, 0);
 
     const preview = {
       mode,
@@ -496,6 +537,7 @@ export async function generateBills(
       staffCount,
       termsPerPerson: isTiered ? null : flatTerms.length,
       alreadyBilledPairs: alreadyBilled,
+      underCovered,
       toGeneratePairs: toGenerate,
       conflictCount,
       conflictsSkipped,
@@ -523,10 +565,12 @@ export async function generateBills(
       .maybeSingle();
     const categoryId = cat?.id ?? null;
 
-    // Each learner's academic year comes from their PROFILE (resolveApplicablePeople
-    // already loaded learners_profiles.academic_year_id). Resolve the distinct ids ->
-    // display name in one query; the number of distinct academic years is tiny (one or
-    // two per institution), so a single .in() stays well under the gateway limit.
+    // A bill belongs to the TRANSPORT year being generated, so its academic_year_id
+    // must be the academic year of the same name ('2026-2027') for the learner's
+    // institution — NOT learners_profiles.academic_year_id, which lags whenever a
+    // profile has not been rolled over yet and used to stamp bills with a stale year.
+    // We still load the learners' own academic years so the description fallback and
+    // the no-row-for-this-institution fallback keep working.
     const learnerAyIds = [
       ...new Set(
         resolved
@@ -534,7 +578,19 @@ export async function generateBills(
           .map((r) => r.person.academic_year_id as string)
       ),
     ];
+    const learnerInstitutionIds = [
+      ...new Set(
+        resolved
+          .filter((r) => r.person.person_type === 'learner' && r.person.institution_id)
+          .map((r) => r.person.institution_id as string)
+      ),
+    ];
+
     const acadYearNameById = new Map<string, string>();
+    let ayByInstitution = new Map<string, string>();
+
+    // Both sets are tiny — one or two academic years per institution across at most a
+    // handful of institutions — so each .in() stays far below the gateway's limit.
     if (learnerAyIds.length) {
       const { data: ays, error: ayErr } = await svc
         .from('academic_years')
@@ -546,6 +602,21 @@ export async function generateBills(
       for (const a of (ays ?? []) as Array<{ id: string; academic_year_name: string | null }>) {
         if (a.academic_year_name) acadYearNameById.set(a.id, a.academic_year_name);
       }
+    }
+
+    if (tyName && learnerInstitutionIds.length) {
+      const { data: tyAys, error: tyAyErr } = await svc
+        .from('academic_years')
+        .select('id, institution_id, academic_year_name')
+        .eq('academic_year_name', tyName)
+        .in('institution_id', learnerInstitutionIds);
+      if (tyAyErr) {
+        return { ok: false, status: 500, error: 'Failed to resolve academic years for bill naming.' };
+      }
+      ayByInstitution = academicYearByInstitution(
+        (tyAys ?? []) as Array<{ id: string; institution_id: string | null; academic_year_name: string | null }>,
+        tyName
+      );
     }
 
     // Auto-only: at a 15-minute cadence across 3 structures an unconditional run
@@ -597,98 +668,137 @@ export async function generateBills(
 
     for (const r of resolved) {
       const p = r.person;
-      const bandPrefix = r.band?.label ? `${r.band.label} - ` : '';
-      const acadYearId = p.person_type === 'learner' ? p.academic_year_id : null;
+      const acadYearId =
+        p.person_type === 'learner'
+          ? resolveBillAcademicYear(ayByInstitution, p.institution_id, p.academic_year_id)
+          : null;
       const acadYearName = acadYearId ? acadYearNameById.get(acadYearId) ?? null : null;
-      const ayPart = acadYearName ? `${acadYearName} - ` : '';
+
+      if (p.person_type === 'learner') {
+        if (billedPersons.has(p.person_id)) { skipped++; continue; }
+
+        // One bill for the whole year; the terms become its instalments.
+        const folded = foldTermsIntoBill(r.terms);
+        if (!folded) { skipped++; continue; }
+
+        const { data: bill, error: billErr } = await svc
+          .from('billing_student_bills')
+          .insert([{
+            student_id: p.person_id,
+            institution_id: p.institution_id,
+            item_category_id: categoryId,
+            fee_source: 'ad_hoc',
+            // No term suffix: the schedule lives in billing_bill_instalments now.
+            // The transport year is named explicitly so the description keeps
+            // carrying the year even when academic_year_id is NULL. Parts are
+            // joined with ONE separator, so a flat bill reads
+            // "Transport Fee - 2026-2027" and a tiered one
+            // "Transport Fee - 2026-2027 - Year 1" — never a missing or trailing dash.
+            bill_description: [catName, tyName ?? acadYearName, r.band?.label ?? null]
+              .filter((part): part is string => Boolean(part))
+              .join(' - '),
+            due_date: folded.dueDate,
+            quantity: 1,
+            unit_amount: folded.total,
+            total_amount: folded.total,
+            tax_amount: 0,
+            final_amount: folded.total,
+            balance_amount: folded.total,
+            status: 'unpaid',
+            academic_year_id: acadYearId,
+            transport_year_id: fs.transport_year_id,
+            created_by: opts.actorId,
+          }])
+          .select('id')
+          .single();
+        if (billErr || !bill) { errors++; continue; }
+
+        // EVERY instalment in ONE insert: trg_bbi_validate_sum is deferrable and
+        // requires the tranches to total final_amount, so a row-at-a-time insert
+        // fails on the first row.
+        const { error: instErr } = await svc
+          .from('billing_bill_instalments')
+          .insert(folded.instalments.map((i) => ({
+            bill_id: bill.id,
+            sequence_no: i.sequence_no,
+            amount: i.amount,
+            due_date: i.due_date,
+            label: i.label,
+          })));
+        if (instErr) {
+          // The money row is committed and now has no schedule. Leaving it would
+          // charge the learner the year total with a single due date — worse than
+          // not billing them. Compensate.
+          const { error: cleanupErr } = await svc
+            .from('billing_student_bills').delete().eq('id', bill.id);
+          if (cleanupErr) {
+            console.error(
+              '[fees] ORPHANED BILL: instalment insert failed and cleanup failed',
+              { billId: bill.id, personId: p.person_id, instErr, cleanupErr }
+            );
+          }
+          errors++;
+          continue;
+        }
+
+        // ONE ledger row: uq_tms_fee_bill_billing_student_bill forbids a second.
+        const { error: ledErr } = await svc.from('tms_fee_bill').insert([{
+          generation_run_id: runId,
+          fee_structure_id: id,
+          transport_year_id: fs.transport_year_id,
+          person_id: p.person_id,
+          person_type: 'learner',
+          term_no: 1,
+          amount: folded.total,
+          due_date: folded.dueDate,
+          billing_category_id: categoryId,
+          billing_student_bill_id: bill.id,
+          status: 'generated',
+        }]);
+        if (ledErr) {
+          // Deleting the money row cascades the instalments away with it.
+          const { error: cleanupErr } = await svc
+            .from('billing_student_bills').delete().eq('id', bill.id);
+          if (cleanupErr) {
+            console.error(
+              '[fees] ORPHANED BILL: ledger insert failed and cleanup failed',
+              { billId: bill.id, personId: p.person_id, ledErr, cleanupErr }
+            );
+          }
+          errors++;
+          continue;
+        }
+        learnerBilled++;
+        billedPersons.add(p.person_id); // a re-resolved duplicate must not double-bill
+        if (folded.dueDate < today) bornOverdue++;
+        continue;
+      }
+
+      // staff: a real payable bill, still one ledger row per term. tms_fee_bill
+      // is the authoritative staff ledger — staff can never be written to
+      // billing_student_bills, whose student_id is NOT NULL with an FK to
+      // learners_profiles. The in-charge enforcement cron still writes
+      // 'staff_deferred' via the parameter default.
       for (const t of r.terms) {
         if (billedKey.has(`${p.person_id}:${t.term_no}`)) { skipped++; continue; }
         const amount = Number(t.amount);
-
-        if (p.person_type === 'learner') {
-          const { data: bill, error: billErr } = await svc
-            .from('billing_student_bills')
-            .insert([{
-              student_id: p.person_id,
-              institution_id: p.institution_id,
-              item_category_id: categoryId,
-              fee_source: 'ad_hoc',
-              bill_description: `${catName} - ${ayPart}${bandPrefix}${t.term_label || `Term ${t.term_no}`}`,
-              due_date: t.due_date,
-              quantity: 1,
-              unit_amount: amount,
-              total_amount: amount,
-              tax_amount: 0,
-              final_amount: amount,
-              balance_amount: amount,
-              status: 'unpaid',
-              academic_year_id: acadYearId,
-              transport_year_id: fs.transport_year_id,
-              created_by: opts.actorId,
-            }])
-            .select('id')
-            .single();
-          if (billErr || !bill) { errors++; continue; }
-
-          const { error: ledErr } = await svc.from('tms_fee_bill').insert([{
-            generation_run_id: runId,
-            fee_structure_id: id,
-            transport_year_id: fs.transport_year_id,
-            person_id: p.person_id,
-            person_type: 'learner',
-            term_no: t.term_no,
-            amount,
-            due_date: t.due_date,
-            billing_category_id: categoryId,
-            billing_student_bill_id: bill.id,
+        const { error: ledErr } = await svc.from('tms_fee_bill').insert([
+          buildStaffFeeBillRow({
+            runId,
+            feeStructureId: id,
+            transportYearId: fs.transport_year_id,
+            staffId: p.person_id,
+            categoryId,
+            term: { term_no: t.term_no, amount, due_date: t.due_date },
             status: 'generated',
-          }]);
-          if (ledErr) {
-            // The money row is already committed. Leaving it would orphan a real
-            // bill: MyJKKN would show a charge that tms_fee_bill knows nothing
-            // about, breaking the Billed == Collected + Pending reconciliation.
-            // Compensate by removing it. If the delete ALSO fails there is
-            // nothing further we can do from here, so log loudly — this is the
-            // only trace an operator will get.
-            const { error: cleanupErr } = await svc
-              .from('billing_student_bills')
-              .delete()
-              .eq('id', bill.id);
-            if (cleanupErr) {
-              console.error(
-                '[fees] ORPHANED BILL: ledger insert failed and cleanup failed',
-                { billId: bill.id, personId: p.person_id, termNo: t.term_no, ledErr, cleanupErr }
-              );
-            }
-            errors++;
-            continue;
-          }
-          learnerBilled++;
-          if (t.due_date < today) bornOverdue++;
-        } else {
-          // staff: a real payable bill. tms_fee_bill is the authoritative staff
-          // ledger — staff can never be written to billing_student_bills, whose
-          // student_id is NOT NULL with an FK to learners_profiles. The
-          // in-charge enforcement cron still writes 'staff_deferred' via the
-          // parameter default.
-          const { error: ledErr } = await svc.from('tms_fee_bill').insert([
-            buildStaffFeeBillRow({
-              runId,
-              feeStructureId: id,
-              transportYearId: fs.transport_year_id,
-              staffId: p.person_id,
-              categoryId,
-              term: { term_no: t.term_no, amount, due_date: t.due_date },
-              status: 'generated',
-            }),
-          ]);
-          if (ledErr) { errors++; continue; }
-          staffDeferred++;
-          if (t.due_date < today) bornOverdue++;
-          // Notify only for rows THIS run inserted, so a re-run — which inserts
-          // nothing thanks to tms_fee_bill_idem_unique — notifies nobody.
-          billedStaff.push({ staffId: p.person_id, amount, dueDate: t.due_date });
-        }
+          }),
+        ]);
+        if (ledErr) { errors++; continue; }
+        staffDeferred++;
+        if (t.due_date < today) bornOverdue++;
+        // Notify only for rows THIS run inserted, so a re-run — which inserts
+        // nothing thanks to tms_fee_bill_idem_unique — notifies nobody.
+        billedStaff.push({ staffId: p.person_id, amount, dueDate: t.due_date });
       }
     }
 

@@ -446,12 +446,13 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
                 value={form.lifecycle_statuses}
                 onValueChange={(v) => set('lifecycle_statuses', v)}
                 options={LIFECYCLE_OPTIONS}
-                placeholder="Active only (default)"
+                placeholder="Enrolled + reserved (default)"
                 ariaLabel="Learner lifecycle statuses"
                 disabled={saving}
               />
               <p className="mt-1 text-xs text-gray-500">
-                Empty = <strong>Active</strong> only. Add <strong>Reserved</strong> to bill incoming learners not yet enrolled.
+                Empty = <strong>Active, Admitted, Account, Reserved</strong> — the states a bus-pass applicant
+                can sit in. Enquiry-stage and graduated/rejected learners are never billed by default.
               </p>
             </div>
           )}

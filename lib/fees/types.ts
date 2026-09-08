@@ -90,7 +90,19 @@ export interface FeeStructureRow {
 
 // The learner lifecycle states billed when a structure leaves lifecycle_statuses
 // empty. Centralised so applicability + validation agree.
-export const DEFAULT_LIFECYCLE_STATUSES = ['active'] as const;
+//
+// This is NOT just 'active'. MyJKKN's Bus Pass Request sets bus_required = true
+// for new admissions who sit in 'reserved' / 'admitted' / 'account' for months
+// before they ever become 'active'. An 'active'-only default silently dropped
+// them from EVERY automatic run — applicability filters them out before the
+// engine sees them, so they produced no unresolved count and no error, and the
+// miss was invisible.
+//
+// Deliberately EXCLUDED: 'enquiry' / 'enquiry_submitted' (a lead, not an
+// admission) and 'rejected' / 'graduated' / 'inactive' (not travelling). An
+// overdue transport bill locks the learner out of the portal, so billing
+// someone who never enrolled has a real cost.
+export const DEFAULT_LIFECYCLE_STATUSES = ['active', 'admitted', 'account', 'reserved'] as const;
 
 // The two transport billing categories (seeded in MyJKKN's shared
 // billing_categories). Resolved by NAME at generation time (ids differ per DB),
