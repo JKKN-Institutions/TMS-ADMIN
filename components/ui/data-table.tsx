@@ -154,7 +154,21 @@ export function DataTable<TData, TValue>({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           {globalSearch && (
-            <div className="relative min-w-0 flex-1 sm:max-w-xs">
+            // NEVER `flex-1` here. `flex-1` is `flex: 1 1 0%` -- a ZERO basis -- so the
+            // search claims no space of its own and is left with whatever its siblings
+            // decline, while every FilterSelect reserves `basis-40` (160px) up front.
+            // Being the only growable item made it the only STARVABLE one. Measured
+            // usable text width (box minus the 40px `pl-10!` gutter and 12px right pad),
+            // against the ~215px a 34-char placeholder needs:
+            //   320px -> 84    360px -> -44    390px -> -14    414px -> 10    640px -> 96
+            // Negative means the padding alone overflowed the box. Worst at 360-390px,
+            // and NOT monotonic -- widening the screen let a second filter join the row
+            // and squeezed it further, which is why it looked broken at "all views".
+            // basis-full gives it the whole line below sm (filters wrap beneath);
+            // basis-56 keeps a 224px floor above sm so wrapping, not crushing, absorbs
+            // any shortfall once the action buttons share the row. max-w-xs still caps
+            // it on wide screens. Same widths after: 252 / 292 / 322 / 346 / 264.
+            <div className="relative min-w-0 basis-full sm:basis-56 sm:grow sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
                 value={globalFilter}
