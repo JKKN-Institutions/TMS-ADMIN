@@ -181,11 +181,19 @@ begin
   first_line as (
     select
       true                                                as found,
-      bool_and(l.paid)                                    as paid,
+      -- coalesce, not bare l.paid: bool_and IGNORES nulls, so a line whose paid
+      -- is unknown (a NULL billing_student_bills.status makes
+      -- `bl.status = 'paid'` evaluate to NULL) would drop out of the vote and
+      -- let a tied SETTLED line carry the term-1 decision on its own. On an
+      -- access gate an unknown payment state must read as NOT settled.
+      bool_and(coalesce(l.paid, false))                   as paid,
       -- Report the WORST tied line: unsettled first, then largest balance.
-      (array_agg(l.status  order by l.paid asc, l.balance desc nulls last))[1] as status,
+      -- Same coalesce for the same reason -- `order by l.paid asc` is NULLS
+      -- LAST, so an unknown line would sort BEHIND a settled one and the
+      -- reported status/balance would contradict the fail-closed verdict above.
+      (array_agg(l.status  order by coalesce(l.paid, false) asc, l.balance desc nulls last))[1] as status,
       min(l.due_date)                                     as due_date,
-      (array_agg(l.balance order by l.paid asc, l.balance desc nulls last))[1] as balance
+      (array_agg(l.balance order by coalesce(l.paid, false) asc, l.balance desc nulls last))[1] as balance
     from lines l
     join min_key k
       on l.due_date is not distinct from k.d
