@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isDirectionOpen, formatHM, type AttendanceWindows } from '@/lib/boarding/attendance-window';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
+import { noteRead, type LastRead } from '@/lib/boarding/scan-dedupe';
 
 type FeeTerm = {
   termNo: number | null;
@@ -90,6 +91,9 @@ export default function ScanDialog({
   const busyRef = useRef(false);
   const lastTokenRef = useRef('');
   const lastSourceRef = useRef<ScanSource>('camera');
+  // The card the camera saw most recently, so a card still held in view is not
+  // re-submitted when the post-request cooldown lapses. See scan-dedupe.ts.
+  const lastReadRef = useRef<LastRead | null>(null);
   // Kept current every render so the long-lived scan callback (registered once by the
   // camera-start effect) always reads the latest windows instead of the stale
   // closure captured when the effect last ran.
@@ -144,12 +148,27 @@ export default function ScanDialog({
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
       }
     } catch {
+      // Forget the card, so holding it up again retries once the cooldown
+      // lapses. Without this a dropped request could never be retried by camera.
+      lastReadRef.current = null;
       setResult({ ok: false, error: 'Network error' });
     } finally {
       setTimeout(() => {
         busyRef.current = false;
       }, 1500);
     }
+  }
+
+  // Every camera decode lands here, ~10 times a second while a card is in view.
+  // Only a read of a NEW card, or of the same card after it has been out of view,
+  // reaches submit(). Typed codes and the walk-up button call submit() directly,
+  // so a staffer's explicit action is never filtered.
+  function onCameraRead(decoded: string) {
+    const code = classifyScan(decoded, 'camera').code;
+    const { ignore, last } = noteRead(lastReadRef.current, code, Date.now());
+    lastReadRef.current = last;
+    if (ignore) return;
+    void submit(decoded, 'camera');
   }
 
   async function stopCamera() {
@@ -177,7 +196,7 @@ export default function ScanDialog({
       const gen = cameraGenRef.current;
       const scanner = new Html5Qrcode(READER_ID);
       try {
-        await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, (decoded) => submit(decoded, 'camera'), () => {});
+        await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onCameraRead, () => {});
         if (cameraGenRef.current !== gen) {
           // Cleanup already ran (dialog closed/unmounted) while start() was pending — this
           // scanner was never assigned to scannerRef, so nothing else can stop it. Stop it
@@ -218,6 +237,9 @@ export default function ScanDialog({
     if (!open) {
       setResult(null);
       setManual('');
+      // Reopening the scanner is a deliberate new session, so the same card
+      // should scan straight away rather than wait out the same-card gap.
+      lastReadRef.current = null;
     }
   }, [open]);
 
