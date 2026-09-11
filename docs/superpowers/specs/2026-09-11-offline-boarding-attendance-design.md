@@ -25,6 +25,15 @@ Each is corrected in place below; this list is the summary.
    offline the screen would silently fall back to the 07:00–09:30 default.
 5. **Typed 6-digit pass codes need signal.** They are resolved by an HMAC
    over every learner on the staffer's routes, which a phone cannot compute.
+6. **Two trips, decided at tap time (after evening attendance merged,
+   `54ca971`).** Attendance now has a morning (`onward`) and an evening
+   (`return`) trip, and `decideMarkDirection` picks the trip from a clock.
+   Offline marking feeds it the TAP time. Every queued mark and scan records
+   its trip; each request names one trip and every mark in it is judged for
+   that trip at its own tap time (`wrong_trip` / `evening_off` otherwise); the
+   outbox slot is per (user, day, trip, learner). A morning mark that syncs
+   during the evening window stays a morning mark. The SQL migration is
+   `20260911200000`, since `20260911160000` is taken by evening attendance.
 
 ## Problem
 

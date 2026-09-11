@@ -1,21 +1,15 @@
 # Offline Boarding Attendance Implementation Plan
 
-> **ON HOLD (2026-09-11) — do not execute as written.** Evening attendance
-> (branch `feat/boarding-evening-attendance`) is being built at the same time
-> and changes the same rule the opposite way: there the SERVER CLOCK decides
-> which trip a mark is for (`decideMarkDirection` in
-> `lib/boarding/trip-direction.ts`), while offline marking needs the TAP TIME
-> to decide it. The user ruled: evening attendance merges first, then this
-> plan is revised. Required revisions before execution:
-> 1. The trip (`onward` / `return`) is decided from the tap time, not arrival:
->    call `decideMarkDirection({ ..., now: tappedAt })`, and have
->    `judgeTappedAt` judge the window of that trip. The outbox entry, both
->    request bodies and the outbox key gain the trip, since a learner can have
->    one mark per trip per day.
-> 2. Rename Task 2's migration: `20260911160000` is already taken by
->    `20260911160000_attendance_window_is_active.sql` on the evening branch.
-> 3. Refresh Task 14 against `main`: `components/boarding/scan-dialog.tsx`
->    changed after this plan was written (`8ca98bc`, `6c39992`).
+> **Revised 2026-09-11 after evening attendance merged (`54ca971`).** Evening
+> attendance added a second trip (`onward` morning, `return` evening) and a
+> rule, `decideMarkDirection` in `lib/boarding/trip-direction.ts`, that picks
+> the trip from a clock and refuses a request naming a different trip. This
+> plan now feeds that rule the TAP TIME (`now: at`), so a morning mark sent in
+> the evening stays a morning mark. Consequences carried through every task:
+> the phone records the trip with each queued mark and scan; each request
+> names one trip; the outbox slot is per (user, day, TRIP, learner); two new
+> refusal reasons exist (`wrong_trip`, `evening_off`); Task 2's migration is
+> `20260911200000` because `20260911160000` is taken.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -35,6 +29,7 @@
 - Run one test file: `npx vitest run <path>`. Run all: `npx vitest run`.
 - `tsc` is red on `main` (about 540 known errors, see project memory). Never gate on a clean full `tsc`. Gate on: vitest green, `npx next build` exit 0, and zero `tsc` errors in the files the task touched, checked with `npx tsc --noEmit 2>&1 | grep -E "<touched file paths>"` returning nothing.
 - The trip date of a mark is the IST date of its tap time: `istToday(at)` from `lib/booking/window.ts`.
+- The trip (`AttDirection` = `'onward' | 'return'` from `lib/boarding/attendance-window.ts`) of a queued mark is decided at TAP time, on the phone by `activeDirection(windows, tapTime)` and on the server by `decideMarkDirection({ windows, requested, windowExempt, now: tapTime })`. Never by arrival time.
 - Every `.in()` over ids is chunked to at most 150 and its `error` is checked.
 - Warning toasts are `toast(msg, { icon: '⚠️' })`. `toast.warning` does not exist in react-hot-toast and throws.
 - The SQL change (Task 2) is dry-run against the live DB, then applied, BEFORE any route that sends `scanned_at` is merged.
@@ -50,7 +45,7 @@
 |---|---|---|
 | `lib/boarding/offline/protocol.ts` | new | Wire types and constants shared by server and phone |
 | `lib/boarding/tapped-at.ts` | new | Judge a tap time: `judgeTappedAt`, `partitionByTap` |
-| `supabase/migrations/20260911160000_tms_mark_attendance_scanned_at.sql` | new | RPC accepts a per-mark `scanned_at` |
+| `supabase/migrations/20260911200000_tms_mark_attendance_scanned_at.sql` | new | RPC accepts a per-mark `scanned_at` |
 | `lib/boarding/mark-results.ts` | new | Map RPC outcomes and rejections to per-mark `MarkResult[]` |
 | `app/api/boarding/attendance/route.ts` | modify | POST judges each mark by tap time, returns `results` |
 | `app/api/boarding/scan/route.ts` | modify | POST judges by tap time, stores tap time |
@@ -83,10 +78,10 @@
 - Test: `lib/boarding/tapped-at.test.ts`
 
 **Interfaces:**
-- Consumes: `isDirectionOpen(win, now)` and `AttendanceWindow` from `lib/boarding/attendance-window.ts`; `istToday(now)` from `lib/booking/window.ts`.
+- Consumes: `decideMarkDirection({ windows, requested, windowExempt, now })` from `lib/boarding/trip-direction.ts` (its failure `reason` is `'window_closed' | 'wrong_trip' | 'evening_off' | 'bad_direction'`, with an `error` string); `AttendanceWindows`, `AttDirection` from `lib/boarding/attendance-window.ts`; `istToday(now)` from `lib/booking/window.ts`.
 - Produces:
   - `protocol.ts`: `TapRejectReason`, `MarkRejectReason`, `SavedOutcome`, `MarkResult`, `TAP_FUTURE_SKEW_MS`, `SYNC_BATCH_SIZE`, `SYNC_BACKOFF_MS`, `SYNC_INTERVAL_MS`, `REJECT_REASON_TEXT`, `isSavedOutcome(o)`.
-  - `tapped-at.ts`: `judgeTappedAt(tappedAt, now, window, opts?) => TapVerdict`; `partitionByTap(marks, now, window, opts?) => { accepted: Array<{ mark: T; at: Date }>; rejected: Array<{ mark: T; reason: TapRejectReason }>; tripDate: string }`.
+  - `tapped-at.ts`: `judgeTappedAt(tappedAt, now, windows, requested, opts?) => TapVerdict` where `TapVerdict = { ok: true; tripDate: string; at: Date; direction: AttDirection } | { ok: false; reason: TapRejectReason; error?: string }`; `partitionByTap(marks, now, windows, requested, opts?) => { accepted: Array<{ mark: T; at: Date; direction: AttDirection }>; rejected: Array<{ mark: T; reason: TapRejectReason }>; tripDate: string }`.
 
 - [ ] **Step 1: Create the protocol module**
 
@@ -101,8 +96,14 @@
  * can import it without pulling in either side's dependencies.
  */
 
-/** Why the server refused a mark because of WHEN it was tapped. */
-export type TapRejectReason = 'invalid' | 'future' | 'stale' | 'outside_window';
+/** Why the server refused a mark because of WHEN it was tapped, or for which trip. */
+export type TapRejectReason =
+  | 'invalid'
+  | 'future'
+  | 'stale'
+  | 'outside_window'
+  | 'wrong_trip'
+  | 'evening_off';
 
 /** Every reason a queued mark can be refused. */
 export type MarkRejectReason =
@@ -132,10 +133,12 @@ export const SYNC_INTERVAL_MS = 15_000;
 
 /** Plain-words reason shown to the staffer for a refused mark. */
 export const REJECT_REASON_TEXT: Record<MarkRejectReason, string> = {
-  invalid: 'The phone sent an unreadable time for this mark.',
+  invalid: 'The phone sent an unreadable time or trip for this mark.',
   future: "The phone's clock is ahead. Check the phone's date and time settings.",
   stale: 'It reached the server after midnight, so it no longer counts.',
-  outside_window: 'It was tapped outside the attendance window.',
+  outside_window: 'It was tapped outside the attendance hours.',
+  wrong_trip: 'The trip hours were changed, so it no longer matches the trip it was tapped on.',
+  evening_off: 'Evening attendance was switched off.',
   not_on_route: 'This student is no longer on the route.',
   not_assigned: 'You are not assigned to this route.',
   not_your_share: 'This student belongs to another in-charge.',
@@ -155,82 +158,109 @@ export function isSavedOutcome(o: string): o is SavedOutcome {
 ```ts
 import { describe, expect, it } from 'vitest';
 import { judgeTappedAt, partitionByTap } from './tapped-at';
-import type { AttendanceWindow } from './attendance-window';
+import type { AttendanceWindows } from './attendance-window';
 
-// 07:00–09:30 IST == 01:30–04:00 UTC.
-const WIN: AttendanceWindow = { direction: 'onward', start: '07:00', end: '09:30', enabled: true };
+// Morning 07:00–09:30 IST == 01:30–04:00 UTC. Evening 16:30–19:00 IST == 11:00–13:30 UTC.
+const W: AttendanceWindows = {
+  onward: { direction: 'onward', start: '07:00', end: '09:30', enabled: true, active: true },
+  return: { direction: 'return', start: '16:30', end: '19:00', enabled: true, active: true },
+};
 const at = (iso: string) => new Date(iso);
 
 describe('judgeTappedAt', () => {
-  const now = at('2026-09-11T03:00:00Z'); // 08:30 IST
+  const now = at('2026-09-11T03:00:00Z'); // 08:30 IST, morning open
 
   it('treats a missing tap time as tapped now', () => {
-    expect(judgeTappedAt(undefined, now, WIN)).toEqual({ ok: true, tripDate: '2026-09-11', at: now });
-    expect(judgeTappedAt('', now, WIN)).toEqual({ ok: true, tripDate: '2026-09-11', at: now });
+    expect(judgeTappedAt(undefined, now, W, undefined)).toEqual({ ok: true, tripDate: '2026-09-11', at: now, direction: 'onward' });
+    expect(judgeTappedAt('', now, W, 'onward')).toEqual({ ok: true, tripDate: '2026-09-11', at: now, direction: 'onward' });
   });
 
   it('refuses an unparseable time', () => {
-    expect(judgeTappedAt('garbage', now, WIN)).toEqual({ ok: false, reason: 'invalid' });
+    expect(judgeTappedAt('garbage', now, W, 'onward')).toEqual({ ok: false, reason: 'invalid' });
   });
 
   it('allows up to two minutes of phone clock skew, and no more', () => {
-    expect(judgeTappedAt('2026-09-11T03:01:30Z', now, WIN).ok).toBe(true);
-    expect(judgeTappedAt('2026-09-11T03:03:00Z', now, WIN)).toEqual({ ok: false, reason: 'future' });
+    expect(judgeTappedAt('2026-09-11T03:01:30Z', now, W, 'onward').ok).toBe(true);
+    expect(judgeTappedAt('2026-09-11T03:03:00Z', now, W, 'onward')).toEqual({ ok: false, reason: 'future' });
   });
 
   it('refuses a tap from an earlier IST day', () => {
-    expect(judgeTappedAt('2026-09-10T03:00:00Z', now, WIN)).toEqual({ ok: false, reason: 'stale' });
+    expect(judgeTappedAt('2026-09-10T03:00:00Z', now, W, 'onward')).toEqual({ ok: false, reason: 'stale' });
   });
 
   it('refuses a tap that arrives after IST midnight', () => {
     const afterMidnight = at('2026-09-11T18:31:00Z'); // 00:01 IST on the 12th
-    expect(judgeTappedAt('2026-09-11T03:00:00Z', afterMidnight, WIN)).toEqual({ ok: false, reason: 'stale' });
+    expect(judgeTappedAt('2026-09-11T03:00:00Z', afterMidnight, W, 'onward')).toEqual({ ok: false, reason: 'stale' });
   });
 
   it('refuses a tap dated tomorrow in IST even inside the skew', () => {
     const lateNight = at('2026-09-11T18:29:00Z'); // 23:59 IST
-    expect(judgeTappedAt('2026-09-11T18:30:30Z', lateNight, WIN, { exemptWindow: true }))
+    expect(judgeTappedAt('2026-09-11T18:30:30Z', lateNight, W, 'onward', { exemptWindow: true }))
       .toEqual({ ok: false, reason: 'future' });
   });
 
   it('judges the window at the TAP time, not the arrival time', () => {
-    const later = at('2026-09-11T05:00:00Z'); // 10:30 IST, window long closed
-    expect(judgeTappedAt('2026-09-11T03:55:00Z', later, WIN)).toEqual({
-      ok: true, tripDate: '2026-09-11', at: at('2026-09-11T03:55:00Z'),
+    const later = at('2026-09-11T05:00:00Z'); // 10:30 IST, both windows closed
+    expect(judgeTappedAt('2026-09-11T03:55:00Z', later, W, 'onward')).toEqual({
+      ok: true, tripDate: '2026-09-11', at: at('2026-09-11T03:55:00Z'), direction: 'onward',
     });
-    expect(judgeTappedAt('2026-09-11T04:05:00Z', later, WIN)).toEqual({ ok: false, reason: 'outside_window' });
+    const closed = judgeTappedAt('2026-09-11T04:05:00Z', later, W, 'onward');
+    expect(closed).toMatchObject({ ok: false, reason: 'outside_window' });
+    expect(closed.ok === false && closed.error).toMatch(/Attendance is open/);
+  });
+
+  it('keeps a morning tap a morning mark when it arrives in the evening', () => {
+    const evening = at('2026-09-11T12:00:00Z'); // 17:30 IST, evening open
+    expect(judgeTappedAt('2026-09-11T03:00:00Z', evening, W, 'onward')).toMatchObject({ ok: true, direction: 'onward' });
+    expect(judgeTappedAt('2026-09-11T11:30:00Z', evening, W, 'return')).toMatchObject({ ok: true, direction: 'return' });
+  });
+
+  it('refuses a tap whose named trip was not open at the tap time', () => {
+    expect(judgeTappedAt('2026-09-11T03:00:00Z', at('2026-09-11T05:00:00Z'), W, 'return'))
+      .toMatchObject({ ok: false, reason: 'wrong_trip' });
+  });
+
+  it('refuses an evening mark once evening attendance is switched off', () => {
+    const off: AttendanceWindows = { ...W, return: { ...W.return, active: false } };
+    expect(judgeTappedAt('2026-09-11T11:30:00Z', at('2026-09-11T12:00:00Z'), off, 'return', { exemptWindow: true }))
+      .toMatchObject({ ok: false, reason: 'evening_off' });
   });
 
   it('includes the window start and excludes the window end', () => {
     const later = at('2026-09-11T06:00:00Z');
-    expect(judgeTappedAt('2026-09-11T01:30:00Z', later, WIN).ok).toBe(true);
-    expect(judgeTappedAt('2026-09-11T04:00:00Z', later, WIN)).toEqual({ ok: false, reason: 'outside_window' });
+    expect(judgeTappedAt('2026-09-11T01:30:00Z', later, W, 'onward').ok).toBe(true);
+    expect(judgeTappedAt('2026-09-11T04:00:00Z', later, W, 'onward')).toMatchObject({ ok: false, reason: 'outside_window' });
   });
 
   it('skips the window for exempt callers but keeps the day rules', () => {
     const later = at('2026-09-11T05:00:00Z');
-    expect(judgeTappedAt('2026-09-11T04:05:00Z', later, WIN, { exemptWindow: true }).ok).toBe(true);
-    expect(judgeTappedAt('2026-09-10T03:00:00Z', later, WIN, { exemptWindow: true }))
+    expect(judgeTappedAt('2026-09-11T04:05:00Z', later, W, 'onward', { exemptWindow: true }))
+      .toMatchObject({ ok: true, direction: 'onward' });
+    expect(judgeTappedAt('2026-09-10T03:00:00Z', later, W, 'onward', { exemptWindow: true }))
       .toEqual({ ok: false, reason: 'stale' });
   });
 
-  it('treats a disabled window as always open', () => {
-    const off: AttendanceWindow = { ...WIN, enabled: false };
-    expect(judgeTappedAt('2026-09-11T05:00:00Z', at('2026-09-11T06:00:00Z'), off).ok).toBe(true);
+  it('treats a morning window without enforced hours as always open', () => {
+    const open: AttendanceWindows = { ...W, onward: { ...W.onward, enabled: false } };
+    expect(judgeTappedAt('2026-09-11T05:00:00Z', at('2026-09-11T06:00:00Z'), open, 'onward').ok).toBe(true);
+  });
+
+  it('refuses an unknown trip name', () => {
+    expect(judgeTappedAt('2026-09-11T03:00:00Z', now, W, 'midday')).toMatchObject({ ok: false, reason: 'invalid' });
   });
 });
 
 describe('partitionByTap', () => {
-  it('splits accepted from rejected and reports the IST trip date', () => {
+  it('splits accepted from rejected and reports the IST trip date and trip', () => {
     const now = at('2026-09-11T03:05:00Z');
     const marks = [
       { clientId: 'a', tappedAt: '2026-09-11T03:00:00Z' },
       { clientId: 'b', tappedAt: 'garbage' },
       { clientId: 'c' },
     ];
-    const out = partitionByTap(marks, now, WIN);
+    const out = partitionByTap(marks, now, W, 'onward');
     expect(out.tripDate).toBe('2026-09-11');
-    expect(out.accepted.map((a) => a.mark.clientId)).toEqual(['a', 'c']);
+    expect(out.accepted.map((a) => [a.mark.clientId, a.direction])).toEqual([['a', 'onward'], ['c', 'onward']]);
     expect(out.accepted[0].at).toEqual(at('2026-09-11T03:00:00Z'));
     expect(out.accepted[1].at).toEqual(now);
     expect(out.rejected).toEqual([{ mark: marks[1], reason: 'invalid' }]);
@@ -253,29 +283,41 @@ Expected: FAIL, "Failed to resolve import ./tapped-at".
  *
  * A mark made on a bus with no signal arrives late. Judging it at arrival
  * would refuse a mark tapped at 09:20 and sent at 09:40 as "window closed",
- * and store a mark sent the next morning under the wrong day. So the phone
- * sends its tap time and the server bounds how far that claim can go:
+ * file a morning mark sent at 17:30 under the evening trip, and store a mark
+ * sent the next morning under the wrong day. So the phone sends its tap time
+ * and the server bounds how far that claim can go:
  *
  *   - no later than TAP_FUTURE_SKEW_MS ahead of the server clock, and never
  *     on a later IST day (a phone clock running ahead);
  *   - on the same IST day as the server (arrived after midnight = stale);
- *   - inside the attendance window AT THE TAP TIME, unless exempt.
+ *   - the trip and its window are decided by decideMarkDirection AT THE TAP
+ *     TIME -- the same rule evening attendance uses at arrival, fed a
+ *     different clock.
  *
  * Consequence worth knowing: every accepted mark's trip date is today in IST,
  * so a request can never mix days.
  */
-import { isDirectionOpen, type AttendanceWindow } from './attendance-window';
+import type { AttDirection, AttendanceWindows } from './attendance-window';
+import { decideMarkDirection } from './trip-direction';
 import { istToday } from '@/lib/booking/window';
 import { TAP_FUTURE_SKEW_MS, type TapRejectReason } from './offline/protocol';
 
 export type TapVerdict =
-  | { ok: true; tripDate: string; at: Date }
-  | { ok: false; reason: TapRejectReason };
+  | { ok: true; tripDate: string; at: Date; direction: AttDirection }
+  | { ok: false; reason: TapRejectReason; error?: string };
+
+const FROM_DECISION = {
+  window_closed: 'outside_window',
+  wrong_trip: 'wrong_trip',
+  evening_off: 'evening_off',
+  bad_direction: 'invalid',
+} as const satisfies Record<string, TapRejectReason>;
 
 export function judgeTappedAt(
   tappedAt: string | null | undefined,
   now: Date,
-  window: AttendanceWindow,
+  windows: AttendanceWindows,
+  requested: unknown,
   opts: { exemptWindow?: boolean } = {},
 ): TapVerdict {
   let at: Date;
@@ -294,26 +336,28 @@ export function judgeTappedAt(
   if (tripDate > today) return { ok: false, reason: 'future' };
   if (tripDate < today) return { ok: false, reason: 'stale' };
 
-  if (!opts.exemptWindow && !isDirectionOpen(window, at)) return { ok: false, reason: 'outside_window' };
+  const decided = decideMarkDirection({ windows, requested, windowExempt: !!opts.exemptWindow, now: at });
+  if (!decided.ok) return { ok: false, reason: FROM_DECISION[decided.reason], error: decided.error };
 
-  return { ok: true, tripDate, at };
+  return { ok: true, tripDate, at, direction: decided.direction };
 }
 
 export function partitionByTap<T extends { tappedAt?: string | null }>(
   marks: T[],
   now: Date,
-  window: AttendanceWindow,
+  windows: AttendanceWindows,
+  requested: unknown,
   opts: { exemptWindow?: boolean } = {},
 ): {
-  accepted: Array<{ mark: T; at: Date }>;
+  accepted: Array<{ mark: T; at: Date; direction: AttDirection }>;
   rejected: Array<{ mark: T; reason: TapRejectReason }>;
   tripDate: string;
 } {
-  const accepted: Array<{ mark: T; at: Date }> = [];
+  const accepted: Array<{ mark: T; at: Date; direction: AttDirection }> = [];
   const rejected: Array<{ mark: T; reason: TapRejectReason }> = [];
   for (const mark of marks) {
-    const v = judgeTappedAt(mark.tappedAt, now, window, opts);
-    if (v.ok) accepted.push({ mark, at: v.at });
+    const v = judgeTappedAt(mark.tappedAt, now, windows, requested, opts);
+    if (v.ok) accepted.push({ mark, at: v.at, direction: v.direction });
     else rejected.push({ mark, reason: v.reason });
   }
   return { accepted, rejected, tripDate: istToday(now) };
@@ -323,7 +367,7 @@ export function partitionByTap<T extends { tappedAt?: string | null }>(
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `npx vitest run lib/boarding/tapped-at.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -337,7 +381,7 @@ git commit -m "feat(boarding): judge an attendance mark by when it was tapped"
 ### Task 2: Let `tms_mark_attendance` store the tap time
 
 **Files:**
-- Create: `supabase/migrations/20260911160000_tms_mark_attendance_scanned_at.sql`
+- Create: `supabase/migrations/20260911200000_tms_mark_attendance_scanned_at.sql`
 
 **Interfaces:**
 - Consumes: the live function `tms_mark_attendance(p_marks jsonb, p_trip_date date, p_direction text, p_actor uuid, p_method text, p_allow_override boolean)`.
@@ -347,7 +391,7 @@ git commit -m "feat(boarding): judge an attendance mark by when it was tapped"
 
 The body below is the live function (dumped 2026-09-11) with ONE change: a per-mark `v_at` replaces `v_now` in the VALUES list. Keep `#variable_conflict use_column` directly after `as $$`; without it every call fails with SQLSTATE 42702 (the 2026-08-28 incident). The function is `SECURITY INVOKER` with no `search_path` setting; `create or replace` keeps its owner and grants, so add no GRANT or REVOKE.
 
-`supabase/migrations/20260911160000_tms_mark_attendance_scanned_at.sql`:
+`supabase/migrations/20260911200000_tms_mark_attendance_scanned_at.sql`:
 
 ```sql
 -- tms_mark_attendance: accept a per-mark scanned_at (the time the staffer TAPPED).
@@ -552,7 +596,7 @@ Expected: `has_key = true`, `has_conflict_pragma = true`, `svc_exec = true`, `se
 - [ ] **Step 7: Commit**
 
 ```bash
-git add supabase/migrations/20260911160000_tms_mark_attendance_scanned_at.sql
+git add supabase/migrations/20260911200000_tms_mark_attendance_scanned_at.sql
 git commit -m "feat(attendance): let tms_mark_attendance store the tap time"
 ```
 
@@ -701,11 +745,11 @@ git commit -m "feat(boarding): report one result per mark in a batch"
 ### Task 4: Attendance POST judges each mark by tap time
 
 **Files:**
-- Modify: `app/api/boarding/attendance/route.ts` (the `mark` function, lines 38 and 103–395 as of `origin/main` on 2026-09-11)
+- Modify: `app/api/boarding/attendance/route.ts` (the `mark` function, as of `origin/main` `54ca971`)
 
 **Interfaces:**
-- Consumes: `partitionByTap` (Task 1), `buildMarkResults` (Task 3), `MarkRejectReason` (Task 1), the RPC's per-mark `scanned_at` (Task 2).
-- Produces: request marks accept `tappedAt?: string` and `clientId?: string`. Every JSON response of POST that reaches the RPC stage, and the new early "nothing accepted" response, includes `results: MarkResult[]`. Old fields (`updated`, `skipped`, `locked`, `dropped`, `walkUps`) are unchanged. A request with no `tappedAt` on any mark behaves exactly as before.
+- Consumes: `partitionByTap` (Task 1), `buildMarkResults` (Task 3), `MarkRejectReason` (Task 1), the RPC's per-mark `scanned_at` (Task 2); the existing `decideMarkDirection` call in the route.
+- Produces: request marks accept `tappedAt?: string` and `clientId?: string`. A request carrying any `tappedAt` MUST name `direction` (`'onward' | 'return'`); every mark in it is judged for that trip at its own tap time. Every JSON response of POST that reaches the RPC stage, and the new early "nothing accepted" response, includes `results: MarkResult[]`. Old fields (`updated`, `skipped`, `locked`, `dropped`, `walkUps`) are unchanged. A request with no `tappedAt` on any mark behaves exactly as before.
 
 - [ ] **Step 1: Add imports**
 
@@ -738,36 +782,70 @@ interface MarkInput {
 }
 ```
 
-- [ ] **Step 3: Replace the window gate**
+- [ ] **Step 3: Replace the trip and window gate**
 
-Replace the whole block that starts with the comment `// Time-window gate: manual marking follows the same window as the scanner` and ends with the closing `}` of `if (!auth.isSuperAdmin && !isOverrideHolder) { const windows = ...` (the 409 `window_closed` block) with:
+Replace this block (from the comment `// Time-window gate: manual marking follows the same window as the scanner` through `const direction: AttDirection = decided.direction;`):
 
 ```ts
-    // Time-window gate, two contracts:
-    //  - LEGACY: no mark carries tappedAt. One whole-request check at arrival
-    //    and the 409 the older screen knows how to show. Unchanged.
-    //  - OFFLINE-AWARE: each mark is judged by WHEN IT WAS TAPPED, so a mark
-    //    made on a bus with no signal still counts when it arrives later the
-    //    same day. See lib/boarding/tapped-at.ts for the bounds.
-    // Override holders are exempt from the window either way -- they exist
-    // specifically to fix a mark after it closes.
+    const windows = await loadAttendanceWindows(svc);
+    const decided = decideMarkDirection({
+      windows,
+      requested: body.direction,
+      windowExempt: auth.isSuperAdmin || isOverrideHolder,
+    });
+    if (!decided.ok) {
+      return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
+    }
+    const direction: AttDirection = decided.direction;
+```
+
+(together with the comment lines above it) with:
+
+```ts
+    // Which trip, and is its window open. Two contracts:
+    //  - LEGACY: no mark carries tappedAt. The server clock decides the trip
+    //    for the whole request at arrival, exactly as before (see
+    //    lib/boarding/trip-direction.ts).
+    //  - OFFLINE-AWARE: the request names its trip, and EACH mark is judged for
+    //    that trip at the moment it was TAPPED. A morning mark made on a bus
+    //    with no signal and sent at 17:30 is still a morning mark, and still
+    //    counts. See lib/boarding/tapped-at.ts for the bounds.
+    // A window-exempt caller (super admin, override holder) skips the window in
+    // both contracts -- they exist to fix a mark after it closes.
     const exempt = auth.isSuperAdmin || isOverrideHolder;
     const windows = await loadAttendanceWindows(svc);
     const legacy = marks.every((m) => !m.tappedAt);
-    if (legacy && !exempt && !isDirectionOpen(windows[direction])) {
-      const w = windows[direction];
-      return NextResponse.json({
-        error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
-        reason: 'window_closed',
-      }, { status: 409 });
-    }
     const now = new Date();
-    const tap = partitionByTap(marks, now, windows[direction], { exemptWindow: exempt });
+
+    let direction: AttDirection;
+    if (legacy) {
+      const decided = decideMarkDirection({ windows, requested: body.direction, windowExempt: exempt });
+      if (!decided.ok) {
+        return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
+      }
+      direction = decided.direction;
+    } else {
+      // A queued batch is one trip. Without a named trip there is no way to say
+      // which trip a late mark belongs to, so refuse rather than guess.
+      if (body.direction !== 'onward' && body.direction !== 'return') {
+        return NextResponse.json(
+          { error: 'Name the trip (onward or return) when sending tap times.', reason: 'bad_direction' },
+          { status: 400 },
+        );
+      }
+      direction = body.direction;
+    }
+
+    const tap = legacy
+      ? { accepted: marks.map((mark) => ({ mark, at: now })), rejected: [] as Array<{ mark: MarkInput; reason: MarkRejectReason }>, tripDate: istToday(now) }
+      : partitionByTap(marks, now, windows, direction, { exemptWindow: exempt });
     const rejected: Array<{ clientId?: string; reason: MarkRejectReason }> =
       tap.rejected.map((r) => ({ clientId: r.mark.clientId, reason: r.reason }));
     const tapAt = new Map<MarkInput, Date>(tap.accepted.map((a) => [a.mark, a.at] as const));
     const acceptedMarks = tap.accepted.map((a) => a.mark);
 ```
+
+`partitionByTap` only accepts a mark whose trip at tap time IS `direction` (anything else comes back `wrong_trip`), so every accepted mark belongs to the one trip the RPC call below writes.
 
 - [ ] **Step 4: Derive the dates from the tap**
 
@@ -831,7 +909,7 @@ Replace the statement that begins `const rows = marks` and ends with its closing
       // PER-LEARNER entitlement; mirrors decideMark's isLearnerOwner.
       allow_override: markable ? markable.own.has(m.learnerId) : false,
       // When the staffer tapped, so the record says when they boarded rather
-      // than when the phone found signal. Needs the 20260911160000 migration.
+      // than when the phone found signal. Needs the 20260911200000 migration.
       scanned_at: (tapAt.get(m) ?? now).toISOString(),
     }));
     // sent[i] produced outcomes[i]: the RPC answers in request order.
@@ -915,38 +993,21 @@ git commit -m "feat(boarding): accept late attendance marks judged by tap time"
 ### Task 5: Scan POST judges by tap time
 
 **Files:**
-- Modify: `app/api/boarding/scan/route.ts`
+- Modify: `app/api/boarding/scan/route.ts` (as of `origin/main` `54ca971`)
 
 **Interfaces:**
-- Consumes: `judgeTappedAt` (Task 1), `REJECT_REASON_TEXT` (Task 1), RPC `scanned_at` (Task 2).
-- Produces: the body accepts `tappedAt?: string` and `clientId?: string`. A tap outside the window still answers `reason: 'window_closed'` (409, unchanged text); `stale`, `future` and `invalid` answer 409 with that reason. Success and `not_booked` responses carry `clientId`.
+- Consumes: `judgeTappedAt` (Task 1), RPC `scanned_at` (Task 2).
+- Produces: the body accepts `tappedAt?: string` and `clientId?: string`. The trip and window are judged at the tap time (arrival time when `tappedAt` is absent, which is exactly today's behaviour). Refusals keep evening attendance's reason names for existing screens: `window_closed`, `wrong_trip`, `evening_off`, `bad_direction`; plus `stale`, `future` and `invalid` (unparseable time) for queued scans. Success and `not_booked` responses carry `clientId`.
 
-- [ ] **Step 1: Imports**
+- [ ] **Step 1: Import the judge**
 
-Add after the `attendance-window` import:
+Add after the `trip-direction` import line:
 
 ```ts
 import { judgeTappedAt } from '@/lib/boarding/tapped-at';
-import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
 ```
 
-- [ ] **Step 2: Give `resolveLearnerId` the trip date**
-
-Change its signature to take `tripDate: string` as a fifth parameter:
-
-```ts
-async function resolveLearnerId(
-  raw: string,
-  source: ScanSource,
-  auth: AuthContext,
-  svc: ReturnType<typeof createServiceRoleClient>,
-  tripDate: string,
-): Promise<Resolved> {
-```
-
-and inside the `pass_code` branch change `matchPassCode(decision.code, candidateIds, istToday())` to `matchPassCode(decision.code, candidateIds, tripDate)`.
-
-- [ ] **Step 3: Accept the new body fields**
+- [ ] **Step 2: Accept the new body fields**
 
 Change the body type to:
 
@@ -957,61 +1018,81 @@ Change the body type to:
     };
 ```
 
-- [ ] **Step 4: Judge the tap before resolving, and remove the old gate**
+- [ ] **Step 3: Replace the trip check with the tap-time judge**
 
-Replace these lines:
+Replace this block:
 
 ```ts
-    const resolved = await resolveLearnerId(String(body.token ?? ''), source, auth, svc);
+    const windows = await loadAttendanceWindows(svc);
+    const decided = decideMarkDirection({ windows, requested: body.direction, windowExempt: false });
+    if (!decided.ok) {
+      return NextResponse.json({
+        ok: false,
+        reason: decided.reason,
+        error: decided.error,
+        activeDirection: activeDirection(windows),
+      }, { status: decided.status });
+    }
+    const direction: AttDirection = decided.direction;
 ```
 
 with:
 
 ```ts
-    // Judge WHEN the scan happened before anything else. A queued offline scan
-    // arrives late; it counts if it was scanned inside the window today.
     const windows = await loadAttendanceWindows(svc);
-    const tap = judgeTappedAt(body.tappedAt, new Date(), windows[direction]);
+    // Judged at the moment of the SCAN. A scan queued on a bus with no signal
+    // arrives late; it counts if it was scanned inside its trip's window today.
+    // With no tappedAt this is the same check as before, at arrival.
+    const tap = judgeTappedAt(body.tappedAt, new Date(), windows, body.direction);
     if (!tap.ok) {
-      const w = windows[direction];
+      // Keep evening attendance's reason names for the existing scan screen.
+      const reason =
+        tap.reason === 'outside_window' ? 'window_closed'
+        : tap.reason === 'invalid' && !body.tappedAt ? 'bad_direction'
+        : tap.reason;
       return NextResponse.json({
         ok: false,
         clientId: body.clientId ?? null,
-        // 'window_closed' kept verbatim for the existing scan screen.
-        reason: tap.reason === 'outside_window' ? 'window_closed' : tap.reason,
-        error: tap.reason === 'outside_window'
-          ? `Onward (morning) scanning is open ${formatHM(w.start)}–${formatHM(w.end)} only.`
-          : REJECT_REASON_TEXT[tap.reason],
+        reason,
+        error: tap.error ?? REJECT_REASON_TEXT[tap.reason],
         activeDirection: activeDirection(windows),
-      }, { status: 409 });
+      }, { status: tap.reason === 'invalid' ? 400 : 409 });
     }
-
-    const resolved = await resolveLearnerId(String(body.token ?? ''), source, auth, svc, tap.tripDate);
+    const direction: AttDirection = tap.direction;
 ```
 
-Then DELETE the old block that begins `// Time-window gate: scanning is only allowed inside the admin-configurable` and ends with its 409 `return` and closing `}`.
+and extend the import from Task 1's protocol:
 
-- [ ] **Step 5: Use the tap's date and time**
+```ts
+import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
+```
 
-Replace `const today = istToday();` with `const today = tap.tripDate;`.
+- [ ] **Step 4: Store under the tap's date and time**
+
+Replace `const today = istToday();` with:
+
+```ts
+    // The IST date of the scan. Identical to istToday() for a live scan.
+    const today = tap.tripDate;
+```
 
 In the `svc.rpc('tms_mark_attendance', ...)` call add `scanned_at: tap.at.toISOString(),` to the single object in `p_marks` (after `is_walk_up: isWalkUp,`).
 
-- [ ] **Step 6: Echo the clientId**
+- [ ] **Step 5: Echo the clientId**
 
 In the `not_booked` response object add `clientId: body.clientId ?? null,` after `ok: false,`. In the final success response (the `return NextResponse.json({` after `logActivity`) add `clientId: body.clientId ?? null,` as its first property.
 
-- [ ] **Step 7: Remove a now-unused import if any**
+- [ ] **Step 6: Tidy imports**
 
-Run: `grep -n "istToday\|isDirectionOpen" app/api/boarding/scan/route.ts`
-For each of the two names, if the only remaining match is in the import line, remove that name from the import.
+Run: `grep -n "istToday\|decideMarkDirection" app/api/boarding/scan/route.ts`
+`istToday` is still used by `resolveLearnerId` (pass codes), so it stays. If `decideMarkDirection` now appears only in its import line, remove it from that import (keep any other names on that line).
 
-- [ ] **Step 8: Type-check**
+- [ ] **Step 7: Type-check**
 
 Run: `npx tsc --noEmit 2>&1 | grep -E "app/api/boarding/scan/route.ts"`
 Expected: no output.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add app/api/boarding/scan/route.ts
@@ -1395,11 +1476,11 @@ git commit -m "feat(boarding): keep the day's roster on the phone"
 - Test: `lib/boarding/offline/outbox.test.ts`
 
 **Interfaces:**
-- Consumes: `Kv` (Task 7), `istToday` from `lib/booking/window.ts`, `SYNC_BACKOFF_MS` and `MarkRejectReason` (Task 1).
+- Consumes: `Kv` (Task 7), `istToday` from `lib/booking/window.ts`, `AttDirection` from `lib/boarding/attendance-window.ts`, `SYNC_BACKOFF_MS` and `MarkRejectReason` (Task 1).
 - Produces:
-  - Types `MarkEntry`, `ScanEntry`, `OutboxEntry`, `Problem` (fields exactly as below).
-  - `outboxKey(e)`, `enqueueMark(kv, input, now, makeId?) => Promise<MarkEntry>`, `enqueueScan(kv, input, now, makeId?) => Promise<ScanEntry>`, `listOutbox(kv, userId)`, `countPending(kv, userId)`, `removeIfSame(kv, entry)`, `deferIfSame(kv, entry, now)`, `addProblem(kv, p)`, `listProblems(kv, userId)`, `dismissProblem(kv, userId, clientId)`.
-- Key rule: one outbox slot per `(user, trip date, learner)`, so a later tap on the same learner REPLACES the earlier unsent one. A scan with no resolved learner gets its own slot.
+  - Types `MarkEntry`, `ScanEntry`, `OutboxEntry`, `Problem` (fields exactly as below). Both entry kinds carry `direction: AttDirection`, the trip decided at tap time by the caller.
+  - `outboxKey(e)`, `enqueueMark(kv, input, now, makeId?) => Promise<MarkEntry>` (input includes `direction`), `enqueueScan(kv, input, now, makeId?) => Promise<ScanEntry>` (input includes `direction`), `listOutbox(kv, userId)`, `countPending(kv, userId)`, `removeIfSame(kv, entry)`, `deferIfSame(kv, entry, now)`, `addProblem(kv, p)`, `listProblems(kv, userId)`, `dismissProblem(kv, userId, clientId)`.
+- Key rule: one outbox slot per `(user, trip date, trip, learner)`, so a later tap on the same learner for the same trip REPLACES the earlier unsent one, while the morning and evening marks of one learner are separate. A scan with no resolved learner gets its own slot.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1415,14 +1496,20 @@ import {
 
 const NOW = new Date('2026-09-11T03:00:00Z'); // 08:30 IST
 const ids = () => { let n = 0; return () => `c${++n}`; };
-const mark = (learnerId: string, status: 'present' | 'absent' = 'present', userId = 'u1') =>
-  ({ userId, learnerId, routeId: 'r1', status, name: `L-${learnerId}` });
+const mark = (
+  learnerId: string,
+  status: 'present' | 'absent' = 'present',
+  userId = 'u1',
+  direction: 'onward' | 'return' = 'onward',
+) => ({ userId, learnerId, routeId: 'r1', status, name: `L-${learnerId}`, direction });
+const scan = (learnerId: string | null, token: string) =>
+  ({ userId: 'u1', learnerId, token, walkUp: false, name: learnerId, verified: learnerId !== null, direction: 'onward' as const });
 
 describe('outbox', () => {
   it('stores a mark with its tap time and IST trip date', async () => {
     const kv = memoryKv();
     const e = await enqueueMark(kv, mark('l1'), NOW, ids());
-    expect(e).toMatchObject({ kind: 'mark', clientId: 'c1', tappedAt: NOW.toISOString(), tripDate: '2026-09-11', attempts: 0, nextAttemptAt: 0 });
+    expect(e).toMatchObject({ kind: 'mark', clientId: 'c1', direction: 'onward', tappedAt: NOW.toISOString(), tripDate: '2026-09-11', attempts: 0, nextAttemptAt: 0 });
     const lateIst = new Date('2026-09-11T19:00:00Z'); // 00:30 IST on the 12th
     expect((await enqueueMark(kv, mark('l2'), lateIst, ids())).tripDate).toBe('2026-09-12');
   });
@@ -1437,13 +1524,21 @@ describe('outbox', () => {
     expect(all[0]).toMatchObject({ status: 'absent', clientId: 'c2' });
   });
 
+  it('keeps the morning and evening marks of one learner apart', async () => {
+    const kv = memoryKv();
+    const id = ids();
+    await enqueueMark(kv, mark('l1', 'present', 'u1', 'onward'), NOW, id);
+    await enqueueMark(kv, mark('l1', 'absent', 'u1', 'return'), NOW, id);
+    expect((await listOutbox(kv, 'u1')).map((e) => e.direction).sort()).toEqual(['onward', 'return']);
+  });
+
   it('collapses a resolved scan with a mark for the same learner, but not raw scans', async () => {
     const kv = memoryKv();
     const id = ids();
     await enqueueMark(kv, mark('l1', 'absent'), NOW, id);
-    await enqueueScan(kv, { userId: 'u1', learnerId: 'l1', token: 't', walkUp: false, name: 'L', verified: true }, NOW, id);
-    await enqueueScan(kv, { userId: 'u1', learnerId: null, token: 'x', walkUp: false, name: null, verified: false }, NOW, id);
-    await enqueueScan(kv, { userId: 'u1', learnerId: null, token: 'y', walkUp: false, name: null, verified: false }, NOW, id);
+    await enqueueScan(kv, scan('l1', 't'), NOW, id);
+    await enqueueScan(kv, scan(null, 'x'), NOW, id);
+    await enqueueScan(kv, scan(null, 'y'), NOW, id);
     const all = await listOutbox(kv, 'u1');
     expect(all.map((e) => e.kind)).toEqual(['scan', 'scan', 'scan']);
     expect(await countPending(kv, 'u1')).toBe(3);
@@ -1505,16 +1600,19 @@ Expected: FAIL, unresolved import.
 /**
  * Marks waiting on the phone to be sent, and the marks the server refused.
  *
- * ONE slot per (user, trip date, learner): tapping Present then Absent on the
- * same student while offline leaves one entry, the latest. That keeps the
- * outbox small, and it means a batch never carries two marks for one learner,
- * so send order inside a batch cannot matter. A scan that resolved to nobody
- * on the saved roster gets its own slot until the server identifies it.
+ * ONE slot per (user, trip date, trip, learner): tapping Present then Absent
+ * on the same student for the same trip while offline leaves one entry, the
+ * latest. The morning and evening marks of one student are separate slots,
+ * because they are separate records on the server. That keeps the outbox
+ * small, and it means a batch (always one trip) never carries two marks for one
+ * learner, so send order inside a batch cannot matter. A scan that resolved to
+ * nobody on the saved roster gets its own slot until the server identifies it.
  *
  * Settling uses removeIfSame / deferIfSame: the slot may have been refilled by
  * a NEWER tap while the old one was in flight, and that newer tap must survive.
  */
 import type { Kv } from './kv';
+import type { AttDirection } from '@/lib/boarding/attendance-window';
 import { istToday } from '@/lib/booking/window';
 import { SYNC_BACKOFF_MS, type MarkRejectReason } from './protocol';
 
@@ -1523,6 +1621,8 @@ interface EntryBase {
   userId: string;
   tappedAt: string;
   tripDate: string;
+  /** The trip this tap was for, decided by the caller at tap time. */
+  direction: AttDirection;
   attempts: number;
   nextAttemptAt: number;
   name: string | null;
@@ -1560,21 +1660,24 @@ export interface Problem {
 
 const defaultId = () => globalThis.crypto.randomUUID();
 
-export function outboxKey(e: Pick<OutboxEntry, 'userId' | 'tripDate' | 'learnerId' | 'clientId'>): string {
-  return `outbox:${e.userId}:${e.tripDate}:${e.learnerId ?? `raw-${e.clientId}`}`;
+export function outboxKey(e: Pick<OutboxEntry, 'userId' | 'tripDate' | 'direction' | 'learnerId' | 'clientId'>): string {
+  return `outbox:${e.userId}:${e.tripDate}:${e.direction}:${e.learnerId ?? `raw-${e.clientId}`}`;
 }
 
 const problemKey = (userId: string, clientId: string) => `problem:${userId}:${clientId}`;
 
 export async function enqueueMark(
   kv: Kv,
-  input: { userId: string; learnerId: string; routeId: string; status: 'present' | 'absent'; name: string | null },
+  input: {
+    userId: string; learnerId: string; routeId: string; status: 'present' | 'absent';
+    name: string | null; direction: AttDirection;
+  },
   now: Date,
   makeId: () => string = defaultId,
 ): Promise<MarkEntry> {
   const entry: MarkEntry = {
     kind: 'mark', clientId: makeId(), userId: input.userId, learnerId: input.learnerId,
-    routeId: input.routeId, status: input.status, name: input.name,
+    routeId: input.routeId, status: input.status, name: input.name, direction: input.direction,
     tappedAt: now.toISOString(), tripDate: istToday(now), attempts: 0, nextAttemptAt: 0,
   };
   await kv.set(outboxKey(entry), entry);
@@ -1583,13 +1686,17 @@ export async function enqueueMark(
 
 export async function enqueueScan(
   kv: Kv,
-  input: { userId: string; learnerId: string | null; token: string; walkUp: boolean; name: string | null; verified: boolean },
+  input: {
+    userId: string; learnerId: string | null; token: string; walkUp: boolean;
+    name: string | null; verified: boolean; direction: AttDirection;
+  },
   now: Date,
   makeId: () => string = defaultId,
 ): Promise<ScanEntry> {
   const entry: ScanEntry = {
     kind: 'scan', clientId: makeId(), userId: input.userId, learnerId: input.learnerId,
     token: input.token, walkUp: input.walkUp, name: input.name, verified: input.verified,
+    direction: input.direction,
     tappedAt: now.toISOString(), tripDate: istToday(now), attempts: 0, nextAttemptAt: 0,
   };
   await kv.set(outboxKey(entry), entry);
@@ -1638,7 +1745,7 @@ export async function dismissProblem(kv: Kv, userId: string, clientId: string): 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run lib/boarding/offline/outbox.test.ts`
-Expected: PASS, 7 tests. If `globalThis.crypto` is undefined on this Node version the tests still pass (they inject ids); check `node -e "console.log(typeof globalThis.crypto?.randomUUID)"` prints `function` for the browser path's sake anyway.
+Expected: PASS, 8 tests. If `globalThis.crypto` is undefined on this Node version the tests still pass (they inject ids); check `node -e "console.log(typeof globalThis.crypto?.randomUUID)"` prints `function` for the browser path's sake anyway.
 
 - [ ] **Step 5: Commit**
 
@@ -1657,7 +1764,7 @@ git commit -m "feat(boarding): queue attendance marks on the phone"
 
 **Interfaces:**
 - Consumes: `RosterRow` from `lib/booking/roster.ts`; `OutboxEntry` (Task 8).
-- Produces: `PendingView = { status: 'present' | 'absent'; kind: 'queued' | 'unverified' }`; `pendingByLearner(entries, date) => Map<string, PendingView>`; `countRoster(rows) => { counts: RosterCounts; share: RosterShare }`; `applyPending<T extends RosterView>(roster: T, pending) => T`. `RosterCounts`, `RosterShare`, `RosterView` exported. The count formulas are copied from `app/api/boarding/attendance/roster/route.ts` and must stay identical to it.
+- Produces: `PendingView = { status: 'present' | 'absent'; kind: 'queued' | 'unverified' }`; `pendingByLearner(entries, date, direction) => Map<string, PendingView>` (only entries for that day AND trip); `countRoster(rows) => { counts: RosterCounts; share: RosterShare }`; `applyPending<T extends RosterView>(roster: T, pending) => T`. `RosterCounts`, `RosterShare`, `RosterView` exported. The count formulas are copied from `app/api/boarding/attendance/roster/route.ts` and must stay identical to it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1679,17 +1786,18 @@ const row = (id: string, over: Partial<RosterRow> = {}): RosterRow => ({
 
 const roster = (rows: RosterRow[]) => ({ date: '2026-09-11', rows, ...countRoster(rows) });
 
-const base = { userId: 'u1', tappedAt: '2026-09-11T03:00:00Z', tripDate: '2026-09-11', attempts: 0, nextAttemptAt: 0, name: null };
+const base = { userId: 'u1', tappedAt: '2026-09-11T03:00:00Z', tripDate: '2026-09-11', direction: 'onward' as const, attempts: 0, nextAttemptAt: 0, name: null };
 
 describe('pendingByLearner', () => {
-  it('maps marks and scans for the viewed day only', () => {
+  it('maps marks and scans for the viewed day and trip only', () => {
     const entries: OutboxEntry[] = [
       { ...base, kind: 'mark', clientId: 'a', learnerId: 'l1', routeId: 'r1', status: 'absent' },
       { ...base, kind: 'scan', clientId: 'b', learnerId: 'l2', token: 't', walkUp: false, verified: false },
       { ...base, kind: 'scan', clientId: 'c', learnerId: null, token: 'x', walkUp: false, verified: false },
       { ...base, kind: 'mark', clientId: 'd', learnerId: 'l3', routeId: 'r1', status: 'present', tripDate: '2026-09-10' },
+      { ...base, kind: 'mark', clientId: 'e', learnerId: 'l4', routeId: 'r1', status: 'present', direction: 'return' },
     ];
-    const p = pendingByLearner(entries, '2026-09-11');
+    const p = pendingByLearner(entries, '2026-09-11', 'onward');
     expect([...p.entries()]).toEqual([
       ['l1', { status: 'absent', kind: 'queued' }],
       ['l2', { status: 'present', kind: 'unverified' }],
@@ -1749,6 +1857,7 @@ Expected: FAIL, unresolved import.
  * and must stay identical; the unit test pins them.
  */
 import type { RosterRow } from '@/lib/booking/roster';
+import type { AttDirection } from '@/lib/boarding/attendance-window';
 import type { OutboxEntry } from './outbox';
 
 export interface PendingView {
@@ -1764,10 +1873,14 @@ export interface RosterCounts {
 export interface RosterShare { total: number; marked: number; remaining: number }
 export interface RosterView { rows: RosterRow[]; counts: RosterCounts; share: RosterShare }
 
-export function pendingByLearner(entries: OutboxEntry[], date: string): Map<string, PendingView> {
+export function pendingByLearner(
+  entries: OutboxEntry[],
+  date: string,
+  direction: AttDirection,
+): Map<string, PendingView> {
   const out = new Map<string, PendingView>();
   for (const e of entries) {
-    if (e.tripDate !== date || !e.learnerId) continue;
+    if (e.tripDate !== date || e.direction !== direction || !e.learnerId) continue;
     out.set(
       e.learnerId,
       e.kind === 'mark'
@@ -1997,7 +2110,7 @@ async function setup(n = 1, routeId = 'r1') {
   const kv = memoryKv();
   const id = ids();
   for (let i = 1; i <= n; i++) {
-    await enqueueMark(kv, { userId: 'u1', learnerId: `l${i}`, routeId, status: 'present', name: `N${i}` }, T0, id);
+    await enqueueMark(kv, { userId: 'u1', learnerId: `l${i}`, routeId, status: 'present', name: `N${i}`, direction: 'onward' }, T0, id);
   }
   return kv;
 }
@@ -2084,11 +2197,20 @@ describe('syncOnce', () => {
 
   it('batches 25 per request and per route', async () => {
     const kv = await setup(30, 'r1');
-    await enqueueMark(kv, { userId: 'u1', learnerId: 'z1', routeId: 'r2', status: 'present', name: 'Z' }, T0, () => 'z');
+    await enqueueMark(kv, { userId: 'u1', learnerId: 'z1', routeId: 'r2', status: 'present', name: 'Z', direction: 'onward' }, T0, () => 'z');
     const d = deps(kv);
     await syncOnce(d);
     const sizes = (d.postMarks as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0].marks.length).sort((a: number, b: number) => a - b);
     expect(sizes).toEqual([1, 5, 25]);
+  });
+
+  it('sends each trip as its own batch, naming the trip', async () => {
+    const kv = await setup(1);
+    await enqueueMark(kv, { userId: 'u1', learnerId: 'l1', routeId: 'r1', status: 'absent', name: 'N1', direction: 'return' }, T0, () => 'eve');
+    const d = deps(kv);
+    await syncOnce(d);
+    const trips = (d.postMarks as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0].direction).sort();
+    expect(trips).toEqual(['onward', 'return']);
   });
 
   it('defers a mark the server gave no answer for, never drops it', async () => {
@@ -2101,7 +2223,7 @@ describe('syncOnce', () => {
     const kv = await setup(1);
     await syncOnce(deps(kv, {
       postMarks: async (b) => {
-        await enqueueMark(kv, { userId: 'u1', learnerId: 'l1', routeId: 'r1', status: 'absent', name: 'N1' }, T0, () => 'newer');
+        await enqueueMark(kv, { userId: 'u1', learnerId: 'l1', routeId: 'r1', status: 'absent', name: 'N1', direction: 'onward' }, T0, () => 'newer');
         return ok({ results: [{ clientId: b.marks[0].clientId, outcome: 'inserted', walkUp: false }] });
       },
     }));
@@ -2112,7 +2234,7 @@ describe('syncOnce', () => {
     const kv = memoryKv();
     const id = ids();
     const scan = (learnerId: string) =>
-      enqueueScan(kv, { userId: 'u1', learnerId, token: `t-${learnerId}`, walkUp: false, name: learnerId, verified: true }, T0, id);
+      enqueueScan(kv, { userId: 'u1', learnerId, token: `t-${learnerId}`, walkUp: false, name: learnerId, verified: true, direction: 'onward' }, T0, id);
     await scan('s1'); await scan('s2'); await scan('s3');
     await syncOnce(deps(kv, {
       postScan: async (b) =>
@@ -2147,7 +2269,7 @@ import { syncMessages } from './messages';
 import type { SyncOutcome } from './sync';
 
 const entry = (name: string, status: 'present' | 'absent' = 'present') => ({
-  kind: 'mark' as const, clientId: name, userId: 'u', learnerId: name, routeId: 'r', status, name,
+  kind: 'mark' as const, direction: 'onward' as const, clientId: name, userId: 'u', learnerId: name, routeId: 'r', status, name,
   tappedAt: '', tripDate: '', attempts: 0, nextAttemptAt: 0,
 });
 const o = (name: string, result: SyncOutcome['result'], status: 'present' | 'absent' = 'present'): SyncOutcome =>
@@ -2193,7 +2315,7 @@ Expected: FAIL, unresolved imports.
 /**
  * Drain the outbox: send what is due, settle every answer.
  *
- * Roster taps go in batches of SYNC_BATCH_SIZE per (route, trip date); scans
+ * Roster taps go in batches of SYNC_BATCH_SIZE per (route, trip date, trip); scans
  * go one by one to the scan endpoint. The outbox holds at most one entry per
  * learner and day, so order inside a batch never matters.
  *
@@ -2203,6 +2325,7 @@ Expected: FAIL, unresolved imports.
  * touches nothing -- the marks wait for the same user to sign back in.
  */
 import type { Kv } from './kv';
+import type { AttDirection } from '@/lib/boarding/attendance-window';
 import {
   addProblem, deferIfSame, listOutbox, removeIfSame,
   type MarkEntry, type OutboxEntry, type ScanEntry,
@@ -2217,7 +2340,7 @@ export interface PostResult { status: number; json: any }
 
 export interface MarksBody {
   routeId: string;
-  direction: 'onward';
+  direction: AttDirection;
   marks: Array<{ learnerId: string; status: 'present' | 'absent'; tappedAt: string; clientId: string }>;
 }
 
@@ -2225,7 +2348,7 @@ export interface ScanBody {
   token: string;
   source: 'camera';
   walkUp: boolean;
-  direction: 'onward';
+  direction: AttDirection;
   tappedAt: string;
   clientId: string;
 }
@@ -2338,7 +2461,7 @@ export async function syncOnce(d: SyncDeps): Promise<SyncReport> {
   const groups = new Map<string, MarkEntry[]>();
   for (const e of due) {
     if (e.kind !== 'mark') continue;
-    const k = `${e.routeId}|${e.tripDate}`;
+    const k = `${e.routeId}|${e.tripDate}|${e.direction}`;
     groups.set(k, [...(groups.get(k) ?? []), e]);
   }
   const batches: MarkEntry[][] = [];
@@ -2352,7 +2475,7 @@ export async function syncOnce(d: SyncDeps): Promise<SyncReport> {
     try {
       res = await d.postMarks({
         routeId: batch[0].routeId,
-        direction: 'onward',
+        direction: batch[0].direction,
         marks: batch.map((m) => ({ learnerId: m.learnerId, status: m.status, tappedAt: m.tappedAt, clientId: m.clientId })),
       });
     } catch {
@@ -2372,7 +2495,7 @@ export async function syncOnce(d: SyncDeps): Promise<SyncReport> {
     report.attempted++;
     try {
       res = await d.postScan({
-        token: scan.token, source: 'camera', walkUp: scan.walkUp, direction: 'onward',
+        token: scan.token, source: 'camera', walkUp: scan.walkUp, direction: scan.direction,
         tappedAt: scan.tappedAt, clientId: scan.clientId,
       });
     } catch {
@@ -2450,7 +2573,7 @@ export function syncMessages(outcomes: SyncOutcome[]): SyncMessage[] {
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `npx vitest run lib/boarding/offline/sync.test.ts lib/boarding/offline/messages.test.ts`
-Expected: PASS, 16 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 7: Commit**
 
@@ -2473,7 +2596,7 @@ git commit -m "feat(boarding): send queued marks when signal returns"
 - Consumes: Tasks 7, 8, 11.
 - Produces:
   - `transport.ts`: `postMarks(body: MarksBody)`, `postScan(body: ScanBody)`.
-  - `useOfflineAttendance(userId: string | null, onSynced: () => void)` returning `{ entries: OutboxEntry[]; problems: Problem[]; online: boolean; authRequired: boolean; markOffline(row: RosterRow, status): Promise<void>; queueScan(input: QueueScanInput): Promise<void>; dismiss(clientId): Promise<void>; syncNow(): Promise<void> }`; type `OfflineAttendance`; type `QueueScanInput = { learnerId: string | null; token: string; walkUp: boolean; name: string | null; verified: boolean }`.
+  - `useOfflineAttendance(userId: string | null, onSynced: () => void)` returning `{ entries: OutboxEntry[]; problems: Problem[]; online: boolean; authRequired: boolean; markOffline(row: RosterRow, status, direction: AttDirection): Promise<void>; queueScan(input: QueueScanInput): Promise<void>; dismiss(clientId): Promise<void>; syncNow(): Promise<void> }`; type `OfflineAttendance`; type `QueueScanInput = { learnerId: string | null; token: string; walkUp: boolean; name: string | null; verified: boolean; direction: AttDirection }`.
   - `<OfflineStatusBar online pendingCount savedAt authRequired />`, `<OfflineProblemsPanel problems onDismiss />`.
 
 No unit tests: vitest runs in node with no DOM. The logic these wrap is covered by Tasks 7–11; this task is verified by type-check here and the browser check in Task 17.
@@ -2511,6 +2634,7 @@ export const postScan = (body: ScanBody) => post('/api/boarding/scan', body);
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import type { RosterRow } from '@/lib/booking/roster';
+import type { AttDirection } from '@/lib/boarding/attendance-window';
 import { offlineKv } from '@/lib/boarding/offline/kv';
 import {
   dismissProblem, enqueueMark, enqueueScan, listOutbox, listProblems,
@@ -2527,6 +2651,8 @@ export interface QueueScanInput {
   walkUp: boolean;
   name: string | null;
   verified: boolean;
+  /** The trip open when the scan happened, from activeDirection(windows). */
+  direction: AttDirection;
 }
 
 /**
@@ -2587,11 +2713,11 @@ export function useOfflineAttendance(userId: string | null, onSynced: () => void
     };
   }, [refresh, syncNow]);
 
-  const markOffline = useCallback(async (row: RosterRow, status: 'present' | 'absent') => {
+  const markOffline = useCallback(async (row: RosterRow, status: 'present' | 'absent', direction: AttDirection) => {
     if (!userId) return;
     try {
       await enqueueMark(offlineKv(), {
-        userId, learnerId: row.learner_id, routeId: row.route_id, status, name: row.name,
+        userId, learnerId: row.learner_id, routeId: row.route_id, status, name: row.name, direction,
       }, new Date());
     } catch (e) {
       console.error('boarding outbox write failed:', e);
@@ -2881,18 +3007,27 @@ async function fetchRoster(date: string, direction: AttDirection, userId: string
   return { ...data, savedAt: null };
 }
 
-async function fetchWindows(userId: string | null): Promise<{ windows: AttendanceWindows }> {
+async function fetchWindows(
+  userId: string | null,
+): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
   try {
     const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
     const json = await res.json();
-    if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS };
+    if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
     const windows = json.data.windows as AttendanceWindows;
     if (userId) void saveWindows(offlineKv(), userId, windows, new Date()).catch(() => {});
-    return { windows };
+    return {
+      windows,
+      // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
+      activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
+    };
   } catch {
-    // No signal: an admin-customised window must not silently fall back to 07:00–09:30.
+    // No signal. Admin-customised hours (and the evening switch) must not
+    // silently fall back to the defaults, so use the saved copy. With no
+    // server to ask, the phone's clock is the only clock there is.
     const saved = userId ? await loadWindows<AttendanceWindows>(offlineKv(), userId).catch(() => null) : null;
-    return { windows: saved?.value ?? DEFAULT_WINDOWS };
+    const windows = saved?.value ?? DEFAULT_WINDOWS;
+    return { windows, activeDirection: activeDirection(windows) };
   }
 }
 ```
@@ -2911,7 +3046,7 @@ At the top of `BoardingAttendancePage`, after `const qc = useQueryClient();` add
   }, [userId]);
 ```
 
-Change the windows query to `queryFn: () => fetchWindows(userId)` and add `userId` to its key: `queryKey: ['boarding-attendance-window', userId]`.
+Change the windows query to `queryFn: () => fetchWindows(userId)` and add `userId` to its key: `queryKey: ['boarding-attendance-window', userId]`. Keep its existing `refetchOnWindowFocus` and `refetchInterval` options. (`useAttendanceSettingsLive` invalidates `['boarding-attendance-window']`, which still matches by prefix.)
 
 Change the roster query's `queryFn` to `() => fetchRoster(date, direction, userId)` and its key to `['boarding-roster', date, direction, userId]`. (`invalidateQueries({ queryKey: ['boarding-roster'] })` still matches by prefix.)
 
@@ -2926,7 +3061,12 @@ Replace:
 with:
 
 ```ts
-  const pending = useMemo(() => pendingByLearner(offline.entries, date), [offline.entries, date]);
+  // Only the viewed trip's unsent marks: the morning and evening tabs are
+  // separate records, so a waiting evening mark must not show on Morning.
+  const pending = useMemo(
+    () => pendingByLearner(offline.entries, date, direction),
+    [offline.entries, date, direction],
+  );
   const view = useMemo(() => (data ? applyPending(data, pending) : undefined), [data, pending]);
   const rows = view?.rows ?? [];
   const counts = view?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 };
@@ -2941,10 +3081,12 @@ Replace the whole `const mark = useCallback(async (row, status) => { ... }, [dir
   // Every tap goes to the outbox, online or not; it sends within a second
   // when there is signal, and the toasts come from the sync's answers
   // (lib/boarding/offline/messages.ts), worded as they were before.
+  // `direction` is the tab being marked. Marking is only enabled on the tab
+  // whose window is open (canMark), so it is also the trip open at tap time.
   const { markOffline } = offline;
   const mark = useCallback(
-    (row: RosterRow, status: 'present' | 'absent') => { void markOffline(row, status); },
-    [markOffline],
+    (row: RosterRow, status: 'present' | 'absent') => { void markOffline(row, status, direction); },
+    [markOffline, direction],
   );
 ```
 
@@ -3032,7 +3174,7 @@ git commit -m "feat(boarding): mark attendance through the outbox"
 - Modify: `components/boarding/scan-dialog.tsx`
 
 **Interfaces:**
-- Consumes: `resolveScanOffline` (Task 10), `QueueScanInput` (Task 12), `RosterRow`.
+- Consumes: `resolveScanOffline` (Task 10), `QueueScanInput` (Task 12, which carries `direction`), `RosterRow`, `activeDirection` (already used by `submit` to pick the open trip as `current`).
 - Produces: optional prop `offline?: { online: boolean; roster: { rows: RosterRow[]; cards?: Record<string, string> } | undefined; queueScan: (input: QueueScanInput) => Promise<void> }`. Without it, behaviour is unchanged.
 
 - [ ] **Step 1: Imports, result field, prop**
@@ -3044,6 +3186,8 @@ import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
 import type { RosterRow } from '@/lib/booking/roster';
 ```
+
+Also add `type AttDirection` to the existing import from `@/lib/boarding/attendance-window` (it already imports `activeDirection`, `LEG_NAME` and `type AttendanceWindows`).
 
 Add to the `ScanResult` type, after `error?: string;`:
 
@@ -3093,7 +3237,9 @@ Add this function inside the component, directly above `async function submit(`:
    * handled the scan. Only camera reads are queued -- a typed JKKN ID is
    * refused anyway, and a typed 6-digit code needs the server.
    */
-  async function submitOffline(token: string, source: ScanSource, walkUp: boolean): Promise<boolean> {
+  async function submitOffline(
+    token: string, source: ScanSource, walkUp: boolean, direction: AttDirection,
+  ): Promise<boolean> {
     const o = offlineRef.current;
     if (!o) return false;
     const local = resolveScanOffline(token, source, o.roster ?? { rows: [] });
@@ -3123,6 +3269,7 @@ Add this function inside the component, directly above `async function submit(`:
       walkUp,
       name: local.kind === 'resolved' ? local.name : null,
       verified: local.kind === 'resolved' && local.verified,
+      direction,
     });
     setResult({
       ok: true,
@@ -3140,11 +3287,11 @@ Add this function inside the component, directly above `async function submit(`:
 
 - [ ] **Step 3: Use it before and after the request**
 
-In `submit`, directly after the window check's closing `}` (the `if (!isDirectionOpen(w.onward)) { ... return; }` block) and before `if (busyRef.current && !walkUp) return;`, add:
+In `submit`, directly after the trip check's closing `}` (the `const current = activeDirection(w); if (!current) { ... return; }` block) and before `if (busyRef.current && !walkUp) return;`, add:
 
 ```ts
     if (offlineRef.current && !offlineRef.current.online) {
-      await submitOffline(token, source, walkUp);
+      await submitOffline(token, source, walkUp, current);
       return;
     }
 ```
@@ -3161,7 +3308,7 @@ with:
 ```ts
       lastReadRef.current = null;
       // The request never got an answer: treat it as no signal and queue it.
-      if (!(await submitOffline(token, source, walkUp))) {
+      if (!(await submitOffline(token, source, walkUp, current))) {
         setResult({ ok: false, error: 'Network error' });
       }
 ```
@@ -3507,6 +3654,7 @@ Hand the user these steps:
 6. Go back online. Within 15 seconds the banner clears, a summary toast appears, and the "Waiting" badges disappear.
 7. In Supabase, confirm those five rows exist with `scanned_at` equal to when they were tapped, not when they synced.
 8. Close the app fully, go offline, open the installed app. It opens on Attendance, not the offline page.
+9. If evening attendance is switched on: mark two students during the morning window with no signal, stay offline until the evening window opens, then reconnect. Both marks must appear on the Morning tab, not the Evening one, and in Supabase with `direction = 'onward'`.
 
 - [ ] **Step 7: Report**
 
