@@ -6,7 +6,8 @@ import { Clock } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { isDirectionOpen, formatHM, type AttendanceWindows } from '@/lib/boarding/attendance-window';
+import { activeDirection, LEG_NAME, type AttendanceWindows } from '@/lib/boarding/attendance-window';
+import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { noteRead, type LastRead } from '@/lib/boarding/scan-dedupe';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
@@ -84,10 +85,12 @@ function FeeBadgeView({ fees }: { fees: ScanResult['fees'] }) {
 }
 
 /**
- * Scanner-in-a-modal. Attendance is onward-only, so there is no leg to pick — every
- * scan is marked onward. Reuses the old scan page's html5-qrcode + 6-digit + walk-up
- * flow. Fires onMarked after a successful scan so the page can refresh the roster.
- * Camera runs only while the dialog is open and the onward window is open.
+ * Scanner-in-a-modal. The trip is decided by the server's clock — morning or
+ * evening, whichever window is open right now; the request names the trip it
+ * believes is open, and the server refuses a mismatch. Reuses the old scan
+ * page's html5-qrcode + 6-digit + walk-up flow. Fires onMarked after a
+ * successful scan so the page can refresh the roster. Camera runs only while
+ * the dialog is open and some trip's window is open.
  */
 export default function ScanDialog({
   open,
@@ -134,8 +137,9 @@ export default function ScanDialog({
   // of being adopted into scannerRef.
   const cameraGenRef = useRef(0);
 
-  const win = windows.onward;
-  const legOpen = isDirectionOpen(win);
+  // Which trip is open for scanning right now, if any.
+  const leg = activeDirection(windows);
+  const legOpen = leg !== null;
 
   async function submit(token: string, source: ScanSource, walkUp = false) {
     if (!token) return;
@@ -150,12 +154,9 @@ export default function ScanDialog({
     // callback was registered with the scanner — the camera-start effect doesn't restart
     // on a windows change, so the closed-over props could be stale.
     const w = windowsRef.current;
-    if (!isDirectionOpen(w.onward)) {
-      setResult({
-        ok: false,
-        reason: 'window_closed',
-        error: `Scanning is open ${formatHM(w.onward.start)}–${formatHM(w.onward.end)} only.`,
-      });
+    const current = activeDirection(w);
+    if (!current) {
+      setResult({ ok: false, reason: 'window_closed', error: `Scanning is open ${openHoursText(w)} only.` });
       return;
     }
     if (busyRef.current && !walkUp) return;
@@ -167,7 +168,7 @@ export default function ScanDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ token, direction: 'onward', walkUp, source }),
+        body: JSON.stringify({ token, direction: current, walkUp, source }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -251,7 +252,8 @@ export default function ScanDialog({
     }
   }
 
-  // Run the camera only while the dialog is open and the onward window is open.
+  // Run the camera only while the dialog is open and a trip window is open —
+  // morning always, evening too when switched on in Settings.
   useEffect(() => {
     cameraGenRef.current++;
     if (open && legOpen) void startCamera();
@@ -277,14 +279,14 @@ export default function ScanDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Scan boarding pass</DialogTitle>
+          <DialogTitle>Scan boarding pass{leg ? ` · ${LEG_NAME[leg]}` : ''}</DialogTitle>
         </DialogHeader>
 
         {!legOpen && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <Clock className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              Scanning is open {formatHM(win.start)}–{formatHM(win.end)} only.
+              Scanning is open {openHoursText(windows)} only.
             </span>
           </div>
         )}
@@ -328,6 +330,9 @@ export default function ScanDialog({
               <div className="space-y-2">
                 <p className="font-medium text-green-700 dark:text-green-300">
                   {result.alreadyMarked ? '✓ Already marked present' : '✓ Marked present'}
+                  {result.direction === 'onward' || result.direction === 'return'
+                    ? ` · ${LEG_NAME[result.direction]}`
+                    : ''}
                   {result.walkUp ? ' · walk-up' : ''}
                 </p>
 

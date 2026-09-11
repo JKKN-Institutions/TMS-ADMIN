@@ -202,10 +202,13 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
       countOf(() => supabase.from('tms_booking').select('learner_id', head)
         .eq('travel_date', tomorrow), 'bookings.tomorrow', degraded),
 
+      // Morning only: a learner can now also have an evening `direction =
+      // 'return'` row the same day, and this figure means the morning trip.
       countOf(() => supabase.from('tms_attendance').select('id', head)
-        .eq('trip_date', today), 'attendance.marked', degraded),
+        .eq('trip_date', today).eq('direction', 'onward'), 'attendance.marked', degraded),
       countOf(() => supabase.from('tms_attendance').select('id', head)
-        .eq('trip_date', today).eq('status', 'present'), 'attendance.present', degraded),
+        .eq('trip_date', today).eq('status', 'present')
+        .eq('direction', 'onward'), 'attendance.present', degraded),
 
       countOf(() => supabase.from('tms_trip').select('id', head)
         .eq('travel_date', today), 'trips.today', degraded),
@@ -263,8 +266,10 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
       // travel_date), tms_attendance is (id).
       trendRows(supabase, 'tms_booking', 'travel_date', ['travel_date', 'learner_id'],
         trendDates, degraded, 'trend.bookings'),
+      // Morning only, same reason as attendance.marked/present above — this
+      // trend line means the morning trip, not every attendance row.
       trendRows(supabase, 'tms_attendance', 'trip_date', ['id'],
-        trendDates, degraded, 'trend.present', 'present'),
+        trendDates, degraded, 'trend.present', 'present', [['direction', 'onward']]),
 
       // ── Recent activity ──
       recentActivity(supabase, auth, degraded),
@@ -401,7 +406,9 @@ async function trendRows(
   dates: string[],
   degraded: Degraded,
   key: string,
-  statusFilter?: string
+  statusFilter?: string,
+  /** Extra equality filters, e.g. `[['direction', 'onward']]`. */
+  extraFilters?: Array<[string, string]>
 ): Promise<Map<string, number> | null> {
   try {
     const counts = new Map<string, number>();
@@ -419,6 +426,7 @@ async function trendRows(
       // Ordering on the primary key makes the walk deterministic.
       for (const col of orderKey) query = query.order(col, { ascending: true });
       if (statusFilter) query = query.eq('status', statusFilter);
+      if (extraFilters) for (const [col, val] of extraFilters) query = query.eq(col, val);
 
       const { data, error } = await query;
       if (error) {
@@ -519,10 +527,14 @@ async function hourlyScans(
 
     for (let page = 0; page < SUM_MAX_PAGES; page++) {
       const from = page * SUM_PAGE;
+      // Morning only, same reason as attendance.marked/present above — an
+      // evening scan burst would otherwise land in this same chart and be
+      // read as a second morning peak.
       const { data, error } = await supabase
         .from('tms_attendance')
         .select('scanned_at, status')
         .eq('trip_date', date)
+        .eq('direction', 'onward')
         .order('id', { ascending: true })
         .range(from, from + SUM_PAGE - 1);
 
@@ -613,8 +625,12 @@ async function routesWithNoScans(
       supabase.from('tms_booking').select('route_id').eq('travel_date', date)
         .order('travel_date', { ascending: true }).order('learner_id', { ascending: true })
         .range(0, SUM_PAGE * 4 - 1),
+      // Morning only, same reason as attendance.marked/present above — an
+      // evening-only scan must not hide a route whose morning trip was
+      // never marked.
       supabase.from('tms_attendance').select('route_id').eq('trip_date', date)
-        .eq('status', 'present').order('id', { ascending: true })
+        .eq('status', 'present').eq('direction', 'onward')
+        .order('id', { ascending: true })
         .range(0, SUM_PAGE * 4 - 1),
       supabase.from('tms_route').select('id, route_number').eq('status', 'active'),
     ]);
@@ -662,13 +678,15 @@ async function previousDay(
   try {
     for (let back = 1; back <= 14; back++) {
       const date = addDays(today, -back);
+      // Morning only, same reason as attendance.marked/present above — this
+      // figure means the morning trip, not every attendance row that day.
       const [bookedRes, presentRes, markedRes] = await Promise.all([
         supabase.from('tms_booking').select('learner_id', { count: 'exact', head: true })
           .eq('travel_date', date),
         supabase.from('tms_attendance').select('id', { count: 'exact', head: true })
-          .eq('trip_date', date).eq('status', 'present'),
+          .eq('trip_date', date).eq('status', 'present').eq('direction', 'onward'),
         supabase.from('tms_attendance').select('id', { count: 'exact', head: true })
-          .eq('trip_date', date),
+          .eq('trip_date', date).eq('direction', 'onward'),
       ]);
 
       if (bookedRes.error) {

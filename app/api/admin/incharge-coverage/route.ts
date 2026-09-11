@@ -80,9 +80,13 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
     const bookedByRoute = new Map<string, string[]>();
     const markedByRoute = new Map<string, string[]>();
     for (const c of chunk(routeIds)) {
+      // Morning only: a learner can now also have an evening `direction =
+      // 'return'` row the same day, and this board's "marked" means the
+      // morning trip an in-charge's share is answerable for.
       const [{ data: bk, error: bErr }, { data: at, error: atErr }] = await Promise.all([
         svc.from('tms_booking').select('route_id, learner_id').in('route_id', c).eq('travel_date', date),
-        svc.from('tms_attendance').select('route_id, learner_id').in('route_id', c).eq('trip_date', date),
+        svc.from('tms_attendance').select('route_id, learner_id').in('route_id', c)
+          .eq('trip_date', date).eq('direction', 'onward'),
       ]);
       // Never let either failure read as "the bus never ran" or "nobody
       // marked" — this board is what the office acts on.

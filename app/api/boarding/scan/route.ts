@@ -9,7 +9,8 @@ import { loadLearnerFeeStatus } from '@/lib/boarding/fee-status';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
-import { loadAttendanceWindows, isDirectionOpen, activeDirection, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
+import { loadAttendanceWindows, activeDirection, type AttDirection } from '@/lib/boarding/attendance-window';
+import { decideMarkDirection } from '@/lib/boarding/trip-direction';
 
 /**
  * POST a scanned boarding-pass token → mark the learner present for today.
@@ -144,15 +145,6 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // accepted, so an older client that has not been updated degrades to
     // today's behaviour rather than silently starting to accept cards.
     const source: ScanSource = body.source === 'camera' ? 'camera' : 'typed';
-    // Attendance is onward-only. A stale client requesting the retired evening
-    // leg must fail loudly rather than silently having its scan recorded as onward.
-    if (body.direction && body.direction !== 'onward') {
-      return NextResponse.json(
-        { ok: false, error: 'Only onward (morning) attendance is supported.' },
-        { status: 400 },
-      );
-    }
-    const direction: AttDirection = 'onward';
 
     const svc = createServiceRoleClient();
 
@@ -165,18 +157,20 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const learnerId = resolved.learnerId;
     const matchedBy = resolved.matchedBy;
 
-    // Time-window gate: scanning is only allowed inside the admin-configurable
-    // morning window. Outside it, the scan is rejected rather than recorded.
+    // Which trip, and whether scanning is open at all. The server clock decides;
+    // a scanner that names a different trip is on a stale screen and is refused
+    // rather than silently recorded on the other trip. See trip-direction.ts.
     const windows = await loadAttendanceWindows(svc);
-    if (!isDirectionOpen(windows[direction])) {
-      const w = windows[direction];
+    const decided = decideMarkDirection({ windows, requested: body.direction, windowExempt: false });
+    if (!decided.ok) {
       return NextResponse.json({
         ok: false,
-        reason: 'window_closed',
-        error: `Onward (morning) scanning is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
+        reason: decided.reason,
+        error: decided.error,
         activeDirection: activeDirection(windows),
-      }, { status: 409 });
+      }, { status: decided.status });
     }
+    const direction: AttDirection = decided.direction;
 
     const { data } = await svc
       .from('learners_profiles')

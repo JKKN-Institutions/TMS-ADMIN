@@ -58,18 +58,18 @@ function MarkControl({ status, disabled, onMark }: { status: RosterStatus; disab
 /**
  * Roster columns factory. Takes an `editable` flag (staff can manage AND the
  * roster is for today) + saving state + the mark callback (a roster row marks
- * attendance instead of view/edit/delete). Attendance marking is onward-only
- * (see lib/boarding/attendance-window.ts); the onward column is filterable
+ * attendance instead of view/edit/delete). THIS PAGE marks the morning trip
+ * only (see lib/boarding/attendance-window.ts); the onward column is filterable
  * (id + accessorFn + filterFn) so the page's `filters` can target it, and
  * renders a live mark control when editable, else a read-only pill — which is
  * also how advance-booking (future-date) rosters display.
  *
  * The `return` column is READ-ONLY, unconditionally, on every path — it never
  * renders a MarkControl and ignores `editable`. Evening (`return_status`)
- * writes were retired everywhere upstream (see lib/boarding/attendance-window.ts
- * and the writers under app/api/boarding/); this column exists solely so
- * historical `direction='return'` rows already in tms_attendance stay visible
- * (non-destructive-to-history rule). Do not wire it to `onMark`.
+ * marking now happens on the Attendance page, not here, when the evening
+ * window is switched on in Settings (see lib/boarding/attendance-window.ts and
+ * app/api/boarding/attendance/route.ts); this column shows those marks
+ * read-only so the roster still reflects both trips. Do not wire it to `onMark`.
  */
 export function getRosterColumns(
   editable: boolean,

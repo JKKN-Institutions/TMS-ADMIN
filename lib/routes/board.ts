@@ -64,8 +64,11 @@ export async function loadRouteBoard(date: string): Promise<RouteBoardResult> {
         supabase.from('tms_trip').select('route_id, status').eq('travel_date', date),
         tallyBy(supabase, 'tms_booking', 'route_id', ['travel_date', 'learner_id'],
           (q) => q.eq('travel_date', date), degraded, 'booked'),
+        // Morning only: a learner can now also have an evening `direction =
+        // 'return'` row the same day, and "boarded" here means the morning trip.
         tallyBy(supabase, 'tms_attendance', 'route_id', ['id'],
-          (q) => q.eq('trip_date', date).eq('status', 'present'), degraded, 'boarded'),
+          (q) => q.eq('trip_date', date).eq('status', 'present').eq('direction', 'onward'),
+          degraded, 'boarded'),
         tallyBy(supabase, 'tms_route_stop', 'route_id', ['id'],
           (q) => q.eq('is_active', true), degraded, 'stops'),
       ]);
