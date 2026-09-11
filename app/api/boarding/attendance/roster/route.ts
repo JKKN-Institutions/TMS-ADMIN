@@ -277,6 +277,29 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       ));
     }
 
+    // Offline card scanning: the phone matches a camera-read JKKN ID against
+    // this map when there is no signal. ACTIVE cards only -- a retired card
+    // must never mark anyone present, offline or not. The number is printed on
+    // the card itself, so sending it to the in-charge's phone discloses nothing.
+    // Best-effort: on a failed read the phone just treats every card as
+    // "unknown, will check when online".
+    const cards: Record<string, string> = {};
+    const rosterIds = [...new Set(rows.map((r) => r.learner_id))];
+    for (let i = 0; i < rosterIds.length; i += 150) {
+      const { data: idRows, error: idErr } = await svc
+        .from('jkkn_identities')
+        .select('jkkn_id, learner_profile_id')
+        .in('learner_profile_id', rosterIds.slice(i, i + 150))
+        .is('retired_at', null);
+      if (idErr) {
+        console.error('boarding roster: card map read failed (non-fatal):', idErr);
+        break;
+      }
+      for (const r of (idRows ?? []) as Array<{ jkkn_id: string; learner_profile_id: string | null }>) {
+        if (r.learner_profile_id) cards[r.jkkn_id] = r.learner_profile_id;
+      }
+    }
+
     const present = rows.filter((r) => r.status === 'present').length;
     const absent = rows.filter((r) => r.status === 'absent').length;
     const booked = rows.filter((r) => r.booked).length;
@@ -297,6 +320,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
         date,
         direction,
         rows,
+        cards,
         counts: {
           total: rows.length,
           present,
