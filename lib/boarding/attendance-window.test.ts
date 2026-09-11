@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   istMinutesOfDay,
   hmToMinutes,
@@ -6,7 +7,10 @@ import {
   formatHM,
   isDirectionOpen,
   activeDirection,
+  validateWindows,
+  loadAttendanceWindows,
   DEFAULT_WINDOWS,
+  type AttendanceWindows,
 } from './attendance-window';
 
 describe('istMinutesOfDay', () => {
@@ -63,7 +67,115 @@ describe('activeDirection', () => {
     expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-07-23T12:30:00Z'))).toBeNull();
   });
   it('returns onward at any time when the window is disabled', () => {
-    const win = { onward: { ...DEFAULT_WINDOWS.onward, enabled: false } };
+    const win: AttendanceWindows = {
+      ...DEFAULT_WINDOWS,
+      onward: { ...DEFAULT_WINDOWS.onward, enabled: false },
+    };
     expect(activeDirection(win, new Date('2026-07-23T12:30:00Z'))).toBe('onward');
+  });
+});
+
+// IST is UTC+5:30. 08:00 IST = 02:30Z, 16:30 IST = 11:00Z, 17:00 IST = 11:30Z, 20:00 IST = 14:30Z.
+const withEvening = (over: Partial<AttendanceWindows['return']> = {}): AttendanceWindows => ({
+  onward: { ...DEFAULT_WINDOWS.onward },
+  return: { ...DEFAULT_WINDOWS.return, active: true, ...over },
+});
+
+describe('activeDirection with two trips', () => {
+  it('is onward inside the morning window', () => {
+    expect(activeDirection(withEvening(), new Date('2026-07-23T02:30:00Z'))).toBe('onward');
+  });
+  it('is return inside the evening window when evening is switched on', () => {
+    expect(activeDirection(withEvening(), new Date('2026-07-23T11:30:00Z'))).toBe('return');
+  });
+  it('is null inside the evening window when evening is switched off', () => {
+    expect(activeDirection(DEFAULT_WINDOWS, new Date('2026-07-23T11:30:00Z'))).toBeNull();
+  });
+  it('is null outside both windows', () => {
+    expect(activeDirection(withEvening(), new Date('2026-07-23T14:30:00Z'))).toBeNull();
+  });
+  it('lets morning win if stored data overlaps despite validation', () => {
+    const w: AttendanceWindows = {
+      onward: { ...DEFAULT_WINDOWS.onward, end: '17:30' },
+      return: { ...DEFAULT_WINDOWS.return, active: true },
+    };
+    expect(activeDirection(w, new Date('2026-07-23T11:30:00Z'))).toBe('onward');
+  });
+});
+
+describe('validateWindows', () => {
+  it('accepts the defaults', () => {
+    expect(validateWindows(DEFAULT_WINDOWS)).toBeNull();
+  });
+  it('refuses overlapping windows when evening is switched on', () => {
+    const w: AttendanceWindows = {
+      onward: { ...DEFAULT_WINDOWS.onward, end: '17:30' },
+      return: { ...DEFAULT_WINDOWS.return, active: true },
+    };
+    expect(validateWindows(w)).toBe('End the morning window at or before 4:30 PM to switch on evening attendance.');
+  });
+  it('allows a morning that ends exactly when the evening starts', () => {
+    const w: AttendanceWindows = {
+      onward: { ...DEFAULT_WINDOWS.onward, end: '16:30' },
+      return: { ...DEFAULT_WINDOWS.return, active: true },
+    };
+    expect(validateWindows(w)).toBeNull();
+  });
+  it('refuses switching evening on while either trip has no set hours', () => {
+    const w: AttendanceWindows = {
+      onward: { ...DEFAULT_WINDOWS.onward, enabled: false },
+      return: { ...DEFAULT_WINDOWS.return, active: true },
+    };
+    expect(validateWindows(w)).toBe('To switch on evening attendance, both trips need set hours. Turn Enforce on for both.');
+  });
+  it('ignores the evening times while evening is switched off', () => {
+    const w: AttendanceWindows = {
+      onward: { ...DEFAULT_WINDOWS.onward },
+      return: { ...DEFAULT_WINDOWS.return, start: '19:00', end: '16:00', active: false },
+    };
+    expect(validateWindows(w)).toBeNull();
+  });
+  it('refuses an evening that starts after it ends when switched on', () => {
+    expect(validateWindows(withEvening({ start: '19:00', end: '16:00' })))
+      .toBe('Evening: start time must be before end time');
+  });
+  it('refuses a morning that starts after it ends', () => {
+    const w: AttendanceWindows = { ...DEFAULT_WINDOWS, onward: { ...DEFAULT_WINDOWS.onward, start: '10:00', end: '09:00' } };
+    expect(validateWindows(w)).toBe('Morning: start time must be before end time');
+  });
+});
+
+describe('loadAttendanceWindows', () => {
+  const fakeSvc = (result: { data: unknown; error: unknown }) =>
+    ({ from: () => ({ select: async () => result }) }) as unknown as SupabaseClient;
+
+  it('reads both trips and the evening switch', async () => {
+    const w = await loadAttendanceWindows(fakeSvc({
+      data: [
+        { direction: 'onward', start_time: '07:00:00', end_time: '16:30:00', enabled: true, is_active: true },
+        { direction: 'return', start_time: '16:30:00', end_time: '19:00:00', enabled: true, is_active: true },
+      ],
+      error: null,
+    }));
+    expect(w.onward).toEqual({ direction: 'onward', start: '07:00', end: '16:30', enabled: true, active: true });
+    expect(w.return).toEqual({ direction: 'return', start: '16:30', end: '19:00', enabled: true, active: true });
+  });
+  it('never treats the morning row as switched off', async () => {
+    const w = await loadAttendanceWindows(fakeSvc({
+      data: [{ direction: 'onward', start_time: '07:00:00', end_time: '09:30:00', enabled: true, is_active: false }],
+      error: null,
+    }));
+    expect(w.onward.active).toBe(true);
+  });
+  it('keeps evening off when there is no evening row', async () => {
+    const w = await loadAttendanceWindows(fakeSvc({
+      data: [{ direction: 'onward', start_time: '07:00:00', end_time: '09:30:00', enabled: true, is_active: true }],
+      error: null,
+    }));
+    expect(w.return.active).toBe(false);
+  });
+  it('falls back to the defaults on a read error', async () => {
+    const w = await loadAttendanceWindows(fakeSvc({ data: null, error: { message: 'boom' } }));
+    expect(w).toEqual(DEFAULT_WINDOWS);
   });
 });
