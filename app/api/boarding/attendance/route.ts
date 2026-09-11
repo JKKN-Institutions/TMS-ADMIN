@@ -5,7 +5,8 @@ import { logActivity } from '@/lib/activity/log';
 import { notifyLearner } from '@/lib/notifications/notify';
 import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { loadAttendanceWindows, isDirectionOpen, formatHM, type AttDirection } from '@/lib/boarding/attendance-window';
+import { loadAttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
+import { decideMarkDirection, decideClearDirection } from '@/lib/boarding/trip-direction';
 import { summarizeMarkBatch, type RpcMarkOutcome } from '@/lib/boarding/mark-batch';
 import { canClearMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
 import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
@@ -109,16 +110,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     const body = (await request.json().catch(() => ({}))) as {
       routeId?: string; direction?: string; marks?: MarkInput[];
     };
-    // Attendance is onward-only. A stale client requesting the retired evening
-    // leg must fail loudly rather than silently having its marks recorded as onward.
-    if (body.direction && body.direction !== 'onward') {
-      return NextResponse.json(
-        { error: 'Only onward (morning) attendance is supported.' },
-        { status: 400 },
-      );
-    }
     const routeId = String(body.routeId ?? '');
-    const direction: AttDirection = 'onward';
     const marks = Array.isArray(body.marks) ? body.marks : [];
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (marks.length === 0) return NextResponse.json({ error: 'No marks provided' }, { status: 400 });
@@ -145,16 +137,20 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // -- except for override holders, who exist specifically to fix a mark
     // AFTER the window closes, the only time a wrong mark is otherwise
     // unfixable.
-    if (!auth.isSuperAdmin && !isOverrideHolder) {
-      const windows = await loadAttendanceWindows(svc);
-      if (!isDirectionOpen(windows[direction])) {
-        const w = windows[direction];
-        return NextResponse.json({
-          error: `Onward (morning) marking is open ${formatHM(w.start)}–${formatHM(w.end)} only.`,
-          reason: 'window_closed',
-        }, { status: 409 });
-      }
+    // Which trip. Ordinary staff get the server clock's trip and are refused
+    // outside the windows. A window-exempt caller (super admin, override holder)
+    // corrects marks outside the windows, where the clock has no answer, so they
+    // name the trip. See lib/boarding/trip-direction.ts.
+    const windows = await loadAttendanceWindows(svc);
+    const decided = decideMarkDirection({
+      windows,
+      requested: body.direction,
+      windowExempt: auth.isSuperAdmin || isOverrideHolder,
+    });
+    if (!decided.ok) {
+      return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
     }
+    const direction: AttDirection = decided.direction;
 
     const cfg = await loadSchedulingConfig(svc);
     const { data: callerProfile } = await auth.supabase
@@ -506,16 +502,7 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = (await request.json().catch(() => ({}))) as ClearInput;
-    // Attendance is onward-only. A stale client requesting the retired evening
-    // leg must fail loudly rather than silently clearing the wrong (or a nonexistent) leg.
-    if (body.direction && body.direction !== 'onward') {
-      return NextResponse.json(
-        { error: 'Only onward (morning) attendance is supported.' },
-        { status: 400 },
-      );
-    }
     const routeId = String(body.routeId ?? '');
-    const direction: AttDirection = 'onward';
     const learnerIds = Array.isArray(body.learnerIds) ? [...new Set(body.learnerIds.filter(Boolean))] : [];
     if (!routeId) return NextResponse.json({ error: 'routeId is required' }, { status: 400 });
     if (learnerIds.length === 0) return NextResponse.json({ error: 'No learners provided' }, { status: 400 });
@@ -529,6 +516,15 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
+    // An undo names the trip whose mark it removes. The clock must NOT decide:
+    // there is no time window on undo, and at 17:00 the clock would say
+    // "evening" while the staffer is undoing a morning mark.
+    const windows = await loadAttendanceWindows(svc);
+    const decided = decideClearDirection({ windows, requested: body.direction });
+    if (!decided.ok) {
+      return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
+    }
+    const direction: AttDirection = decided.direction;
     // See the note on the marking path above: the trip_date rows are matched
     // and deleted by stays on UTC (pre-existing, shared with the QR scanner);
     // only the authorization date is IST.
