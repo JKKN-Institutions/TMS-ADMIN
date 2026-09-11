@@ -13,6 +13,9 @@ import { loadShareLearnerIds } from '@/lib/boarding/allocation-repo';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { istToday } from '@/lib/booking/window';
+import { partitionByTap } from '@/lib/boarding/tapped-at';
+import { buildMarkResults } from '@/lib/boarding/mark-results';
+import type { MarkRejectReason } from '@/lib/boarding/offline/protocol';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -36,7 +39,14 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
   return !!data;
 }
 
-interface MarkInput { learnerId: string; status: 'present' | 'absent' }
+interface MarkInput {
+  learnerId: string;
+  status: 'present' | 'absent';
+  /** When the staffer tapped, from the phone. Absent on older clients. */
+  tappedAt?: string;
+  /** Phone-generated id, echoed in `results` so the outbox can settle this mark. */
+  clientId?: string;
+}
 interface StudentLite { id: string; transport_route_id: string | null; transport_stop_id: string | null }
 
 /**
@@ -133,24 +143,47 @@ async function mark(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    // Time-window gate: manual marking follows the same window as the scanner
-    // -- except for override holders, who exist specifically to fix a mark
-    // AFTER the window closes, the only time a wrong mark is otherwise
-    // unfixable.
-    // Which trip. Ordinary staff get the server clock's trip and are refused
-    // outside the windows. A window-exempt caller (super admin, override holder)
-    // corrects marks outside the windows, where the clock has no answer, so they
-    // name the trip. See lib/boarding/trip-direction.ts.
+    // Which trip, and is its window open. Two contracts:
+    //  - LEGACY: no mark carries tappedAt. The server clock decides the trip
+    //    for the whole request at arrival, exactly as before (see
+    //    lib/boarding/trip-direction.ts).
+    //  - OFFLINE-AWARE: the request names its trip, and EACH mark is judged for
+    //    that trip at the moment it was TAPPED. A morning mark made on a bus
+    //    with no signal and sent at 17:30 is still a morning mark, and still
+    //    counts. See lib/boarding/tapped-at.ts for the bounds.
+    // A window-exempt caller (super admin, override holder) skips the window in
+    // both contracts -- they exist to fix a mark after it closes.
+    const exempt = auth.isSuperAdmin || isOverrideHolder;
     const windows = await loadAttendanceWindows(svc);
-    const decided = decideMarkDirection({
-      windows,
-      requested: body.direction,
-      windowExempt: auth.isSuperAdmin || isOverrideHolder,
-    });
-    if (!decided.ok) {
-      return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
+    const legacy = marks.every((m) => !m.tappedAt);
+    const now = new Date();
+
+    let direction: AttDirection;
+    if (legacy) {
+      const decided = decideMarkDirection({ windows, requested: body.direction, windowExempt: exempt });
+      if (!decided.ok) {
+        return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
+      }
+      direction = decided.direction;
+    } else {
+      // A queued batch is one trip. Without a named trip there is no way to say
+      // which trip a late mark belongs to, so refuse rather than guess.
+      if (body.direction !== 'onward' && body.direction !== 'return') {
+        return NextResponse.json(
+          { error: 'Name the trip (onward or return) when sending tap times.', reason: 'bad_direction' },
+          { status: 400 },
+        );
+      }
+      direction = body.direction;
     }
-    const direction: AttDirection = decided.direction;
+
+    const tap = legacy
+      ? { accepted: marks.map((mark) => ({ mark, at: now })), rejected: [] as Array<{ mark: MarkInput; reason: MarkRejectReason }>, tripDate: istToday(now) }
+      : partitionByTap(marks, now, windows, direction, { exemptWindow: exempt });
+    const rejected: Array<{ clientId?: string; reason: MarkRejectReason }> =
+      tap.rejected.map((r) => ({ clientId: r.mark.clientId, reason: r.reason }));
+    const tapAt = new Map<MarkInput, Date>(tap.accepted.map((a) => [a.mark, a.at] as const));
+    const acceptedMarks = tap.accepted.map((a) => a.mark);
 
     const cfg = await loadSchedulingConfig(svc);
     const { data: callerProfile } = await auth.supabase
@@ -164,15 +197,27 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // deliberately left on UTC. That is pre-existing behaviour shared with the
     // QR scanner, and changing which date a mark lands on is out of scope here
     // and would be dangerous. Only the authorization lookup moves to IST.
-    const authDate = istToday();
-    const today = new Date().toISOString().slice(0, 10);
+    const authDate = legacy ? istToday() : tap.tripDate;
+    // Legacy requests keep storing under the UTC date (see the note above).
+    // Offline-aware requests store under the IST date of the tap. Inside the
+    // attendance window the two are the same calendar day.
+    const today = legacy ? new Date().toISOString().slice(0, 10) : tap.tripDate;
+
+    if (acceptedMarks.length === 0) {
+      // Every mark was refused for its timing. Not an error: the outbox needs
+      // the per-mark reasons to move them to its "Not saved" list.
+      return NextResponse.json({
+        success: true, updated: 0, skipped: 0, locked: [], dropped: marks.length, walkUps: 0,
+        results: buildMarkResults({ rejected, sent: [], outcomes: [], markerName: () => '' }),
+      });
+    }
     const markable = await markableLearnerIds(svc, {
       callerEmail, routeId, date: authDate, isSuperAdmin: auth.isSuperAdmin,
       enabled: cfg.inchargeShareScoringEnabled,
     });
 
     if (markable) {
-      const outside = marks.filter((m) => !markable.all.has(m.learnerId)).map((m) => m.learnerId);
+      const outside = acceptedMarks.filter((m) => !markable.all.has(m.learnerId)).map((m) => m.learnerId);
       if (outside.length > 0) {
         // Name the owner. A bare 403 tells the in-charge nothing they can act
         // on, and "ask Priya, they own this student" is the whole point of
@@ -190,7 +235,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     }
 
     // Verify each learner actually belongs to this route; grab their stop id.
-    const learnerIds = [...new Set(marks.map((m) => m.learnerId).filter(Boolean))];
+    const learnerIds = [...new Set(acceptedMarks.map((m) => m.learnerId).filter(Boolean))];
     const stopByLearner = new Map<string, string | null>();
     for (const c of chunk(learnerIds)) {
       const { data: studs } = await svc
@@ -245,31 +290,39 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // KPI and out of seatsRemaining, and it remains distinguishable from a
     // booked absence by joining tms_booking on the day.
 
-    const rows = marks
-      .filter((m) => stopByLearner.has(m.learnerId) && (m.status === 'present' || m.status === 'absent'))
-      .map((m) => ({
-        learner_id: m.learnerId,
-        route_id: routeId,
-        stop_id: stopByLearner.get(m.learnerId) ?? null,
-        status: m.status,
-        // "Boarded without a booking" — a claim about RIDING, so it can only
-        // be true of a PRESENT mark. Deriving it from the booking alone (as
-        // this did while absent-without-a-ticket was rejected outright) would
-        // now flag every unbooked ABSENCE as a walk-up, and the flag has teeth:
-        // walk-ups come off the route's remaining seats in seatsRemaining and
-        // feed the admin Walk-ups KPI. A student marked absent would have been
-        // counted as occupying a seat they were just recorded as not taking,
-        // and would have been notified that they travelled without booking.
-        is_walk_up: m.status === 'present' && !bookedLearners.has(m.learnerId),
-        // PER-LEARNER entitlement. p_allow_override below is a per-CALL flag and
-        // cannot express this: within one batch the caller may own some learners
-        // and merely cover others, and only the owned ones outrank a coverer's
-        // existing mark. Mirrors decideMark's isLearnerOwner.
-        allow_override: markable ? markable.own.has(m.learnerId) : false,
-      }));
+    const isValidStatus = (m: MarkInput) => m.status === 'present' || m.status === 'absent';
+    const onRoute = acceptedMarks.filter((m) => stopByLearner.has(m.learnerId) && isValidStatus(m));
+    for (const m of acceptedMarks) {
+      if (!onRoute.includes(m)) {
+        rejected.push({ clientId: m.clientId, reason: isValidStatus(m) ? 'not_on_route' : 'invalid' });
+      }
+    }
+
+    const rows = onRoute.map((m) => ({
+      learner_id: m.learnerId,
+      route_id: routeId,
+      stop_id: stopByLearner.get(m.learnerId) ?? null,
+      status: m.status,
+      // "Boarded without a booking" -- a claim about RIDING, so it can only
+      // be true of a PRESENT mark. See the history above for why.
+      is_walk_up: m.status === 'present' && !bookedLearners.has(m.learnerId),
+      // PER-LEARNER entitlement; mirrors decideMark's isLearnerOwner.
+      allow_override: markable ? markable.own.has(m.learnerId) : false,
+      // When the staffer tapped, so the record says when they boarded rather
+      // than when the phone found signal. Needs the 20260911200000 migration.
+      scanned_at: (tapAt.get(m) ?? now).toISOString(),
+    }));
+    // sent[i] produced outcomes[i]: the RPC answers in request order.
+    const sent = onRoute.map((m, i) => ({ clientId: m.clientId, walkUp: rows[i].is_walk_up }));
 
     if (rows.length === 0) {
-      return NextResponse.json({ error: 'No valid learners for this route' }, { status: 400 });
+      if (legacy) {
+        return NextResponse.json({ error: 'No valid learners for this route' }, { status: 400 });
+      }
+      return NextResponse.json({
+        success: true, updated: 0, skipped: 0, locked: [], dropped: marks.length, walkUps: 0,
+        results: buildMarkResults({ rejected, sent: [], outcomes: [], markerName: () => '' }),
+      });
     }
 
     // Atomic: the decision and the write are ONE statement per learner, inside
@@ -319,6 +372,13 @@ async function mark(request: NextRequest, auth: AuthContext) {
       markedAt: l.markedAt,
     }));
 
+    const results = buildMarkResults({
+      rejected,
+      sent,
+      outcomes: (outcomes ?? []) as RpcMarkOutcome[],
+      markerName: (id) => (id && lockedNames.get(id)) || 'another staff member',
+    });
+
     // 409 only when ownership is the WHOLE story. 403 would be wrong -- this
     // staffer MAY use the endpoint, these rows are taken.
     if (summary.disposition === 'all_locked') {
@@ -328,6 +388,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
           error: `Already marked ${first.status} by ${first.markedByName}. Only they or the transport office can change it.`,
           reason: 'locked',
           locked,
+          results,
         },
         { status: 409 },
       );
@@ -384,7 +445,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // happen, so it can never render this as a clean sweep.
     return NextResponse.json({
       success: true, updated: written, skipped, locked, dropped: summary.dropped,
-      walkUps: notified.length,
+      walkUps: notified.length, results,
     });
   } catch (e) {
     console.error('boarding manual mark error:', e);
