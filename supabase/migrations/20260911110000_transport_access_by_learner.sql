@@ -168,5 +168,9 @@ $function$;
 -- CREATE OR REPLACE does not preserve grants on a NEW function, and a revoked
 -- EXECUTE grant on a boarding function has already caused a silent multi-week
 -- lockout once. Grant both explicitly.
+-- The `authenticated` grant on the core is superseded two migrations later by
+-- 20260911120000_revoke_authenticated_on_transport_access_core.sql, which
+-- revokes it (and a leftover PUBLIC grant): the core reads any learner's fee
+-- position with no caller check, so only the service role should reach it.
 grant execute on function public.tms_transport_access_for_learner(uuid) to authenticated, service_role;
 grant execute on function public.tms_student_transport_access(uuid) to authenticated, service_role;

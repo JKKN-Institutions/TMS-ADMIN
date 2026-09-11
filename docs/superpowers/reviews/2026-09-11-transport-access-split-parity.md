@@ -129,8 +129,17 @@ The scratch function was dropped afterwards; `pg_proc` confirms zero rows remain
 
 | Role | `tms_student_transport_access(uuid)` | `tms_transport_access_for_learner(uuid)` |
 |---|---|---|
-| `authenticated` | true | true |
+| `authenticated` | true | false |
 | `service_role` | true | true |
+
+Both grants held at the time this parity check ran. A later migration on this branch,
+`20260911120000_revoke_authenticated_on_transport_access_core.sql`, revoked `authenticated`
+(and a leftover `PUBLIC` grant) from the learner-keyed core: it reads any learner's fee position
+with no caller-identity check inside it, so it is reachable only by the service role. The wrapper
+`tms_student_transport_access(uuid)` is SECURITY DEFINER and keeps its own `authenticated` grant
+unchanged, so the portal gate every learner depends on is unaffected. Verified live via
+`has_function_privilege` on 2026-09-11: `authenticated` is `false` and `service_role` is `true` on
+the core.
 
 ## Verdict
 

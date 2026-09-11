@@ -311,17 +311,24 @@ export default function ScanDialog({
                   <p className="rounded-md border border-muted px-2 py-1 text-xs text-muted-foreground">
                     Fee status unavailable.
                   </p>
-                ) : result.fees && result.fees.overdueCount > 0 ? (
+                ) : result.fees &&
+                  (result.fees.overdueCount > 0 || result.fees.reason === 'term1_unpaid') ? (
                   <div className="rounded-md border border-red-400 bg-red-50 px-2 py-1 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200">
-                    <p className="font-medium">
-                      ⚠ Fees pending · ₹{result.fees.totalOwed.toLocaleString('en-IN')} overdue
-                    </p>
-                    <p className="mt-0.5">
-                      {result.fees.terms
-                        .filter((t) => t.overdue)
-                        .map((t) => `Term ${t.termNo ?? '—'}`)
-                        .join(', ')}
-                    </p>
+                    {result.fees.overdueCount > 0 ? (
+                      <>
+                        <p className="font-medium">
+                          ⚠ Fees pending · ₹{result.fees.totalOwed.toLocaleString('en-IN')} overdue
+                        </p>
+                        <p className="mt-0.5 break-words">
+                          {result.fees.terms
+                            .filter((t) => t.overdue)
+                            .map((t) => `Term ${t.termNo ?? '—'}`)
+                            .join(', ')}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="font-medium">⚠ Fees pending · Term 1 billed and unpaid</p>
+                    )}
                   </div>
                 ) : null}
 
