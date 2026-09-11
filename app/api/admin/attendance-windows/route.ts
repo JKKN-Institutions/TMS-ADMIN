@@ -35,9 +35,11 @@ function parseWindow(dir: AttDirection, w: WindowInput, stored: AttendanceWindow
     direction: dir,
     start,
     end,
-    enabled: w.enabled ?? stored.enabled,
+    // A truthy non-boolean (e.g. the string "false") must not pass through:
+    // it would be stored as a real `false` and quietly disable a leg.
+    enabled: typeof w.enabled === 'boolean' ? w.enabled : stored.enabled,
     // Morning attendance is always on; only the evening has a switch.
-    active: dir === 'onward' ? true : (w.active ?? stored.active),
+    active: dir === 'onward' ? true : (typeof w.active === 'boolean' ? w.active : stored.active),
   };
 }
 

@@ -23,19 +23,26 @@ export function AttendanceWindowSettings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Set when the initial GET didn't return real settings — network error,
+  // non-OK response, or `success` false. The form still shows its defaults in
+  // that case, but Save must be disabled: writing those defaults would
+  // overwrite the real stored windows with them.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch('/api/admin/attendance-windows', { cache: 'no-store', credentials: 'same-origin' });
         const json = await res.json();
-        if (json?.success) {
+        if (res.ok && json?.success) {
           const w = json.data.windows as AttendanceWindows;
           setOnward({ start: w.onward.start, end: w.onward.end, enabled: w.onward.enabled });
           setEvening({ start: w.return.start, end: w.return.end, enabled: w.return.enabled, active: w.return.active });
+        } else {
+          setLoadFailed(true);
         }
       } catch {
-        /* keep defaults */
+        setLoadFailed(true);
       } finally {
         setLoading(false);
       }
@@ -82,10 +89,16 @@ export function AttendanceWindowSettings() {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold text-gray-900">Attendance Scan Windows</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          Boarding staff can mark attendance only during these windows. The time decides which
-          trip a mark belongs to. Outside them, scanning and manual marking are closed.
-        </p>
+        {loadFailed ? (
+          <p className="mt-1 text-sm font-medium text-red-600 dark:text-red-400">
+            Could not load the current attendance windows. Reload the page before making changes.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-gray-600">
+            Boarding staff can mark attendance only during these windows. The time decides which
+            trip a mark belongs to. Outside them, scanning and manual marking are closed.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -133,7 +146,7 @@ export function AttendanceWindowSettings() {
       <button
         type="button"
         onClick={save}
-        disabled={saving}
+        disabled={saving || loadFailed}
         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
       >
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

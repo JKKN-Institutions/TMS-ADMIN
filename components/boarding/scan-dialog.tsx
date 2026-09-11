@@ -252,7 +252,8 @@ export default function ScanDialog({
     }
   }
 
-  // Run the camera only while the dialog is open and the onward window is open.
+  // Run the camera only while the dialog is open and a trip window is open —
+  // morning always, evening too when switched on in Settings.
   useEffect(() => {
     cameraGenRef.current++;
     if (open && legOpen) void startCamera();

@@ -179,7 +179,12 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900 truncate">{route ? `Route ${route.route_number || '—'}` : 'Roster'}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-900 truncate">{route ? `Route ${route.route_number || '—'}` : 'Roster'}</h1>
+              <span className="shrink-0 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                Morning trip
+              </span>
+            </div>
             {route?.route_name && <p className="text-gray-600 text-sm truncate">{route.route_name}</p>}
           </div>
         </div>

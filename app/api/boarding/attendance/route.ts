@@ -5,7 +5,7 @@ import { logActivity } from '@/lib/activity/log';
 import { notifyLearner } from '@/lib/notifications/notify';
 import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { loadAttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
+import { loadAttendanceWindows, LEG_NAME, type AttDirection } from '@/lib/boarding/attendance-window';
 import { decideMarkDirection, decideClearDirection } from '@/lib/boarding/trip-direction';
 import { summarizeMarkBatch, type RpcMarkOutcome } from '@/lib/boarding/mark-batch';
 import { canClearMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
@@ -357,7 +357,9 @@ async function mark(request: NextRequest, auth: AuthContext) {
           learnerId: o.learner_id,
           actorId: auth.userId,
           title: 'Travelled without a booking',
-          body: `You were recorded travelling${onRoute} on ${day} without a booking for the day. Please book your seat before travelling.`,
+          // Names the trip so a morning and an evening walk-up the same day
+          // read as two distinct notices, not a duplicate.
+          body: `You were recorded travelling on the ${LEG_NAME[direction]} trip${onRoute} on ${day} without a booking for the day. Please book your seat before travelling.`,
           category: 'transport',
           url: '/student/attendance',
         });

@@ -31,8 +31,9 @@ interface BoardingDashboard {
   assignedRouteCount: number;
   studentsTotal: number;
   bookedToday: number;
-  // Onward/return were dropped: attendance is onward-only, so `onward` always
-  // equalled `total` and `return` was never read.
+  // Onward/return were dropped: `total` is deliberately the morning trip only
+  // (see app/api/boarding/dashboard/route.ts) even though tms_attendance can
+  // now also hold an evening `direction = 'return'` row the same day.
   today: { total: number };
   routes: BoardingRoute[];
   recent: RecentScan[];

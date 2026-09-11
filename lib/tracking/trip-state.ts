@@ -28,9 +28,9 @@ export const MIN_MOVE_KM = 0.02;
 
 /**
  * Which leg is this? Derived from IST time-of-day against the route's arrival_time.
- * `tms_attendance` only ever holds 'onward' because the transport office retired the
- * return ATTENDANCE leg — but buses still run both ways (all 24 routes carry evening
- * stop times), so trips support both. The driver may override this.
+ * `tms_attendance` now holds both legs: 'onward' (morning) always, and 'return'
+ * (evening) when the evening window is switched on in Settings. The driver may
+ * override this.
  */
 export function deriveDirection(
   nowMinutesIst: number,

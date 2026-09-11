@@ -81,8 +81,11 @@ async function getDashboard(auth: AuthContext) {
 
       if (!error && att) {
         const rows = att as AttRow[];
+        // Morning only: a learner can now also have an evening `direction =
+        // 'return'` row the same day, and "Boarded Today" here means the
+        // morning trip. `recent` below intentionally keeps both directions.
         for (const a of rows) {
-          if (a.status !== 'present') continue;
+          if (a.status !== 'present' || a.direction !== 'onward') continue;
           total += 1;
           presentByRoute[a.route_id] = (presentByRoute[a.route_id] ?? 0) + 1;
         }
