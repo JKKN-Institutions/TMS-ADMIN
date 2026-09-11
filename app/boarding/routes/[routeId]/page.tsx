@@ -87,8 +87,9 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
 
   // Persist a batch of onward marks; optimistic with revert on failure.
   // `prev` is captured inside the state updater so it's never a stale closure.
-  // Marking is onward-only (see lib/boarding/attendance-window.ts) — the API
-  // rejects direction: 'return' with a 400, so this always sends 'onward'.
+  // This page marks the morning trip only. The server clock decides which
+  // trip a request belongs to and refuses one that names the wrong trip;
+  // evening marking is done on the Attendance page, not here.
   const postMarks = async (marks: { learnerId: string; status: 'present' | 'absent' }[]) => {
     if (marks.length === 0) return;
     const wanted = new Map(marks.map((m) => [m.learnerId, m.status]));
@@ -116,6 +117,16 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
       if (res.status === 409 && json?.reason === 'locked') {
         setStudents(prev);
         toast.error(json.error || 'Another staff member has already marked this student.');
+        return;
+      }
+      // This page only ever sends the morning trip. Outside the morning window
+      // (typically the evening window now open) the server refuses it as the
+      // wrong trip — reloading this page cannot fix that, so point staff at
+      // the page that actually offers the evening trip instead of showing the
+      // server's "reload the page" wording, which would mislead here.
+      if (res.status === 409 && (json?.reason === 'wrong_trip' || json?.reason === 'evening_off')) {
+        setStudents(prev);
+        toast.error('This page marks the morning trip. Mark the evening trip from the Attendance page.');
         return;
       }
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -9,7 +9,12 @@ import ScanDialog from '@/components/boarding/scan-dialog';
 import AbsenceDialog, { type AbsenceRoute } from '@/components/boarding/absence-dialog';
 import { getRosterColumns } from './columns';
 import type { RosterRow } from '@/lib/booking/roster';
-import { DEFAULT_WINDOWS, isDirectionOpen, formatHM, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
+import {
+  DEFAULT_WINDOWS, activeDirection, LEG_NAME,
+  type AttendanceWindows, type AttDirection,
+} from '@/lib/boarding/attendance-window';
+import { openHoursText } from '@/lib/boarding/trip-direction';
+import { useAttendanceSettingsLive } from '@/hooks/use-attendance-settings-live';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -28,22 +33,28 @@ async function fetchRoster(date: string, direction: AttDirection): Promise<Roste
   return json.data as RosterResponse;
 }
 
-async function fetchWindows(): Promise<{ windows: AttendanceWindows }> {
+async function fetchWindows(): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
   const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
-  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS };
-  return { windows: json.data.windows as AttendanceWindows };
+  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
+  return {
+    windows: json.data.windows as AttendanceWindows,
+    // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
+    activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
+  };
 }
 
 export default function BoardingAttendancePage() {
   const qc = useQueryClient();
   const [date, setDate] = useState(todayStr());
-  const direction: AttDirection = 'onward';
+  const [direction, setDirection] = useState<AttDirection>('onward');
+  // Once the staffer picks a tab, stop moving them to the open trip.
+  const tabChosen = useRef(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [absenceOpen, setAbsenceOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  // Forces a re-render every 30s so the amber closed-window hint (isToday && !legOpen)
-  // appears/disappears at a scan-window edge instead of lagging until an unrelated re-render.
+  // Forces a re-render every 30s so the tabs/hint (isToday && !canMark, openLeg)
+  // appear/disappear at a scan-window edge instead of lagging until an unrelated re-render.
   const [, setTick] = useState(0);
   useEffect(() => {
     const i = setInterval(() => setTick((t) => t + 1), 30_000);
@@ -52,11 +63,29 @@ export default function BoardingAttendancePage() {
 
   const isToday = date === todayStr();
 
-  const { data: winData } = useQuery({ queryKey: ['boarding-attendance-window'], queryFn: fetchWindows });
+  const { data: winData } = useQuery({
+    queryKey: ['boarding-attendance-window'],
+    queryFn: fetchWindows,
+    // Settings changes are pushed live (useAttendanceSettingsLive). These two
+    // re-reads cover a phone that dropped its live connection in the background.
+    refetchOnWindowFocus: true,
+    refetchInterval: 120_000,
+  });
+  useAttendanceSettingsLive();
   const windows = winData?.windows ?? DEFAULT_WINDOWS;
 
-  const legOpenNow = isDirectionOpen(windows.onward);
-  const canMarkNow = isToday && legOpenNow;
+  // Open on the trip that is open for marking, unless the staffer picked a tab.
+  useEffect(() => {
+    if (!tabChosen.current && winData?.activeDirection) setDirection(winData.activeDirection);
+  }, [winData?.activeDirection]);
+  // Evening switched off while its tab is showing: fall back to the morning.
+  useEffect(() => {
+    if (direction === 'return' && !windows.return.active) setDirection('onward');
+  }, [direction, windows.return.active]);
+
+  // Marking is allowed only on the tab whose window is open right now.
+  const openLeg = activeDirection(windows);
+  const canMarkNow = isToday && openLeg === direction;
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['boarding-roster', date, direction],
@@ -93,8 +122,7 @@ export default function BoardingAttendancePage() {
     return [...byId.values()];
   }, [rows]);
 
-  const legOpen = isDirectionOpen(windows.onward);
-  const canMark = isToday && legOpen;
+  const canMark = canMarkNow;
 
   const mark = useCallback(
     async (row: RosterRow, status: 'present' | 'absent') => {
@@ -233,7 +261,7 @@ export default function BoardingAttendancePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `attendance-${date}-onward.csv`;
+    a.download = `attendance-${date}-${direction}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -356,9 +384,40 @@ export default function BoardingAttendancePage() {
         </div>
       </div>
 
-      {isToday && !legOpen && (
+      {windows.return.active && (
+        <div
+          role="tablist"
+          aria-label="Trip"
+          className="inline-flex rounded-lg border border-gray-300 p-0.5 text-sm dark:border-gray-700"
+        >
+          {(['onward', 'return'] as const).map((leg) => (
+            <button
+              key={leg}
+              type="button"
+              role="tab"
+              aria-selected={direction === leg}
+              onClick={() => {
+                tabChosen.current = true;
+                setDirection(leg);
+              }}
+              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+                direction === leg
+                  ? 'bg-green-600 text-white'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+              }`}
+            >
+              {LEG_NAME[leg]}
+              {isToday && openLeg === leg ? ' · open now' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isToday && !canMark && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          Attendance window is {formatHM(windows.onward.start)}–{formatHM(windows.onward.end)}; marking present/absent and scanning are closed until it opens.
+          {openLeg
+            ? `Marking is open for the ${LEG_NAME[openLeg].toLowerCase()} trip now. Switch to the ${LEG_NAME[openLeg]} tab to mark.`
+            : `Attendance is open ${openHoursText(windows)} only. Marking present or absent and scanning are closed until then.`}
         </p>
       )}
 
