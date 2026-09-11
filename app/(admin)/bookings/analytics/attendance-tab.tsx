@@ -288,7 +288,7 @@ export default function AttendanceTab({ data }: { data: AttendanceBlock }) {
               <Cell label="Without booking" value={num(k.walkUps)} Icon={AlertTriangle} color="var(--viz-warning)" />
               <Cell label="Onward" value={num(data.byDirection.onward)} Icon={ScanLine} color="var(--viz-accent)" />
               <Cell label="Return" value={num(data.byDirection.return)} Icon={ScanLine} color="var(--viz-context)" />
-              <Cell label="QR / manual" value={`${num(data.byMethod.qr_scan)} / ${num(data.byMethod.manual)}`} Icon={QrCode} color="var(--viz-neutral)" />
+              <Cell label="QR / card / manual" value={`${num(data.byMethod.qr_scan)} / ${num(data.byMethod.id_card)} / ${num(data.byMethod.manual)}`} Icon={QrCode} color="var(--viz-neutral)" />
             </div>
           )}
         </section>

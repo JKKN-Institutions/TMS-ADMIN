@@ -182,7 +182,7 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       bookedBy: oneOf(params.get('booked_by'), ['self', 'admin'] as const),
       direction: oneOf(params.get('direction'), ['onward', 'return'] as const),
       attStatus: oneOf(params.get('att_status'), ['present', 'absent'] as const),
-      method: oneOf(params.get('method'), ['qr_scan', 'manual'] as const),
+      method: oneOf(params.get('method'), ['qr_scan', 'manual', 'id_card'] as const),
     };
 
     const svc = createServiceRoleClient();
