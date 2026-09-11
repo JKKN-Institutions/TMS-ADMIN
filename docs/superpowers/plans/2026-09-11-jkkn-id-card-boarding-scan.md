@@ -200,21 +200,28 @@ Why this task exists: `tms_attendance_method_check` currently permits only `qr_s
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `lib/booking/analytics-attendance.test.ts`, inside the existing top-level `describe`:
+Add to `lib/booking/analytics-attendance.test.ts`, inside the existing top-level `describe('aggregateAttendance', ...)`. The file already defines the helpers `at(learner, date, over)` and `agg(bookings, attendance, over)`; use them rather than calling `aggregateAttendance` directly:
 
 ```ts
   it('counts id_card marks separately from qr_scan and manual', () => {
-    const rows = [
-      at('L1', '2026-07-09', { method: 'id_card' }),
-      at('L2', '2026-07-09', { method: 'id_card' }),
-      at('L3', '2026-07-09', { method: 'qr_scan' }),
-    ];
-    const out = computeAttendanceAnalytics(rows, [], EMPTY_FILTERS);
-    expect(out.byMethod).toEqual({ qr_scan: 1, manual: 0, id_card: 2 });
+    const cardOut = agg(
+      [bk('L1', '2026-07-09'), bk('L2', '2026-07-09'), bk('L3', '2026-07-09')],
+      [
+        at('L1', '2026-07-09', { method: 'id_card' }),
+        at('L2', '2026-07-09', { method: 'id_card' }),
+        at('L3', '2026-07-09', { method: 'qr_scan' }),
+      ],
+    );
+    expect(cardOut.byMethod).toEqual({ qr_scan: 1, manual: 0, id_card: 2 });
   });
 ```
 
-If the local helper `at` or the call signature in this file differs from the above, match the file's existing convention exactly rather than the sketch here; read the neighbouring tests first.
+Two existing assertions in this same file will now fail because they spell out the whole `byMethod` object and it has gained a key. Both must gain `id_card: 0`:
+
+- `lib/booking/analytics-attendance.test.ts:136` — currently `expect(out.byMethod).toEqual({ qr_scan: 2, manual: 0 });`
+- `lib/booking/analytics-attendance.test.ts:333` — currently `expect(filtered.byMethod).toEqual({ qr_scan: 1, manual: 0 });`
+
+Those two are the complete list; a repository-wide search for `byMethod` in tests returns only them.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
