@@ -7,11 +7,30 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isDirectionOpen, formatHM, type AttendanceWindows } from '@/lib/boarding/attendance-window';
+import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
+
+type FeeTerm = {
+  termNo: number | null;
+  amount: number | null;
+  balance: number | null;
+  dueDate: string | null;
+  status: string | null;
+  paid: boolean;
+  overdue: boolean;
+};
 
 type ScanResult = {
   ok: boolean;
-  learner?: { name: string; rollNumber: string | null };
+  matchedBy?: 'pass' | 'jkkn_id' | 'pass_code';
+  learner?: {
+    name: string;
+    rollNumber: string | null;
+    photoUrl?: string | null;
+    routeLabel?: string | null;
+    stopLabel?: string | null;
+  };
   direction?: string;
+  booked?: boolean;
   walkUp?: boolean;
   reason?: 'not_booked' | 'window_closed';
   seatsRemaining?: number;
@@ -20,6 +39,14 @@ type ScanResult = {
   alreadyMarked?: { by: string; at: string | null };
   /** This scan corrected an earlier absent mark made by someone else. */
   overrode?: { from: 'present' | 'absent'; by: string; at: string | null };
+  /** null means the fee read failed. Render that as unavailable, never as 0. */
+  fees?: {
+    allowed: boolean;
+    reason: string | null;
+    overdueCount: number;
+    totalOwed: number;
+    terms: FeeTerm[];
+  } | null;
   error?: string;
 };
 
@@ -62,6 +89,7 @@ export default function ScanDialog({
   const startingRef = useRef(false);
   const busyRef = useRef(false);
   const lastTokenRef = useRef('');
+  const lastSourceRef = useRef<ScanSource>('camera');
   // Kept current every render so the long-lived scan callback (registered once by the
   // camera-start effect) always reads the latest windows instead of the stale
   // closure captured when the effect last ran.
@@ -75,8 +103,15 @@ export default function ScanDialog({
   const win = windows.onward;
   const legOpen = isDirectionOpen(win);
 
-  async function submit(token: string, walkUp = false) {
+  async function submit(token: string, source: ScanSource, walkUp = false) {
     if (!token) return;
+    // Instant feedback beats a round trip. The SERVER refusal is still the
+    // authority; this only spares the staffer the wait.
+    const decision = classifyScan(token, source);
+    if (decision.refusal === 'typed_jkkn_id') {
+      setResult({ ok: false, error: 'Point the camera at the card to use a JKKN ID.' });
+      return;
+    }
     // Read the CURRENT windows via the ref, not the props closed over when this
     // callback was registered with the scanner — the camera-start effect doesn't restart
     // on a windows change, so the closed-over props could be stale.
@@ -92,12 +127,13 @@ export default function ScanDialog({
     if (busyRef.current && !walkUp) return;
     busyRef.current = true;
     lastTokenRef.current = token;
+    lastSourceRef.current = source;
     try {
       const res = await fetch('/api/boarding/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ token, direction: 'onward', walkUp }),
+        body: JSON.stringify({ token, direction: 'onward', walkUp, source }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -141,7 +177,7 @@ export default function ScanDialog({
       const gen = cameraGenRef.current;
       const scanner = new Html5Qrcode(READER_ID);
       try {
-        await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, (decoded) => submit(decoded), () => {});
+        await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, (decoded) => submit(decoded, 'camera'), () => {});
         if (cameraGenRef.current !== gen) {
           // Cleanup already ran (dialog closed/unmounted) while start() was pending — this
           // scanner was never assigned to scannerRef, so nothing else can stop it. Stop it
@@ -216,7 +252,9 @@ export default function ScanDialog({
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Or enter the 6-digit code:</p>
+          <p className="text-xs text-muted-foreground">
+            Or enter the 6-digit code. A JKKN ID must be scanned with the camera.
+          </p>
           <div className="flex gap-2">
             <Input
               value={manual}
@@ -226,7 +264,7 @@ export default function ScanDialog({
               placeholder="6-digit code"
               disabled={!legOpen}
             />
-            <Button onClick={() => submit(manual)} disabled={!manual || !legOpen}>
+            <Button onClick={() => submit(manual, 'typed')} disabled={!manual || !legOpen}>
               Mark
             </Button>
           </div>
@@ -235,21 +273,62 @@ export default function ScanDialog({
         {result && (
           <div className={`rounded-lg border p-3 text-sm ${result.ok ? 'border-green-400' : 'border-red-400'}`}>
             {result.ok ? (
-              <div>
+              <div className="space-y-2">
                 <p className="font-medium text-green-700 dark:text-green-300">
-                  {result.alreadyMarked
-                    ? '✓ Already marked present'
-                    : `✓ Marked present (${result.direction})`}
+                  {result.alreadyMarked ? '✓ Already marked present' : '✓ Marked present'}
                   {result.walkUp ? ' · walk-up' : ''}
                 </p>
-                <p>
-                  {result.learner?.name}
-                  {result.learner?.rollNumber ? ` · ${result.learner.rollNumber}` : ''}
-                </p>
+
+                <div className="flex items-start gap-3">
+                  {result.learner?.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- remote learner photo, next/image adds nothing here
+                    <img
+                      src={result.learner.photoUrl}
+                      alt=""
+                      className="h-14 w-14 shrink-0 rounded-md border object-cover"
+                    />
+                  ) : null}
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{result.learner?.name}</p>
+                    {result.learner?.rollNumber && (
+                      <p className="truncate text-xs text-muted-foreground">{result.learner.rollNumber}</p>
+                    )}
+                    <p className="truncate text-xs text-muted-foreground">
+                      {result.learner?.routeLabel ?? 'Route —'} · Stop: {result.learner?.stopLabel ?? '—'}
+                    </p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      {result.matchedBy === 'jkkn_id'
+                        ? 'JKKN ID card'
+                        : result.matchedBy === 'pass_code'
+                          ? 'Pass code'
+                          : 'Boarding pass'}
+                      {result.booked === false ? ' · not booked today' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                {result.fees === null ? (
+                  <p className="rounded-md border border-muted px-2 py-1 text-xs text-muted-foreground">
+                    Fee status unavailable.
+                  </p>
+                ) : result.fees && result.fees.overdueCount > 0 ? (
+                  <div className="rounded-md border border-red-400 bg-red-50 px-2 py-1 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200">
+                    <p className="font-medium">
+                      ⚠ Fees pending · ₹{result.fees.totalOwed.toLocaleString('en-IN')} overdue
+                    </p>
+                    <p className="mt-0.5">
+                      {result.fees.terms
+                        .filter((t) => t.overdue)
+                        .map((t) => `Term ${t.termNo ?? '—'}`)
+                        .join(', ')}
+                    </p>
+                  </div>
+                ) : null}
+
                 {/* A dozen in-charges can share this route. Naming who marked
                     first stops the second scanner wondering if the scan failed. */}
                 {result.alreadyMarked && (
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Marked by {result.alreadyMarked.by}
                     {result.alreadyMarked.at
                       ? ` at ${new Date(result.alreadyMarked.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
@@ -258,19 +337,19 @@ export default function ScanDialog({
                   </p>
                 )}
                 {result.overrode && (
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
                     ⚠ Was marked {result.overrode.from} by {result.overrode.by} — corrected to present.
                   </p>
                 )}
                 {result.overCapacity && (
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">⚠ Bus over capacity — boarded as overflow.</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300">⚠ Bus over capacity — boarded as overflow.</p>
                 )}
               </div>
             ) : result.reason === 'not_booked' ? (
               <div className="space-y-2">
                 <p className="text-amber-700 dark:text-amber-300">⚠ {result.learner?.name ?? 'Learner'} has no booking for today.</p>
                 <p className="text-xs text-muted-foreground">Seats remaining: {result.seatsRemaining ?? 0}</p>
-                <Button className="w-full" onClick={() => submit(lastTokenRef.current, true)}>
+                <Button className="w-full" onClick={() => submit(lastTokenRef.current, lastSourceRef.current, true)}>
                   {(result.seatsRemaining ?? 0) > 0 ? 'Add as walk-up' : 'Add as walk-up (over capacity)'}
                 </Button>
               </div>

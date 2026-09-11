@@ -3,7 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { verifyPass, matchPassCode } from '@/lib/boarding/pass';
-import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
+import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { loadLearnerFeeStatus } from '@/lib/boarding/fee-status';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -264,13 +264,18 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // into { error } instead of rejecting — that is library behaviour, not a
     // guarantee, and a rejection here would have produced a 500 after the
     // attendance row already existed.
-    const [routeSettled, stopSettled, feesSettled] = await Promise.allSettled([
+    const [routeSettled, stopSettled, feesSettled, markerNamesSettled] = await Promise.allSettled([
       svc.from('tms_route').select('route_number, route_name')
         .eq('id', learner.transport_route_id).maybeSingle(),
       learner.transport_stop_id
         ? svc.from('tms_route_stop').select('stop_name').eq('id', learner.transport_stop_id).maybeSingle()
         : Promise.resolve({ data: null }),
       loadLearnerFeeStatus(svc, learner.id),
+      // Display-only, same as the two reads above: the mark is already
+      // written, so a failed name lookup must fall back rather than fail
+      // the request. loadMarkerNames already swallows its own per-chunk
+      // errors; allSettled additionally covers a rejected promise.
+      loadMarkerNames(svc, [outcome?.existing_by ?? null]),
     ]);
     const route = (routeSettled.status === 'fulfilled' ? routeSettled.value.data : null) as
       { route_number: string | null; route_name: string | null } | null;
@@ -283,6 +288,19 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // A rejection lands on the same null the helper already returns on a failed
     // read, so the response still says "unavailable" and never a misleading 0.
     const fees = feesSettled.status === 'fulfilled' ? feesSettled.value : null;
+    const markerNames = markerNamesSettled.status === 'fulfilled' ? markerNamesSettled.value : new Map<string, string>();
+    // Honest, non-empty fallback: never render an empty string or a raw uuid
+    // to a staffer who is trying to figure out who marked this learner first.
+    const markerName = (id: string | null): string => (id && markerNames.get(id)) || 'another staff member';
+
+    const alreadyMarked =
+      outcome?.outcome === 'noop_same_status'
+        ? { by: markerName(outcome.existing_by), at: outcome.existing_at }
+        : undefined;
+    const overrode =
+      outcome?.outcome === 'overridden' && (outcome.existing_status === 'present' || outcome.existing_status === 'absent')
+        ? { from: outcome.existing_status, by: markerName(outcome.existing_by), at: outcome.existing_at }
+        : undefined;
 
     await logActivity(auth, request, {
       module: 'boarding',
@@ -318,6 +336,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
       walkUp: isWalkUp,
       overCapacity: overCapacity || undefined,
       alreadyPresent: alreadyPresent || undefined,
+      alreadyMarked,
+      overrode,
       // null, never a zeroed object: on a money panel a 0 reads as
       // "nothing owed", which is the one wrong answer that looks right.
       fees,
