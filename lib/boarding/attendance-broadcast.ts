@@ -27,6 +27,8 @@ export async function publishAttendanceSettingsChanged(): Promise<boolean> {
       body: JSON.stringify({
         messages: [{ topic: ATTENDANCE_SETTINGS_TOPIC, event: 'changed', payload: {}, private: true }],
       }),
+      // A hung Realtime endpoint must not hold up an already-committed save.
+      signal: AbortSignal.timeout(3000),
     });
     return res.ok;
   } catch {

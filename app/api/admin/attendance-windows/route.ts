@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import {
-  loadAttendanceWindows, validateWindows, LEG_NAME,
+  loadAttendanceWindows, readAttendanceWindows, validateWindows, LEG_NAME,
   type AttDirection, type AttendanceWindow, type AttendanceWindows,
 } from '@/lib/boarding/attendance-window';
 import { publishAttendanceSettingsChanged } from '@/lib/boarding/attendance-broadcast';
@@ -22,7 +22,7 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
   return !!data;
 }
 
-const HM = /^\d{2}:\d{2}$/;
+const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 interface WindowInput { start?: string; end?: string; enabled?: boolean; active?: boolean }
 
@@ -35,9 +35,9 @@ function parseWindow(dir: AttDirection, w: WindowInput, stored: AttendanceWindow
     direction: dir,
     start,
     end,
-    enabled: w.enabled !== false,
+    enabled: w.enabled ?? stored.enabled,
     // Morning attendance is always on; only the evening has a switch.
-    active: dir === 'onward' ? true : w.active === true,
+    active: dir === 'onward' ? true : (w.active ?? stored.active),
   };
 }
 
@@ -60,16 +60,29 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_MANAGE))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const body = (await request.json().catch(() => ({}))) as { onward?: WindowInput; return?: WindowInput };
+    const parsedBody = await request.json().catch(() => null);
+    const body = (parsedBody && typeof parsedBody === 'object' ? parsedBody : {}) as {
+      onward?: WindowInput; return?: WindowInput;
+    };
     const svc = createServiceRoleClient();
-    const stored = await loadAttendanceWindows(svc);
+    // Use the null-on-error read, not loadAttendanceWindows: a read failure
+    // must refuse the write, never fall back to defaults and overwrite the
+    // real stored row (especially the untouched evening leg) with them.
+    const stored = await readAttendanceWindows(svc);
+    if (!stored) {
+      return NextResponse.json(
+        { error: 'Could not read the current attendance windows. Nothing was saved; try again.' },
+        { status: 500 },
+      );
+    }
 
     const onward = parseWindow('onward', body.onward ?? {}, stored.onward);
     if (typeof onward === 'string') return NextResponse.json({ error: onward }, { status: 400 });
 
     // An older Settings screen sends no `return` key. Keep the stored evening
     // row exactly as it is, rather than reading the absence as "switch it off".
-    const ret = body.return ? parseWindow('return', body.return, stored.return) : stored.return;
+    const touchesEvening = !!body.return;
+    const ret = touchesEvening ? parseWindow('return', body.return!, stored.return) : stored.return;
     if (typeof ret === 'string') return NextResponse.json({ error: ret }, { status: 400 });
 
     const windows: AttendanceWindows = { onward, return: ret };
@@ -77,7 +90,11 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
     if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
     const now = new Date().toISOString();
-    const rows = [onward, ret].map((w) => ({
+    // Only write the rows the caller actually touched. An old client that
+    // never sends `return` must not rewrite the evening row's updated_at /
+    // updated_by — it never touched it.
+    const touched = touchesEvening ? [onward, ret] : [onward];
+    const rows = touched.map((w) => ({
       direction: w.direction,
       start_time: w.start,
       end_time: w.end,

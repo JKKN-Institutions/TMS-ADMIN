@@ -122,10 +122,13 @@ export function validateWindows(w: AttendanceWindows): string | null {
 
 /**
  * Load both trips' windows from the DB; each falls back to DEFAULT_WINDOWS when
- * its row is absent, and both do on a read error. The morning row's is_active is
- * ignored: morning attendance is always on.
+ * its row is absent. The morning row's is_active is ignored: morning attendance
+ * is always on. Returns null on a read error — the caller decides whether that
+ * is safe to treat as defaults (most callers) or must refuse to act (a save
+ * that would otherwise overwrite an unread row with defaults; see the admin
+ * PUT handler, which uses this instead of loadAttendanceWindows).
  */
-export async function loadAttendanceWindows(svc: SupabaseClient): Promise<AttendanceWindows> {
+export async function readAttendanceWindows(svc: SupabaseClient): Promise<AttendanceWindows | null> {
   const out: AttendanceWindows = {
     onward: { ...DEFAULT_WINDOWS.onward },
     return: { ...DEFAULT_WINDOWS.return },
@@ -133,7 +136,8 @@ export async function loadAttendanceWindows(svc: SupabaseClient): Promise<Attend
   const { data, error } = await svc
     .from('tms_attendance_window')
     .select('direction, start_time, end_time, enabled, is_active');
-  if (error || !data) return out; // missing table / empty ⇒ defaults
+  if (error) return null;
+  if (!data) return out; // empty table ⇒ defaults
   for (const r of data as {
     direction: string; start_time: string; end_time: string; enabled: boolean; is_active: boolean | null;
   }[]) {
@@ -147,4 +151,12 @@ export async function loadAttendanceWindows(svc: SupabaseClient): Promise<Attend
     };
   }
   return out;
+}
+
+/** Same as readAttendanceWindows, but falls back to fresh DEFAULT_WINDOWS on a read error. */
+export async function loadAttendanceWindows(svc: SupabaseClient): Promise<AttendanceWindows> {
+  return (await readAttendanceWindows(svc)) ?? {
+    onward: { ...DEFAULT_WINDOWS.onward },
+    return: { ...DEFAULT_WINDOWS.return },
+  };
 }

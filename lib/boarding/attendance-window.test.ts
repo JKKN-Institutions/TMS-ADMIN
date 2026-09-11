@@ -9,6 +9,7 @@ import {
   activeDirection,
   validateWindows,
   loadAttendanceWindows,
+  readAttendanceWindows,
   DEFAULT_WINDOWS,
   type AttendanceWindows,
 } from './attendance-window';
@@ -177,5 +178,15 @@ describe('loadAttendanceWindows', () => {
   it('falls back to the defaults on a read error', async () => {
     const w = await loadAttendanceWindows(fakeSvc({ data: null, error: { message: 'boom' } }));
     expect(w).toEqual(DEFAULT_WINDOWS);
+  });
+});
+
+describe('readAttendanceWindows', () => {
+  const fakeSvc = (result: { data: unknown; error: unknown }) =>
+    ({ from: () => ({ select: async () => result }) }) as unknown as SupabaseClient;
+
+  it('returns null on a read error, instead of masking it as defaults', async () => {
+    const w = await readAttendanceWindows(fakeSvc({ data: null, error: { message: 'boom' } }));
+    expect(w).toBeNull();
   });
 });
