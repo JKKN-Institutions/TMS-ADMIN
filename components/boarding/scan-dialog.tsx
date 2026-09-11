@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { isDirectionOpen, formatHM, type AttendanceWindows } from '@/lib/boarding/attendance-window';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { noteRead, type LastRead } from '@/lib/boarding/scan-dedupe';
+import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 
 type FeeTerm = {
   termNo: number | null;
@@ -52,6 +53,35 @@ type ScanResult = {
 };
 
 const READER_ID = 'scan-dialog-reader';
+
+const FEE_TONE: Record<FeeTone, string> = {
+  paid: 'border-green-400 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200',
+  overdue: 'border-red-400 bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200',
+  due: 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
+  none: 'border-muted text-muted-foreground',
+  unknown: 'border-muted text-muted-foreground',
+};
+
+const FEE_ICON: Record<FeeTone, string> = { paid: '✓ ', overdue: '✗ ', due: '✗ ', none: '', unknown: '' };
+
+/**
+ * The learner's transport-fee position, shown on every scan. Display only: it
+ * never decides whether attendance is marked. The wording rules live in
+ * lib/boarding/fee-badge.ts, where they are tested.
+ */
+function FeeBadgeView({ fees }: { fees: ScanResult['fees'] }) {
+  const badge = feeBadge(fees);
+  if (!badge) return null;
+  return (
+    <div className={`rounded-md border px-2 py-1 text-xs ${FEE_TONE[badge.tone]}`}>
+      <p className="font-medium">
+        {FEE_ICON[badge.tone]}
+        {badge.label}
+      </p>
+      {badge.detail && <p className="mt-0.5 break-words">{badge.detail}</p>}
+    </div>
+  );
+}
 
 /**
  * Scanner-in-a-modal. Attendance is onward-only, so there is no leg to pick — every
@@ -329,30 +359,7 @@ export default function ScanDialog({
                   </div>
                 </div>
 
-                {result.fees === null ? (
-                  <p className="rounded-md border border-muted px-2 py-1 text-xs text-muted-foreground">
-                    Fee status unavailable.
-                  </p>
-                ) : result.fees &&
-                  (result.fees.overdueCount > 0 || result.fees.reason === 'term1_unpaid') ? (
-                  <div className="rounded-md border border-red-400 bg-red-50 px-2 py-1 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200">
-                    {result.fees.overdueCount > 0 ? (
-                      <>
-                        <p className="font-medium">
-                          ⚠ Fees pending · ₹{result.fees.totalOwed.toLocaleString('en-IN')} overdue
-                        </p>
-                        <p className="mt-0.5 break-words">
-                          {result.fees.terms
-                            .filter((t) => t.overdue)
-                            .map((t) => `Term ${t.termNo ?? '—'}`)
-                            .join(', ')}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="font-medium">⚠ Fees pending · Term 1 billed and unpaid</p>
-                    )}
-                  </div>
-                ) : null}
+                <FeeBadgeView fees={result.fees} />
 
                 {/* A dozen in-charges can share this route. Naming who marked
                     first stops the second scanner wondering if the scan failed. */}
@@ -378,6 +385,7 @@ export default function ScanDialog({
               <div className="space-y-2">
                 <p className="text-amber-700 dark:text-amber-300">⚠ {result.learner?.name ?? 'Learner'} has no booking for today.</p>
                 <p className="text-xs text-muted-foreground">Seats remaining: {result.seatsRemaining ?? 0}</p>
+                <FeeBadgeView fees={result.fees} />
                 <Button className="w-full" onClick={() => submit(lastTokenRef.current, lastSourceRef.current, true)}>
                   {(result.seatsRemaining ?? 0) > 0 ? 'Add as walk-up' : 'Add as walk-up (over capacity)'}
                 </Button>

@@ -214,11 +214,17 @@ async function scan(request: NextRequest, auth: AuthContext) {
     if (!booked) {
       const seats = await seatsRemaining(svc, learner.transport_route_id, today);
       if (!body.walkUp) {
+        // The staffer is deciding right now whether to add this learner as a
+        // walk-up, so show their fee position here too. A failed or rejected
+        // read becomes null ("unavailable"): it must never turn this reply into
+        // an error, because that would hide the walk-up button.
+        const fees = await loadLearnerFeeStatus(svc, learner.id).catch(() => null);
         return NextResponse.json({
           ok: false,
           reason: 'not_booked',
           seatsRemaining: seats,
           learner: { name, rollNumber: learner.roll_number },
+          fees,
         });
       }
       isWalkUp = true;
