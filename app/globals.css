@@ -841,6 +841,15 @@ html {
 .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
   width: 2.75rem !important;
   height: 2.75rem !important;
+  /* Stay tappable while a modal is open. A Radix modal Dialog (the boarding scan
+     dialog, every admin form dialog) sets body.style.pointerEvents = 'none' and
+     re-enables only its own overlay and content. The FAB sets no pointer-events of
+     its own, so it inherited 'none': still drawn on top at z-index 9999, but a tap
+     fell through to the dialog overlay, which reads as a click outside and CLOSED
+     the dialog instead of opening the reporter. With this, the tap reaches the
+     FAB; the dialog still dismisses (the pointerdown is outside it), which also
+     releases the dialog's focus trap so the reporter form can take typing. */
+  pointer-events: auto !important;
 }
 .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn svg {
   width: 1.25rem !important;
