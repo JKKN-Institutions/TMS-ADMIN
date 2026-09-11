@@ -88,7 +88,19 @@ async function resolveLearnerId(
     // retired card must never mark anyone present.
     if (row.retired_at) return { error: 'This card has been retired. Issue a new one.', status: 409 };
     if (!row.learner_profile_id) {
-      return { error: 'That is a staff card. Attendance is for learners.', status: 409 };
+      // The only fact ESTABLISHED here is that the card has no learner link.
+      // person_kind is what separates staff from associates and visitors, so
+      // name it rather than calling every non-learner card a staff card: of
+      // the 1,042 cards that reach this branch, 309 are not staff at all.
+      const holder =
+        row.person_kind === 'team_member' ? 'a staff member'
+        : row.person_kind === 'associate' ? 'an associate'
+        : row.person_kind === 'external_participant' ? 'a visitor'
+        : 'someone with no learner record';
+      return {
+        error: `This card belongs to ${holder}, so nothing was recorded. If they are a learner, scan their bus pass QR instead.`,
+        status: 409,
+      };
     }
     return { learnerId: row.learner_profile_id, matchedBy: 'jkkn_id' };
   }
@@ -245,9 +257,14 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const outcome = (up.data as ScanOutcome[] | null)?.[0] ?? null;
     const alreadyPresent = outcome?.outcome === 'noop_same_status';
 
-    // Display-only. The mark is already written; a failed label read must not
-    // turn a successful scan into an error the staffer will retry.
-    const [routeRes, stopRes, fees] = await Promise.all([
+    // Display-only. The mark is already written, so none of these three may
+    // fail the request: a failed label read must not turn a successful scan
+    // into an error the staffer will retry. allSettled makes that STRUCTURAL
+    // rather than relying on the Supabase client resolving transport failures
+    // into { error } instead of rejecting — that is library behaviour, not a
+    // guarantee, and a rejection here would have produced a 500 after the
+    // attendance row already existed.
+    const [routeSettled, stopSettled, feesSettled] = await Promise.allSettled([
       svc.from('tms_route').select('route_number, route_name')
         .eq('id', learner.transport_route_id).maybeSingle(),
       learner.transport_stop_id
@@ -255,11 +272,17 @@ async function scan(request: NextRequest, auth: AuthContext) {
         : Promise.resolve({ data: null }),
       loadLearnerFeeStatus(svc, learner.id),
     ]);
-    const route = routeRes.data as { route_number: string | null; route_name: string | null } | null;
+    const route = (routeSettled.status === 'fulfilled' ? routeSettled.value.data : null) as
+      { route_number: string | null; route_name: string | null } | null;
     const routeLabel = route
       ? [route.route_number, route.route_name].filter(Boolean).join(' — ') || null
       : null;
-    const stopLabel = (stopRes.data as { stop_name?: string } | null)?.stop_name ?? null;
+    const stop = (stopSettled.status === 'fulfilled' ? stopSettled.value.data : null) as
+      { stop_name?: string } | null;
+    const stopLabel = stop?.stop_name ?? null;
+    // A rejection lands on the same null the helper already returns on a failed
+    // read, so the response still says "unavailable" and never a misleading 0.
+    const fees = feesSettled.status === 'fulfilled' ? feesSettled.value : null;
 
     await logActivity(auth, request, {
       module: 'boarding',
