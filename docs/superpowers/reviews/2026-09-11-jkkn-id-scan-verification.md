@@ -45,7 +45,7 @@ Three methods listed as expected: `qr_scan`, `manual`, `id_card`.
 | `public.tms_student_transport_access(uuid)` (wrapper) | **true** | **true** |
 | `public.tms_transport_access_for_learner(uuid)` (core) | **false** | **true** |
 
-This matches the expected, deliberate split: the wrapper (which enforces "you may only ask about yourself") is callable by any authenticated user; the core (which reads any learner's fee position with no caller check) is callable only by the service role, i.e. only from trusted server-side code paths like the boarding scan route.
+This matches the expected, deliberate split: the wrapper performs no caller check of its own — it is callable by any authenticated user for any profile id it is given, and self-only access is enforced by its calling route (`app/api/student/transport-access/route.ts`), which passes the authenticated user's own id and never accepts one from the client. The core (which reads any learner's fee position with no caller check either) is callable only by the service role, i.e. only from trusted server-side code paths like the boarding scan route.
 
 ## 4. Scoped TypeScript check
 
