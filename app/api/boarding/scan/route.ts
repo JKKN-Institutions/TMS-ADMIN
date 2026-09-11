@@ -10,7 +10,8 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
 import { loadAttendanceWindows, activeDirection, type AttDirection } from '@/lib/boarding/attendance-window';
-import { decideMarkDirection } from '@/lib/boarding/trip-direction';
+import { judgeTappedAt } from '@/lib/boarding/tapped-at';
+import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
 
 /**
  * POST a scanned boarding-pass token → mark the learner present for today.
@@ -140,6 +141,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
 
     const body = (await request.json().catch(() => ({}))) as {
       token?: string; direction?: string; walkUp?: boolean; source?: string;
+      tappedAt?: string; clientId?: string;
     };
     // Optional, defaulting to 'typed'. That default can only NARROW what is
     // accepted, so an older client that has not been updated degrades to
@@ -161,16 +163,25 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // a scanner that names a different trip is on a stale screen and is refused
     // rather than silently recorded on the other trip. See trip-direction.ts.
     const windows = await loadAttendanceWindows(svc);
-    const decided = decideMarkDirection({ windows, requested: body.direction, windowExempt: false });
-    if (!decided.ok) {
+    // Judged at the moment of the SCAN. A scan queued on a bus with no signal
+    // arrives late; it counts if it was scanned inside its trip's window today.
+    // With no tappedAt this is the same check as before, at arrival.
+    const tap = judgeTappedAt(body.tappedAt, new Date(), windows, body.direction);
+    if (!tap.ok) {
+      // Keep evening attendance's reason names for the existing scan screen.
+      const reason =
+        tap.reason === 'outside_window' ? 'window_closed'
+        : tap.reason === 'invalid' && !body.tappedAt ? 'bad_direction'
+        : tap.reason;
       return NextResponse.json({
         ok: false,
-        reason: decided.reason,
-        error: decided.error,
+        clientId: body.clientId ?? null,
+        reason,
+        error: tap.error ?? REJECT_REASON_TEXT[tap.reason],
         activeDirection: activeDirection(windows),
-      }, { status: decided.status });
+      }, { status: tap.reason === 'invalid' ? 400 : 409 });
     }
-    const direction: AttDirection = decided.direction;
+    const direction: AttDirection = tap.direction;
 
     const { data } = await svc
       .from('learners_profiles')
@@ -196,7 +207,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    const today = istToday();
+    // The IST date of the scan. Identical to istToday() for a live scan.
+    const today = tap.tripDate;
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
 
     // Booking gate: a learner must have booked today, unless staff explicitly add
@@ -215,6 +227,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
         const fees = await loadLearnerFeeStatus(svc, learner.id).catch(() => null);
         return NextResponse.json({
           ok: false,
+          clientId: body.clientId ?? null,
           reason: 'not_booked',
           seatsRemaining: seats,
           learner: { name, rollNumber: learner.roll_number },
@@ -238,6 +251,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
           stop_id: learner.transport_stop_id,
           status: 'present',
           is_walk_up: isWalkUp,
+          scanned_at: tap.at.toISOString(),
         },
       ],
       p_trip_date: today,
@@ -322,6 +336,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       },
     });
     return NextResponse.json({
+      clientId: body.clientId ?? null,
       ok: true,
       matchedBy,
       learner: {
