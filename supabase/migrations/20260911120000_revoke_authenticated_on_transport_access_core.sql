@@ -1,0 +1,35 @@
+-- Revoke EXECUTE on the learner-keyed core tms_transport_access_for_learner(uuid)
+-- from both `authenticated` and `PUBLIC`.
+--
+-- Why: this function was granted EXECUTE with no caller-identity check inside
+-- it. Any signed-in user (student, staff, driver) could call it directly with
+-- an arbitrary learner_id and read that learner's transport fee position
+-- (paid/unpaid, balances, due dates) with no relationship to the caller at
+-- all. Worse, `\dp`-equivalent inspection (pg_proc.proacl) showed an `=X/postgres`
+-- entry alongside the explicit `authenticated` grant: PostgreSQL grants EXECUTE
+-- to PUBLIC by default on function creation unless explicitly revoked, and
+-- that default grant was never revoked here. That means EVERY role, including
+-- `anon` (i.e. a request with no session at all), could also call it directly
+-- and read any learner's money data. Revoking only the `authenticated` grant
+-- would have left that anon hole wide open, so this migration revokes from
+-- PUBLIC as well as authenticated.
+--
+-- Verified safe before applying: the live portal gate
+-- public.tms_student_transport_access(p_profile_id uuid) is SECURITY DEFINER
+-- and calls this core internally. A SECURITY DEFINER function executes its
+-- body (including any nested function calls it makes) as the function OWNER,
+-- so the core's privilege check never consults the original caller's grants.
+-- Confirmed empirically in uncommitted transactions: `set local role
+-- authenticated` before calling the wrapper returned the identical JSON
+-- payload before the revoke, after revoking only `authenticated`, and after
+-- additionally revoking from PUBLIC. Revoking therefore closes the direct-call
+-- hole (for both signed-in users and anonymous callers) without touching the
+-- portal gate that every learner depends on to log in.
+--
+-- service_role keeps EXECUTE via its own explicit grant (unaffected by
+-- revoking authenticated/PUBLIC) because server-side boarding-scan code calls
+-- the core directly via the service-role client. Both grants on the wrapper
+-- (authenticated + service_role) are left completely untouched.
+
+revoke execute on function public.tms_transport_access_for_learner(uuid) from authenticated;
+revoke execute on function public.tms_transport_access_for_learner(uuid) from public;

@@ -22,7 +22,7 @@ export interface AttendanceRow {
   stop_id: string | null;
   direction: 'onward' | 'return';
   status: 'present' | 'absent';
-  method: 'qr_scan' | 'manual';
+  method: 'qr_scan' | 'manual' | 'id_card';
   is_walk_up: boolean;
   /** profiles.id of the staff member who marked it. Nullable: `on delete set null`. */
   scanned_by: string | null;
@@ -58,7 +58,7 @@ export interface AnalyticsFilters {
   bookedBy: 'self' | 'admin' | null;
   direction: 'onward' | 'return' | null;
   attStatus: 'present' | 'absent' | null;
-  method: 'qr_scan' | 'manual' | null;
+  method: 'qr_scan' | 'manual' | 'id_card' | null;
 }
 
 export const EMPTY_FILTERS: AnalyticsFilters = {
@@ -216,7 +216,7 @@ export interface AttendanceBlock {
   /** How many distinct learners were recorded at all, so the UI can say "top 20 of N". */
   walkUpLearnerTotal: number;
   byDirection: { onward: number; return: number };
-  byMethod: { qr_scan: number; manual: number };
+  byMethod: { qr_scan: number; manual: number; id_card: number };
   byStatus: { present: number; absent: number };
   byDepartment: ShowRow[];
   /**

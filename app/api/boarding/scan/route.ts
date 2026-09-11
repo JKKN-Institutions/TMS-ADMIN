@@ -3,7 +3,9 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { verifyPass, matchPassCode } from '@/lib/boarding/pass';
-import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
+import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
+import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
+import { loadLearnerFeeStatus } from '@/lib/boarding/fee-status';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
 import { istToday } from '@/lib/booking/window';
@@ -28,6 +30,7 @@ interface LearnerLite {
   first_name: string | null;
   last_name: string | null;
   roll_number: string | null;
+  student_photo_url: string | null;
   transport_route_id: string | null;
   transport_stop_id: string | null;
 }
@@ -42,24 +45,67 @@ interface ScanOutcome {
   existing_at: string | null;
 }
 
+type MatchedBy = 'pass' | 'jkkn_id' | 'pass_code';
+type Resolved = { learnerId: string; matchedBy: MatchedBy } | { error: string; status: number };
+
 /**
- * Resolve the learner behind a scan input. Two shapes are accepted:
- *  - the signed QR / long token, whose identity is embedded → verified directly;
- *  - a typed 6-digit daily code, which carries no identity → reverse-looked-up
- *    among the learners this staff may scan (their assigned routes; super admins
- *    fall back to all route-allocated learners). The candidate set is therefore
- *    already authority-scoped, and matchPassCode flags collisions (>1 match).
+ * Resolve the learner behind a scan input. Three shapes are accepted:
+ *  - the signed QR / long token, whose identity is embedded and verified;
+ *  - a JKKN ID from a printed card, resolved through the identity register,
+ *    accepted ONLY from the camera because the number is public;
+ *  - a typed 6-digit daily code, reverse-looked-up among the learners this
+ *    staff may scan, so the candidate set is already authority-scoped.
  */
 async function resolveLearnerId(
   raw: string,
+  source: ScanSource,
   auth: AuthContext,
   svc: ReturnType<typeof createServiceRoleClient>
-): Promise<{ learnerId: string } | { error: string; status: number }> {
+): Promise<Resolved> {
+  // verifyPass stays the authority on the signed token: it checks the HMAC,
+  // which the shape classifier deliberately does not.
   const verified = verifyPass(raw);
-  if (verified) return { learnerId: verified };
+  if (verified) return { learnerId: verified, matchedBy: 'pass' };
 
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 6) {
+  const decision = classifyScan(raw, source);
+
+  if (decision.shape === 'jkkn_id') {
+    if (decision.refusal === 'typed_jkkn_id') {
+      return { error: 'Point the camera at the card to use a JKKN ID.', status: 400 };
+    }
+    const { data, error } = await svc
+      .from('jkkn_identities')
+      .select('learner_profile_id, person_kind, retired_at')
+      .eq('jkkn_id', decision.code)
+      .maybeSingle();
+    if (error) {
+      console.error('boarding scan jkkn id lookup error:', error);
+      return { error: 'Could not read the identity register', status: 500 };
+    }
+    const row = data as { learner_profile_id: string | null; person_kind: string | null; retired_at: string | null } | null;
+    if (!row) return { error: 'Card not recognised.', status: 404 };
+    // Retired numbers are kept forever so they are never reissued, but a
+    // retired card must never mark anyone present.
+    if (row.retired_at) return { error: 'This card has been retired. Issue a new one.', status: 409 };
+    if (!row.learner_profile_id) {
+      // The only fact ESTABLISHED here is that the card has no learner link.
+      // person_kind is what separates staff from associates and visitors, so
+      // name it rather than calling every non-learner card a staff card: of
+      // the 1,042 cards that reach this branch, 309 are not staff at all.
+      const holder =
+        row.person_kind === 'team_member' ? 'a staff member'
+        : row.person_kind === 'associate' ? 'an associate'
+        : row.person_kind === 'external_participant' ? 'a visitor'
+        : 'someone with no learner record';
+      return {
+        error: `This card belongs to ${holder}, so nothing was recorded. If they are a learner, scan their bus pass QR instead.`,
+        status: 409,
+      };
+    }
+    return { learnerId: row.learner_profile_id, matchedBy: 'jkkn_id' };
+  }
+
+  if (decision.shape === 'pass_code') {
     let query = svc.from('learners_profiles').select('id').not('transport_route_id', 'is', null);
     if (!auth.isSuperAdmin) {
       const routeIds = await getAssignedRouteIdsForUser(auth);
@@ -74,8 +120,8 @@ async function resolveLearnerId(
       return { error: 'Could not resolve pass code', status: 500 };
     }
     const candidateIds = ((data ?? []) as { id: string }[]).map((r) => r.id);
-    const matches = matchPassCode(digits, candidateIds, istToday());
-    if (matches.length === 1) return { learnerId: matches[0] };
+    const matches = matchPassCode(decision.code, candidateIds, istToday());
+    if (matches.length === 1) return { learnerId: matches[0], matchedBy: 'pass_code' };
     if (matches.length > 1) {
       return { error: 'Code matches multiple learners — please scan the QR code', status: 409 };
     }
@@ -91,7 +137,13 @@ async function scan(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as { token?: string; direction?: string; walkUp?: boolean };
+    const body = (await request.json().catch(() => ({}))) as {
+      token?: string; direction?: string; walkUp?: boolean; source?: string;
+    };
+    // Optional, defaulting to 'typed'. That default can only NARROW what is
+    // accepted, so an older client that has not been updated degrades to
+    // today's behaviour rather than silently starting to accept cards.
+    const source: ScanSource = body.source === 'camera' ? 'camera' : 'typed';
     // Attendance is onward-only. A stale client requesting the retired evening
     // leg must fail loudly rather than silently having its scan recorded as onward.
     if (body.direction && body.direction !== 'onward') {
@@ -104,12 +156,14 @@ async function scan(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
-    // Identify the learner from the QR token or a typed 6-digit code.
-    const resolved = await resolveLearnerId(String(body.token ?? ''), auth, svc);
+    // Identify the learner from the QR token, a scanned JKKN ID card, or a
+    // typed 6-digit code.
+    const resolved = await resolveLearnerId(String(body.token ?? ''), source, auth, svc);
     if ('error' in resolved) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
     const learnerId = resolved.learnerId;
+    const matchedBy = resolved.matchedBy;
 
     // Time-window gate: scanning is only allowed inside the admin-configurable
     // morning window. Outside it, the scan is rejected rather than recorded.
@@ -126,7 +180,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
 
     const { data } = await svc
       .from('learners_profiles')
-      .select('id, first_name, last_name, roll_number, transport_route_id, transport_stop_id')
+      .select('id, first_name, last_name, roll_number, student_photo_url, transport_route_id, transport_stop_id')
       .eq('id', learnerId)
       .maybeSingle();
     const learner = data as LearnerLite | null;
@@ -189,7 +243,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       p_trip_date: today,
       p_direction: direction,
       p_actor: auth.userId,
-      p_method: 'qr_scan',
+      p_method: matchedBy === 'jkkn_id' ? 'id_card' : 'qr_scan',
       p_allow_override: true,
     });
 
@@ -202,6 +256,51 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // mark stays with whoever actually scanned them first.
     const outcome = (up.data as ScanOutcome[] | null)?.[0] ?? null;
     const alreadyPresent = outcome?.outcome === 'noop_same_status';
+
+    // Display-only. The mark is already written, so none of these three may
+    // fail the request: a failed label read must not turn a successful scan
+    // into an error the staffer will retry. allSettled makes that STRUCTURAL
+    // rather than relying on the Supabase client resolving transport failures
+    // into { error } instead of rejecting — that is library behaviour, not a
+    // guarantee, and a rejection here would have produced a 500 after the
+    // attendance row already existed.
+    const [routeSettled, stopSettled, feesSettled, markerNamesSettled] = await Promise.allSettled([
+      svc.from('tms_route').select('route_number, route_name')
+        .eq('id', learner.transport_route_id).maybeSingle(),
+      learner.transport_stop_id
+        ? svc.from('tms_route_stop').select('stop_name').eq('id', learner.transport_stop_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      loadLearnerFeeStatus(svc, learner.id),
+      // Display-only, same as the two reads above: the mark is already
+      // written, so a failed name lookup must fall back rather than fail
+      // the request. loadMarkerNames already swallows its own per-chunk
+      // errors; allSettled additionally covers a rejected promise.
+      loadMarkerNames(svc, [outcome?.existing_by ?? null]),
+    ]);
+    const route = (routeSettled.status === 'fulfilled' ? routeSettled.value.data : null) as
+      { route_number: string | null; route_name: string | null } | null;
+    const routeLabel = route
+      ? [route.route_number, route.route_name].filter(Boolean).join(' — ') || null
+      : null;
+    const stop = (stopSettled.status === 'fulfilled' ? stopSettled.value.data : null) as
+      { stop_name?: string } | null;
+    const stopLabel = stop?.stop_name ?? null;
+    // A rejection lands on the same null the helper already returns on a failed
+    // read, so the response still says "unavailable" and never a misleading 0.
+    const fees = feesSettled.status === 'fulfilled' ? feesSettled.value : null;
+    const markerNames = markerNamesSettled.status === 'fulfilled' ? markerNamesSettled.value : new Map<string, string>();
+    // Honest, non-empty fallback: never render an empty string or a raw uuid
+    // to a staffer who is trying to figure out who marked this learner first.
+    const markerName = (id: string | null): string => (id && markerNames.get(id)) || 'another staff member';
+
+    const alreadyMarked =
+      outcome?.outcome === 'noop_same_status'
+        ? { by: markerName(outcome.existing_by), at: outcome.existing_at }
+        : undefined;
+    const overrode =
+      outcome?.outcome === 'overridden' && (outcome.existing_status === 'present' || outcome.existing_status === 'absent')
+        ? { from: outcome.existing_status, by: markerName(outcome.existing_by), at: outcome.existing_at }
+        : undefined;
 
     await logActivity(auth, request, {
       module: 'boarding',
@@ -219,15 +318,29 @@ async function scan(request: NextRequest, auth: AuthContext) {
         rollNumber: learner.roll_number,
         walkUp: isWalkUp,
         outcome: outcome?.outcome ?? null,
+        matchedBy,
       },
     });
     return NextResponse.json({
       ok: true,
-      learner: { name, rollNumber: learner.roll_number },
+      matchedBy,
+      learner: {
+        name,
+        rollNumber: learner.roll_number,
+        photoUrl: learner.student_photo_url,
+        routeLabel,
+        stopLabel,
+      },
       direction,
+      booked,
       walkUp: isWalkUp,
       overCapacity: overCapacity || undefined,
       alreadyPresent: alreadyPresent || undefined,
+      alreadyMarked,
+      overrode,
+      // null, never a zeroed object: on a money panel a 0 reads as
+      // "nothing owed", which is the one wrong answer that looks right.
+      fees,
     });
   } catch (e) {
     console.error('boarding scan error:', e);
