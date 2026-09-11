@@ -107,11 +107,29 @@ attendance".
 
 In `app/api/boarding/scan/route.ts` and both handlers in
 `app/api/boarding/attendance/route.ts` (mark and clear), the three
-`body.direction !== 'onward'` guards are removed. Each handler computes
-`direction = activeDirection(windows)` on the server. A null result refuses
-with the existing `window_closed` 409 shape, naming the open hours of both
-trips when evening is active. A direction in the request body is ignored and
-never trusted; accepting it silently keeps older clients working.
+`body.direction !== 'onward'` guards are removed. The trip is decided by two
+pure functions in a new `lib/boarding/trip-direction.ts`, because the three
+handlers need different rules:
+
+- **Scan, and mark by ordinary staff:** the server clock decides,
+  `activeDirection(windows)`. No open window refuses with 409
+  `window_closed`, naming the hours of every switched-on trip. If the request
+  names a DIFFERENT trip from the clock's, refuse with 409 `wrong_trip` ("It is
+  the evening trip now. Reload the page to mark it."). Silently using the
+  clock's trip would record an evening mark from a staffer looking at a stale
+  morning roster.
+- **Mark by a window-exempt caller** (super admin, or holder of
+  `tms.attendance.override`): these callers exist to correct marks outside the
+  windows, where the clock gives no answer. They name the trip they are
+  correcting. `onward` is always allowed; `return` only while evening is
+  switched on. With no trip named, fall back to the clock, then to `onward`.
+- **Clear (undo):** there is no time window on undo, and it removes a specific
+  existing mark, so the request names the trip. The clock must NOT decide:
+  an undo at 17:00 would otherwise delete the evening mark when the staffer
+  meant the morning one. `return` is allowed only while evening is switched on;
+  with no trip named, `onward`, which keeps older clients working.
+
+An unrecognised trip value refuses with 400.
 
 Every other gate is unchanged and runs in the same order: permission, identity
 resolution, learner lookup, allocated route, route assignment, booking and
@@ -160,19 +178,22 @@ place, the GET endpoint, never by the channel.
 Fallbacks, because phones drop live connections when backgrounded: the windows
 query also re-reads on tab focus and every two minutes.
 
-## Must be verified live, not assumed
+## Channel name, and what must be verified live
 
-The existing live-bus hook subscribes to `${topic}#${instanceId}`, while the bus
-publisher sends to the bare topic and the bus policy matches the topic's prefix.
-Nothing in this repository proves a message sent to `X` reaches a channel named
-`X#suffix`. Before the listening hook is written, a throwaway check must
-establish which channel name actually receives a broadcast on this project, and
-the new hook must use that. If the check shows the suffix breaks delivery, that
-also suggests live bus tracking may be quietly running on its polling fallback,
-which is to be REPORTED, not fixed, in this work.
+The settings listener subscribes to the BARE topic `tms_attendance_settings`,
+the exact name the server sends to. The live-bus hook appends
+`#${instanceId}` only because several consumers on one page share a topic on
+the singleton client; the settings listener has one subscriber per page and
+needs no suffix. Sending to `X` and listening on `X` is the standard path.
 
-Separately, a Settings save must be seen to reach a subscribed screen before
-merge.
+Before merge, a subscriber on the bare topic must be seen to receive a broadcast
+sent the way the settings save sends it.
+
+As a report-only diagnostic, the same check also tests whether a channel named
+`X#suffix` receives a message sent to `X`. The bus receive policy parses a
+route id out of the topic with `split_part(topic, ':', 2)::uuid`, which a
+`#suffix` would break. If the suffix blocks delivery, live bus tracking may be
+quietly running on its polling fallback. That is REPORTED, not fixed, here.
 
 ## State at deploy
 
