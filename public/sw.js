@@ -5,7 +5,7 @@
 // never data.
 //
 // Bump VERSION to invalidate all caches on the next activate.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `tms-shell-${VERSION}`;
 
 // Precached so the offline fallback + core icons work on the very first offline hit.
@@ -66,7 +66,7 @@ self.addEventListener('fetch', (event) => {
 
   // Page navigations → NetworkFirst, fall back to cached page, then offline shell.
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirst(request));
+    event.respondWith(networkFirst(request, url));
     return;
   }
 
@@ -79,14 +79,37 @@ self.addEventListener('fetch', (event) => {
   // Anything else same-origin → default network.
 });
 
-async function networkFirst(request) {
+// The installed app starts at "/", which the server REDIRECTS to the user's
+// home page. A navigation's redirect cannot be cached, so with no signal "/"
+// had nothing to fall back to and showed offline.html. Remember the last app
+// page actually served, and fall back to it for "/".
+const LAST_NAV_KEY = '/__tms-last-nav';
+
+function isAppPage(url) {
+  return (
+    url.pathname !== '/' &&
+    !url.pathname.startsWith('/auth/') &&
+    url.pathname !== '/offline.html' &&
+    !url.pathname.startsWith('/unauthorized') &&
+    !url.pathname.startsWith('/access-denied')
+  );
+}
+
+async function networkFirst(request, url) {
   const cache = await caches.open(CACHE);
   try {
     const response = await fetch(request);
-    if (response && response.ok) cache.put(request, response.clone());
+    if (response && response.ok) {
+      cache.put(request, response.clone());
+      if (isAppPage(url)) cache.put(LAST_NAV_KEY, new Response(url.pathname + url.search));
+    }
     return response;
   } catch {
-    const cached = await cache.match(request);
+    let cached = await cache.match(request);
+    if (!cached && url.pathname === '/') {
+      const pointer = await cache.match(LAST_NAV_KEY);
+      if (pointer) cached = await cache.match(await pointer.text());
+    }
     if (cached) return cached;
     const offline = await cache.match('/offline.html');
     return offline || Response.error();
