@@ -496,6 +496,7 @@ export default function BoardingAttendancePage() {
         onOpenChange={setScanOpen}
         windows={windows}
         onMarked={() => qc.invalidateQueries({ queryKey: ['boarding-roster'] })}
+        offline={{ online: offline.online, roster: view, queueScan: offline.queueScan }}
       />
 
       <AbsenceDialog

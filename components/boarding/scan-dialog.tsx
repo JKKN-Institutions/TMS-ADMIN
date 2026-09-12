@@ -6,11 +6,14 @@ import { Clock } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { activeDirection, LEG_NAME, type AttendanceWindows } from '@/lib/boarding/attendance-window';
+import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { noteRead, type LastRead } from '@/lib/boarding/scan-dedupe';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
+import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
+import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
+import type { RosterRow } from '@/lib/booking/roster';
 
 type FeeTerm = {
   termNo: number | null;
@@ -51,6 +54,10 @@ type ScanResult = {
     terms: FeeTerm[];
   } | null;
   error?: string;
+  /** Saved on this phone because there was no signal; sent later. */
+  offlineSaved?: boolean;
+  /** Offline pass QR: the signature is checked by the server on sync. */
+  unverified?: boolean;
 };
 
 const READER_ID = 'scan-dialog-reader';
@@ -97,11 +104,17 @@ export default function ScanDialog({
   onOpenChange,
   windows,
   onMarked,
+  offline,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   windows: AttendanceWindows;
   onMarked: () => void;
+  offline?: {
+    online: boolean;
+    roster: { rows: RosterRow[]; cards?: Record<string, string> } | undefined;
+    queueScan: (input: QueueScanInput) => Promise<void>;
+  };
 }) {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -136,10 +149,64 @@ export default function ScanDialog({
   // scanner.start() that resolves after teardown can detect it's stale and self-stop instead
   // of being adopted into scannerRef.
   const cameraGenRef = useRef(0);
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
 
   // Which trip is open for scanning right now, if any.
   const leg = activeDirection(windows);
   const legOpen = leg !== null;
+
+  /**
+   * No signal: resolve against the saved roster and queue. Returns true when it
+   * handled the scan. Only camera reads are queued -- a typed JKKN ID is
+   * refused anyway, and a typed 6-digit code needs the server.
+   */
+  async function submitOffline(
+    token: string, source: ScanSource, walkUp: boolean, direction: AttDirection,
+  ): Promise<boolean> {
+    const o = offlineRef.current;
+    if (!o) return false;
+    const local = resolveScanOffline(token, source, o.roster ?? { rows: [] });
+    if (local.kind === 'refused') {
+      setResult({ ok: false, error: local.message });
+      return true;
+    }
+    if (source !== 'camera') {
+      setResult({ ok: false, error: 'Typed codes need signal. Scan the QR or the ID card instead.' });
+      return true;
+    }
+    if (local.kind === 'resolved' && local.alreadyPresent) {
+      setResult({ ok: true, alreadyMarked: { by: 'you or a colleague', at: null }, learner: { name: local.name, rollNumber: null } });
+      return true;
+    }
+    if (local.kind === 'resolved' && !local.booked && !walkUp) {
+      // Same question the server asks, answered from the saved roster. The
+      // existing "Add as walk-up" button re-enters submit() with walkUp=true.
+      lastTokenRef.current = token;
+      lastSourceRef.current = source;
+      setResult({ ok: false, reason: 'not_booked', learner: { name: local.name, rollNumber: null }, seatsRemaining: 0, offlineSaved: false });
+      return true;
+    }
+    await o.queueScan({
+      learnerId: local.kind === 'resolved' ? local.learnerId : null,
+      token,
+      walkUp,
+      name: local.kind === 'resolved' ? local.name : null,
+      verified: local.kind === 'resolved' && local.verified,
+      direction,
+    });
+    setResult({
+      ok: true,
+      offlineSaved: true,
+      unverified: local.kind !== 'resolved' || !local.verified,
+      walkUp,
+      learner: local.kind === 'resolved' ? { name: local.name, rollNumber: null } : undefined,
+      error: local.kind === 'unknown' ? local.message : undefined,
+    });
+    setManual('');
+    onMarked();
+    return true;
+  }
 
   async function submit(token: string, source: ScanSource, walkUp = false) {
     if (!token) return;
@@ -157,6 +224,10 @@ export default function ScanDialog({
     const current = activeDirection(w);
     if (!current) {
       setResult({ ok: false, reason: 'window_closed', error: `Scanning is open ${openHoursText(w)} only.` });
+      return;
+    }
+    if (offlineRef.current && !offlineRef.current.online) {
+      await submitOffline(token, source, walkUp, current);
       return;
     }
     if (busyRef.current && !walkUp) return;
@@ -182,7 +253,10 @@ export default function ScanDialog({
       // Forget the card, so holding it up again retries once the cooldown
       // lapses. Without this a dropped request could never be retried by camera.
       lastReadRef.current = null;
-      setResult({ ok: false, error: 'Network error' });
+      // The request never got an answer: treat it as no signal and queue it.
+      if (!(await submitOffline(token, source, walkUp, current))) {
+        setResult({ ok: false, error: 'Network error' });
+      }
     } finally {
       setTimeout(() => {
         busyRef.current = false;
@@ -329,12 +403,21 @@ export default function ScanDialog({
             {result.ok ? (
               <div className="space-y-2">
                 <p className="font-medium text-green-700 dark:text-green-300">
-                  {result.alreadyMarked ? '✓ Already marked present' : '✓ Marked present'}
+                  {result.offlineSaved
+                    ? '✓ Saved on this phone'
+                    : result.alreadyMarked ? '✓ Already marked present' : '✓ Marked present'}
                   {result.direction === 'onward' || result.direction === 'return'
                     ? ` · ${LEG_NAME[result.direction]}`
                     : ''}
                   {result.walkUp ? ' · walk-up' : ''}
                 </p>
+                {result.offlineSaved && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    No signal. It will be sent when you are back online
+                    {result.unverified ? ', and the pass will be checked then' : ''}.
+                    {result.error ? ` ${result.error}` : ''}
+                  </p>
+                )}
 
                 <div className="flex items-start gap-3">
                   {result.learner?.photoUrl ? (
@@ -389,10 +472,14 @@ export default function ScanDialog({
             ) : result.reason === 'not_booked' ? (
               <div className="space-y-2">
                 <p className="text-amber-700 dark:text-amber-300">⚠ {result.learner?.name ?? 'Learner'} has no booking for today.</p>
-                <p className="text-xs text-muted-foreground">Seats remaining: {result.seatsRemaining ?? 0}</p>
+                {result.offlineSaved === false ? null : (
+                  <p className="text-xs text-muted-foreground">Seats remaining: {result.seatsRemaining ?? 0}</p>
+                )}
                 <FeeBadgeView fees={result.fees} />
                 <Button className="w-full" onClick={() => submit(lastTokenRef.current, lastSourceRef.current, true)}>
-                  {(result.seatsRemaining ?? 0) > 0 ? 'Add as walk-up' : 'Add as walk-up (over capacity)'}
+                  {result.offlineSaved === false || (result.seatsRemaining ?? 0) > 0
+                    ? 'Add as walk-up'
+                    : 'Add as walk-up (over capacity)'}
                 </Button>
               </div>
             ) : (
