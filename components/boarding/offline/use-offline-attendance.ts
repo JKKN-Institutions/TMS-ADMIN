@@ -62,7 +62,13 @@ export function useOfflineAttendance(userId: string | null, onSynced: () => void
         if (m.kind === 'success') toast.success(m.text);
         else toast(m.text, { icon: '⚠️' });
       }
+      // Remove the pending overlay from the outbox BEFORE invalidating the
+      // roster query -- otherwise, on a slow link, the roster refetch can
+      // land before refresh() clears the pending entry, and a freshly-synced
+      // mark flashes back to "Unmarked" for one round trip.
+      await refresh();
       if (report.outcomes.length > 0) onSyncedRef.current();
+      return;
     } catch (e) {
       console.error('boarding outbox sync failed:', e);
     }

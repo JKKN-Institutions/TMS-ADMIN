@@ -36,6 +36,12 @@ export function syncMessages(outcomes: SyncOutcome[]): SyncMessage[] {
     if (result.outcome === 'inserted' && result.walkUp) {
       return { kind: 'success', text: `${who} recorded as travelling without a ticket. They have been notified.` };
     }
+    if (!isSavedOutcome(result.outcome)) {
+      // An outcome settle() couldn't recognise -- it filed a problem, not a
+      // save. Never say "Marked" here or the toast contradicts the "Not
+      // saved" row for the same tap.
+      return { kind: 'warning', text: `${who}: not saved — ${lowerFirst(REJECT_REASON_TEXT.invalid)}` };
+    }
     return { kind: 'success', text: `Marked ${who} ${status}.` };
   });
 }

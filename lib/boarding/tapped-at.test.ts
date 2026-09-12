@@ -21,9 +21,9 @@ describe('judgeTappedAt', () => {
     expect(judgeTappedAt('garbage', now, W, 'onward')).toEqual({ ok: false, reason: 'invalid' });
   });
 
-  it('allows up to two minutes of phone clock skew, and no more', () => {
-    expect(judgeTappedAt('2026-09-11T03:01:30Z', now, W, 'onward').ok).toBe(true);
-    expect(judgeTappedAt('2026-09-11T03:03:00Z', now, W, 'onward')).toEqual({ ok: false, reason: 'future' });
+  it('clamps a fast phone clock to now when the tap is still today in IST', () => {
+    expect(judgeTappedAt('2026-09-11T03:01:30Z', now, W, 'onward')).toEqual({ ok: true, tripDate: '2026-09-11', at: now, direction: 'onward' });
+    expect(judgeTappedAt('2026-09-11T03:03:00Z', now, W, 'onward')).toEqual({ ok: true, tripDate: '2026-09-11', at: now, direction: 'onward' });
   });
 
   it('refuses a tap from an earlier IST day', () => {

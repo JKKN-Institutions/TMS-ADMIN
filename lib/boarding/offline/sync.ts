@@ -129,7 +129,10 @@ async function settleMarkBatch(d: SyncDeps, batch: MarkEntry[], res: PostResult,
     for (const e of batch) {
       if (taken.has(e.learnerId)) await settle(d, e, reject(e, 'not_your_share'), report);
     }
-    // The rest were not written. They go again next cycle, without these.
+    // The rest were not written. They go again next cycle, without these --
+    // deferred explicitly so `attempts` advances even when the server names
+    // no one (an empty `learners` list must not retry every 15s forever).
+    await deferAll(d, batch.filter((e) => !taken.has(e.learnerId)), report);
     return;
   }
 
@@ -155,7 +158,8 @@ async function settleScan(d: SyncDeps, scan: ScanEntry, res: PostResult, report:
   const reason: MarkRejectReason =
     j.reason === 'not_booked' ? 'not_booked'
     : j.reason === 'window_closed' ? 'outside_window'
-    : j.reason === 'stale' || j.reason === 'future' || j.reason === 'invalid' ? j.reason
+    : j.reason === 'stale' || j.reason === 'future' || j.reason === 'invalid'
+      || j.reason === 'wrong_trip' || j.reason === 'evening_off' ? j.reason
     : res.status === 403 ? 'not_assigned'
     : 'scan_refused';
   return settle(d, scan, reject(scan, reason, typeof j.error === 'string' ? j.error : undefined), report);

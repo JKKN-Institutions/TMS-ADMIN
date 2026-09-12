@@ -496,7 +496,16 @@ export default function BoardingAttendancePage() {
         onOpenChange={setScanOpen}
         windows={windows}
         onMarked={() => qc.invalidateQueries({ queryKey: ['boarding-roster'] })}
-        offline={{ online: offline.online, roster: view, queueScan: offline.queueScan }}
+        offline={{
+          online: offline.online,
+          // Only hand over the roster when it's the trip actually being
+          // scanned -- otherwise (Evening tab, or an older date on screen)
+          // resolving against it answers booked/alreadyPresent from the
+          // wrong day/trip. undefined makes the dialog treat every scan as
+          // unknown and queue it raw for the server to resolve, which is safe.
+          roster: isToday && openLeg === direction ? view : undefined,
+          queueScan: offline.queueScan,
+        }}
       />
 
       <AbsenceDialog

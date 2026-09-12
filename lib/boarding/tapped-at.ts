@@ -7,12 +7,17 @@
  * sent the next morning under the wrong day. So the phone sends its tap time
  * and the server bounds how far that claim can go:
  *
- *   - no later than TAP_FUTURE_SKEW_MS ahead of the server clock, and never
- *     on a later IST day (a phone clock running ahead);
+ *   - a tap cannot really be in the future: when it is ahead of the server
+ *     clock but still the same IST day, it is CLAMPED to `now` for the
+ *     window/trip decision and for the returned `at` -- every roster tap
+ *     goes through this path now (online included), so a phone that is a
+ *     few minutes fast must not be refused;
+ *   - a tap dated a LATER IST day is a clock wrong by hours, not by drift,
+ *     and is still refused as `future`;
  *   - on the same IST day as the server (arrived after midnight = stale);
- *   - the trip and its window are decided by decideMarkDirection AT THE TAP
- *     TIME -- the same rule evening attendance uses at arrival, fed a
- *     different clock.
+ *   - the trip and its window are decided by decideMarkDirection AT THE
+ *     (possibly clamped) TAP TIME -- the same rule evening attendance uses
+ *     at arrival, fed a different clock.
  *
  * Consequence worth knowing: every accepted mark's trip date is today in IST,
  * so a request can never mix days.
@@ -20,7 +25,7 @@
 import type { AttDirection, AttendanceWindows } from './attendance-window';
 import { decideMarkDirection } from './trip-direction';
 import { istToday } from '@/lib/booking/window';
-import { TAP_FUTURE_SKEW_MS, type TapRejectReason } from './offline/protocol';
+import type { TapRejectReason } from './offline/protocol';
 
 export type TapVerdict =
   | { ok: true; tripDate: string; at: Date; direction: AttDirection }
@@ -49,7 +54,11 @@ export function judgeTappedAt(
     at = new Date(ms);
   }
 
-  if (at.getTime() - now.getTime() > TAP_FUTURE_SKEW_MS) return { ok: false, reason: 'future' };
+  // A tap cannot really be in the future. If it is ahead of the server but
+  // still the same IST day, treat it as tapped now (clock drift). A tap
+  // dated a later IST day is a clock wrong by hours, not by drift, and is
+  // refused below.
+  if (at.getTime() > now.getTime() && istToday(at) === istToday(now)) at = now;
 
   const tripDate = istToday(at);
   const today = istToday(now);

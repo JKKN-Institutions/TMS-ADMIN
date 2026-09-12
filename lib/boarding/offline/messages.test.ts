@@ -26,6 +26,13 @@ describe('syncMessages', () => {
     ]);
   });
 
+  it('warns instead of celebrating an outcome it does not recognise', () => {
+    // @ts-expect-error -- deliberately an outcome outside SavedOutcome/locked/rejected
+    expect(syncMessages([o('Priya', { clientId: 'x', outcome: 'something_new' })])).toEqual([
+      { kind: 'warning', text: expect.stringContaining('Priya: not saved') },
+    ]);
+  });
+
   it('summarises a backlog in one line', () => {
     const many = ['a', 'b', 'c', 'd'].map((n) => o(n, { clientId: n, outcome: 'inserted', walkUp: false }));
     many.push(o('e', { clientId: 'e', outcome: 'rejected', reason: 'stale' }));

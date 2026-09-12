@@ -111,6 +111,16 @@ describe('syncOnce', () => {
     expect((await listOutbox(kv, 'u1')).map((e) => e.learnerId)).toEqual(['l1']);
   });
 
+  it('on not_your_share with an empty learners list, defers the whole batch instead of retrying forever', async () => {
+    const kv = await setup(2);
+    const r = await syncOnce(deps(kv, {
+      postMarks: async () => ({ status: 403, json: { reason: 'not_your_share', learners: [] } }),
+    }));
+    expect(r.deferred).toBe(2);
+    expect(await listProblems(kv, 'u1')).toEqual([]);
+    expect((await listOutbox(kv, 'u1')).map((e) => e.attempts)).toEqual([1, 1]);
+  });
+
   it('batches 25 per request and per route', async () => {
     const kv = await setup(30, 'r1');
     await enqueueMark(kv, { userId: 'u1', learnerId: 'z1', routeId: 'r2', status: 'present', name: 'Z', direction: 'onward' }, T0, () => 'z');

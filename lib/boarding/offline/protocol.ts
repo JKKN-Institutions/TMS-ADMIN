@@ -32,8 +32,6 @@ export type MarkResult =
   | { clientId: string; outcome: 'locked'; markedByName: string }
   | { clientId: string; outcome: 'rejected'; reason: MarkRejectReason; message?: string };
 
-/** A phone clock may run this far ahead of the server before a tap is refused. */
-export const TAP_FUTURE_SKEW_MS = 2 * 60_000;
 /** Marks per POST /api/boarding/attendance request from the outbox. */
 export const SYNC_BATCH_SIZE = 25;
 /** Wait after the 1st, 2nd, and every later failed send. */

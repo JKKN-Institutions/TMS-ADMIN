@@ -174,8 +174,17 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
           // The server owns this decision -- see deriveInChargeGate in
           // lib/boarding/incharge-gate.ts, published via /api/boarding/access.
           const gate = d.gate as 'in_duty' | 'choose' | 'must_pay' | 'denied' | undefined;
-          if (gate) void saveAccess(offlineKv(), pid, istToday(), gate, new Date()).catch(() => {});
-          setAccess(gateToAccess(gate));
+          if (gate === 'in_duty' || gate === 'choose' || gate === 'must_pay' || gate === 'denied') {
+            void saveAccess(offlineKv(), pid, istToday(), gate, new Date()).catch(() => {});
+            setAccess(gateToAccess(gate));
+          } else {
+            // A 200 with no usable gate -- e.g. a captive portal answering with
+            // an HTML body that json() silently turns into {}. Not a real
+            // "denied" from the server: fall back the same way as no signal,
+            // and never save an invented verdict.
+            const saved = await loadAccess(offlineKv(), pid, istToday()).catch(() => null);
+            if (!cancelled) setAccess(saved ? gateToAccess(saved) : 'offline_unknown');
+          }
         } else setAccess('denied');
       } catch {
         if (!cancelled) setAccess('denied');
