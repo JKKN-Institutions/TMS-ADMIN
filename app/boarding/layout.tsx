@@ -11,6 +11,10 @@ import { boardingNavigation, deriveBoardingPageTitle } from '@/lib/boarding/navi
 import BoardingBottomNav from '@/components/boarding-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
+import { offlineKv } from '@/lib/boarding/offline/kv';
+import { loadAccess, saveAccess } from '@/lib/boarding/offline/snapshot';
+import { istToday } from '@/lib/booking/window';
+import { useSafeSignOut } from '@/components/boarding/offline/use-safe-sign-out';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -37,7 +41,8 @@ function ThemeToggle() {
 }
 
 function ProfileMenu() {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut: rawSignOut } = useAuth();
+  const signOut = useSafeSignOut(rawSignOut, profile?.id ?? null);
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
   if (!profile) return null;
@@ -111,14 +116,15 @@ function ProfileMenu() {
 }
 
 export default function BoardingLayout({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, loading, signOut: rawSignOut } = useAuth();
+  const signOut = useSafeSignOut(rawSignOut, profile?.id ?? null);
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   // Portal access requires an ACTUAL route assignment, not just the permission.
   // Authoritative check is server-side (/api/boarding/access). Super admins pass.
   const [access, setAccess] = useState<
-    'checking' | 'allowed' | 'choose' | 'must_pay' | 'denied'
+    'checking' | 'allowed' | 'choose' | 'must_pay' | 'denied' | 'offline_unknown'
   >('checking');
 
   useEffect(() => {
@@ -142,20 +148,34 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   // Confirm the staffer is assigned to a route before opening the portal.
   useEffect(() => {
     if (loading || !user || !profile) return;
+    const pid = profile.id;
     let cancelled = false;
     (async () => {
+      const gateToAccess = (gate: string | undefined) =>
+        gate === 'in_duty' ? 'allowed'
+        : gate === 'choose' || gate === 'must_pay' || gate === 'denied' ? gate
+        : 'denied';
+      let res: Response;
       try {
-        const res = await fetch('/api/boarding/access', { cache: 'no-store', credentials: 'same-origin' });
+        res = await fetch('/api/boarding/access', { cache: 'no-store', credentials: 'same-origin' });
+      } catch {
+        // No signal. Use today's saved verdict; never invent one. A server
+        // "denied" is only ever saved, never overridden, so this cannot let
+        // anyone in that the server would refuse today.
+        const saved = await loadAccess(offlineKv(), pid, istToday()).catch(() => null);
+        if (!cancelled) setAccess(saved ? gateToAccess(saved) : 'offline_unknown');
+        return;
+      }
+      try {
         const json = await res.json().catch(() => ({}));
         const d = json?.data ?? {};
         if (cancelled) return;
         if (res.ok) {
-          // The server now owns this decision -- it is the only side that can see
-          // the staffer's bills. The gate is derived by deriveInChargeGate in
-          // lib/boarding/incharge-gate.ts and published here via /api/boarding/access.
-          const gate = d.gate as
-            | 'in_duty' | 'choose' | 'must_pay' | 'denied' | undefined;
-          setAccess(gate === 'in_duty' ? 'allowed' : (gate ?? 'denied'));
+          // The server owns this decision -- see deriveInChargeGate in
+          // lib/boarding/incharge-gate.ts, published via /api/boarding/access.
+          const gate = d.gate as 'in_duty' | 'choose' | 'must_pay' | 'denied' | undefined;
+          if (gate) void saveAccess(offlineKv(), pid, istToday(), gate, new Date()).catch(() => {});
+          setAccess(gateToAccess(gate));
         } else setAccess('denied');
       } catch {
         if (!cancelled) setAccess('denied');
@@ -228,6 +248,29 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
           <div className="content-body fade-in flex flex-1 items-start justify-center">{children}</div>
         </div>
       </BugReporterWrapper>
+    );
+  }
+
+  if (access === 'offline_unknown') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-sm text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+            <Bus className="h-6 w-6 text-amber-600" />
+          </div>
+          <h1 className="text-lg font-semibold text-gray-900">No signal</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Open the boarding portal once with signal today. After that it works without signal
+            for the rest of the day.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-5 inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
     );
   }
 
