@@ -15,8 +15,18 @@ import {
 } from '@/lib/boarding/attendance-window';
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { useAttendanceSettingsLive } from '@/hooks/use-attendance-settings-live';
+import { useAuth } from '@/providers/auth-provider';
+import { istToday } from '@/lib/booking/window';
+import { offlineKv } from '@/lib/boarding/offline/kv';
+import { loadRoster, loadWindows, pruneSnapshots, saveRoster, saveWindows } from '@/lib/boarding/offline/snapshot';
+import { applyPending, pendingByLearner } from '@/lib/boarding/offline/apply-pending';
+import { useOfflineAttendance } from '@/components/boarding/offline/use-offline-attendance';
+import { OfflineStatusBar } from '@/components/boarding/offline/offline-status-bar';
+import { OfflineProblemsPanel } from '@/components/boarding/offline/offline-problems-panel';
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// IST, matching the date the outbox files marks under. The old UTC version
+// showed yesterday between 00:00 and 05:30 IST.
+const todayStr = () => istToday();
 
 interface RosterResponse {
   date: string;
@@ -24,28 +34,68 @@ interface RosterResponse {
   rows: RosterRow[];
   counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number; boardedWithoutTicket: number };
   share: { total: number; marked: number; remaining: number };
+  /** Active JKKN ID -> learner id, for offline card scans. */
+  cards?: Record<string, string>;
+  /** Client-only: set when this came from the phone, not the server. */
+  savedAt?: string | null;
 }
 
-async function fetchRoster(date: string, direction: AttDirection): Promise<RosterResponse> {
-  const res = await fetch(`/api/boarding/attendance/roster?date=${date}&direction=${direction}`, { cache: 'no-store', credentials: 'same-origin' });
+const OFFLINE_NO_COPY =
+  "No signal, and this day's list is not saved on this phone yet. Open Attendance once with signal first.";
+
+async function fetchRoster(date: string, direction: AttDirection, userId: string | null): Promise<RosterResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/boarding/attendance/roster?date=${date}&direction=${direction}`, { cache: 'no-store', credentials: 'same-origin' });
+  } catch {
+    // fetch rejects only when no response arrived at all: no signal.
+    if (userId) {
+      const saved = await loadRoster<RosterResponse>(offlineKv(), userId, date).catch(() => null);
+      if (saved) return { ...saved.value, savedAt: saved.savedAt };
+    }
+    throw new Error(OFFLINE_NO_COPY);
+  }
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load roster');
-  return json.data as RosterResponse;
+  const data = json.data as RosterResponse;
+  if (userId) void saveRoster(offlineKv(), userId, date, data, new Date()).catch(() => {});
+  return { ...data, savedAt: null };
 }
 
-async function fetchWindows(): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
-  const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
-  const json = await res.json();
-  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
-  return {
-    windows: json.data.windows as AttendanceWindows,
-    // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
-    activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
-  };
+async function fetchWindows(
+  userId: string | null,
+): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
+  try {
+    const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
+    const json = await res.json();
+    if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
+    const windows = json.data.windows as AttendanceWindows;
+    if (userId) void saveWindows(offlineKv(), userId, windows, new Date()).catch(() => {});
+    return {
+      windows,
+      // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
+      activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
+    };
+  } catch {
+    // No signal. Admin-customised hours (and the evening switch) must not
+    // silently fall back to the defaults, so use the saved copy. With no
+    // server to ask, the phone's clock is the only clock there is.
+    const saved = userId ? await loadWindows<AttendanceWindows>(offlineKv(), userId).catch(() => null) : null;
+    const windows = saved?.value ?? DEFAULT_WINDOWS;
+    return { windows, activeDirection: activeDirection(windows) };
+  }
 }
 
 export default function BoardingAttendancePage() {
   const qc = useQueryClient();
+  const { profile } = useAuth();
+  const userId = profile?.id ?? null;
+  const offline = useOfflineAttendance(userId, () => qc.invalidateQueries({ queryKey: ['boarding-roster'] }));
+
+  useEffect(() => {
+    if (userId) void pruneSnapshots(offlineKv(), userId, istToday()).catch(() => {});
+  }, [userId]);
+
   const [date, setDate] = useState(todayStr());
   const [direction, setDirection] = useState<AttDirection>('onward');
   // Once the staffer picks a tab, stop moving them to the open trip.
@@ -64,8 +114,8 @@ export default function BoardingAttendancePage() {
   const isToday = date === todayStr();
 
   const { data: winData } = useQuery({
-    queryKey: ['boarding-attendance-window'],
-    queryFn: fetchWindows,
+    queryKey: ['boarding-attendance-window', userId],
+    queryFn: () => fetchWindows(userId),
     // Settings changes are pushed live (useAttendanceSettingsLive). These two
     // re-reads cover a phone that dropped its live connection in the background.
     refetchOnWindowFocus: true,
@@ -88,8 +138,8 @@ export default function BoardingAttendancePage() {
   const canMarkNow = isToday && openLeg === direction;
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['boarding-roster', date, direction],
-    queryFn: () => fetchRoster(date, direction),
+    queryKey: ['boarding-roster', date, direction, userId],
+    queryFn: () => fetchRoster(date, direction, userId),
     // A route can have a dozen staff splitting this roster, and the global
     // defaults (staleTime 60s, refetchOnWindowFocus false, no interval) mean a
     // page held open on a moving bus never shows a colleague's marks at all.
@@ -102,9 +152,16 @@ export default function BoardingAttendancePage() {
     if (isError) toast.error(error instanceof Error ? error.message : 'Failed to load roster');
   }, [isError, error]);
 
-  const rows = data?.rows ?? [];
-  const counts = data?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 };
-  const share = data?.share ?? { total: 0, marked: 0, remaining: 0 };
+  // Only the viewed trip's unsent marks: the morning and evening tabs are
+  // separate records, so a waiting evening mark must not show on Morning.
+  const pending = useMemo(
+    () => pendingByLearner(offline.entries, date, direction),
+    [offline.entries, date, direction],
+  );
+  const view = useMemo(() => (data ? applyPending(data, pending) : undefined), [data, pending]);
+  const rows = view?.rows ?? [];
+  const counts = view?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 };
+  const share = view?.share ?? { total: 0, marked: 0, remaining: 0 };
   // Derived from the data, not the flag: the page has no access to the setting, and
   // deriving it from the rows keeps the column/filter in sync with what actually
   // arrived. False while share-scoring is off (owner_name null on every row) — in
@@ -124,62 +181,15 @@ export default function BoardingAttendancePage() {
 
   const canMark = canMarkNow;
 
+  // Every tap goes to the outbox, online or not; it sends within a second
+  // when there is signal, and the toasts come from the sync's answers
+  // (lib/boarding/offline/messages.ts), worded as they were before.
+  // `direction` is the tab being marked. Marking is only enabled on the tab
+  // whose window is open (canMark), so it is also the trip open at tap time.
+  const { markOffline } = offline;
   const mark = useCallback(
-    async (row: RosterRow, status: 'present' | 'absent') => {
-      setBusyId(row.learner_id);
-      try {
-        const res = await fetch('/api/boarding/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ routeId: row.route_id, direction, marks: [{ learnerId: row.learner_id, status }] }),
-        });
-        const json = await res.json();
-        // 409 = a colleague owns this mark. The roster is polled, not live, so
-        // this is reachable from a stale screen even though the button rendered
-        // -- refetch so the row redraws as Locked.
-        if (res.status === 409 && json?.reason === 'locked') {
-          toast.error(json.error || 'Another staff member has already marked this student.');
-          qc.invalidateQueries({ queryKey: ['boarding-roster'] });
-          return;
-        }
-        if (!res.ok || !json.success) throw new Error(json.error || 'Failed to mark attendance');
-        // A 200 does NOT mean everything asked for happened. The response
-        // reports three separate things — what was written, what was already
-        // true, and what a colleague holds — and claiming a flat "Marked X" over
-        // the top of the last two is how someone else's mark gets quietly
-        // assumed away. Mirrors markBatchMessage in lib/boarding/mark-batch.ts.
-        const left = Array.isArray(json.locked) ? json.locked.length : 0;
-        if (left > 0) {
-          // react-hot-toast has no `.warning` — it was `toast.warning` here,
-          // which is undefined and throws, so the one message this branch
-          // exists to show never rendered. The project's warning form is a
-          // plain toast with an icon.
-          toast(
-            `Not changed — already marked by ${json.locked[0]?.markedByName ?? 'another staff member'}.`,
-            { icon: '⚠️' },
-          );
-        } else if (json.walkUps > 0) {
-          // Never announce this as a plain "Marked present". The in-charge has
-          // just recorded a rule breach against a named student and been told
-          // the student was notified — that has to be visible, not buried in a
-          // toast that looks like every other mark.
-          toast.success(`${row.name} recorded as travelling without a ticket. They have been notified.`);
-        } else if (json.updated === 0 && json.skipped > 0) {
-          toast.success(`${row.name} was already marked ${status}`);
-        } else if (json.updated === 0) {
-          toast(`${row.name} was not marked — they are not on this route.`, { icon: '⚠️' });
-        } else {
-          toast.success(`Marked ${row.name} ${status}`);
-        }
-        qc.invalidateQueries({ queryKey: ['boarding-roster'] });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to mark attendance');
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [direction, qc]
+    (row: RosterRow, status: 'present' | 'absent') => { void markOffline(row, status, direction); },
+    [markOffline, direction],
   );
 
   /**
@@ -195,6 +205,10 @@ export default function BoardingAttendancePage() {
    */
   const undo = useCallback(
     async (row: RosterRow) => {
+      if (!offline.online) {
+        toast('Undo needs signal. Try again when you are back online.', { icon: '⚠️' });
+        return;
+      }
       setBusyId(row.learner_id);
       try {
         const res = await fetch('/api/boarding/attendance', {
@@ -222,12 +236,12 @@ export default function BoardingAttendancePage() {
         setBusyId(null);
       }
     },
-    [direction, qc]
+    [direction, qc, offline.online]
   );
 
   const columns = useMemo(
-    () => getRosterColumns({ canMark, busyId, onMark: mark, onUndo: undo, hasOwners }),
-    [canMark, busyId, mark, undo, hasOwners]
+    () => getRosterColumns({ canMark, busyId, onMark: mark, onUndo: undo, hasOwners, pending }),
+    [canMark, busyId, mark, undo, hasOwners, pending]
   );
 
   const filters: DataTableFilter[] = [
@@ -338,6 +352,16 @@ export default function BoardingAttendancePage() {
             <span className="font-medium">undo arrow</span> to remove the record altogether.
           </p>
         </div>
+
+        <div className="mt-3 space-y-3">
+          <OfflineStatusBar
+            online={offline.online}
+            pendingCount={offline.entries.length}
+            savedAt={data?.savedAt ?? null}
+            authRequired={offline.authRequired}
+          />
+          <OfflineProblemsPanel problems={offline.problems} onDismiss={(id) => void offline.dismiss(id)} />
+        </div>
       </div>
 
       {/* Analytics tiles + day picker */}
@@ -446,7 +470,9 @@ export default function BoardingAttendancePage() {
               <button
                 type="button"
                 onClick={() => setAbsenceOpen(true)}
-                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                disabled={!offline.online}
+                title={offline.online ? undefined : 'Needs signal'}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 I am absent today
               </button>

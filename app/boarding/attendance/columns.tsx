@@ -1,30 +1,43 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2 } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
+import type { PendingView } from '@/lib/boarding/offline/apply-pending';
 
 const fmtTime = (ts: string | null) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
 
-function StatusBadge({ status }: { status: RosterRow['status'] }) {
-  if (status === 'present')
-    return (
+function StatusBadge({ status, pending }: { status: RosterRow['status']; pending?: PendingView['kind'] }) {
+  const badge =
+    status === 'present' ? (
       <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/15 dark:text-green-300">
         <Check className="h-3 w-3" /> Present
       </span>
-    );
-  if (status === 'absent')
-    return (
+    ) : status === 'absent' ? (
       <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">
         <X className="h-3 w-3" /> Absent
       </span>
+    ) : (
+      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+        Unmarked
+      </span>
     );
+  if (!pending) return badge;
+  // Saved on this phone, not yet on the server. "Pending check" = a pass QR
+  // whose signature only the server can verify.
   return (
-    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-      Unmarked
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {badge}
+      <span
+        className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+        title={pending === 'unverified' ? 'The pass will be checked when you are back online' : 'Saved on this phone, waiting to send'}
+      >
+        <Clock className="h-3 w-3" />
+        {pending === 'unverified' ? 'Pending check' : 'Waiting'}
+      </span>
     </span>
   );
 }
@@ -172,6 +185,8 @@ export function getRosterColumns(opts: {
   // than rendering "Unassigned" on the whole bus (which would read as an
   // alarm on a screen in-charges use daily, for a feature that isn't live).
   hasOwners: boolean;
+  /** Marks waiting on the phone, by learner, for the "Waiting" badge. */
+  pending?: Map<string, PendingView>;
 }): ColumnDef<RosterRow>[] {
   const selectColumn: ColumnDef<RosterRow> = {
     id: 'select',
@@ -264,7 +279,9 @@ export function getRosterColumns(opts: {
       accessorFn: (r) => r.status,
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       size: 120,
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      cell: ({ row }) => (
+        <StatusBadge status={row.original.status} pending={opts.pending?.get(row.original.learner_id)?.kind} />
+      ),
     },
     {
       accessorKey: 'scanned_at',
