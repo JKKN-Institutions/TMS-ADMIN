@@ -10,7 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveFine, type FineSkipReason } from './resolve';
-import { TRANSPORT_CATEGORY_NAME } from '@/lib/fees/types';
+import { TRANSPORT_FINE_CATEGORY_NAME } from '@/lib/fees/types';
 import { notifyLearner } from '@/lib/notifications/notify';
 
 type Svc = SupabaseClient;
@@ -163,7 +163,7 @@ export async function createFines(svc: Svc, input: CreateFinesInput): Promise<Cr
   const { data: cat } = await svc
     .from('billing_categories')
     .select('id')
-    .eq('category_name', TRANSPORT_CATEGORY_NAME.student)
+    .eq('category_name', TRANSPORT_FINE_CATEGORY_NAME)
     .maybeSingle();
   const categoryId = (cat as { id: string } | null)?.id ?? null;
 

@@ -325,7 +325,7 @@ describe('generateBills — learner bills are one bill with instalments', () => 
     const svc = flatFixture();
     await generateBills(svc as never, { feeStructureId: 'fs1', mode: 'generate', actorId: 'admin-1' });
     const bills = inserts(svc, 'billing_student_bills') as Array<Record<string, unknown>[]>;
-    expect(bills[0][0].bill_description).toBe('Transport Fee - 2026-2027');
+    expect(bills[0][0].bill_description).toBe('Transport Maintenance Fee - 2026-2027');
   });
 
   it('deletes the bill when the instalment insert fails, leaving no orphan', async () => {
@@ -453,7 +453,7 @@ describe('generateBills — tiered bill description', () => {
       Record<string, unknown>[]
     >;
     expect(bills).toHaveLength(1);
-    expect(bills[0][0].bill_description).toBe('Transport Fee - 2026-2027 - Year 1');
+    expect(bills[0][0].bill_description).toBe('Transport Maintenance Fee - 2026-2027 - Year 1');
   });
 });
 
@@ -506,7 +506,7 @@ describe('generateBills — the bill academic year follows the transport year', 
       { id: 'ay-26', institution_id: 'i1', academic_year_name: '2026-2027' },
     ]));
     expect(row.academic_year_id).toBe('ay-26');
-    expect(row.bill_description).toBe('Transport Fee - 2026-2027');
+    expect(row.bill_description).toBe('Transport Maintenance Fee - 2026-2027');
   });
 
   it('falls back to the profile academic year when the institution has no row for this year', async () => {

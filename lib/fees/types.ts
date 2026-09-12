@@ -104,10 +104,22 @@ export interface FeeStructureRow {
 // someone who never enrolled has a real cost.
 export const DEFAULT_LIFECYCLE_STATUSES = ['active', 'admitted', 'account', 'reserved'] as const;
 
-// The two transport billing categories (seeded in MyJKKN's shared
-// billing_categories). Resolved by NAME at generation time (ids differ per DB),
-// then mapped: audience 'student' -> learner category, 'staff' -> staff category.
+// The transport billing categories (seeded in MyJKKN's shared
+// billing_categories). Resolved by NAME at write time (ids differ per DB),
+// then mapped: audience 'student' -> learner category, 'staff' -> staff one.
+//
+// This is the RECURRING charge only. Fines bill to
+// TRANSPORT_FINE_CATEGORY_NAME below.
 export const TRANSPORT_CATEGORY_NAME: Record<FeeAudience, string> = {
-  student: 'Transport Fee',
-  staff: 'Staff Transport Fee',
+  student: 'Transport Maintenance Fee',
+  staff: 'Staff Transport Maintenance Fee',
 };
+
+// The FINE ledger (tms_fee_fine) deliberately bills under a DIFFERENT category
+// from the recurring maintenance fee above, so a penalty and a regular charge
+// can be told apart in every category-keyed report.
+//
+// Do NOT collapse these back into one constant. Until 2026-09-12 both the fee
+// generator and lib/fines/create.ts read TRANSPORT_CATEGORY_NAME.student, which
+// is why renaming it alone would have moved fines too.
+export const TRANSPORT_FINE_CATEGORY_NAME = 'Transport Fee';
