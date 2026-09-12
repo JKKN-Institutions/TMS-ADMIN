@@ -39,7 +39,13 @@ export function useOfflineAttendance(userId: string | null, onSynced: () => void
   onSyncedRef.current = onSynced;
 
   const refresh = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+      setEntries([]);
+      setProblems([]);
+      setAuthRequired(false);
+      setReachable(true);
+      return;
+    }
     const kv = offlineKv();
     const [e, p] = await Promise.all([listOutbox(kv, userId), listProblems(kv, userId)]);
     setEntries(e);
