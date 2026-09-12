@@ -21,7 +21,7 @@ export function OfflineProblemsPanel({
         {problems.map((p) => (
           <li key={p.clientId} className="flex items-start justify-between gap-2">
             <span className="min-w-0">
-              <span className="font-medium">{p.name ?? 'Unknown card or pass'}</span>
+              <span className="font-medium">{p.name ?? 'Unknown card'}</span>
               {' — '}
               {p.message}
               <span className="text-xs opacity-75"> (tapped {fmt(p.tappedAt)})</span>

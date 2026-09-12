@@ -1,6 +1,13 @@
 /**
- * scan-resolve — decides WHAT a boarding scan string is, and whether the
- * source it arrived from is allowed to send it. Pure: no database, no React.
+ * scan-resolve — decides whether a boarding scan is a JKKN ID card, and whether
+ * the source it arrived from is allowed to send it. Pure: no database, no React.
+ *
+ * ONE CREDENTIAL. The printed JKKN ID card is now the only thing the scanner
+ * accepts. The old transport boarding pass (a signed token in the student
+ * portal) and its six-digit daily code were retired on 2026-09-12: they needed
+ * a portal login, a booking for that exact day, and no unpaid fee, which is why
+ * they went almost unused. Both now fall through to "unrecognised". Historic
+ * attendance rows written by them are untouched and still read `qr_scan`.
  *
  * The rules for normalising a JKKN ID are DELIBERATELY COPIED from MyJKKN's
  * lib/identity/scan-normalize.ts rather than imported. The two apps are
@@ -13,7 +20,7 @@
  * window, and the booking rule.
  */
 
-export type ScannedShape = 'pass' | 'jkkn_id' | 'pass_code' | 'unknown';
+export type ScannedShape = 'jkkn_id' | 'unknown';
 
 /** Where the string came from. A camera read implies physical possession. */
 export type ScanSource = 'camera' | 'typed';
@@ -28,19 +35,13 @@ export interface ScanDecision {
   refusal: ScanRefusal | null;
 }
 
-const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const PASS_RE = new RegExp(`^${UUID}\\.[0-9a-f]{32}$`, 'i');
 const JKKN_ID_RE = /^[0-9]{6}-[0-9]$/;
 
 export function classifyScan(raw: string, source: ScanSource): ScanDecision {
   const code = (raw ?? '').replace(/[\r\n]/g, '').trim();
-
-  if (PASS_RE.test(code)) return { shape: 'pass', code, refusal: null };
-
   const compact = code.replace(/[\s-]/g, '');
 
-  // Seven bare digits is a JKKN ID with the dash dropped. Classify it as one
-  // so a typed card number is refused as "typed", not as "unrecognised".
+  // Seven bare digits is a JKKN ID with the dash dropped.
   let jkknId: string | null = null;
   if (/^[0-9]{7}$/.test(compact)) jkknId = `${compact.slice(0, 6)}-${compact.slice(6)}`;
   else if (JKKN_ID_RE.test(code)) jkknId = code;
@@ -54,8 +55,6 @@ export function classifyScan(raw: string, source: ScanSource): ScanDecision {
       refusal: source === 'typed' ? 'typed_jkkn_id' : null,
     };
   }
-
-  if (/^[0-9]{6}$/.test(compact)) return { shape: 'pass_code', code: compact, refusal: null };
 
   return { shape: 'unknown', code, refusal: 'unrecognised' };
 }

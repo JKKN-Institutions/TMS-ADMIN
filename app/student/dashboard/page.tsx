@@ -3,14 +3,13 @@
 import { useRouter } from 'next/navigation';
 import type { ComponentType, ReactNode } from 'react';
 import {
-  MapPin, CreditCard, Route as RouteIcon, QrCode, MessageCircle, Bell, AlertTriangle,
+  MapPin, CreditCard, Route as RouteIcon, MessageCircle, Bell, AlertTriangle,
 } from 'lucide-react';
 import { useMe } from '@/lib/student/use-me';
 import { useTransportAccess, type TransportAccess } from '@/lib/student/use-transport-access';
 
 const QUICK = [
   { title: 'My Route', desc: 'View your route & stops', icon: RouteIcon, color: 'bg-gradient-to-br from-blue-500 to-indigo-600', href: '/student/routes' },
-  { title: 'Boarding Pass', desc: 'Show your QR pass', icon: QrCode, color: 'bg-gradient-to-br from-green-500 to-emerald-600', href: '/student/pass' },
   { title: 'Grievances', desc: 'Raise or track issues', icon: MessageCircle, color: 'bg-gradient-to-br from-orange-500 to-amber-600', href: '/student/grievances' },
   { title: 'Notifications', desc: 'Latest updates', icon: Bell, color: 'bg-gradient-to-br from-purple-500 to-violet-600', href: '/student/notifications' },
 ];

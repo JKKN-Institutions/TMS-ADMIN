@@ -42,7 +42,7 @@ export interface ScanEntry extends EntryBase {
   learnerId: string | null;
   token: string;
   walkUp: boolean;
-  /** True when resolved by the saved card map; false for a pass QR not yet signature-checked. */
+  /** True when resolved by the saved card map; false when the scan matched nobody on the saved roster and still needs the server to resolve it. */
   verified: boolean;
 }
 

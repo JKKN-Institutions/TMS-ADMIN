@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import { verifyPass, matchPassCode } from '@/lib/boarding/pass';
 import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/identity';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { loadLearnerFeeStatus } from '@/lib/boarding/fee-status';
@@ -14,10 +13,10 @@ import { judgeTappedAt } from '@/lib/boarding/tapped-at';
 import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
 
 /**
- * POST a scanned boarding-pass token → mark the learner present for today.
+ * POST a scanned JKKN ID card → mark the learner present for today.
  *
  * Security: requires tms.attendance.scan; the pass signature is verified
- * server-side (verifyPass); and the scanning staff must be assigned to the
+ * the card is resolved through jkkn_identities; and the scanning staff must be assigned to the
  * learner's route (getAssignedRouteIdsForUser) — super admins bypass that check.
  * Idempotent per (learner, day, direction) via upsert.
  */
@@ -47,90 +46,63 @@ interface ScanOutcome {
   existing_at: string | null;
 }
 
-type MatchedBy = 'pass' | 'jkkn_id' | 'pass_code';
+type MatchedBy = 'jkkn_id';
 type Resolved = { learnerId: string; matchedBy: MatchedBy } | { error: string; status: number };
 
 /**
- * Resolve the learner behind a scan input. Three shapes are accepted:
- *  - the signed QR / long token, whose identity is embedded and verified;
- *  - a JKKN ID from a printed card, resolved through the identity register,
- *    accepted ONLY from the camera because the number is public;
- *  - a typed 6-digit daily code, reverse-looked-up among the learners this
- *    staff may scan, so the candidate set is already authority-scoped.
+ * Resolve the learner behind a scan. ONE credential is accepted: the printed
+ * JKKN ID card, read by camera. The number is public (printed on plastic and
+ * downloadable as a PNG from MyJKKN), so a TYPED one is refused — a camera read
+ * is the evidence of physical possession.
+ *
+ * The transport boarding pass and its six-digit daily code were retired on
+ * 2026-09-12. Both now fall through to "unrecognised" here; historic rows they
+ * wrote keep method 'qr_scan' and are untouched.
  */
 async function resolveLearnerId(
   raw: string,
   source: ScanSource,
-  auth: AuthContext,
   svc: ReturnType<typeof createServiceRoleClient>
 ): Promise<Resolved> {
-  // verifyPass stays the authority on the signed token: it checks the HMAC,
-  // which the shape classifier deliberately does not.
-  const verified = verifyPass(raw);
-  if (verified) return { learnerId: verified, matchedBy: 'pass' };
-
   const decision = classifyScan(raw, source);
 
-  if (decision.shape === 'jkkn_id') {
-    if (decision.refusal === 'typed_jkkn_id') {
-      return { error: 'Point the camera at the card to use a JKKN ID.', status: 400 };
-    }
-    const { data, error } = await svc
-      .from('jkkn_identities')
-      .select('learner_profile_id, person_kind, retired_at')
-      .eq('jkkn_id', decision.code)
-      .maybeSingle();
-    if (error) {
-      console.error('boarding scan jkkn id lookup error:', error);
-      return { error: 'Could not read the identity register', status: 500 };
-    }
-    const row = data as { learner_profile_id: string | null; person_kind: string | null; retired_at: string | null } | null;
-    if (!row) return { error: 'Card not recognised.', status: 404 };
-    // Retired numbers are kept forever so they are never reissued, but a
-    // retired card must never mark anyone present.
-    if (row.retired_at) return { error: 'This card has been retired. Issue a new one.', status: 409 };
-    if (!row.learner_profile_id) {
-      // The only fact ESTABLISHED here is that the card has no learner link.
-      // person_kind is what separates staff from associates and visitors, so
-      // name it rather than calling every non-learner card a staff card: of
-      // the 1,042 cards that reach this branch, 309 are not staff at all.
-      const holder =
-        row.person_kind === 'team_member' ? 'a staff member'
-        : row.person_kind === 'associate' ? 'an associate'
-        : row.person_kind === 'external_participant' ? 'a visitor'
-        : 'someone with no learner record';
-      return {
-        error: `This card belongs to ${holder}, so nothing was recorded. If they are a learner, scan their bus pass QR instead.`,
-        status: 409,
-      };
-    }
-    return { learnerId: row.learner_profile_id, matchedBy: 'jkkn_id' };
+  if (decision.refusal === 'typed_jkkn_id') {
+    return { error: 'Point the camera at the card to use a JKKN ID.', status: 400 };
+  }
+  if (decision.shape !== 'jkkn_id') {
+    return { error: 'Not a JKKN ID card. Scan the card, or mark the learner by hand.', status: 400 };
   }
 
-  if (decision.shape === 'pass_code') {
-    let query = svc.from('learners_profiles').select('id').not('transport_route_id', 'is', null);
-    if (!auth.isSuperAdmin) {
-      const routeIds = await getAssignedRouteIdsForUser(auth);
-      if (routeIds.length === 0) {
-        return { error: 'You are not assigned to any route', status: 403 };
-      }
-      query = query.in('transport_route_id', routeIds);
-    }
-    const { data, error } = await query;
-    if (error) {
-      console.error('boarding scan code lookup error:', error);
-      return { error: 'Could not resolve pass code', status: 500 };
-    }
-    const candidateIds = ((data ?? []) as { id: string }[]).map((r) => r.id);
-    const matches = matchPassCode(decision.code, candidateIds, istToday());
-    if (matches.length === 1) return { learnerId: matches[0], matchedBy: 'pass_code' };
-    if (matches.length > 1) {
-      return { error: 'Code matches multiple learners — please scan the QR code', status: 409 };
-    }
-    return { error: 'Code not recognised', status: 400 };
+  const { data, error } = await svc
+    .from('jkkn_identities')
+    .select('learner_profile_id, person_kind, retired_at')
+    .eq('jkkn_id', decision.code)
+    .maybeSingle();
+  if (error) {
+    console.error('boarding scan jkkn id lookup error:', error);
+    return { error: 'Could not read the identity register', status: 500 };
   }
-
-  return { error: 'Invalid or unrecognised pass', status: 400 };
+  const row = data as { learner_profile_id: string | null; person_kind: string | null; retired_at: string | null } | null;
+  if (!row) return { error: 'Card not recognised.', status: 404 };
+  // Retired numbers are kept forever so they are never reissued, but a
+  // retired card must never mark anyone present.
+  if (row.retired_at) return { error: 'This card has been retired. Issue a new one.', status: 409 };
+  if (!row.learner_profile_id) {
+    // The only fact ESTABLISHED here is that the card has no learner link.
+    // person_kind is what separates staff from associates and visitors, so
+    // name it rather than calling every non-learner card a staff card: of
+    // the 1,042 cards that reach this branch, 309 are not staff at all.
+    const holder =
+      row.person_kind === 'team_member' ? 'a staff member'
+      : row.person_kind === 'associate' ? 'an associate'
+      : row.person_kind === 'external_participant' ? 'a visitor'
+      : 'someone with no learner record';
+    return {
+      error: `This card belongs to ${holder}, so nothing was recorded. If they are a learner, mark them by hand.`,
+      status: 409,
+    };
+  }
+  return { learnerId: row.learner_profile_id, matchedBy: 'jkkn_id' };
 }
 
 async function scan(request: NextRequest, auth: AuthContext) {
@@ -152,7 +124,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
 
     // Identify the learner from the QR token, a scanned JKKN ID card, or a
     // typed 6-digit code.
-    const resolved = await resolveLearnerId(String(body.token ?? ''), source, auth, svc);
+    const resolved = await resolveLearnerId(String(body.token ?? ''), source, svc);
     if ('error' in resolved) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
@@ -257,7 +229,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
       p_trip_date: today,
       p_direction: direction,
       p_actor: auth.userId,
-      p_method: matchedBy === 'jkkn_id' ? 'id_card' : 'qr_scan',
+      // The card is the only credential now, so every new scan is an id_card.
+      p_method: 'id_card',
       p_allow_override: true,
     });
 

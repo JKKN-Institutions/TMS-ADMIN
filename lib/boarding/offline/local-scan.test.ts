@@ -22,27 +22,20 @@ describe('resolveScanOffline', () => {
     expect(resolveScanOffline('348295-7', 'typed', roster)).toMatchObject({ kind: 'refused' });
   });
 
-  it('reads the learner id out of a pass QR but marks it unverified', () => {
-    const token = `${ID.toUpperCase()}.${'a'.repeat(32)}`;
-    expect(resolveScanOffline(token, 'camera', roster)).toEqual({
-      kind: 'resolved', learnerId: ID, name: 'Priya', booked: true, verified: false, alreadyPresent: false,
-    });
-  });
-
   it('flags a learner already present on the saved list', () => {
     expect(resolveScanOffline('111111-1', 'camera', roster)).toMatchObject({ kind: 'resolved', alreadyPresent: true });
   });
 
-  it('queues an unknown card or pass rather than dropping it', () => {
+  it('queues a camera-read JKKN ID matching nobody on the saved roster rather than dropping it', () => {
     expect(resolveScanOffline('999999-9', 'camera', roster)).toMatchObject({ kind: 'unknown' });
-    const other = `${'1'.repeat(8)}-1111-1111-1111-${'1'.repeat(12)}.${'b'.repeat(32)}`;
-    expect(resolveScanOffline(other, 'camera', roster)).toMatchObject({ kind: 'unknown' });
   });
 
-  it('refuses 6-digit codes and unrecognised input offline', () => {
-    expect(resolveScanOffline('123456', 'typed', roster)).toEqual({
-      kind: 'refused', message: '6-digit codes need signal. Scan the QR or the ID card instead.',
-    });
+  it('refuses a pass-shaped token as unrecognised now that the transport pass is retired', () => {
+    const token = `${ID.toUpperCase()}.${'a'.repeat(32)}`;
+    expect(resolveScanOffline(token, 'camera', roster)).toMatchObject({ kind: 'refused' });
+  });
+
+  it('refuses unrecognised input offline', () => {
     expect(resolveScanOffline('hello', 'camera', roster)).toMatchObject({ kind: 'refused' });
   });
 });

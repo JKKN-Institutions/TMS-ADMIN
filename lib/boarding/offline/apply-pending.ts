@@ -12,7 +12,7 @@ import type { OutboxEntry } from './outbox';
 
 export interface PendingView {
   status: 'present' | 'absent';
-  /** 'unverified' = a pass QR the server has not signature-checked yet. */
+  /** 'unverified' = a scan that matched nobody on the saved roster; the server still has to resolve it. */
   kind: 'queued' | 'unverified';
 }
 
