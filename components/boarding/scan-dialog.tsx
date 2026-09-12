@@ -5,7 +5,6 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { Clock } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { activeDirection, LEG_NAME, type AttendanceWindows } from '@/lib/boarding/attendance-window';
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
@@ -24,7 +23,7 @@ type FeeTerm = {
 
 type ScanResult = {
   ok: boolean;
-  matchedBy?: 'pass' | 'jkkn_id' | 'pass_code';
+  matchedBy?: 'jkkn_id';
   learner?: {
     name: string;
     rollNumber: string | null;
@@ -105,7 +104,6 @@ export default function ScanDialog({
 }) {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [manual, setManual] = useState('');
   // Forces a re-render every 30s while open so legOpen (which reads new Date())
   // re-evaluates at a scan-window edge, flipping the closed banner and the
   // camera-lifecycle effect below without waiting on an unrelated re-render.
@@ -173,7 +171,6 @@ export default function ScanDialog({
       const json = await res.json();
       if (json.ok) {
         setResult(json);
-        setManual('');
         onMarked();
       } else {
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
@@ -244,7 +241,7 @@ export default function ScanDialog({
         setScanning(true);
       } catch {
         if (cameraGenRef.current === gen) {
-          setResult({ ok: false, error: 'Could not start camera — use manual entry below.' });
+          setResult({ ok: false, error: 'Could not start camera — mark the learner by hand instead.' });
         }
       }
     } finally {
@@ -268,7 +265,6 @@ export default function ScanDialog({
   useEffect(() => {
     if (!open) {
       setResult(null);
-      setManual('');
       // Reopening the scanner is a deliberate new session, so the same card
       // should scan straight away rather than wait out the same-card gap.
       lastReadRef.current = null;
@@ -305,24 +301,10 @@ export default function ScanDialog({
           )}
         </div>
 
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Or enter the 6-digit code. A JKKN ID must be scanned with the camera.
-          </p>
-          <div className="flex gap-2">
-            <Input
-              value={manual}
-              onChange={(e) => setManual(e.target.value)}
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="6-digit code"
-              disabled={!legOpen}
-            />
-            <Button onClick={() => submit(manual, 'typed')} disabled={!manual || !legOpen}>
-              Mark
-            </Button>
-          </div>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Scan the learner&apos;s JKKN ID card. If the camera cannot read it, mark them by hand on the
+          attendance list.
+        </p>
 
         {result && (
           <div className={`rounded-lg border p-3 text-sm ${result.ok ? 'border-green-400' : 'border-red-400'}`}>
@@ -354,11 +336,7 @@ export default function ScanDialog({
                       {result.learner?.routeLabel ?? 'Route —'} · Stop: {result.learner?.stopLabel ?? '—'}
                     </p>
                     <p className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                      {result.matchedBy === 'jkkn_id'
-                        ? 'JKKN ID card'
-                        : result.matchedBy === 'pass_code'
-                          ? 'Pass code'
-                          : 'Boarding pass'}
+                      JKKN ID card
                       {result.booked === false ? ' · not booked today' : ''}
                     </p>
                   </div>
