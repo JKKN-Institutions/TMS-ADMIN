@@ -78,7 +78,7 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
           <Field label="Assigned Route" value={learner.routeLabel} />
           <Field label="Boarding Stop" value={learner.stopLabel} />
           <Field
-            label="Transport Fee"
+            label="Transport Maintenance Fee"
             value={learner.transportFee != null ? `₹${learner.transportFee}` : null}
           />
           <Field label="Assignment" value={learner.assigned ? 'Assigned' : 'Unassigned'} />

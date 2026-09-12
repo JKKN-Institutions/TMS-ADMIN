@@ -8,6 +8,7 @@ import { Loader2, Save, Plus, Trash2, Wand2, Layers } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fetchMasters, fetchTransportYearOptions, type MasterOption } from './fee-api';
 import type { FeeAudience, FeeStatus, FeeMode, FeeStructureStopTerm } from '@/lib/fees/types';
+import { TRANSPORT_CATEGORY_NAME } from '@/lib/fees/types';
 import { validateShares } from '@/lib/fees/stop-rate';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/select-menu';
 import { SelectMenuMulti } from '@/components/ui/select-menu-multi';
@@ -383,7 +384,9 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
               disabled={saving}
             />
             <p className="mt-1 text-xs text-gray-500">
-              {isStudent ? 'Bills go under the “Transport Fee” category.' : 'Staff are recorded for coverage; real staff billing is phase 2.'}
+              {isStudent
+                ? `Bills go under the “${TRANSPORT_CATEGORY_NAME.student}” category. Fines are billed separately under “Transport Fee”.`
+                : 'Staff are recorded for coverage; real staff billing is phase 2.'}
             </p>
           </div>
           <div>
