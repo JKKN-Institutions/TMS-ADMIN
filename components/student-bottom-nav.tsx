@@ -12,7 +12,6 @@ import { studentNavigation, type StudentNavItem } from '@/lib/student/navigation
 const PRIMARY_HREFS = [
   '/student/dashboard',
   '/student/routes',
-  '/student/pass',
   '/student/attendance',
 ];
 
