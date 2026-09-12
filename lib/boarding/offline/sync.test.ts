@@ -49,6 +49,21 @@ describe('syncOnce', () => {
     ]);
   });
 
+  it('surfaces an unrecognised outcome as a problem instead of deleting it', async () => {
+    const kv = await setup(1);
+    await syncOnce(deps(kv, { postMarks: async () => ok({ results: [{ clientId: 'c1', outcome: 'something_new' }] }) }));
+    expect(await listOutbox(kv, 'u1')).toEqual([]);
+    expect(await listProblems(kv, 'u1')).toMatchObject([{ reason: 'invalid' }]);
+  });
+
+  it('defers the whole batch on an empty results array instead of rejecting it', async () => {
+    const kv = await setup(1);
+    const r = await syncOnce(deps(kv, { postMarks: async () => ({ status: 200, json: { results: [] } }) }));
+    expect(r.deferred).toBe(1);
+    expect((await listOutbox(kv, 'u1'))[0]).toMatchObject({ attempts: 1 });
+    expect(await listProblems(kv, 'u1')).toEqual([]);
+  });
+
   it('keeps and backs off on no network, then retries once due', async () => {
     const kv = await setup(1);
     const down = deps(kv, { postMarks: async () => { throw new TypeError('Failed to fetch'); } });

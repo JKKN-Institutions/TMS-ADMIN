@@ -17,7 +17,7 @@ import {
   type MarkEntry, type OutboxEntry, type ScanEntry,
 } from './outbox';
 import {
-  REJECT_REASON_TEXT, SYNC_BATCH_SIZE,
+  REJECT_REASON_TEXT, SYNC_BATCH_SIZE, isSavedOutcome,
   type MarkRejectReason, type MarkResult,
 } from './protocol';
 
@@ -88,6 +88,19 @@ async function settle(d: SyncDeps, e: OutboxEntry, r: MarkResult, report: SyncRe
       tappedAt: e.tappedAt,
       recordedAt: d.now().toISOString(),
     });
+  } else if (!isSavedOutcome(r.outcome)) {
+    // An outcome we don't recognise (a future server value, or a malformed
+    // element with no outcome at all). Never delete silently -- surface it.
+    await addProblem(d.kv, {
+      clientId: e.clientId,
+      userId: e.userId,
+      learnerId: e.learnerId,
+      name: e.name,
+      reason: 'invalid',
+      message: REJECT_REASON_TEXT.invalid,
+      tappedAt: e.tappedAt,
+      recordedAt: d.now().toISOString(),
+    });
   }
   await removeIfSame(d.kv, e);
   report.outcomes.push({ entry: e, result: r });
@@ -97,8 +110,8 @@ const reject = (e: OutboxEntry, reason: MarkRejectReason, message?: string): Mar
   ({ clientId: e.clientId, outcome: 'rejected', reason, ...(message ? { message } : {}) });
 
 async function settleMarkBatch(d: SyncDeps, batch: MarkEntry[], res: PostResult, report: SyncReport): Promise<void> {
-  const results: MarkResult[] = Array.isArray(res.json?.results) ? res.json.results : [];
-  if (results.length > 0) {
+  if (Array.isArray(res.json?.results)) {
+    const results: MarkResult[] = res.json.results;
     const byId = new Map(results.map((r) => [r.clientId, r]));
     for (const e of batch) {
       const r = byId.get(e.clientId);
