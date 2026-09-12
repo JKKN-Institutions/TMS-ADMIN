@@ -12,6 +12,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveApplicablePeople, type ApplicablePerson } from './applicability';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience } from './types';
+import { resolveBillingCategoryId } from './billing-category';
 import { currentYearOf } from './year-of-study';
 import { academicYearByInstitution, resolveBillAcademicYear } from './bill-academic-year';
 import {
@@ -558,12 +559,20 @@ export async function generateBills(
 
     // ── GENERATE ────────────────────────────────────────────────────────────
     const catName = TRANSPORT_CATEGORY_NAME[fs.audience as FeeAudience];
-    const { data: cat } = await svc
-      .from('billing_categories')
-      .select('id')
-      .eq('category_name', catName)
-      .maybeSingle();
-    const categoryId = cat?.id ?? null;
+    // Caught locally, not left to the outer catch: that one flattens everything
+    // to 'Internal server error', and an unseeded category is a configuration
+    // problem the admin can actually fix — if they are told which one.
+    let categoryId: string;
+    try {
+      categoryId = await resolveBillingCategoryId(svc, catName);
+    } catch (e) {
+      console.error('Fee generation error (billing category):', e);
+      return {
+        ok: false,
+        status: 500,
+        error: e instanceof Error ? e.message : 'Billing category lookup failed.',
+      };
+    }
 
     // A bill belongs to the TRANSPORT year being generated, so its academic_year_id
     // must be the academic year of the same name ('2026-2027') for the learner's

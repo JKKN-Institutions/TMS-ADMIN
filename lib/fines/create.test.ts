@@ -125,4 +125,16 @@ describe('createFines', () => {
     expect(eq?.[1]).toEqual(['category_name', 'Transport Fee']);
     expect((eq?.[1] as unknown[])[1]).not.toBe(TRANSPORT_CATEGORY_NAME.student);
   });
+
+  it('raises rather than writing uncategorised fines when the category is missing', async () => {
+    const svc = makeFakeSupabase({ ...baseData(), billing_categories: [] });
+
+    await expect(createFines(svc as never, input())).rejects.toThrow(/Transport Fee/);
+
+    // and no money row was inserted
+    const inserts = svc.calls.filter(
+      (c) => c.table === 'billing_student_bills' && c.ops.some(([op]) => op === 'insert')
+    );
+    expect(inserts).toHaveLength(0);
+  });
 });

@@ -27,6 +27,7 @@ function flatFixture(overrides: Record<string, unknown[]> = {}) {
     admission_years: [],
     tms_fee_override: [],
     tms_fee_bill: [],
+    billing_categories: [{ id: 'cat-1', category_name: 'Transport Maintenance Fee' }],
     ...overrides,
   });
 }
@@ -345,6 +346,7 @@ describe('generateBills — learner bills are one bill with instalments', () => 
         admission_years: [],
         tms_fee_override: [],
         tms_fee_bill: [],
+        billing_categories: [{ id: 'cat-1', category_name: 'Transport Maintenance Fee' }],
       },
       { insertErrors: { billing_bill_instalments: { message: 'sum mismatch' } } }
     );
@@ -515,5 +517,29 @@ describe('generateBills — the bill academic year follows the transport year', 
       { id: 'ay-26-other', institution_id: 'i2', academic_year_name: '2026-2027' },
     ]));
     expect(row.academic_year_id).toBe('ay-25');
+  });
+});
+
+describe('generateBills — missing billing category', () => {
+  it('refuses to generate rather than writing uncategorised bills', async () => {
+    // Same fixture, with the category row taken away.
+    const svc = flatFixture({ billing_categories: [] });
+
+    const res = await generateBills(svc as never, {
+      feeStructureId: 'fs1',
+      mode: 'generate',
+      actorId: 'admin-1',
+    });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.status).toBe(500);
+    expect(res.error).toMatch(/Transport Maintenance Fee/);
+
+    // and nothing was written
+    const inserts = svc.calls.filter(
+      (c) => c.table === 'billing_student_bills' && c.ops.some(([op]) => op === 'insert')
+    );
+    expect(inserts).toHaveLength(0);
   });
 });
