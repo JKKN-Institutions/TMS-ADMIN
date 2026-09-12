@@ -65,17 +65,9 @@ async function fetchRoster(date: string, direction: AttDirection, userId: string
 async function fetchWindows(
   userId: string | null,
 ): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
+  let res: Response;
   try {
-    const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
-    const json = await res.json();
-    if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
-    const windows = json.data.windows as AttendanceWindows;
-    if (userId) void saveWindows(offlineKv(), userId, windows, new Date()).catch(() => {});
-    return {
-      windows,
-      // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
-      activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
-    };
+    res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
   } catch {
     // No signal. Admin-customised hours (and the evening switch) must not
     // silently fall back to the defaults, so use the saved copy. With no
@@ -84,6 +76,15 @@ async function fetchWindows(
     const windows = saved?.value ?? DEFAULT_WINDOWS;
     return { windows, activeDirection: activeDirection(windows) };
   }
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
+  const windows = json.data.windows as AttendanceWindows;
+  if (userId) void saveWindows(offlineKv(), userId, windows, new Date()).catch(() => {});
+  return {
+    windows,
+    // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
+    activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
+  };
 }
 
 export default function BoardingAttendancePage() {
