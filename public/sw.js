@@ -8,6 +8,12 @@
 const VERSION = 'v2';
 const CACHE = `tms-shell-${VERSION}`;
 
+// The installed app starts at "/", which the server REDIRECTS to the user's
+// home page. A navigation's redirect cannot be cached, so with no signal "/"
+// had nothing to fall back to and showed offline.html. Remember the last app
+// page actually served, and fall back to it for "/".
+const LAST_NAV_KEY = '/__tms-last-nav';
+
 // Precached so the offline fallback + core icons work on the very first offline hit.
 const PRECACHE_URLS = [
   '/offline.html',
@@ -43,6 +49,12 @@ self.addEventListener('activate', (event) => {
 // Lets the update flow (PwaProvider) activate a waiting SW immediately.
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  // Sign-out: forget which page to open at "/" offline, so a shared phone
+  // never opens the previous user's screen. The cached pages themselves are
+  // client-rendered shells and carry no user data.
+  if (event.data && event.data.type === 'CLEAR_LAST_NAV') {
+    event.waitUntil(caches.open(CACHE).then((cache) => cache.delete(LAST_NAV_KEY)));
+  }
 });
 
 function isStaticAsset(url) {
@@ -78,12 +90,6 @@ self.addEventListener('fetch', (event) => {
 
   // Anything else same-origin → default network.
 });
-
-// The installed app starts at "/", which the server REDIRECTS to the user's
-// home page. A navigation's redirect cannot be cached, so with no signal "/"
-// had nothing to fall back to and showed offline.html. Remember the last app
-// page actually served, and fall back to it for "/".
-const LAST_NAV_KEY = '/__tms-last-nav';
 
 function isAppPage(url) {
   return (

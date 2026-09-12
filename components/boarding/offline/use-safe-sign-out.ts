@@ -21,6 +21,7 @@ export function useSafeSignOut(signOut: () => Promise<void>, userId: string | nu
         if (!ok) return;
       }
     }
+    navigator.serviceWorker?.controller?.postMessage({ type: 'CLEAR_LAST_NAV' });
     await signOut();
   }, [signOut, userId]);
 }
