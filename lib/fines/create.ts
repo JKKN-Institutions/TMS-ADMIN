@@ -10,7 +10,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveFine, type FineSkipReason } from './resolve';
-import { TRANSPORT_CATEGORY_NAME } from '@/lib/fees/types';
+import { TRANSPORT_FINE_CATEGORY_NAME } from '@/lib/fees/types';
+import { resolveBillingCategoryId } from '@/lib/fees/billing-category';
 import { notifyLearner } from '@/lib/notifications/notify';
 
 type Svc = SupabaseClient;
@@ -160,12 +161,9 @@ export async function createFines(svc: Svc, input: CreateFinesInput): Promise<Cr
     personIds: input.personIds,
   });
 
-  const { data: cat } = await svc
-    .from('billing_categories')
-    .select('id')
-    .eq('category_name', TRANSPORT_CATEGORY_NAME.student)
-    .maybeSingle();
-  const categoryId = (cat as { id: string } | null)?.id ?? null;
+  // Throws MissingBillingCategoryError. Deliberately NOT caught here: writing a
+  // batch of uncategorised fines is worse than raising 500 to the caller.
+  const categoryId = await resolveBillingCategoryId(svc, TRANSPORT_FINE_CATEGORY_NAME);
 
   const result: CreateFinesResult = {
     created: 0,

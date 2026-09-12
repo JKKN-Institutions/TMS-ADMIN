@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveApplicablePeople } from './applicability';
 import { resolvePersonTerms, type StopScheduleTerm } from './resolve-terms';
 import { TRANSPORT_CATEGORY_NAME, type FeeAudience, type FeeMode } from './types';
+import { resolveBillingCategoryId } from './billing-category';
 
 export type StaffBillTerm = { term_no: number; amount: number; due_date: string };
 
@@ -230,11 +231,7 @@ export async function generateStaffBill(
     if (!plan.billable) return { billingStatus: plan.reason, inserted: 0 };
 
     const catName = TRANSPORT_CATEGORY_NAME['staff' as FeeAudience];
-    const { data: cat } = await svc
-      .from('billing_categories')
-      .select('id')
-      .eq('category_name', catName)
-      .maybeSingle();
+    const categoryId = await resolveBillingCategoryId(svc, catName);
 
     let inserted = 0;
     for (const term of plan.terms) {
@@ -243,7 +240,7 @@ export async function generateStaffBill(
         feeStructureId: plan.feeStructureId,
         transportYearId: opts.transportYearId,
         staffId: opts.staffId,
-        categoryId: cat?.id ?? null,
+        categoryId,
         term,
       });
       const { error } = await svc.from('tms_fee_bill').insert([row]);
@@ -252,7 +249,11 @@ export async function generateStaffBill(
       if (!error) inserted++;
     }
     return { billingStatus: 'billed', inserted };
-  } catch {
+  } catch (e) {
+    // Was a bare `catch {}`. An unseeded billing category surfaced here as a
+    // generic 'error' with nothing in the logs, which is how a configuration
+    // problem turns into a mystery.
+    console.error('[staff-bill] generateStaffBill failed:', e);
     return { billingStatus: 'error', inserted: 0 };
   }
 }

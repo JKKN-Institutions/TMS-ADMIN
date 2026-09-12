@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { makeFakeSupabase } from '@/lib/fees/__testing__/fake-supabase';
 import { previewFines, createFines } from './create';
+import { TRANSPORT_CATEGORY_NAME } from '@/lib/fees/types';
 
 const YEAR = 'year-1';
 
@@ -107,5 +108,33 @@ describe('createFines', () => {
       errors: { tms_fine_stop_rate: { message: 'boom' } },
     });
     await expect(createFines(svc as never, input())).rejects.toThrow();
+  });
+
+  // REGRESSION LOCK. The fine writer and the recurring-fee generator used to
+  // read the SAME constant. Pointing the fee at 'Transport Maintenance Fee'
+  // would have silently dragged fines along with it — the exact opposite of
+  // what the split is for — and no existing test would have noticed.
+  it('bills a fine to the Transport Fee category, never the maintenance one', async () => {
+    const svc = makeFakeSupabase(baseData());
+
+    await createFines(svc as never, input());
+
+    const call = svc.calls.find((c) => c.table === 'billing_categories');
+    expect(call).toBeDefined();
+    const eq = call!.ops.find(([op]) => op === 'eq');
+    expect(eq?.[1]).toEqual(['category_name', 'Transport Fee']);
+    expect((eq?.[1] as unknown[])[1]).not.toBe(TRANSPORT_CATEGORY_NAME.student);
+  });
+
+  it('raises rather than writing uncategorised fines when the category is missing', async () => {
+    const svc = makeFakeSupabase({ ...baseData(), billing_categories: [] });
+
+    await expect(createFines(svc as never, input())).rejects.toThrow(/Transport Fee/);
+
+    // and no money row was inserted
+    const inserts = svc.calls.filter(
+      (c) => c.table === 'billing_student_bills' && c.ops.some(([op]) => op === 'insert')
+    );
+    expect(inserts).toHaveLength(0);
   });
 });

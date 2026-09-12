@@ -93,6 +93,7 @@ export async function autoGenerateBills(
       });
 
       if (!res.ok) {
+        console.error('[auto-generate] structure failed', s.id, s.name, res.error);
         results.push({
           id: s.id, name: s.name, billed: 0, skipped: 0, unresolved: 0,
           conflictsSkipped: 0, bornOverdue: 0, errors: 0, error: res.error,
@@ -154,6 +155,7 @@ export async function autoGenerateBills(
         });
       }
     } catch (e) {
+      console.error('[auto-generate] structure threw', s.id, s.name, e);
       results.push({
         id: s.id, name: s.name, billed: 0, skipped: 0, unresolved: 0,
         conflictsSkipped: 0, bornOverdue: 0, errors: 0,

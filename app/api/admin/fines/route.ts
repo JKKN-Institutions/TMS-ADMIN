@@ -5,6 +5,7 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
 import { parseCreateFineBody } from '@/lib/fines/fields';
 import { createFines } from '@/lib/fines/create';
+import { MissingBillingCategoryError } from '@/lib/fees/billing-category';
 import { loadFines } from '@/lib/fines/list';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -79,6 +80,11 @@ async function create(request: NextRequest, auth: AuthContext) {
     });
   } catch (e) {
     console.error('Fine create error:', e);
+    // A missing category is a configuration problem with an obvious fix, so the
+    // admin gets told which category rather than 'Internal server error'.
+    if (e instanceof MissingBillingCategoryError) {
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
