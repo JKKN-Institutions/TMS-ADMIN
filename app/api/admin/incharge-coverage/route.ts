@@ -10,6 +10,7 @@
  *   - shares left unmarked on the selected day
  */
 import { NextResponse, type NextRequest } from 'next/server';
+import { AUTO_METHOD } from '@/lib/boarding/auto-mark';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { loadSharesForRoutes } from '@/lib/boarding/allocation-repo';
@@ -86,7 +87,10 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
       const [{ data: bk, error: bErr }, { data: at, error: atErr }] = await Promise.all([
         svc.from('tms_booking').select('route_id, learner_id').in('route_id', c).eq('travel_date', date),
         svc.from('tms_attendance').select('route_id, learner_id').in('route_id', c)
-          .eq('trip_date', date).eq('direction', 'onward'),
+          .eq('trip_date', date).eq('direction', 'onward')
+          // Rows the database wrote when the window closed are not an
+          // in-charge's work; counting them would show a share nobody marked as done.
+          .neq('method', AUTO_METHOD),
       ]);
       // Never let either failure read as "the bus never ran" or "nobody
       // marked" — this board is what the office acts on.

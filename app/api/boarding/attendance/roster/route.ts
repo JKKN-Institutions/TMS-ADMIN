@@ -12,6 +12,7 @@ import { loadRouteAllocation } from '@/lib/boarding/allocation-repo';
 import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
+import { isAutoMark } from '@/lib/boarding/auto-mark';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -313,7 +314,8 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
     // that reads "12 of 12 marked" while the bus still has 30 unmarked riders
     // is the correct answer to "am I done?".
     const mineRows = rows.filter((r) => r.is_mine && r.booked);
-    const mineMarked = mineRows.filter((r) => r.status !== 'unmarked').length;
+    // An auto-absent answers "was this rider accounted for", not "did I mark them".
+    const mineMarked = mineRows.filter((r) => r.status !== 'unmarked' && !isAutoMark(r.method)).length;
     return NextResponse.json({
       success: true,
       data: {
