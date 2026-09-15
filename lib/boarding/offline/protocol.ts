@@ -22,7 +22,9 @@ export type MarkRejectReason =
   | 'not_assigned'
   | 'not_your_share'
   | 'not_booked'
-  | 'scan_refused';
+  | 'scan_refused'
+  | 'manual_off'
+  | 'scan_off';
 
 export type SavedOutcome = 'inserted' | 'updated_own' | 'overridden' | 'noop_same_status';
 
@@ -52,6 +54,8 @@ export const REJECT_REASON_TEXT: Record<MarkRejectReason, string> = {
   not_your_share: 'This student belongs to another in-charge.',
   not_booked: 'Not booked. Scan again with signal to add them as travelled without booking.',
   scan_refused: 'The scan was refused.',
+  manual_off: "Manual marking is switched off in Settings. Scan the student's ID card instead.",
+  scan_off: 'Scanning is switched off in Settings. Mark the student with P, A or B instead.',
 };
 
 export function isSavedOutcome(o: string): o is SavedOutcome {

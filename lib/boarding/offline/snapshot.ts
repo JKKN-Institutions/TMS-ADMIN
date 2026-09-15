@@ -31,6 +31,17 @@ export async function loadWindows<T>(kv: Kv, userId: string): Promise<Saved<T> |
   return (await kv.get<Saved<T>>(windowsKey(userId))) ?? null;
 }
 
+/** Settings → Marking method as it applies to this user, so a no-signal start shows the right controls. */
+const markingKey = (userId: string) => `marking:${userId}`;
+
+export async function saveMarking<T>(kv: Kv, userId: string, marking: T, now: Date): Promise<void> {
+  await kv.set<Saved<T>>(markingKey(userId), { savedAt: now.toISOString(), value: marking });
+}
+
+export async function loadMarking<T>(kv: Kv, userId: string): Promise<Saved<T> | null> {
+  return (await kv.get<Saved<T>>(markingKey(userId))) ?? null;
+}
+
 export async function saveAccess(kv: Kv, userId: string, date: string, gate: string, now: Date): Promise<void> {
   await kv.set<Saved<string>>(accessKey(userId, date), { savedAt: now.toISOString(), value: gate });
 }

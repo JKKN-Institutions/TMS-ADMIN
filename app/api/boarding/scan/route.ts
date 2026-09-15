@@ -11,6 +11,7 @@ import { istToday } from '@/lib/booking/window';
 import { loadAttendanceWindows, activeDirection, type AttDirection } from '@/lib/boarding/attendance-window';
 import { judgeTappedAt } from '@/lib/boarding/tapped-at';
 import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
+import { loadMarkingMode, allowedMethods } from '@/lib/boarding/marking-mode';
 
 /**
  * POST a scanned JKKN ID card → mark the learner present for today.
@@ -121,6 +122,16 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const source: ScanSource = body.source === 'camera' ? 'camera' : 'typed';
 
     const svc = createServiceRoleClient();
+
+    // Settings → Marking method. Manual only switches scanning off for ordinary
+    // staff; the transport office keeps it.
+    const scanExempt = auth.isSuperAdmin || (await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE));
+    if (!allowedMethods(await loadMarkingMode(svc), scanExempt).scan) {
+      return NextResponse.json(
+        { ok: false, clientId: body.clientId ?? null, reason: 'scan_off', error: REJECT_REASON_TEXT.scan_off },
+        { status: 409 },
+      );
+    }
 
     // Identify the learner from the QR token, a scanned JKKN ID card, or a
     // typed 6-digit code.

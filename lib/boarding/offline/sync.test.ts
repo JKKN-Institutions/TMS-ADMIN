@@ -173,6 +173,20 @@ describe('syncOnce', () => {
       ['s2', 'not_booked'], ['s3', 'scan_refused'],
     ]);
   });
+
+  it('refuses a mark batch with manual_off, without retrying', async () => {
+    const kv = await setup(2);
+    await syncOnce(deps(kv, { postMarks: async () => ({ status: 409, json: { reason: 'manual_off', error: 'Manual marking is switched off.' } }) }));
+    expect((await listProblems(kv, 'u1')).map((p) => p.reason)).toEqual(['manual_off', 'manual_off']);
+    expect(await listOutbox(kv, 'u1')).toEqual([]);
+  });
+
+  it('refuses a queued scan with scan_off', async () => {
+    const kv = memoryKv();
+    await enqueueScan(kv, { userId: 'u1', learnerId: 's1', token: 't-s1', walkUp: false, name: 's1', verified: true, direction: 'onward' }, T0, ids());
+    await syncOnce(deps(kv, { postScan: async () => ({ status: 409, json: { ok: false, reason: 'scan_off', error: 'Scanning is switched off.' } }) }));
+    expect((await listProblems(kv, 'u1')).map((p) => p.reason)).toEqual(['scan_off']);
+  });
 });
 
 describe('syncOutbox', () => {

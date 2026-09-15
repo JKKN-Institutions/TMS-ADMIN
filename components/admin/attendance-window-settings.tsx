@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { Clock, Save, Loader2, Sunrise, Sunset } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { validateWindows, DEFAULT_WINDOWS, type AttendanceWindows } from '@/lib/boarding/attendance-window';
+import {
+  MARKING_MODES, MARKING_MODE_LABEL, MARKING_MODE_HINT, DEFAULT_MARKING_MODE, type MarkingMode,
+} from '@/lib/boarding/marking-mode';
 
 interface WinForm { start: string; end: string; enabled: boolean }
 interface EveningForm extends WinForm { active: boolean }
@@ -21,6 +24,7 @@ export function AttendanceWindowSettings() {
   const [evening, setEvening] = useState<EveningForm>({
     start: DEFAULT_WINDOWS.return.start, end: DEFAULT_WINDOWS.return.end, enabled: true, active: false,
   });
+  const [markingMode, setMarkingMode] = useState<MarkingMode>(DEFAULT_MARKING_MODE);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   // Set when the initial GET didn't return real settings — network error,
@@ -38,6 +42,7 @@ export function AttendanceWindowSettings() {
           const w = json.data.windows as AttendanceWindows;
           setOnward({ start: w.onward.start, end: w.onward.end, enabled: w.onward.enabled });
           setEvening({ start: w.return.start, end: w.return.end, enabled: w.return.enabled, active: w.return.active });
+          if (json.data.markingMode) setMarkingMode(json.data.markingMode as MarkingMode);
         } else {
           setLoadFailed(true);
         }
@@ -65,11 +70,11 @@ export function AttendanceWindowSettings() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ onward, return: evening }),
+        body: JSON.stringify({ onward, return: evening, markingMode }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save');
-      toast.success('Attendance windows saved. Open boarding screens update now.');
+      toast.success('Attendance settings saved. Open boarding screens update now.');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save attendance windows');
     } finally {
@@ -100,6 +105,36 @@ export function AttendanceWindowSettings() {
           </p>
         )}
       </div>
+
+      <fieldset className="rounded-lg border border-gray-200 bg-white p-5">
+        <legend className="px-1 font-medium text-gray-900">Marking method</legend>
+        <p className="mb-3 text-xs text-gray-600">
+          How boarding staff record attendance, for both trips. The transport head and super admins can always use both.
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {MARKING_MODES.map((m) => (
+            <label
+              key={m}
+              className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+                markingMode === m ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-gray-200'
+              }`}
+            >
+              <input
+                type="radio"
+                name="marking-mode"
+                value={m}
+                checked={markingMode === m}
+                onChange={() => setMarkingMode(m)}
+                className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                <span className="block font-medium text-gray-900">{MARKING_MODE_LABEL[m]}</span>
+                <span className="block text-xs text-gray-600">{MARKING_MODE_HINT[m]}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <WindowCard
@@ -150,7 +185,7 @@ export function AttendanceWindowSettings() {
         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
       >
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-        Save windows
+        Save attendance settings
       </button>
     </div>
   );

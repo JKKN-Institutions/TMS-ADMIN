@@ -140,6 +140,7 @@ async function settleMarkBatch(d: SyncDeps, batch: MarkEntry[], res: PostResult,
   const reason: MarkRejectReason =
     res.status === 403 ? 'not_assigned'
     : res.status === 409 && res.json?.reason === 'window_closed' ? 'outside_window'
+    : res.status === 409 && res.json?.reason === 'manual_off' ? 'manual_off'
     : res.status === 400 && message === 'No valid learners for this route' ? 'not_on_route'
     : 'invalid';
   for (const e of batch) await settle(d, e, reject(e, reason, message), report);
@@ -157,6 +158,7 @@ async function settleScan(d: SyncDeps, scan: ScanEntry, res: PostResult, report:
   if (res.status >= 500) return deferAll(d, [scan], report);
   const reason: MarkRejectReason =
     j.reason === 'not_booked' ? 'not_booked'
+    : j.reason === 'scan_off' ? 'scan_off'
     : j.reason === 'window_closed' ? 'outside_window'
     : j.reason === 'stale' || j.reason === 'future' || j.reason === 'invalid'
       || j.reason === 'wrong_trip' || j.reason === 'evening_off' ? j.reason

@@ -2,6 +2,7 @@
 
 import type { ColumnDef } from '@tanstack/react-table';
 import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock } from 'lucide-react';
+import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -187,6 +188,8 @@ export function getRosterColumns(opts: {
   hasOwners: boolean;
   /** Marks waiting on the phone, by learner, for the "Waiting" badge. */
   pending?: Map<string, PendingView>;
+  /** Settings → Marking method allows P / A / B for this viewer. */
+  manualAllowed: boolean;
 }): ColumnDef<RosterRow>[] {
   const selectColumn: ColumnDef<RosterRow> = {
     id: 'select',
@@ -290,10 +293,15 @@ export function getRosterColumns(opts: {
       cell: ({ row }) =>
         row.original.status !== 'unmarked' ? (
           <div className="whitespace-nowrap">
-            <span className="inline-flex items-center gap-1.5 text-gray-500">
-              {row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
+            <span className="inline-flex items-center gap-1.5 text-gray-500" title={isAutoMark(row.original.method) ? AUTO_MARK_TITLE : undefined}>
+              {isAutoMark(row.original.method)
+                ? <Clock className="h-3.5 w-3.5" />
+                : row.original.method === 'manual' ? <Pencil className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
               {fmtTime(row.original.scanned_at)}
             </span>
+            {isAutoMark(row.original.method) && (
+              <div className="text-xs text-gray-400">auto · not marked in time</div>
+            )}
             {/* A dozen in-charges share this roster, so an unattributed mark
                 cannot be acted on: "who already did this?" is the question. */}
             {row.original.marked_by_name && (
@@ -325,6 +333,27 @@ export function getRosterColumns(opts: {
         // no control shows at all (present and absent are both disabled by timing).
         if (!opts.canMark) return null;
         const busy = opts.busyId === row.original.learner_id;
+
+        // Scan only: no P / A / B. The one control left is Undo on a SCAN this
+        // viewer may clear, so a mis-scan can be taken back. Never on manual or
+        // auto rows -- those are not a scan.
+        if (!opts.manualAllowed) {
+          const r = row.original;
+          const isScan = r.method === 'id_card' || r.method === 'qr_scan';
+          if (!isScan || !r.can_clear) return null;
+          return (
+            <button
+              type="button"
+              onClick={() => opts.onUndo(r)}
+              disabled={busy}
+              title="Undo this scan"
+              aria-label="Undo this scan"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+          );
+        }
 
         // ── Without a ticket: BOTH actions, same as a booked rider ──
         // This shipped as present-only — one amber "Boarded" button whose only
