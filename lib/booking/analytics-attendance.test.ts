@@ -133,7 +133,7 @@ describe('aggregateAttendance', () => {
 
   it('tallies direction, method and status', () => {
     expect(out.byDirection).toEqual({ onward: 2, return: 0 });
-    expect(out.byMethod).toEqual({ qr_scan: 2, manual: 0, id_card: 0 });
+    expect(out.byMethod).toEqual({ qr_scan: 2, manual: 0, id_card: 0, auto: 0 });
     expect(out.byStatus).toEqual({ present: 1, absent: 1 });
   });
 
@@ -146,7 +146,19 @@ describe('aggregateAttendance', () => {
         at('L3', '2026-07-09', { method: 'qr_scan' }),
       ],
     );
-    expect(cardOut.byMethod).toEqual({ qr_scan: 1, manual: 0, id_card: 2 });
+    expect(cardOut.byMethod).toEqual({ qr_scan: 1, manual: 0, id_card: 2, auto: 0 });
+  });
+
+  it('counts auto-absent rows as their own method and as absences', () => {
+    const autoOut = agg(
+      [bk('L1', '2026-07-09'), bk('L2', '2026-07-09')],
+      [
+        at('L1', '2026-07-09', { method: 'manual' }),
+        at('L2', '2026-07-09', { method: 'auto', status: 'absent' }),
+      ],
+    );
+    expect(autoOut.byMethod).toEqual({ qr_scan: 0, manual: 1, id_card: 0, auto: 1 });
+    expect(autoOut.byStatus).toEqual({ present: 1, absent: 1 });
   });
 
   it('returns a zeroed, non-NaN block for empty input', () => {
@@ -342,7 +354,7 @@ describe('aggregateAttendance', () => {
 
     expect(unfiltered.kpis.manualSharePct).toBe(50);
     expect(filtered.kpis.manualSharePct).toBe(50); // unmoved by the record filter
-    expect(filtered.byMethod).toEqual({ qr_scan: 1, manual: 0, id_card: 0 }); // composition still narrows
+    expect(filtered.byMethod).toEqual({ qr_scan: 1, manual: 0, id_card: 0, auto: 0 }); // composition still narrows
   });
 
   it('scopes the manual-capture share to the COHORT, not the whole fleet', () => {

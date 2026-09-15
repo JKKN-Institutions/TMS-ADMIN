@@ -376,6 +376,7 @@ export function aggregateAttendance({
       qr_scan: count(attendanceForComposition, (a) => a.method, 'qr_scan'),
       manual: count(attendanceForComposition, (a) => a.method, 'manual'),
       id_card: count(attendanceForComposition, (a) => a.method, 'id_card'),
+      auto: count(attendanceForComposition, (a) => a.method, 'auto'),
     },
     byStatus: {
       present: count(attendanceForComposition, (a) => a.status, 'present'),

@@ -81,7 +81,7 @@ export function parseFilters(sp: URLSearchParams): {
       bookedBy: oneOf(sp.get('booked_by'), ['self', 'admin'] as const),
       direction: oneOf(sp.get('direction'), ['onward', 'return'] as const),
       attStatus: oneOf(sp.get('att_status'), ['present', 'absent'] as const),
-      method: oneOf(sp.get('method'), ['qr_scan', 'manual', 'id_card'] as const),
+      method: oneOf(sp.get('method'), ['qr_scan', 'manual', 'id_card', 'auto'] as const),
     },
   };
 }
@@ -102,6 +102,7 @@ const METHOD_OPTS = [
   { id: 'qr_scan', label: 'QR scan' },
   { id: 'id_card', label: 'ID card' },
   { id: 'manual', label: 'Manual' },
+  { id: 'auto', label: 'Auto (window closed)' },
 ];
 
 const dateInput =
