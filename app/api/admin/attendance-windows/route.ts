@@ -8,6 +8,10 @@ import {
   type AttDirection, type AttendanceWindow, type AttendanceWindows,
 } from '@/lib/boarding/attendance-window';
 import { publishAttendanceSettingsChanged } from '@/lib/boarding/attendance-broadcast';
+import {
+  readMarkingMode, loadMarkingMode, isMarkingMode, MARKING_MODE_LABEL, ATTENDANCE_SETTING_TYPE,
+  type MarkingMode,
+} from '@/lib/boarding/marking-mode';
 
 /**
  * Admin read/update of the attendance windows: the morning (onward) trip, and
@@ -49,8 +53,8 @@ async function getWindows(auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const svc = createServiceRoleClient();
-    const windows = await loadAttendanceWindows(svc);
-    return NextResponse.json({ success: true, data: { windows } });
+    const [windows, markingMode] = await Promise.all([loadAttendanceWindows(svc), loadMarkingMode(svc)]);
+    return NextResponse.json({ success: true, data: { windows, markingMode } });
   } catch (e) {
     console.error('admin attendance-windows GET error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -64,7 +68,7 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
     }
     const parsedBody = await request.json().catch(() => null);
     const body = (parsedBody && typeof parsedBody === 'object' ? parsedBody : {}) as {
-      onward?: WindowInput; return?: WindowInput;
+      onward?: WindowInput; return?: WindowInput; markingMode?: unknown;
     };
     const svc = createServiceRoleClient();
     // Use the null-on-error read, not loadAttendanceWindows: a read failure
@@ -91,6 +95,20 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
     const invalid = validateWindows(windows);
     if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
+    // Marking method. An older Settings screen sends no key: keep what is stored.
+    const touchesMode = body.markingMode !== undefined;
+    if (touchesMode && !isMarkingMode(body.markingMode)) {
+      return NextResponse.json({ error: 'Choose Scan only, Manual only or Scan + manual.' }, { status: 400 });
+    }
+    const storedMode = await readMarkingMode(svc);
+    if (storedMode === null) {
+      return NextResponse.json(
+        { error: 'Could not read the current marking method. Nothing was saved; try again.' },
+        { status: 500 },
+      );
+    }
+    const markingMode: MarkingMode = touchesMode ? (body.markingMode as MarkingMode) : storedMode;
+
     const now = new Date().toISOString();
     // Only write the rows the caller actually touched. An old client that
     // never sends `return` must not rewrite the evening row's updated_at /
@@ -110,6 +128,16 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
       console.error('admin attendance-windows PUT error:', error);
       return NextResponse.json({ error: 'Failed to save attendance windows' }, { status: 500 });
     }
+    if (touchesMode) {
+      const { error: modeError } = await svc.from('admin_settings').upsert(
+        { setting_type: ATTENDANCE_SETTING_TYPE, settings_data: { markingMode }, updated_at: now, updated_by: auth.userId },
+        { onConflict: 'setting_type' },
+      );
+      if (modeError) {
+        console.error('admin attendance-windows PUT marking mode error:', modeError);
+        return NextResponse.json({ error: 'Failed to save the marking method' }, { status: 500 });
+      }
+    }
 
     const leg = (w: AttendanceWindow) => `${w.start}-${w.end}${w.enabled ? '' : ' (not enforced)'}`;
     await logActivity(auth, request, {
@@ -117,15 +145,15 @@ async function putWindows(request: NextRequest, auth: AuthContext) {
       action: 'update',
       entityType: 'tms_attendance_window',
       description:
-        `Updated attendance windows — morning ${leg(onward)}; evening ${ret.active ? leg(ret) : 'off'}`,
-      metadata: { windows },
+        `Updated attendance windows — morning ${leg(onward)}; evening ${ret.active ? leg(ret) : 'off'}; marking ${MARKING_MODE_LABEL[markingMode]}`,
+      metadata: { windows, markingMode },
     });
 
     // After the write has committed. A failed signal only delays open screens;
     // the server enforces the new times on the very next request regardless.
     await publishAttendanceSettingsChanged();
 
-    return NextResponse.json({ success: true, data: { windows } });
+    return NextResponse.json({ success: true, data: { windows, markingMode } });
   } catch (e) {
     console.error('admin attendance-windows PUT error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
