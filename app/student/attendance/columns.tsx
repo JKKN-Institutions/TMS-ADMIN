@@ -1,7 +1,8 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { Pencil, QrCode } from 'lucide-react';
+import { Clock, Pencil, QrCode } from 'lucide-react';
+import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 
 // One of MY attendance records, exactly as /api/student/attendance returns it.
@@ -100,8 +101,13 @@ export function getAttendanceColumns(): ColumnDef<AttendanceRow>[] {
       header: ({ column }) => <DataTableColumnHeader column={column} title="Marked" />,
       size: 120,
       cell: ({ row }) => (
-        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500">
-          {row.original.method === 'manual' ? (
+        <span
+          className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-500"
+          title={isAutoMark(row.original.method) ? AUTO_MARK_TITLE : undefined}
+        >
+          {isAutoMark(row.original.method) ? (
+            <Clock className="h-3.5 w-3.5" />
+          ) : row.original.method === 'manual' ? (
             <Pencil className="h-3.5 w-3.5" />
           ) : (
             <QrCode className="h-3.5 w-3.5" />

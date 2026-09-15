@@ -1,6 +1,7 @@
 'use client';
 
-import { ChevronLeft, ChevronRight, Pencil, QrCode } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Pencil, QrCode } from 'lucide-react';
+import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { monthGrid } from '@/lib/booking/month';
 import { istToday } from '@/lib/booking/window';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
@@ -250,8 +251,13 @@ function DayButton({
                   </>
                 )}
                 {m.method && (
-                  <span className="ml-auto inline-flex items-center text-gray-400" title={m.method === 'manual' ? 'Marked manually' : 'Scanned (QR)'}>
-                    {m.method === 'manual' ? <Pencil className="h-2.5 w-2.5" /> : <QrCode className="h-2.5 w-2.5" />}
+                  <span
+                    className="ml-auto inline-flex items-center text-gray-400"
+                    title={isAutoMark(m.method) ? AUTO_MARK_TITLE : m.method === 'manual' ? 'Marked manually' : 'Scanned (QR)'}
+                  >
+                    {isAutoMark(m.method)
+                      ? <Clock className="h-2.5 w-2.5" />
+                      : m.method === 'manual' ? <Pencil className="h-2.5 w-2.5" /> : <QrCode className="h-2.5 w-2.5" />}
                   </span>
                 )}
               </div>
