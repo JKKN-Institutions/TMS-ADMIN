@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Field } from '@/components/ui/detail-view';
 import { istToday, addDays } from '@/lib/booking/window';
 import { getRosterColumns, type RosterStudent } from './columns';
+import { ALL_METHODS_ALLOWED, type AllowedMarking } from '@/lib/boarding/marking-mode';
 
 interface RouteInfo { id: string; route_number: string | null; route_name: string | null }
 
@@ -42,7 +43,18 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
   const [date, setDate] = useState<string>(() => today);
   const isToday = date === today;
   const isFuture = date > today;
-  const editable = canManage && isToday;
+  // Settings → Marking method. In Scan only mode this page offers no manual
+  // control; the server refuses manual marks either way.
+  const { data: marking } = useQuery({
+    queryKey: ['boarding-marking'],
+    queryFn: async (): Promise<AllowedMarking> => {
+      const res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
+      const json = await res.json().catch(() => null);
+      return (json?.data?.marking as AllowedMarking | undefined) ?? ALL_METHODS_ALLOWED;
+    },
+    refetchOnWindowFocus: true,
+  });
+  const editable = canManage && isToday && (marking?.manual ?? true);
 
   const {
     data: rosterData,

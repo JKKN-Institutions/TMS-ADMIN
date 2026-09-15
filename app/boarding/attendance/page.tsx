@@ -15,10 +15,11 @@ import {
 } from '@/lib/boarding/attendance-window';
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { useAttendanceSettingsLive } from '@/hooks/use-attendance-settings-live';
+import { ALL_METHODS_ALLOWED, type AllowedMarking } from '@/lib/boarding/marking-mode';
 import { useAuth } from '@/providers/auth-provider';
 import { istToday } from '@/lib/booking/window';
 import { offlineKv } from '@/lib/boarding/offline/kv';
-import { loadRoster, loadWindows, pruneSnapshots, saveRoster, saveWindows } from '@/lib/boarding/offline/snapshot';
+import { loadMarking, loadRoster, loadWindows, pruneSnapshots, saveMarking, saveRoster, saveWindows } from '@/lib/boarding/offline/snapshot';
 import { applyPending, pendingByLearner } from '@/lib/boarding/offline/apply-pending';
 import { useOfflineAttendance } from '@/components/boarding/offline/use-offline-attendance';
 import { OfflineStatusBar } from '@/components/boarding/offline/offline-status-bar';
@@ -64,7 +65,7 @@ async function fetchRoster(date: string, direction: AttDirection, userId: string
 
 async function fetchWindows(
   userId: string | null,
-): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null }> {
+): Promise<{ windows: AttendanceWindows; activeDirection: AttDirection | null; marking: AllowedMarking }> {
   let res: Response;
   try {
     res = await fetch('/api/boarding/attendance-window', { cache: 'no-store', credentials: 'same-origin' });
@@ -74,14 +75,21 @@ async function fetchWindows(
     // server to ask, the phone's clock is the only clock there is.
     const saved = userId ? await loadWindows<AttendanceWindows>(offlineKv(), userId).catch(() => null) : null;
     const windows = saved?.value ?? DEFAULT_WINDOWS;
-    return { windows, activeDirection: activeDirection(windows) };
+    const savedMarking = userId ? await loadMarking<AllowedMarking>(offlineKv(), userId).catch(() => null) : null;
+    return { windows, activeDirection: activeDirection(windows), marking: savedMarking?.value ?? ALL_METHODS_ALLOWED };
   }
   const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null };
+  if (!res.ok || !json?.success) return { windows: DEFAULT_WINDOWS, activeDirection: null, marking: ALL_METHODS_ALLOWED };
   const windows = json.data.windows as AttendanceWindows;
-  if (userId) void saveWindows(offlineKv(), userId, windows, new Date()).catch(() => {});
+  // Settings → Marking method, already resolved for this user by the server.
+  const marking = (json.data.marking as AllowedMarking | undefined) ?? ALL_METHODS_ALLOWED;
+  if (userId) {
+    void saveWindows(offlineKv(), userId, windows, new Date()).catch(() => {});
+    void saveMarking(offlineKv(), userId, marking, new Date()).catch(() => {});
+  }
   return {
     windows,
+    marking,
     // The server's clock, not the phone's: a wrong device clock must not open the wrong tab.
     activeDirection: (json.data.activeDirection ?? null) as AttDirection | null,
   };
@@ -124,6 +132,7 @@ export default function BoardingAttendancePage() {
   });
   useAttendanceSettingsLive();
   const windows = winData?.windows ?? DEFAULT_WINDOWS;
+  const marking = winData?.marking ?? ALL_METHODS_ALLOWED;
 
   // Open on the trip that is open for marking, unless the staffer picked a tab.
   useEffect(() => {
@@ -241,8 +250,8 @@ export default function BoardingAttendancePage() {
   );
 
   const columns = useMemo(
-    () => getRosterColumns({ canMark, busyId, onMark: mark, onUndo: undo, hasOwners, pending }),
-    [canMark, busyId, mark, undo, hasOwners, pending]
+    () => getRosterColumns({ canMark, busyId, onMark: mark, onUndo: undo, hasOwners, pending, manualAllowed: marking.manual }),
+    [canMark, busyId, mark, undo, hasOwners, pending, marking.manual]
   );
 
   const filters: DataTableFilter[] = [
@@ -308,6 +317,7 @@ export default function BoardingAttendancePage() {
             by their badge wording, so the screen now says outright when to tap
             and — just as importantly — when to do nothing. Most "Not booked"
             students simply stayed home and must be left alone. */}
+        {marking.manual && (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           {/* The KEY to the action column. The buttons are single letters so a
               1,600-row roster stays readable on a phone, which means their
@@ -353,6 +363,17 @@ export default function BoardingAttendancePage() {
             <span className="font-medium">undo arrow</span> to remove the record altogether.
           </p>
         </div>
+        )}
+
+        {/* Settings → Marking method, stated as the rule staff follow today. */}
+        {marking.mode !== 'both' && (
+          <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+            {marking.mode === 'scan_only'
+              ? "Scan only: scan each student's ID card. Students not scanned are marked absent when attendance closes."
+              : 'Manual only: mark each student with P, A or B. Scanning is switched off.'}
+            {marking.manual && marking.scan && ' As transport office you can still use both.'}
+          </p>
+        )}
 
         <div className="mt-3 space-y-3">
           <OfflineStatusBar
@@ -458,7 +479,7 @@ export default function BoardingAttendancePage() {
         getRowId={(r) => r.learner_id}
         toolbarActions={({ selectedRows }) => (
           <>
-            {isToday && (
+            {isToday && marking.scan && (
               <button
                 type="button"
                 onClick={() => setScanOpen(true)}
