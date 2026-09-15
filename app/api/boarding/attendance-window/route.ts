@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadAttendanceWindows, activeDirection, istMinutesOfDay } from '@/lib/boarding/attendance-window';
+import { loadMarkingMode, allowedMethods } from '@/lib/boarding/marking-mode';
 
 /**
  * GET the configured attendance scan windows + the server-computed active
@@ -22,10 +23,16 @@ async function getWindows(auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const svc = createServiceRoleClient();
-    const windows = await loadAttendanceWindows(svc);
+    const [windows, mode, isOverrideHolder] = await Promise.all([
+      loadAttendanceWindows(svc),
+      loadMarkingMode(svc),
+      requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE),
+    ]);
+    // Computed for THIS caller: the transport office keeps both methods.
+    const marking = { mode, ...allowedMethods(mode, auth.isSuperAdmin || isOverrideHolder) };
     return NextResponse.json({
       success: true,
-      data: { windows, activeDirection: activeDirection(windows), serverNowMinutes: istMinutesOfDay() },
+      data: { windows, activeDirection: activeDirection(windows), serverNowMinutes: istMinutesOfDay(), marking },
     });
   } catch (e) {
     console.error('boarding attendance-window GET error:', e);

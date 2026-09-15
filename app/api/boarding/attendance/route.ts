@@ -15,7 +15,8 @@ import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { istToday } from '@/lib/booking/window';
 import { partitionByTap } from '@/lib/boarding/tapped-at';
 import { buildMarkResults } from '@/lib/boarding/mark-results';
-import type { MarkRejectReason } from '@/lib/boarding/offline/protocol';
+import { REJECT_REASON_TEXT, type MarkRejectReason } from '@/lib/boarding/offline/protocol';
+import { loadMarkingMode, allowedMethods } from '@/lib/boarding/marking-mode';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -154,6 +155,24 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // A window-exempt caller (super admin, override holder) skips the window in
     // both contracts -- they exist to fix a mark after it closes.
     const exempt = auth.isSuperAdmin || isOverrideHolder;
+
+    // Settings → Marking method. Refused before timing or ownership is judged:
+    // in Scan only mode a manual mark is not accepted at any time. Queued
+    // (offline-aware) batches get per-mark results so the outbox settles them.
+    if (!allowedMethods(await loadMarkingMode(svc), exempt).manual) {
+      const error = REJECT_REASON_TEXT.manual_off;
+      if (marks.every((m) => !m.tappedAt)) {
+        return NextResponse.json({ error, reason: 'manual_off' }, { status: 409 });
+      }
+      return NextResponse.json({
+        success: true, updated: 0, skipped: 0, locked: [], dropped: marks.length, walkUps: 0,
+        results: buildMarkResults({
+          rejected: marks.map((m) => ({ clientId: m.clientId, reason: 'manual_off' as const })),
+          sent: [], outcomes: [], markerName: () => '',
+        }),
+      });
+    }
+
     const windows = await loadAttendanceWindows(svc);
     const legacy = marks.every((m) => !m.tappedAt);
     const now = new Date();
