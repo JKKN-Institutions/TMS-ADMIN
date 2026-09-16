@@ -15,6 +15,7 @@ import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 // The arbitration rule lives with the boarding domain that enforces it, so the
 // roster's can_edit flag and the API routes' write gate can never disagree.
 import { decideMark, canClearMark, type MarkStatus } from '@/lib/boarding/attendance-ownership';
+import { UNKNOWN_FEE, type RosterFee } from '@/lib/boarding/fee-roster';
 import { bookedCount, routeCapacity } from './repo';
 
 export interface RosterRider {
@@ -214,6 +215,15 @@ export interface RosterRow {
    * to record a no-show as readily as a boarding — the same pair of actions.
    */
   lock_reason: 'not_my_share' | 'locked' | null;
+  /**
+   * Transport fee position, for the Fee column and filter.
+   *
+   * Display ONLY: fees never gate marking or scanning, and nothing on this row
+   * may be withheld because of them. 'unknown' when the lookup failed or the
+   * row came from an offline copy saved before this field existed — never
+   * assume paid.
+   */
+  fee: RosterFee;
   /** Set only when this mark replaced an earlier one (scan or transport-head override). */
   previous_status: 'present' | 'absent' | null;
   previous_by_name: string | null;
@@ -269,6 +279,8 @@ export function buildRosterRows(
     /** The caller's OWN email, to tell owning a learner from merely covering them. */
     myEmail: string | null;
   },
+  /** learner_id -> fee position. Absent ⇒ every row reads 'unknown'. */
+  feeByLearner?: Map<string, RosterFee>,
 ): RosterRow[] {
   const byId = new Map(orderedStops.map((s) => [s.id, s] as const));
   const orderOf = (stopId: string | null) =>
@@ -378,6 +390,9 @@ export function buildRosterRows(
       can_edit: lock_reason === null,
       can_clear: clearable,
       lock_reason,
+      // Never derived from anything on this row: a learner's fees are a fact
+      // about their bills, not about their ticket or their attendance.
+      fee: feeByLearner?.get(rider.learner_id) ?? { ...UNKNOWN_FEE },
       previous_status: prev,
       previous_by_name: prev ? att!.previous_by_name : null,
       previous_at: prev ? att!.previous_at : null,

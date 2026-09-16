@@ -13,6 +13,7 @@ import { getBoardingStaffForRoute } from '@/lib/routes/boarding-staff';
 import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { isAutoMark } from '@/lib/boarding/auto-mark';
+import { loadRosterFees, UNKNOWN_FEE } from '@/lib/boarding/fee-roster';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -105,7 +106,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       success: true,
       data: {
         date, direction, rows: [] as RosterRow[],
-        counts: { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 },
+        counts: { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0, feeUnpaid: 0 },
         share: { total: 0, marked: 0, remaining: 0 },
       },
     };
@@ -301,6 +302,14 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       }
     }
 
+    // Fee position for everyone on the produced rows, in ONE call per 500 ids.
+    // Loaded here rather than per row: the per-learner access function expands
+    // each bill's instalments, so ~1,800 separate calls would take minutes,
+    // while the set-based one answers the whole fleet in ~60ms. A failed read
+    // leaves rows 'unknown' and never fails the roster.
+    const feeByLearner = await loadRosterFees(svc, [...new Set(rows.map((r) => r.learner_id))]);
+    for (const r of rows) r.fee = feeByLearner.get(r.learner_id) ?? { ...UNKNOWN_FEE };
+
     const present = rows.filter((r) => r.status === 'present').length;
     const absent = rows.filter((r) => r.status === 'absent').length;
     const booked = rows.filter((r) => r.booked).length;
@@ -331,6 +340,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
           booked,
           withoutTicket: rows.length - booked,
           boardedWithoutTicket,
+          feeUnpaid: rows.filter((r) => r.fee.state === 'unpaid').length,
         },
         share: {
           total: mineRows.length,

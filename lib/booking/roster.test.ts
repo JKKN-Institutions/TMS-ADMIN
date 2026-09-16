@@ -471,3 +471,24 @@ describe('buildRosterRows — present/absent without a ticket', () => {
     expect(rows[0].can_clear).toBe(true);
   });
 });
+
+// Fee state rides on the row for the Fee column and filter. It is DISPLAY
+// only, so the one rule that matters here is that an absent lookup can never
+// read as "paid" — an unknown fee position must stay unknown.
+describe('buildRosterRows fee state', () => {
+  const feeRoute = { id: 'R1', route_number: '5' };
+  const feeStops = [{ id: 's1', name: 'Stop', time: null, order: 1 }];
+  const feeViewer = { actorId: 'u1', isOverrideHolder: false, isSuperAdmin: false };
+  const feeRiders = [{ learner_id: 'a', name: 'A', roll: '1', stop_id: 's1' }];
+
+  it('carries the fee position through to the row', () => {
+    const fees = new Map([['a', { state: 'unpaid' as const, owed: 2500 }]]);
+    const rows = buildRosterRows(feeRiders, feeRoute, feeStops, new Map(), feeViewer, undefined, fees);
+    expect(rows[0].fee).toEqual({ state: 'unpaid', owed: 2500 });
+  });
+
+  it('reads unknown, never paid, when no fee data was loaded', () => {
+    const rows = buildRosterRows(feeRiders, feeRoute, feeStops, new Map(), feeViewer);
+    expect(rows[0].fee).toEqual({ state: 'unknown', owed: null });
+  });
+});
