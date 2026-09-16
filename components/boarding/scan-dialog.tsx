@@ -79,6 +79,18 @@ const FEE_ICON: Record<FeeTone, string> = { paid: '✓ ', overdue: '✗ ', due: 
 function FeeBadgeView({ fees }: { fees: ScanResult['fees'] }) {
   const badge = feeBadge(fees);
   if (!badge) return null;
+  // Money owed gets a full-width red panel rather than the small pill. The
+  // attendance mark is ALREADY written by the time this renders — fees never
+  // block a scan — so this is the staffer's cue to tell the learner, not a
+  // refusal. 'due' is red too: unpaid is unpaid, whatever the due date says.
+  if (badge.tone === 'overdue' || badge.tone === 'due') {
+    return (
+      <div className="rounded-md border-2 border-red-500 bg-red-50 px-3 py-2 text-red-800 dark:bg-red-950/40 dark:text-red-200">
+        <p className="text-sm font-semibold">✗ Fees not paid</p>
+        {badge.detail && <p className="mt-0.5 break-words text-xs">{badge.detail}</p>}
+      </div>
+    );
+  }
   return (
     <div className={`rounded-md border px-2 py-1 text-xs ${FEE_TONE[badge.tone]}`}>
       <p className="font-medium">
@@ -177,18 +189,14 @@ export default function ScanDialog({
       setResult({ ok: true, alreadyMarked: { by: 'you or a colleague', at: null }, learner: { name: local.name, rollNumber: null } });
       return true;
     }
-    if (local.kind === 'resolved' && !local.booked && !walkUp) {
-      // Same question the server asks, answered from the saved roster. The
-      // existing "Add as walk-up" button re-enters submit() with walkUp=true.
-      lastTokenRef.current = token;
-      lastSourceRef.current = source;
-      setResult({ ok: false, reason: 'not_booked', learner: { name: local.name, rollNumber: null }, seatsRemaining: 0, offlineSaved: false });
-      return true;
-    }
+    // No booking is no longer a question to answer: an unbooked rider is
+    // queued as a walk-up straight away, the same rule the server applies.
+    // Asking first is what left them unrecorded when the second tap never came.
+    const unbooked = local.kind === 'resolved' && !local.booked;
     await o.queueScan({
       learnerId: local.kind === 'resolved' ? local.learnerId : null,
       token,
-      walkUp,
+      walkUp: walkUp || unbooked,
       name: local.kind === 'resolved' ? local.name : null,
       verified: local.kind === 'resolved' && local.verified,
       direction,
@@ -197,7 +205,7 @@ export default function ScanDialog({
       ok: true,
       offlineSaved: true,
       unverified: local.kind !== 'resolved' || !local.verified,
-      walkUp,
+      walkUp: walkUp || unbooked,
       learner: local.kind === 'resolved' ? { name: local.name, rollNumber: null } : undefined,
       error: local.kind === 'unknown' ? local.message : undefined,
     });
@@ -390,8 +398,15 @@ export default function ScanDialog({
                   {result.direction === 'onward' || result.direction === 'return'
                     ? ` · ${LEG_NAME[result.direction]}`
                     : ''}
-                  {result.walkUp ? ' · walk-up' : ''}
                 </p>
+                {/* Said in words, not as a "· walk-up" suffix: this is the one
+                    fact the staffer must carry off the bus, and it is now
+                    recorded without them confirming anything. */}
+                {result.walkUp && (
+                  <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                    Travelled without booking — recorded.
+                  </p>
+                )}
                 {result.offlineSaved && (
                   <p className="text-xs text-amber-700 dark:text-amber-300">
                     No signal. It will be sent when you are back online
@@ -445,19 +460,6 @@ export default function ScanDialog({
                 {result.overCapacity && (
                   <p className="text-xs text-amber-700 dark:text-amber-300">⚠ Bus over capacity — boarded as overflow.</p>
                 )}
-              </div>
-            ) : result.reason === 'not_booked' ? (
-              <div className="space-y-2">
-                <p className="text-amber-700 dark:text-amber-300">⚠ {result.learner?.name ?? 'Learner'} has no booking for today.</p>
-                {result.offlineSaved === false ? null : (
-                  <p className="text-xs text-muted-foreground">Seats remaining: {result.seatsRemaining ?? 0}</p>
-                )}
-                <FeeBadgeView fees={result.fees} />
-                <Button className="w-full" onClick={() => submit(lastTokenRef.current, lastSourceRef.current, true)}>
-                  {result.offlineSaved === false || (result.seatsRemaining ?? 0) > 0
-                    ? 'Add as walk-up'
-                    : 'Add as walk-up (over capacity)'}
-                </Button>
               </div>
             ) : (
               <p className="text-red-700 dark:text-red-300">✗ {result.error}</p>
