@@ -82,7 +82,9 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
 const INR = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
 
 /**
- * The learner's transport fee position.
+ * The learner's transport MAINTENANCE fee position — the recurring charge the
+ * institution collects. Not the Transport Fee, which is the separate penalty
+ * raised when this goes unpaid (tms_fee_fine); that never appears here.
  *
  * DISPLAY ONLY. Nothing on this screen is withheld because of fees: staff mark
  * and scan a rider who owes money exactly as they would any other, and this
@@ -309,7 +311,7 @@ export function getRosterColumns(opts: {
     },
     {
       id: 'fee',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Fees" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Maintenance fee" />,
       // The filter values are the states themselves, so "who boarded owing
       // money" is one click on a 1,600-row roster.
       accessorFn: (r) => r.fee?.state ?? 'unknown',

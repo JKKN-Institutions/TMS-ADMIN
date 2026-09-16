@@ -150,8 +150,8 @@ function AbsencePanel() {
  * One of the two fee outcomes, shown lit when it is the one Confirm will commit to.
  *
  * Confirm reads "Confirm" in both states, so without this the screen never says what
- * pressing it will do — an unlit "Not willing? / Transport fees apply." is the only
- * thing standing between a staffer and a fee they didn't mean to accept.
+ * pressing it will do — an unlit "Not willing? / The maintenance fee applies." is the
+ * only thing standing between a staffer and a fee they didn't mean to accept.
  *
  * Paying the fee is a legitimate choice, not a failure, so the fees outcome lights up
  * in neutral slate rather than a warning colour. Tinting it red or amber would lean on
@@ -256,7 +256,7 @@ export default function InChargePage() {
             <Bus className="h-6 w-6 text-gray-400" />
           </div>
           <h1 className="text-lg font-semibold text-gray-900 dark:text-white sm:text-xl">
-            Transport fees are due
+            Transport maintenance fee is due
           </h1>
           {amount > 0 && (
             <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
@@ -264,7 +264,7 @@ export default function InChargePage() {
             </p>
           )}
           <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-gray-600 dark:text-gray-300">
-            Once you pay the fees you can continue the transport service.
+            Once you pay the maintenance fee you can continue the transport service.
             Please contact the transport office.
           </p>
           <button
@@ -286,9 +286,12 @@ export default function InChargePage() {
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
             <Bus className="h-6 w-6 text-gray-400" />
           </div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white sm:text-xl">Transport fees apply</h1>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white sm:text-xl">
+            Transport maintenance fee applies
+          </h1>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-gray-600 dark:text-gray-300">
-            You&apos;ve opted out of being a bus in-charge, so transport fees apply to your travel.
+            You&apos;ve opted out of being a bus in-charge, so the transport maintenance fee applies
+            to your travel.
             Please contact the transport office.
           </p>
           <button
@@ -318,13 +321,13 @@ export default function InChargePage() {
             active={willing}
             tone="duty"
             question="Willing to be the bus in-charge?"
-            consequence="You will not pay transport fees."
+            consequence="You will not pay the transport maintenance fee."
           />
           <Outcome
             active={!willing}
             tone="fees"
             question="Not willing?"
-            consequence="Transport fees apply."
+            consequence="The transport maintenance fee applies."
           />
         </div>
 

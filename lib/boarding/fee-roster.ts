@@ -1,5 +1,7 @@
 /**
- * Transport fee status for a whole bus, for the boarding Attendance roster.
+ * Transport MAINTENANCE fee status for a whole bus, for the boarding Attendance
+ * roster. The bare "Transport Fee" is the penalty charged when this goes unpaid
+ * (tms_fee_fine) and is deliberately NOT shown here.
  *
  * Display only: it never decides whether attendance is marked or a scan is
  * accepted (see lib/boarding/fee-badge.ts for the same rule at the scanner).

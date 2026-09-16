@@ -17,11 +17,15 @@ describe('feeBadge', () => {
   });
 
   it('says unavailable when the fee lookup failed', () => {
-    expect(feeBadge(null)).toEqual({ tone: 'unknown', label: 'Fee status unavailable', detail: null });
+    expect(feeBadge(null)).toEqual({
+      tone: 'unknown',
+      label: 'Maintenance fee status unavailable',
+      detail: null,
+    });
   });
 
   it('says paid when every billed term is paid', () => {
-    expect(feeBadge(fees())).toEqual({ tone: 'paid', label: 'Fees paid', detail: null });
+    expect(feeBadge(fees())).toEqual({ tone: 'paid', label: 'Maintenance fee paid', detail: null });
   });
 
   it('says not paid, in red, for an overdue term, with the amount and the term', () => {
@@ -56,12 +60,15 @@ describe('feeBadge', () => {
 
   it('never says not paid to a learner who has not been billed', () => {
     const b = feeBadge(fees({ allowed: false, reason: 'term1_not_billed', terms: [] }));
-    expect(b).toEqual({ tone: 'none', label: 'No fee bill yet', detail: null });
+    expect(b).toEqual({ tone: 'none', label: 'No maintenance fee bill yet', detail: null });
   });
 
-  it('says there is no transport fee for a learner with no transport obligation', () => {
+  // The label must not read "No transport fee": since 2026-09-16 the bare
+  // Transport Fee is the penalty charged when the maintenance fee goes unpaid,
+  // so that wording would claim the opposite of this branch.
+  it('says there is no maintenance fee for a learner with no transport obligation', () => {
     const b = feeBadge(fees({ allowed: true, reason: 'no_transport_obligation', terms: [] }));
-    expect(b).toEqual({ tone: 'none', label: 'No transport fee', detail: null });
+    expect(b).toEqual({ tone: 'none', label: 'No maintenance fee', detail: null });
   });
 
   it('never says paid for a result it does not recognise', () => {

@@ -269,7 +269,7 @@ export default function BoardingAttendancePage() {
     },
     {
       columnId: 'fee',
-      title: 'Fees',
+      title: 'Maintenance fee',
       options: [
         { label: 'Unpaid', value: 'unpaid' },
         { label: 'Paid', value: 'paid' },
@@ -281,7 +281,7 @@ export default function BoardingAttendancePage() {
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Booking', 'Travelled Without Booking', 'Fee Status', 'Amount Owed', 'Status', 'Method', 'Marked At'];
+    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Booking', 'Travelled Without Booking', 'Maintenance Fee Status', 'Maintenance Amount Owed', 'Status', 'Method', 'Marked At'];
     const lines = [header.map(esc).join(',')];
     for (const r of rowsToExport) {
       // Booking state and the travelled-anyway flag are separate columns rather
@@ -418,7 +418,7 @@ export default function BoardingAttendancePage() {
               <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
               <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
               <Tile label="Travelled without booking" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
-              <Tile label="Fee unpaid" value={counts.feeUnpaid} tone="red" icon={<IndianRupee className="h-4 w-4" />} />
+              <Tile label="Maintenance unpaid" value={counts.feeUnpaid} tone="red" icon={<IndianRupee className="h-4 w-4" />} />
               <Tile label="On bus" value={counts.total} tone="gray" icon={<ListChecks className="h-4 w-4" />} />
             </>
           ) : (
@@ -427,7 +427,7 @@ export default function BoardingAttendancePage() {
               <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
               <Tile label="Travelled without booking" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
               <Tile label="Not booked" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
-              <Tile label="Fee unpaid" value={counts.feeUnpaid} tone="red" icon={<IndianRupee className="h-4 w-4" />} />
+              <Tile label="Maintenance unpaid" value={counts.feeUnpaid} tone="red" icon={<IndianRupee className="h-4 w-4" />} />
               <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
             </>
           )}
