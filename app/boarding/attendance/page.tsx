@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX } from 'lucide-react';
+import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX, IndianRupee } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import ScanDialog from '@/components/boarding/scan-dialog';
@@ -33,7 +33,7 @@ interface RosterResponse {
   date: string;
   direction: AttDirection;
   rows: RosterRow[];
-  counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number; boardedWithoutTicket: number };
+  counts: { total: number; present: number; absent: number; unmarked: number; booked: number; withoutTicket: number; boardedWithoutTicket: number; feeUnpaid: number };
   share: { total: number; marked: number; remaining: number };
   /** Active JKKN ID -> learner id, for offline card scans. */
   cards?: Record<string, string>;
@@ -170,7 +170,7 @@ export default function BoardingAttendancePage() {
   );
   const view = useMemo(() => (data ? applyPending(data, pending) : undefined), [data, pending]);
   const rows = view?.rows ?? [];
-  const counts = view?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0 };
+  const counts = view?.counts ?? { total: 0, present: 0, absent: 0, unmarked: 0, booked: 0, withoutTicket: 0, boardedWithoutTicket: 0, feeUnpaid: 0 };
   const share = view?.share ?? { total: 0, marked: 0, remaining: 0 };
   // Derived from the data, not the flag: the page has no access to the setting, and
   // deriving it from the rows keeps the column/filter in sync with what actually
@@ -267,19 +267,30 @@ export default function BoardingAttendancePage() {
         { label: 'Not booked', value: 'without_ticket' },
       ],
     },
+    {
+      columnId: 'fee',
+      title: 'Fees',
+      options: [
+        { label: 'Unpaid', value: 'unpaid' },
+        { label: 'Paid', value: 'paid' },
+        { label: 'No bill', value: 'none' },
+      ],
+    },
     { columnId: 'status', title: 'Status', options: [{ label: 'Present', value: 'present' }, { label: 'Absent', value: 'absent' }, { label: 'Unmarked', value: 'unmarked' }] },
   ];
 
   const exportCsv = (rowsToExport: RosterRow[]) => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Booking', 'Travelled Without Booking', 'Status', 'Method', 'Marked At'];
+    const header = ['Learner', 'Roll No.', 'Route', 'Stop', 'Booking', 'Travelled Without Booking', 'Fee Status', 'Amount Owed', 'Status', 'Method', 'Marked At'];
     const lines = [header.map(esc).join(',')];
     for (const r of rowsToExport) {
       // Booking state and the travelled-anyway flag are separate columns rather
       // than three values in one, so the export can be filtered on "did they
       // travel without booking" without string-matching a label.
       const ticket = r.booked ? 'Booked' : 'Not booked';
-      lines.push([r.name, r.roll, r.route_number, r.stop_name, ticket, r.is_walk_up ? 'Yes' : 'No', r.status, r.method, r.scanned_at].map(esc).join(','));
+      // Fee state and the amount are separate columns for the same reason as
+      // the ticket pair: the office filters on the state and sums the amount.
+      lines.push([r.name, r.roll, r.route_number, r.stop_name, ticket, r.is_walk_up ? 'Yes' : 'No', r.fee?.state ?? 'unknown', r.fee?.owed ?? '', r.status, r.method, r.scanned_at].map(esc).join(','));
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -400,13 +411,14 @@ export default function BoardingAttendancePage() {
             signal inside the noise. The labels share no leading words on
             purpose — the first pair shipped as "Without ticket" / "Rode without
             ticket" and staff could not tell them apart at a glance. */}
-        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-6">
           {hasOwners ? (
             <>
               <Tile label="My share" value={share.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
               <Tile label="Marked" value={share.marked} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
               <Tile label="Remaining" value={share.remaining} tone="amber" icon={<XCircle className="h-4 w-4" />} />
               <Tile label="Travelled without booking" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Fee unpaid" value={counts.feeUnpaid} tone="red" icon={<IndianRupee className="h-4 w-4" />} />
               <Tile label="On bus" value={counts.total} tone="gray" icon={<ListChecks className="h-4 w-4" />} />
             </>
           ) : (
@@ -415,6 +427,7 @@ export default function BoardingAttendancePage() {
               <Tile label="Absent" value={counts.absent} tone="red" icon={<XCircle className="h-4 w-4" />} />
               <Tile label="Travelled without booking" value={counts.boardedWithoutTicket} tone="red" icon={<TicketX className="h-4 w-4" />} />
               <Tile label="Not booked" value={counts.withoutTicket} tone="amber" icon={<TicketX className="h-4 w-4" />} />
+              <Tile label="Fee unpaid" value={counts.feeUnpaid} tone="red" icon={<IndianRupee className="h-4 w-4" />} />
               <Tile label="On roster" value={counts.total} tone="slate" icon={<ListChecks className="h-4 w-4" />} />
             </>
           )}
