@@ -34,11 +34,18 @@ interface TransportFeeItem {
   reason: string;
   status: TransportFeeStatus;
 }
+interface RouteCharge {
+  amount: number;
+  route_number: string | null;
+  route_name: string | null;
+  stop_name: string | null;
+}
 interface TransportFees {
   items: TransportFeeItem[];
   outstanding: number;
   total: number;
   count: number;
+  route_charge: RouteCharge | null;
 }
 
 async function fetchAccess(): Promise<Access> {
@@ -48,12 +55,14 @@ async function fetchAccess(): Promise<Access> {
   return json.data as Access;
 }
 
+const NO_FEES: TransportFees = { items: [], outstanding: 0, total: 0, count: 0, route_charge: null };
+
 async function fetchTransportFees(): Promise<TransportFees> {
   const res = await fetch('/api/student/transport-fee', { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
   // Never fail the whole page for this: the maintenance fee is the part that
   // controls portal access and must always render.
-  if (!res.ok || !json.success) return { items: [], outstanding: 0, total: 0, count: 0 };
+  if (!res.ok || !json.success) return NO_FEES;
   return json.data as TransportFees;
 }
 
@@ -122,8 +131,13 @@ export default function StudentFeesPage() {
   // Maintenance outstanding comes from the terms, so it stays in step with the
   // table below rather than being a second, separately-derived number.
   const maintenanceOutstanding = data.terms.reduce((s, t) => s + Math.max(0, Number(t.balance || 0)), 0);
-  const tf = transportFees ?? { items: [], outstanding: 0, total: 0, count: 0 };
+  const tf = transportFees ?? NO_FEES;
   const liveTransportFees = tf.items.filter((i) => i.status !== 'cancelled');
+  const routeCharge = tf.route_charge;
+  // Nothing charged yet: the card shows what the learner's ROUTE would be
+  // charged, which is information, not a debt — so it is never added to any
+  // total and never coloured as money owed.
+  const showsRouteChargeOnly = tf.count === 0 && !!routeCharge;
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4">
@@ -172,14 +186,29 @@ export default function StudentFeesPage() {
           </p>
           <p
             className={`mt-1 text-2xl font-bold ${
-              tf.outstanding > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-900 dark:text-white'
+              tf.outstanding > 0
+                ? 'text-red-700 dark:text-red-300'
+                : showsRouteChargeOnly
+                  ? 'text-gray-500 dark:text-gray-400'
+                  : 'text-gray-900 dark:text-white'
             }`}
           >
-            {inr(tf.outstanding)}
+            {showsRouteChargeOnly ? inr(routeCharge.amount) : inr(tf.outstanding)}
           </p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {tf.count > 0 ? `${tf.count} charge(s) raised` : 'None charged'}
+            {tf.count > 0
+              ? `${tf.count} charge(s) raised`
+              : showsRouteChargeOnly
+                ? 'Your route charge — applies only if the maintenance fee is unpaid'
+                : 'None charged'}
           </p>
+          {showsRouteChargeOnly && (routeCharge.route_number || routeCharge.stop_name) && (
+            <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
+              {routeCharge.route_number ? `Route ${routeCharge.route_number}` : ''}
+              {routeCharge.route_number && routeCharge.stop_name ? ' · ' : ''}
+              {routeCharge.stop_name ?? ''}
+            </p>
+          )}
         </div>
       </div>
 
@@ -192,6 +221,12 @@ export default function StudentFeesPage() {
             by the due date, a <strong>Transport Fee</strong> is charged to your account
             automatically <ArrowRight className="inline h-3.5 w-3.5" /> and you then have to pay that
             as well. Paying the maintenance fee on time avoids it.
+            {routeCharge ? (
+              <>
+                {' '}
+                On your route that charge is <strong>{inr(routeCharge.amount)}</strong>.
+              </>
+            ) : null}
           </p>
         </div>
       </div>
@@ -316,7 +351,7 @@ export default function StudentFeesPage() {
       )}
 
       {/* ── Transport Fee (charged when the maintenance fee goes unpaid) ── */}
-      {liveTransportFees.length > 0 && (
+      {liveTransportFees.length > 0 ? (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Transport Fee</h2>
           <div className="space-y-3">
@@ -340,7 +375,26 @@ export default function StudentFeesPage() {
             ))}
           </div>
         </section>
-      )}
+      ) : routeCharge ? (
+        // Nothing charged. Show the route's rate so the learner knows what is at
+        // stake, worded so it can never be mistaken for a bill.
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Transport Fee</h2>
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+            <p className="text-sm text-gray-700 dark:text-gray-200">
+              No transport fee has been charged to you. On your route
+              {routeCharge.route_number ? ` (Route ${routeCharge.route_number}` : ''}
+              {routeCharge.route_number && routeCharge.route_name ? ` — ${routeCharge.route_name}` : ''}
+              {routeCharge.route_number ? ')' : ''} the charge would be{' '}
+              <strong>{inr(routeCharge.amount)}</strong> if the maintenance fee is not paid by the
+              due date.
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              You do not owe this amount today.
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       <p className="text-xs text-gray-400 dark:text-gray-500">
         Payments are recorded by the transport office. If you&apos;ve paid but still see an overdue status, please tap Refresh or contact the office.
