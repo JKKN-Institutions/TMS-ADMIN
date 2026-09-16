@@ -194,32 +194,22 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const today = tap.tripDate;
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
 
-    // Booking gate: a learner must have booked today, unless staff explicitly add
-    // them as a walk-up. Over-capacity walk-ups are ALLOWED (warning-only) — the
-    // seat count is advisory, not a hard block. Booked learners skip this entirely.
+    // ── Booking state: RECORDED, never a gate ──
+    // This used to answer `not_booked` and write NOTHING until the staffer
+    // tapped "Add as walk-up" on the result panel. On a moving bus that second
+    // tap is often not made, so the riders who most need accounting for — the
+    // ones travelling without a booking — were exactly the ones left unmarked.
+    //
+    // A scan is physical proof the learner boarded, so it now always records,
+    // flagged is_walk_up. `body.walkUp` is still accepted from older clients
+    // but no longer decides anything: the booking lookup does.
+    //
+    // Over capacity stays a WARNING on the response, never a refusal — the seat
+    // count is advisory (a bus that is full still carried them).
     const booked = await hasBookingForDate(svc, learner.id, today);
-    let isWalkUp = false;
-    let overCapacity = false;
-    if (!booked) {
-      const seats = await seatsRemaining(svc, learner.transport_route_id, today);
-      if (!body.walkUp) {
-        // The staffer is deciding right now whether to add this learner as a
-        // walk-up, so show their fee position here too. A failed or rejected
-        // read becomes null ("unavailable"): it must never turn this reply into
-        // an error, because that would hide the walk-up button.
-        const fees = await loadLearnerFeeStatus(svc, learner.id).catch(() => null);
-        return NextResponse.json({
-          ok: false,
-          clientId: body.clientId ?? null,
-          reason: 'not_booked',
-          seatsRemaining: seats,
-          learner: { name, rollNumber: learner.roll_number },
-          fees,
-        });
-      }
-      isWalkUp = true;
-      overCapacity = seats <= 0;
-    }
+    const isWalkUp = !booked;
+    const overCapacity =
+      isWalkUp && (await seatsRemaining(svc, learner.transport_route_id, today)) <= 0;
 
     // Atomic: decision and write in one statement (see the migration comment on
     // tms_mark_attendance). p_allow_override stays TRUE here even after PR B —
