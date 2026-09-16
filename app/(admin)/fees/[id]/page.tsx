@@ -108,7 +108,7 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
 
   const crumbs = (name: string) => [
     { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Fees', href: '/fees' },
+    { label: 'Maintenance Fee', href: '/fees' },
     { label: name },
   ];
 
@@ -123,8 +123,8 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
   if (isError || !fee) {
     return (
       <div className="space-y-6">
-        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/fees" title="Fee structure not found" />
-        <Link href="/fees" className="text-green-600 hover:underline">Back to fees</Link>
+        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/fees" title="Maintenance fee structure not found" />
+        <Link href="/fees" className="text-green-600 hover:underline">Back to maintenance fee</Link>
       </div>
     );
   }
@@ -137,7 +137,7 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
         crumbs={crumbs(fee.name)}
         backHref="/fees"
         title={fee.name}
-        subtitle="Transport fee structure"
+        subtitle="Transport maintenance fee structure"
         actions={
           canManage ? (
             <Link href={`/fees/${fee.id}/edit`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-green-600 px-4 text-sm font-medium text-white transition-colors hover:bg-green-700">

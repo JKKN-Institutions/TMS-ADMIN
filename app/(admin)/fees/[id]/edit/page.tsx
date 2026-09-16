@@ -16,7 +16,7 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
 
   const crumbs = (last: string, nameHref?: string) => [
     { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Fees', href: '/fees' },
+    { label: 'Maintenance Fee', href: '/fees' },
     ...(nameHref ? [{ label: data?.name ?? '', href: nameHref }] : []),
     { label: last },
   ];
@@ -24,7 +24,7 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <DetailPageHeader crumbs={crumbs('Edit')} backHref="/fees" title="Loading…" subtitle="Fetching fee structure" />
+        <DetailPageHeader crumbs={crumbs('Edit')} backHref="/fees" title="Loading…" subtitle="Fetching maintenance fee structure" />
         <div className="h-64 animate-pulse rounded-xl border border-gray-200 bg-white" />
       </div>
     );
@@ -33,8 +33,8 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
   if (isError || !data) {
     return (
       <div className="space-y-6">
-        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/fees" title="Fee structure not found" subtitle="It may have been deleted" />
-        <Link href="/fees" className="text-sm font-medium text-green-600 hover:underline">Back to fees</Link>
+        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/fees" title="Maintenance fee structure not found" subtitle="It may have been deleted" />
+        <Link href="/fees" className="text-sm font-medium text-green-600 hover:underline">Back to maintenance fee</Link>
       </div>
     );
   }
@@ -45,7 +45,7 @@ export default function EditFeePage({ params }: { params: Promise<{ id: string }
         crumbs={crumbs('Edit', `/fees/${data.id}`)}
         backHref={`/fees/${data.id}`}
         title={`Edit ${data.name}`}
-        subtitle="Update fee structure details and terms"
+        subtitle="Update maintenance fee structure details and terms"
       />
       <FeeStructureForm
         mode="edit"

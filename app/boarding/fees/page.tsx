@@ -49,13 +49,13 @@ export default function StaffFeesPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Transport Fees</h1>
-        <p className="text-gray-600">Your transport fee for the current year.</p>
+        <h1 className="text-2xl font-bold text-gray-900">Transport Maintenance Fee</h1>
+        <p className="text-gray-600">Your transport maintenance fee for the current year.</p>
       </div>
 
       {bills.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-800">
-          You have no transport fee bills.
+          You have no transport maintenance fee bills.
         </div>
       ) : (
         <>

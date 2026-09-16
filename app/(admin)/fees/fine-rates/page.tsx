@@ -16,7 +16,7 @@ async function fetchFineRates(year: string): Promise<FineRateRow[]> {
     credentials: 'same-origin',
   });
   const json = await res.json();
-  if (!res.ok || json.success === false) throw new Error(json.error || 'Failed to load fine rates');
+  if (!res.ok || json.success === false) throw new Error(json.error || 'Failed to load transport fee rates');
   return json.data.rates as FineRateRow[];
 }
 
@@ -75,7 +75,7 @@ export default function FineRatesPage() {
       });
       const json = await res.json();
       if (!res.ok || json.success === false) throw new Error(json.error || 'Save failed');
-      toast.success(json.message ?? 'Fine rates saved');
+      toast.success(json.message ?? 'Transport fee rates saved');
       setDraft({});
       // Invalidate rather than relying on a refresh: router.refresh() does NOT
       // bust the TanStack cache, and a stale row here reads as "my edit didn't save".
@@ -118,10 +118,19 @@ export default function FineRatesPage() {
 
   return (
     <div className="space-y-6">
+      {/* The page carries its own title: the header falls back to the nav entry,
+          and this screen must never read as the maintenance fee. */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Transport Fee</h1>
+        <p className="text-gray-600 dark:text-gray-300">
+          Charged to a learner who has not paid the transport maintenance fee.
+        </p>
+      </div>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-prose text-sm text-gray-600 dark:text-gray-300">
-          The fine amount charged per boarding stop. Applies to every learner on that stop, whichever
-          fee structure bills them. {priced} of {rows.length} stop(s) priced.
+          The transport fee charged per boarding stop. Applies to every learner on that stop,
+          whichever maintenance fee structure bills them. {priced} of {rows.length} stop(s) priced.
         </p>
         <div className="w-full sm:w-64">
           <SelectMenu
@@ -168,7 +177,7 @@ export default function FineRatesPage() {
               className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <Copy className="h-4 w-4" />
-              Copy from fee structure
+              Copy from maintenance fee
             </button>
             <a
               href={`/api/admin/fees/fine-rates/template?year=${encodeURIComponent(year)}`}

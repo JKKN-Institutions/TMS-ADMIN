@@ -23,6 +23,7 @@ import {
   Wallet,
   Bug,
   LogOut,
+  IndianRupee,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -66,7 +67,19 @@ export const allNavigation: NavItem[] = [
   { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
   { name: 'Vacate Requests', href: '/vacate-requests', icon: LogOut, permission: TMS_PERMISSIONS.VACATE_VIEW, group: 'services' },
-  { name: 'Fees', href: '/fees', icon: Receipt, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
+  // Two distinct charges live under /fees: the recurring MAINTENANCE fee the
+  // institution collects, and the TRANSPORT FEE charged when it goes unpaid.
+  // The child entry is what makes the header read "Transport Fee" on the rates
+  // page — derivePageTitle() matches the longest nav href, so without it that
+  // page would show the parent's name.
+  {
+    name: 'Maintenance Fee',
+    href: '/fees',
+    icon: Receipt,
+    permission: TMS_PERMISSIONS.FEES_VIEW,
+    group: 'services',
+    subItems: [{ name: 'Transport Fee', href: '/fees/fine-rates', icon: IndianRupee }],
+  },
   { name: 'Bill Management', href: '/bill-management', icon: Wallet, permission: TMS_PERMISSIONS.FEES_VIEW, group: 'services' },
   { name: 'Notifications', href: '/notifications', icon: Bell, permission: TMS_PERMISSIONS.NOTIFICATIONS_VIEW, group: 'services' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: TMS_PERMISSIONS.SETTINGS_MANAGE, group: 'system' },

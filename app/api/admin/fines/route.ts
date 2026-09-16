@@ -62,7 +62,7 @@ async function create(request: NextRequest, auth: AuthContext) {
       action: 'create',
       entityType: 'tms_fee_fine',
       entityId: parsed.value.idempotency_key,
-      description: `Raised ${result.created} fine(s) totalling ₹${result.totalAmount.toLocaleString('en-IN')} — ${parsed.value.reason}`,
+      description: `Charged ${result.created} transport fee(s) totalling ₹${result.totalAmount.toLocaleString('en-IN')} — ${parsed.value.reason}`,
       metadata: {
         created: result.created,
         skipped: result.skipped.length,
@@ -76,7 +76,7 @@ async function create(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({
       success: true,
       data: result,
-      message: `Raised ${result.created} fine(s) totalling ₹${result.totalAmount.toLocaleString('en-IN')}.`,
+      message: `Charged ${result.created} transport fee(s) totalling ₹${result.totalAmount.toLocaleString('en-IN')}.`,
     });
   } catch (e) {
     console.error('Fine create error:', e);

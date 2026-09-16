@@ -42,9 +42,9 @@ export async function previewFines(
 }
 
 /**
- * Write stop rates into the year's fine sheet. Shares the same endpoint as the
- * Fine Rates screen, so a rate typed in the Generate Fine dialog shows up there
- * — there is one sheet, not a dialog-local copy.
+ * Write stop rates into the year's transport-fee sheet. Shares the same endpoint
+ * as the Transport Fee rates screen, so a rate typed in the charge dialog shows
+ * up there — there is one sheet, not a dialog-local copy.
  */
 export async function saveFineRates(year: string, rates: FineRateInput[]): Promise<void> {
   const res = await fetch('/api/admin/fees/fine-rates', {

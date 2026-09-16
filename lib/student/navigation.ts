@@ -22,7 +22,9 @@ export const studentNavigation: StudentNavItem[] = [
   { name: 'My Route', href: '/student/routes', icon: Route },
   { name: 'Book Bus', shortName: 'Book', href: '/student/bookings', icon: CalendarCheck },
   { name: 'My Attendance', shortName: 'Attendance', href: '/student/attendance', icon: ClipboardCheck },
-  { name: 'Transport Fees', shortName: 'Fees', href: '/student/fees', icon: Receipt },
+  // Named just "Fees" because the page now carries TWO charges: the recurring
+  // Transport Maintenance Fee and the Transport Fee raised when it goes unpaid.
+  { name: 'Fees', href: '/student/fees', icon: Receipt },
   { name: 'Grievances', href: '/student/grievances', icon: MessageCircle },
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
   { name: 'Live Track', href: '/student/live-track', icon: MapPin },

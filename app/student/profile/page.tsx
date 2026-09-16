@@ -167,7 +167,7 @@ export default function StudentProfilePage() {
         <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Transport" value={me.busRequired ? 'Required' : 'Not required'} />
           <Field label="Allocation" value={me.assigned ? 'Allocated' : 'Not allocated'} />
-          <Field label="Transport fee" value={me.transportFee != null ? `₹${me.transportFee}` : '—'} />
+          <Field label="Maintenance fee" value={me.transportFee != null ? `₹${me.transportFee}` : '—'} />
           <Field label="Route" value={me.routeLabel ?? '—'} />
           <Field label="Boarding stop" value={me.stopLabel ?? '—'} />
         </div>

@@ -44,7 +44,7 @@ export default function BillManagementPage() {
   const qc = useQueryClient();
   const [selectedYear, setSelectedYear] = useState('');
   const [view, setView] = useState<View>('bills');
-  // Non-null while the Generate Fine dialog is open, holding the ticked bill rows.
+  // Non-null while the Charge Transport Fee dialog is open, holding the ticked bill rows.
   const [fineRows, setFineRows] = useState<TransportBillRow[] | null>(null);
   // Non-null while the waive panel is open, holding the fine being waived.
   const [cancelTarget, setCancelTarget] = useState<FineRow | null>(null);
@@ -62,7 +62,7 @@ export default function BillManagementPage() {
   }, [years, selectedYear]);
 
   const isAll = selectedYear === 'all';
-  // Unbilled and Fines need a specific year — never stay on them for "All years".
+  // Unbilled and Transport Fee need a specific year — never stay on them for "All years".
   useEffect(() => {
     if (isAll && (view === 'unbilled' || view === 'fines')) setView('bills');
   }, [isAll, view]);
@@ -147,7 +147,7 @@ export default function BillManagementPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-prose text-sm text-gray-600 dark:text-gray-300">
-          Transport billing across all fee structures — what&apos;s billed, collected, pending, overdue and still unbilled.
+          Transport billing across all maintenance fee structures — what&apos;s billed, collected, pending, overdue and still unbilled.
         </p>
         <div className="w-full sm:w-64">
           <SelectMenu
@@ -188,20 +188,21 @@ export default function BillManagementPage() {
           Unbilled{!isAll && summary ? ` (${summary.unbilledCount})` : ''}
         </ToggleBtn>
         <ToggleBtn active={view === 'fines'} onClick={() => setView('fines')} disabled={isAll}>
-          Fines{fines ? ` (${fines.summary.count})` : ''}
+          Transport Fee{fines ? ` (${fines.summary.count})` : ''}
         </ToggleBtn>
         <ToggleBtn active={view === 'analytics'} onClick={() => setView('analytics')}>
           Analytics
         </ToggleBtn>
       </div>
 
-      {/* Fine money is reported separately: it lives outside tms_fee_bill, so
-          folding it into the fee tiles above would silently change them. */}
+      {/* Transport-fee money is reported separately: it lives outside
+          tms_fee_bill, so folding it into the maintenance tiles above would
+          silently change them. */}
       {view === 'fines' && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-          <Kpi label="Fines raised" value={inr(fines?.summary.raised)} loading={finesLoading} />
-          <Kpi label="Fines collected" value={inr(fines?.summary.collected)} loading={finesLoading} />
-          <Kpi label="Fines outstanding" value={inr(fines?.summary.outstanding)} loading={finesLoading} />
+          <Kpi label="Transport fee raised" value={inr(fines?.summary.raised)} loading={finesLoading} />
+          <Kpi label="Transport fee collected" value={inr(fines?.summary.collected)} loading={finesLoading} />
+          <Kpi label="Transport fee outstanding" value={inr(fines?.summary.outstanding)} loading={finesLoading} />
         </div>
       )}
 
@@ -211,7 +212,7 @@ export default function BillManagementPage() {
         <DataTable
           columns={fineColumns}
           data={fines?.rows ?? []}
-          entityName="fines"
+          entityName="transport fees"
           isLoading={finesLoading}
           getRowId={(r) => r.id}
           initialColumnVisibility={{ route: false }}
@@ -266,15 +267,15 @@ export default function BillManagementPage() {
           ]}
           toolbarActions={({ selectedRows }) => (
             <div className="flex items-center gap-2">
-              {/* Fining needs a specific year: the fine sheet is per transport year. */}
+              {/* Charging needs a specific year: the transport fee sheet is per transport year. */}
               <button
                 type="button"
                 onClick={() => setFineRows(selectedRows)}
                 disabled={selectedRows.length === 0 || isAll}
-                title={isAll ? 'Select a specific transport year to fine' : undefined}
+                title={isAll ? 'Select a specific transport year to charge a transport fee' : undefined}
                 className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-red-300 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10"
               >
-                Generate Fine{selectedRows.length ? ` (${selectedRows.length})` : ''}
+                Charge Transport Fee{selectedRows.length ? ` (${selectedRows.length})` : ''}
               </button>
               <button
                 type="button"
@@ -313,7 +314,7 @@ export default function BillManagementPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
             <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              Waive {inr(cancelTarget.fine_amount)} fine — {cancelTarget.person_name}?
+              Waive {inr(cancelTarget.fine_amount)} transport fee — {cancelTarget.person_name}?
             </h3>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
               The bill is cancelled, not deleted. The learner stops owing it immediately.
@@ -343,12 +344,12 @@ export default function BillManagementPage() {
                   setWaiving(true);
                   try {
                     await cancelFine(cancelTarget.id, waiveReason.trim());
-                    toast.success('Fine waived.');
+                    toast.success('Transport fee waived.');
                     setCancelTarget(null);
                     setWaiveReason('');
                     await qc.invalidateQueries({ queryKey: ['fines', selectedYear] });
                   } catch (e) {
-                    toast.error(e instanceof Error ? e.message : 'Could not waive the fine');
+                    toast.error(e instanceof Error ? e.message : 'Could not waive the transport fee');
                   } finally {
                     setWaiving(false);
                   }

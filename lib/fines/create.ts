@@ -191,7 +191,7 @@ export async function createFines(svc: Svc, input: CreateFinesInput): Promise<Cr
           institution_id: c.institution_id,
           item_category_id: categoryId,
           fee_source: 'ad_hoc',
-          bill_description: `Transport Fine — ${input.reason}`,
+          bill_description: `Transport Fee — ${input.reason}`,
           due_date: input.dueDate,
           quantity: 1,
           unit_amount: c.amount,
@@ -256,12 +256,12 @@ export async function createFines(svc: Svc, input: CreateFinesInput): Promise<Cr
 
     if (input.notify) {
       // Best-effort by contract — notifyLearner never throws, so a notification
-      // failure cannot undo a fine that is already money.
+      // failure cannot undo a charge that is already money.
       await notifyLearner(svc as never, {
         learnerId: c.person_id,
         actorId: input.actorId ?? '',
-        title: 'Transport fine raised',
-        body: `A transport fine of ₹${c.amount.toLocaleString('en-IN')} has been added to your account (${input.reason}). Due ${input.dueDate}.`,
+        title: 'Transport fee charged',
+        body: `A transport fee of ₹${c.amount.toLocaleString('en-IN')} has been added to your account because the transport maintenance fee was not paid (${input.reason}). Due ${input.dueDate}.`,
         category: 'fees',
         url: '/student/fees',
       });

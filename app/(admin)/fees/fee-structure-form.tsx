@@ -313,7 +313,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
-      toast.success(mode === 'create' ? 'Fee structure created' : 'Fee structure updated');
+      toast.success(mode === 'create' ? 'Maintenance fee structure created' : 'Maintenance fee structure updated');
       // router.refresh() only busts the RSC cache; the list/detail pages read
       // TanStack Query, so without this the save looks like it did nothing.
       // Coverage is derived from the structure's audience/bands, so it goes too.
@@ -350,7 +350,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
               className={selectCls(errors.name)}
-              placeholder="e.g. Transport Fee 2026-2027 (Arts Self)"
+              placeholder="e.g. Transport Maintenance Fee 2026-2027 (Arts Self)"
               disabled={saving}
             />
             {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
@@ -385,7 +385,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
             />
             <p className="mt-1 text-xs text-gray-500">
               {isStudent
-                ? `Bills go under the “${TRANSPORT_CATEGORY_NAME.student}” category. Fines are billed separately under “${TRANSPORT_FINE_CATEGORY_NAME}”.`
+                ? `Bills go under the “${TRANSPORT_CATEGORY_NAME.student}” category. The transport fee charged when it goes unpaid is billed separately under “${TRANSPORT_FINE_CATEGORY_NAME}”.`
                 : 'Staff are recorded for coverage; real staff billing is phase 2.'}
             </p>
           </div>
@@ -676,7 +676,7 @@ export function FeeStructureForm({ mode, feeId, initial }: Props) {
         </Link>
         <button type="submit" disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-green-600 px-4 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          {mode === 'create' ? 'Create Fee Structure' : 'Save Changes'}
+          {mode === 'create' ? 'Create Structure' : 'Save Changes'}
         </button>
       </div>
     </form>

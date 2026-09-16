@@ -86,11 +86,11 @@ async function cancel(request: NextRequest, auth: AuthContext) {
       action: 'cancel',
       entityType: 'tms_fee_fine',
       entityId: id,
-      description: `Waived a fine of ₹${Number(row.fine_amount).toLocaleString('en-IN')} — ${reason}`,
+      description: `Waived a transport fee of ₹${Number(row.fine_amount).toLocaleString('en-IN')} — ${reason}`,
       metadata: { person_id: row.person_id, amount: Number(row.fine_amount), reason },
     });
 
-    return NextResponse.json({ success: true, data: { id }, message: 'Fine waived.' });
+    return NextResponse.json({ success: true, data: { id }, message: 'Transport fee waived.' });
   } catch (e) {
     console.error('Fine cancel error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

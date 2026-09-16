@@ -64,7 +64,7 @@ export function getFeeColumns(
     ...(canManage ? [selectColumn] : []),
     {
       accessorKey: 'name',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Fee Structure" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Maintenance Fee Structure" />,
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
           <button
@@ -90,7 +90,7 @@ export function getFeeColumns(
     },
     {
       accessorKey: 'total_amount',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Total Fee" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Annual Amount" />,
       cell: ({ row }) => {
         const f = row.original;
         if (f.fee_mode === 'tiered') {

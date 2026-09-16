@@ -135,6 +135,9 @@ export async function proxy(request: NextRequest) {
     '/student/grievances',
     '/api/student/transport-access',
     '/api/student/transport-context',
+    // The transport fee is precisely what a BLOCKED learner owes, so /student/fees
+    // must be able to read it while they are confined to that page.
+    '/api/student/transport-fee',
   ];
   const studentGateApplies =
     area === 'student' &&

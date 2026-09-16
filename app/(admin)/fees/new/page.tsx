@@ -9,12 +9,12 @@ export default function NewFeePage() {
       <DetailPageHeader
         crumbs={[
           { label: 'Dashboard', href: '/dashboard' },
-          { label: 'Fees', href: '/fees' },
-          { label: 'Add Fee Structure' },
+          { label: 'Maintenance Fee', href: '/fees' },
+          { label: 'Add Structure' },
         ]}
         backHref="/fees"
-        title="Add Fee Structure"
-        subtitle="Define a transport fee structure, its conditions and term split"
+        title="Add Maintenance Fee Structure"
+        subtitle="Define a transport maintenance fee structure, its conditions and term split"
       />
       <FeeStructureForm mode="create" />
     </div>
