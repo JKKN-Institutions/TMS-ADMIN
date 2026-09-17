@@ -105,21 +105,6 @@ export default function BoardingAttendancePage() {
     if (userId) void pruneSnapshots(offlineKv(), userId, istToday()).catch(() => {});
   }, [userId]);
 
-  // A queue of learners scanned back to back used to reload the whole roster
-  // (fees included) once per card, competing with the next scan on a weak
-  // signal. Coalesce: one reload a moment after the scanning pauses.
-  const scanRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const refreshAfterScan = useCallback(() => {
-    if (scanRefreshRef.current) return;
-    scanRefreshRef.current = setTimeout(() => {
-      scanRefreshRef.current = null;
-      void qc.invalidateQueries({ queryKey: ['boarding-roster'] });
-    }, 2_500);
-  }, [qc]);
-  useEffect(() => () => {
-    if (scanRefreshRef.current) clearTimeout(scanRefreshRef.current);
-  }, []);
-
   const [date, setDate] = useState(todayStr());
   const [direction, setDirection] = useState<AttDirection>('onward');
   // Once the staffer picks a tab, stop moving them to the open trip.
@@ -544,7 +529,10 @@ export default function BoardingAttendancePage() {
         open={scanOpen}
         onOpenChange={setScanOpen}
         windows={windows}
-        onMarked={refreshAfterScan}
+        // Straight away, so the list shows the scan the moment it is saved. A
+        // reload still running is cancelled and restarted by invalidate, so
+        // scans back to back never pile up requests.
+        onMarked={() => qc.invalidateQueries({ queryKey: ['boarding-roster'] })}
         offline={{
           online: offline.online,
           // Only hand over the roster when it's the trip actually being
