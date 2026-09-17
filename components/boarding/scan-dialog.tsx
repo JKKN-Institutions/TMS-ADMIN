@@ -1,8 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Clock } from 'lucide-react';
+import { Camera, Clock } from 'lucide-react';
+import {
+  classifyCameraError,
+  cameraErrorMessage,
+  shouldTryOtherCameras,
+  pickBackCamera,
+  isFreshCapture,
+} from '@/lib/boarding/camera-errors';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
@@ -60,6 +67,7 @@ type ScanResult = {
 };
 
 const READER_ID = 'scan-dialog-reader';
+const PHOTO_READER_ID = 'scan-dialog-photo-reader';
 
 const FEE_TONE: Record<FeeTone, string> = {
   paid: 'border-green-400 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200',
@@ -303,9 +311,17 @@ export default function ScanDialog({
       // start() is still in flight, cameraGenRef will have moved on by the time we get
       // here — that's our signal to stop the just-started stream instead of adopting it.
       const gen = cameraGenRef.current;
-      const scanner = new Html5Qrcode(READER_ID);
-      try {
-        await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onCameraRead, () => {});
+      const config = { fps: 10, qrbox: 250 };
+
+      // One attempt = one fresh scanner. Resolves true when the camera is live.
+      const attempt = async (camera: string | MediaTrackConstraints): Promise<true | { err: unknown }> => {
+        const scanner = new Html5Qrcode(READER_ID);
+        try {
+          await scanner.start(camera, config, onCameraRead, () => {});
+        } catch (err) {
+          try { scanner.clear(); } catch { /* ignore */ }
+          return { err };
+        }
         if (cameraGenRef.current !== gen) {
           // Cleanup already ran (dialog closed/unmounted) while start() was pending — this
           // scanner was never assigned to scannerRef, so nothing else can stop it. Stop it
@@ -316,17 +332,80 @@ export default function ScanDialog({
           } catch {
             /* ignore */
           }
-          return;
+          return true;
         }
         scannerRef.current = scanner;
         setScanning(true);
-      } catch {
-        if (cameraGenRef.current === gen) {
-          setResult({ ok: false, error: 'Could not start camera — mark the learner by hand instead.' });
+        return true;
+      };
+
+      // 1) The rear camera by facing mode — works on most phones.
+      const first = await attempt({ facingMode: 'environment' });
+      if (first === true) return;
+      let kind = classifyCameraError(first.err);
+      console.error('[scan] camera start failed (facingMode):', first.err);
+
+      // 2) Some phones refuse facingMode or hold a stuck stream on one lens:
+      //    try the listed cameras by id, rear first. Pointless when the camera
+      //    is blocked or the browser has no camera API.
+      if (shouldTryOtherCameras(kind) && cameraGenRef.current === gen) {
+        try {
+          const cams = await Html5Qrcode.getCameras();
+          const preferred = pickBackCamera(cams);
+          const ids = preferred ? [preferred, ...cams.map((c) => c.id).filter((id) => id !== preferred)] : [];
+          for (const id of ids) {
+            if (cameraGenRef.current !== gen) return;
+            const r = await attempt(id);
+            if (r === true) return;
+            kind = classifyCameraError(r.err);
+            console.error('[scan] camera start failed (deviceId):', r.err);
+          }
+        } catch (err) {
+          kind = classifyCameraError(err);
+          console.error('[scan] listing cameras failed:', err);
         }
+      }
+
+      if (cameraGenRef.current === gen) {
+        setResult({ ok: false, error: cameraErrorMessage(kind) });
       }
     } finally {
       startingRef.current = false;
+    }
+  }
+
+  // Backup scan: a photo of the ID card taken with the phone's own camera app.
+  // Works where the live camera cannot start (permission quirks, a busy lens,
+  // in-app browsers). Still a read of the physical card: the input opens the
+  // camera (capture), and a photo older than two minutes is refused.
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [readingPhoto, setReadingPhoto] = useState(false);
+
+  async function onPhotoPicked(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same card be photographed again
+    if (!file) return;
+    if (!isFreshCapture(file, Date.now())) {
+      setResult({ ok: false, error: 'Take a new photo of the ID card with the camera. Saved or downloaded pictures are not accepted.' });
+      return;
+    }
+    setReadingPhoto(true);
+    try {
+      // html5-qrcode refuses a file scan while the live camera runs.
+      await stopCamera();
+      const reader = new Html5Qrcode(PHOTO_READER_ID);
+      let decoded: string;
+      try {
+        decoded = await reader.scanFile(file, false);
+      } finally {
+        try { reader.clear(); } catch { /* ignore */ }
+      }
+      await submit(decoded, 'camera');
+    } catch (err) {
+      console.error('[scan] photo decode failed:', err);
+      setResult({ ok: false, error: 'Could not read the card in that photo. Hold the card flat, fill the frame, avoid glare, and try again.' });
+    } finally {
+      setReadingPhoto(false);
     }
   }
 
@@ -369,10 +448,11 @@ export default function ScanDialog({
         )}
 
         <div id={READER_ID} className="w-full overflow-hidden rounded-md" />
+        <div id={PHOTO_READER_ID} className="hidden" />
 
         <div className="flex gap-2">
           {!scanning ? (
-            <Button className="flex-1" onClick={startCamera} disabled={!legOpen}>
+            <Button className="flex-1" onClick={startCamera} disabled={!legOpen || readingPhoto}>
               {legOpen ? 'Start camera' : 'Scanning closed'}
             </Button>
           ) : (
@@ -380,11 +460,28 @@ export default function ScanDialog({
               Stop
             </Button>
           )}
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={!legOpen || readingPhoto}
+          >
+            <Camera className="mr-1.5 h-4 w-4" />
+            {readingPhoto ? 'Reading…' : 'Scan from photo'}
+          </Button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={onPhotoPicked}
+          />
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Scan the learner&apos;s JKKN ID card. If the camera cannot read it, mark them by hand on the
-          attendance list.
+          Scan the learner&apos;s JKKN ID card. If the live camera does not start or cannot read the
+          card, tap <span className="font-medium">Scan from photo</span> and take a picture of the card.
         </p>
 
         {result && (
