@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { applyConcessions, MAX_APPLY } from '@/lib/fees/concessions';
 import { logActivity } from '@/lib/activity/log';
+import { istToday } from '@/lib/booking/window';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -42,7 +43,7 @@ async function postApply(request: NextRequest, auth: AuthContext) {
       kind,
       personIds,
       actorId: auth.userId,
-      today: new Date().toISOString().slice(0, 10),
+      today: istToday(),
     });
 
     const counts: Record<string, number> = {};

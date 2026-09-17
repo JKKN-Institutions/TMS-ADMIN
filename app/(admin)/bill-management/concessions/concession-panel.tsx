@@ -58,9 +58,15 @@ export function ConcessionPanel({ year }: { year: string }) {
       const done = results.filter((r) => ['repriced', 'ledger_aligned', 'override_only', 'unchanged'].includes(r.outcome)).length;
       const review = results.filter((r) => r.outcome === 'review');
       const failed = results.filter((r) => r.outcome === 'error');
+      const skipped = results.filter((r) => r.outcome === 'skipped');
       if (done) toast.success(`Concession applied to ${done} learner(s).`);
       if (review.length) toast(`${review.length} need accounts review: ${review.map((r) => r.name).join(', ')}`, { icon: '⚠️' });
       if (failed.length) toast.error(`${failed.length} failed: ${failed.map((r) => `${r.name} (${r.message})`).join('; ')}`);
+      if (!done && !review.length && !failed.length && skipped.length) {
+        toast(`Nothing to apply: ${skipped.map((r) => `${r.name} (${r.message})`).join('; ')}`);
+      } else if (skipped.length) {
+        toast(`${skipped.length} skipped (already up to date or not eligible).`, { icon: 'ℹ️' });
+      }
       setConfirmRows(null);
       resetSel?.();
       refresh();
