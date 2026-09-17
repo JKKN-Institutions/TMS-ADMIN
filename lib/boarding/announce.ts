@@ -1,20 +1,36 @@
 /**
  * announce — says a scan result out loud, so the staffer at the bus door hears
- * who boarded without a ticket without looking down at the phone.
+ * who boarded without a booking without looking down at the phone.
  *
- * Only unbooked riders are announced. The mark is already recorded by the time
- * this runs; the voice is a cue to the staffer, never a decision.
+ * Only unbooked riders are announced. The voice is a cue to the staffer, never
+ * a decision: the server still records the scan and has the last word.
  *
  * Uses the browser's own speech (Web Speech API): no library, no network.
  * iPhones only allow speech that starts from a tap, so the Scan button calls
  * primeSpeech() first; later announcements from camera reads then work.
  */
 
+/**
+ * Names are stored in capitals ("AJAY P"), and phone voices spell an
+ * all-capitals word out letter by letter, as if it were an abbreviation.
+ * Written as "Ajay P" the name is read as a name; a one-letter initial is
+ * still said as a letter, which is right.
+ */
+export function spokenName(name: string | null | undefined): string {
+  return (name ?? '')
+    .replace(/[.\s]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => (w.length === 1 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase()))
+    .join(' ');
+}
+
 /** What is said for an unbooked rider. */
-export function withoutTicketPhrase(name: string | null | undefined): string {
-  const clean = (name ?? '').replace(/\s+/g, ' ').trim();
-  if (!clean || clean === 'Learner') return 'Learner without ticket';
-  return `${clean}, without ticket`;
+export function withoutBookingPhrase(name: string | null | undefined): string {
+  const spoken = spokenName(name);
+  if (!spoken || spoken === 'Learner') return 'Learner, without booking';
+  return `${spoken}, without booking`;
 }
 
 function speech(): SpeechSynthesis | null {
@@ -36,6 +52,9 @@ export function primeSpeech(): void {
   const synth = speech();
   if (!synth) return;
   try {
+    // Asking for the voices starts loading them, so the first real
+    // announcement does not wait for the list.
+    synth.getVoices();
     const u = new SpeechSynthesisUtterance(' ');
     u.volume = 0;
     synth.speak(u);
@@ -84,7 +103,9 @@ export function speak(text: string): void {
   const synth = speech();
   if (!synth || isVoiceMuted()) return;
   try {
-    synth.cancel();
+    // Cancel only when something is actually playing: on Android Chrome a
+    // cancel() right before speak() can hold up or drop the new sentence.
+    if (synth.speaking || synth.pending) synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
     const voice = pickVoice(synth);
     if (voice) {

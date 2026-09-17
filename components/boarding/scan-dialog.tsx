@@ -16,7 +16,7 @@ import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } 
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { createScanQueue, onRead, onDone, resetScanQueue } from '@/lib/boarding/scan-queue';
-import { isVoiceMuted, primeSpeech, setVoiceMuted, speak, withoutTicketPhrase } from '@/lib/boarding/announce';
+import { isVoiceMuted, primeSpeech, setVoiceMuted, speak, withoutBookingPhrase } from '@/lib/boarding/announce';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
@@ -66,6 +66,9 @@ type ScanResult = {
   /** Queued offline, but the card matched nobody on the saved roster; the server resolves it on sync. */
   unverified?: boolean;
 };
+
+/** A learner announced this recently is not announced again. */
+const ANNOUNCE_REPEAT_MS = 15_000;
 
 const READER_ID = 'scan-dialog-reader';
 const PHOTO_READER_ID = 'scan-dialog-photo-reader';
@@ -160,7 +163,7 @@ export default function ScanDialog({
 }) {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
-  // The "<name>, without ticket" voice. Read from the phone when the dialog
+  // The "<name>, without booking" voice. Read from the phone when the dialog
   // opens, so the staffer's last choice sticks.
   const [voiceMuted, setVoiceMutedState] = useState(false);
   useEffect(() => {
@@ -190,6 +193,9 @@ export default function ScanDialog({
   // Which camera reads to send, hold or ignore, so learners can present cards
   // one after another. See scan-queue.ts.
   const queueRef = useRef(createScanQueue());
+  // Cards already announced, and when, so the server's reply does not repeat
+  // what the phone said the moment the card was read.
+  const announcedRef = useRef(new Map<string, number>());
   // Kept current every render so the long-lived scan callback (registered once by the
   // camera-start effect) always reads the latest windows instead of the stale
   // closure captured when the effect last ran.
@@ -205,6 +211,28 @@ export default function ScanDialog({
   // Which trip is open for scanning right now, if any.
   const leg = activeDirection(windows);
   const legOpen = leg !== null;
+
+  /** Say "<name>, without booking" once per card. `code` is the cleaned card number. */
+  function announceWithoutBooking(code: string, name: string | null | undefined) {
+    const now = Date.now();
+    const at = announcedRef.current.get(code);
+    if (at !== undefined && now - at < ANNOUNCE_REPEAT_MS) return;
+    announcedRef.current.set(code, now);
+    speak(withoutBookingPhrase(name));
+  }
+
+  /**
+   * Announce straight from the list already on this phone, the moment the card
+   * is read, instead of waiting for the server. "Booked" there means booked on
+   * this bus, the same thing the list's "Not booked" label shows. When the list
+   * does not know the card, the server's reply announces it instead.
+   */
+  function announceFromSavedList(code: string) {
+    const roster = offlineRef.current?.roster;
+    if (!roster) return;
+    const local = resolveScanOffline(code, 'camera', roster);
+    if (local.kind === 'resolved' && !local.booked) announceWithoutBooking(code, local.name);
+  }
 
   /**
    * No signal: resolve against the saved roster and queue. Returns true when it
@@ -235,7 +263,9 @@ export default function ScanDialog({
     const unbooked = local.kind === 'resolved' && !local.booked;
     // Only when the saved roster knows the learner; an unknown card's booking
     // is decided by the server later, so nothing is claimed about it now.
-    if (local.kind === 'resolved' && (walkUp || unbooked)) speak(withoutTicketPhrase(local.name));
+    if (local.kind === 'resolved' && (walkUp || unbooked)) {
+      announceWithoutBooking(classifyScan(token, source).code, local.name);
+    }
     await o.queueScan({
       learnerId: local.kind === 'resolved' ? local.learnerId : null,
       token,
@@ -290,7 +320,8 @@ export default function ScanDialog({
       if (json.ok) {
         setResult(json);
         // Said out loud so the staffer at the door hears it without looking.
-        if (json.walkUp) speak(withoutTicketPhrase(json.learner?.name));
+        // Usually already said from the phone's list; this covers the rest.
+        if (json.walkUp) announceWithoutBooking(classifyScan(token, source).code, json.learner?.name);
         onMarked();
       } else {
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
@@ -312,7 +343,11 @@ export default function ScanDialog({
   function onCameraRead(decoded: string) {
     const q = queueRef.current;
     const code = classifyScan(decoded, 'camera').code;
-    if (onRead(q, code, Date.now()) !== 'submit') return;
+    const action = onRead(q, code, Date.now());
+    if (action === 'ignore') return;
+    // Speak now, even for a card waiting behind another save.
+    announceFromSavedList(code);
+    if (action !== 'submit') return;
     void (async () => {
       let next: string | null = code;
       while (next !== null) {
@@ -448,6 +483,7 @@ export default function ScanDialog({
       } finally {
         try { reader.clear(); } catch { /* ignore */ }
       }
+      announceFromSavedList(classifyScan(decoded, 'camera').code);
       await submit(decoded, 'camera');
     } catch (err) {
       console.error('[scan] photo decode failed:', err);
@@ -478,6 +514,7 @@ export default function ScanDialog({
       // fresh object also tells a save loop still running to stop sending.
       resetScanQueue(queueRef.current);
       queueRef.current = createScanQueue();
+      announcedRef.current.clear();
     }
   }, [open]);
 
@@ -544,7 +581,7 @@ export default function ScanDialog({
             onClick={toggleVoice}
             aria-pressed={voiceMuted}
             aria-label={voiceMuted ? 'Turn voice on' : 'Mute voice'}
-            title={voiceMuted ? 'Voice off — tap to hear "without ticket" again' : 'Voice on — tap to mute'}
+            title={voiceMuted ? 'Voice off — tap to hear "without booking" again' : 'Voice on — tap to mute'}
           >
             {voiceMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
           </Button>

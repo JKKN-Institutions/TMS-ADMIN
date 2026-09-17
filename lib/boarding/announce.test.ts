@@ -1,20 +1,32 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { withoutTicketPhrase, speak, primeSpeech, isVoiceMuted, setVoiceMuted } from './announce';
+import { withoutBookingPhrase, spokenName, speak, primeSpeech, isVoiceMuted, setVoiceMuted } from './announce';
 
-describe('withoutTicketPhrase', () => {
-  it('names the learner', () => {
-    expect(withoutTicketPhrase('Priya S')).toBe('Priya S, without ticket');
+describe('spokenName', () => {
+  it('turns stored capitals into a name the voice reads as a word, not letters', () => {
+    expect(spokenName('AJAY P')).toBe('Ajay P');
+    expect(spokenName('SRI PRASATH P')).toBe('Sri Prasath P');
+  });
+
+  it('keeps initials as single capitals and drops their dots', () => {
+    expect(spokenName('KARTHIK R V')).toBe('Karthik R V');
+    expect(spokenName('KARTHIK R.V.')).toBe('Karthik R V');
   });
 
   it('tidies stray spaces', () => {
-    expect(withoutTicketPhrase('  Arun   Kumar ')).toBe('Arun Kumar, without ticket');
+    expect(spokenName('  ARUN   kumar ')).toBe('Arun Kumar');
+  });
+});
+
+describe('withoutBookingPhrase', () => {
+  it('says the full name, then "without booking"', () => {
+    expect(withoutBookingPhrase('KANMANIPRIYAN M')).toBe('Kanmanipriyan M, without booking');
   });
 
   it('still announces when the name is unknown', () => {
-    expect(withoutTicketPhrase(null)).toBe('Learner without ticket');
-    expect(withoutTicketPhrase('')).toBe('Learner without ticket');
+    expect(withoutBookingPhrase(null)).toBe('Learner, without booking');
+    expect(withoutBookingPhrase('')).toBe('Learner, without booking');
     // The scan route's own fallback name.
-    expect(withoutTicketPhrase('Learner')).toBe('Learner without ticket');
+    expect(withoutBookingPhrase('Learner')).toBe('Learner, without booking');
   });
 });
 
@@ -31,7 +43,7 @@ describe('mute', () => {
     setVoiceMuted(false);
   });
 
-  function stubBrowser() {
+  function stubBrowser(speaking = false) {
     const store = new Map<string, string>();
     const spoken: string[] = [];
     let cancelled = 0;
@@ -42,6 +54,8 @@ describe('mute', () => {
         removeItem: (k: string) => void store.delete(k),
       },
       speechSynthesis: {
+        speaking,
+        pending: false,
         getVoices: () => [],
         cancel: () => void cancelled++,
         speak: (u: { text: string }) => void spoken.push(u.text),
@@ -54,10 +68,18 @@ describe('mute', () => {
     return { store, spoken, cancelled: () => cancelled };
   }
 
-  it('speaks when not muted', () => {
+  it('speaks when not muted, without a needless cancel first', () => {
     const b = stubBrowser();
-    speak('Priya S, without ticket');
-    expect(b.spoken).toEqual(['Priya S, without ticket']);
+    speak('Priya S, without booking');
+    expect(b.spoken).toEqual(['Priya S, without booking']);
+    expect(b.cancelled()).toBe(0);
+  });
+
+  it('cuts off an earlier sentence that is still playing', () => {
+    const b = stubBrowser(true);
+    speak('Ajay P, without booking');
+    expect(b.cancelled()).toBe(1);
+    expect(b.spoken).toEqual(['Ajay P, without booking']);
   });
 
   it('stays silent when muted, and the choice is remembered on the phone', () => {
