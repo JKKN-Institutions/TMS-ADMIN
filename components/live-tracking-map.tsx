@@ -278,12 +278,11 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapRef.current).setView(DEFAULT_CENTER, 10);
-    // Street basemap: Esri World Street Map — free with attribution, no key.
-    // (CARTO Voyager was dropped: it now watermarks keyless tiles "API KEY REQUIRED".)
-    const street = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    // Street basemap: CARTO Voyager — clean, Google-like, free, no API key.
+    const street = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
       maxZoom: 20,
-      maxNativeZoom: 19,
-      attribution: 'Tiles © Esri',
+      attribution: '© OpenStreetMap contributors © CARTO',
     });
     // Satellite basemap: Esri World Imagery — free with attribution, no key.
     const satellite = L.tileLayer(
