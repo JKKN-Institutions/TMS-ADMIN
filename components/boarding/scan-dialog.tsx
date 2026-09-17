@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, Clock } from 'lucide-react';
+import { Camera, Clock, Volume2, VolumeX } from 'lucide-react';
 import {
   classifyCameraError,
   cameraErrorMessage,
@@ -16,7 +16,7 @@ import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } 
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { createScanQueue, onRead, onDone, resetScanQueue } from '@/lib/boarding/scan-queue';
-import { primeSpeech, speak, withoutTicketPhrase } from '@/lib/boarding/announce';
+import { isVoiceMuted, primeSpeech, setVoiceMuted, speak, withoutTicketPhrase } from '@/lib/boarding/announce';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
@@ -160,6 +160,18 @@ export default function ScanDialog({
 }) {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
+  // The "<name>, without ticket" voice. Read from the phone when the dialog
+  // opens, so the staffer's last choice sticks.
+  const [voiceMuted, setVoiceMutedState] = useState(false);
+  useEffect(() => {
+    if (open) setVoiceMutedState(isVoiceMuted());
+  }, [open]);
+  function toggleVoice() {
+    const next = !voiceMuted;
+    setVoiceMuted(next);
+    setVoiceMutedState(next);
+    if (!next) primeSpeech();
+  }
   // Forces a re-render every 30s while open so legOpen (which reads new Date())
   // re-evaluates at a scan-window edge, flipping the closed banner and the
   // camera-lifecycle effect below without waiting on an unrelated re-render.
@@ -525,6 +537,17 @@ export default function ScanDialog({
             className="hidden"
             onChange={onPhotoPicked}
           />
+          <Button
+            variant="outline"
+            size="icon"
+            className="shrink-0"
+            onClick={toggleVoice}
+            aria-pressed={voiceMuted}
+            aria-label={voiceMuted ? 'Turn voice on' : 'Mute voice'}
+            title={voiceMuted ? 'Voice off — tap to hear "without ticket" again' : 'Voice on — tap to mute'}
+          >
+            {voiceMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+          </Button>
         </div>
 
         <p className="text-xs text-muted-foreground">

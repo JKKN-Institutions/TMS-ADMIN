@@ -44,10 +44,45 @@ export function primeSpeech(): void {
   }
 }
 
+const MUTE_KEY = 'tms.boarding.voiceMuted';
+
+/**
+ * The staffer's mute choice, kept on this phone. Storage can be blocked
+ * (private tab), so a failed read means "not muted" and a failed write only
+ * lasts for this page.
+ */
+let mutedFallback = false;
+
+export function isVoiceMuted(): boolean {
+  try {
+    return window.localStorage.getItem(MUTE_KEY) === '1';
+  } catch {
+    return mutedFallback;
+  }
+}
+
+export function setVoiceMuted(muted: boolean): void {
+  mutedFallback = muted;
+  try {
+    if (muted) window.localStorage.setItem(MUTE_KEY, '1');
+    else window.localStorage.removeItem(MUTE_KEY);
+  } catch {
+    /* kept in memory for this page */
+  }
+  // Muting stops a sentence already being said.
+  if (muted) {
+    try {
+      speech()?.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /** Say `text` now, cutting off anything still being said for an earlier scan. */
 export function speak(text: string): void {
   const synth = speech();
-  if (!synth) return;
+  if (!synth || isVoiceMuted()) return;
   try {
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
