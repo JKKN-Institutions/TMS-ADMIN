@@ -1557,8 +1557,14 @@ export async function loadConcessionRows(
     svc, 'billing_student_bills', 'id, final_amount, status, payment_date', sbIds);
   const receipts = await selectByIds<{ bill_id: string; amount_paid: string | number }>(
     svc, 'billing_receipt_items', 'bill_id, amount_paid', sbIds, 'bill_id');
-  const pending = await selectByIds<{ bill_id: string }>(
-    svc, 'payment_transaction_items', 'bill_id', sbIds, 'bill_id');
+  // Only open or settled attempts count: failed/expired attempts moved no money.
+  // Same rule as tms_apply_fee_concession (migration 20260917140000).
+  const pti = await selectByIds<{ bill_id: string; transaction_id: string }>(
+    svc, 'payment_transaction_items', 'bill_id, transaction_id', sbIds, 'bill_id');
+  const txns = await selectByIds<{ id: string; status: string | null }>(
+    svc, 'payment_transactions', 'id, status', [...new Set(pti.map((x) => x.transaction_id))]);
+  const deadTxn = new Set(txns.filter((t) => t.status === 'failed' || t.status === 'expired').map((t) => t.id));
+  const pending = pti.filter((x) => !deadTxn.has(x.transaction_id));
   const sbById = new Map(sbs.map((s) => [s.id, s]));
   const paidBy = new Map<string, number>();
   for (const r of receipts) paidBy.set(r.bill_id, (paidBy.get(r.bill_id) ?? 0) + Number(r.amount_paid));
