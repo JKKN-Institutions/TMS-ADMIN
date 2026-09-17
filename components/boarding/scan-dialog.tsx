@@ -16,6 +16,7 @@ import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } 
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { createScanQueue, onRead, onDone, resetScanQueue } from '@/lib/boarding/scan-queue';
+import { primeSpeech, speak, withoutTicketPhrase } from '@/lib/boarding/announce';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
@@ -220,6 +221,9 @@ export default function ScanDialog({
     // queued as a walk-up straight away, the same rule the server applies.
     // Asking first is what left them unrecorded when the second tap never came.
     const unbooked = local.kind === 'resolved' && !local.booked;
+    // Only when the saved roster knows the learner; an unknown card's booking
+    // is decided by the server later, so nothing is claimed about it now.
+    if (local.kind === 'resolved' && (walkUp || unbooked)) speak(withoutTicketPhrase(local.name));
     await o.queueScan({
       learnerId: local.kind === 'resolved' ? local.learnerId : null,
       token,
@@ -273,6 +277,8 @@ export default function ScanDialog({
       const json = await res.json();
       if (json.ok) {
         setResult(json);
+        // Said out loud so the staffer at the door hears it without looking.
+        if (json.walkUp) speak(withoutTicketPhrase(json.learner?.name));
         onMarked();
       } else {
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
@@ -484,7 +490,14 @@ export default function ScanDialog({
 
         <div className="flex gap-2">
           {!scanning ? (
-            <Button className="flex-1" onClick={startCamera} disabled={!legOpen || readingPhoto}>
+            <Button
+              className="flex-1"
+              onClick={() => {
+                primeSpeech();
+                void startCamera();
+              }}
+              disabled={!legOpen || readingPhoto}
+            >
               {legOpen ? 'Start camera' : 'Scanning closed'}
             </Button>
           ) : (
@@ -495,7 +508,10 @@ export default function ScanDialog({
           <Button
             variant="outline"
             className="flex-1"
-            onClick={() => photoInputRef.current?.click()}
+            onClick={() => {
+              primeSpeech();
+              photoInputRef.current?.click();
+            }}
             disabled={!legOpen || readingPhoto}
           >
             <Camera className="mr-1.5 h-4 w-4" />

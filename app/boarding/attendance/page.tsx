@@ -6,6 +6,7 @@ import { CheckCircle2, XCircle, ListChecks, Download, QrCode, TicketX, IndianRup
 import toast from 'react-hot-toast';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
 import ScanDialog from '@/components/boarding/scan-dialog';
+import { primeSpeech } from '@/lib/boarding/announce';
 import AbsenceDialog, { type AbsenceRoute } from '@/components/boarding/absence-dialog';
 import { getRosterColumns } from './columns';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -495,7 +496,11 @@ export default function BoardingAttendancePage() {
             {isToday && marking.scan && (
               <button
                 type="button"
-                onClick={() => setScanOpen(true)}
+                onClick={() => {
+                  // iPhones allow speech only after a tap; this is that tap.
+                  primeSpeech();
+                  setScanOpen(true);
+                }}
                 className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
               >
                 <QrCode className="h-4 w-4" /> Scan
