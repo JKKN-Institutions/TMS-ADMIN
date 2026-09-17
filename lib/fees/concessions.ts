@@ -5,14 +5,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { selectByIds } from '@/lib/supabase/chunked';
 import { resolveApplicablePeople } from './applicability';
-import { resolvePersonTerms } from './resolve-terms';
+import { resolvePersonTerms, UNRESOLVED_LABEL } from './resolve-terms';
 import { loadResolveContext } from './structure-context';
 import type { TermOverride } from './overrides';
 import type { FeeStructureRow } from './types';
 import {
-  classifyConcession, matchRule, rowTargets, targetTerms, targetTotal,
-  SCHEME_75_SCHOLARSHIP,
-  type ConcessionKind, type ConcessionRule, type ConcessionStatus, type LedgerState,
+  classifyConcession, guardTarget, matchRule, rowTargets, targetTerms, targetTotal,
+  SCHEME_75_SCHOLARSHIP, FINAL_YEAR_BATCH_CLOSURE_PREFIX,
+  type ConcessionKind, type ConcessionRule, type ConcessionStatus, type ExistingOverride, type LedgerState,
 } from './concession-math';
 
 export const MAX_APPLY = 200;
@@ -156,13 +156,19 @@ export async function loadConcessionRows(
   // Overrides: by year only (few rows; avoids a huge .in()).
   const { data: ovData, error: ovErr } = await svc
     .from('tms_fee_override')
-    .select('person_id, term_no, billable, amount')
+    .select('person_id, term_no, billable, amount, reason, concession_rule_id')
     .eq('transport_year_id', transportYearId);
   if (ovErr) throw ovErr;
-  const overridesBy = new Map<string, TermOverride[]>();
-  for (const o of (ovData ?? []) as Array<{ person_id: string; term_no: number; billable: boolean; amount: string | number | null }>) {
+  const overridesBy = new Map<string, ExistingOverride[]>();
+  for (const o of (ovData ?? []) as Array<{
+    person_id: string; term_no: number; billable: boolean; amount: string | number | null;
+    reason: string | null; concession_rule_id: string | null;
+  }>) {
     const list = overridesBy.get(o.person_id) ?? [];
-    list.push({ term_no: o.term_no, billable: o.billable, amount: o.amount === null ? null : Number(o.amount) });
+    list.push({
+      term_no: o.term_no, billable: o.billable, amount: o.amount === null ? null : Number(o.amount),
+      reason: o.reason, concession_rule_id: o.concession_rule_id,
+    });
     overridesBy.set(o.person_id, list);
   }
 
@@ -249,12 +255,17 @@ export async function loadConcessionRows(
       loaded.value.ctx
     );
     if (!outcome.ok) {
-      rows.push({ ...base, reason: outcome.reason });
+      rows.push({ ...base, reason: UNRESOLVED_LABEL[outcome.reason] });
       continue;
     }
     const terms = targetTerms(rule, outcome.terms);
     const total = targetTotal(terms);
     const fullTotal = outcome.terms.reduce((s, t) => s + Number(t.amount), 0);
+    const guardReason = guardTarget(kind, total, fullTotal);
+    if (guardReason) {
+      rows.push({ ...base, fullTotal, targetTotal: total, terms, status: 'review', reason: guardReason, rowTargets: [] });
+      continue;
+    }
     const c = classifyConcession({ kind, terms, total, overrides: overridesBy.get(l.id) ?? [], ledger });
     const targets = rowTargets(kind, total, ledger);
     rows.push({
@@ -269,7 +280,7 @@ export async function loadConcessionRows(
 }
 
 const REASON_PREFIX: Record<ConcessionKind, string> = {
-  final_year: 'FINAL-YEAR BATCH CLOSURE',
+  final_year: FINAL_YEAR_BATCH_CLOSURE_PREFIX,
   scheme_75: SCHEME_75_SCHOLARSHIP,
 };
 
