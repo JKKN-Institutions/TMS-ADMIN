@@ -7,6 +7,8 @@ import toast from 'react-hot-toast';
 import { Download, IndianRupee, Wallet, Clock, AlertTriangle, Users, FileX, Loader2 } from 'lucide-react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { DataTable, type DataTableFilter } from '@/components/ui/data-table';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { routeFilterOptions } from '@/lib/fees/route-labels';
 import { getBillColumns, inr } from './columns';
 import { getUnbilledColumns } from './unbilled-columns';
@@ -17,8 +19,9 @@ import { getFineColumns } from './fine-columns';
 import type { FineRow } from '@/lib/fines/list';
 import { summarizeBills, type TransportBillRow } from '@/lib/fees/bills';
 import { FineDialog } from './fine-dialog';
+import { ConcessionPanel } from './concessions/concession-panel';
 
-type View = 'bills' | 'unbilled' | 'analytics' | 'fines';
+type View = 'bills' | 'unbilled' | 'analytics' | 'fines' | 'concessions';
 
 const TYPE_FILTER: DataTableFilter = {
   columnId: 'type',
@@ -42,6 +45,8 @@ const BillAnalytics = dynamic(() => import('./bill-analytics'), {
 
 export default function BillManagementPage() {
   const qc = useQueryClient();
+  const { can } = usePermissions();
+  const canSeeConcessions = can(TMS_PERMISSIONS.FEES_CONCESSION_VIEW);
   const [selectedYear, setSelectedYear] = useState('');
   const [view, setView] = useState<View>('bills');
   // Non-null while the Charge Transport Fee dialog is open, holding the ticked bill rows.
@@ -64,7 +69,7 @@ export default function BillManagementPage() {
   const isAll = selectedYear === 'all';
   // Unbilled and Transport Fee need a specific year — never stay on them for "All years".
   useEffect(() => {
-    if (isAll && (view === 'unbilled' || view === 'fines')) setView('bills');
+    if (isAll && (view === 'unbilled' || view === 'fines' || view === 'concessions')) setView('bills');
   }, [isAll, view]);
 
   const yearOptions = useMemo(
@@ -180,7 +185,7 @@ export default function BillManagementPage() {
       </div>
 
       {/* View toggle */}
-      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-900">
+      <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-900">
         <ToggleBtn active={view === 'bills'} onClick={() => setView('bills')}>
           Bills
         </ToggleBtn>
@@ -193,6 +198,11 @@ export default function BillManagementPage() {
         <ToggleBtn active={view === 'analytics'} onClick={() => setView('analytics')}>
           Analytics
         </ToggleBtn>
+        {canSeeConcessions && (
+          <ToggleBtn active={view === 'concessions'} onClick={() => setView('concessions')} disabled={isAll}>
+            Fee Concession
+          </ToggleBtn>
+        )}
       </div>
 
       {/* Transport-fee money is reported separately: it lives outside
@@ -208,6 +218,8 @@ export default function BillManagementPage() {
 
       {!selectedYear ? (
         <EmptyMsg>Select a transport year to view billing.</EmptyMsg>
+      ) : view === 'concessions' ? (
+        <ConcessionPanel year={selectedYear} />
       ) : view === 'fines' ? (
         <DataTable
           columns={fineColumns}

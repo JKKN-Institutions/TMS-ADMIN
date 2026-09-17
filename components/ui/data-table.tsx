@@ -39,6 +39,8 @@ interface DataTableProps<TData, TValue> {
   isLoading?: boolean;
   /** Enable checkbox row selection (columns must include a `select` column). */
   enableRowSelection?: boolean;
+  /** Per-row selectability; defaults to every row when enableRowSelection is on. */
+  canSelectRow?: (row: TData) => boolean;
   /** Stable row id so selection survives sort/filter (e.g. (d) => d.id). */
   getRowId?: (originalRow: TData, index: number) => string;
   /** Right-side toolbar controls; receives current selection. */
@@ -67,7 +69,7 @@ function prettifyColumnId(id: string) {
 
 export function DataTable<TData, TValue>({
   columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 10,
-  entityName = 'rows', isLoading = false, enableRowSelection = false, getRowId, toolbarActions,
+  entityName = 'rows', isLoading = false, enableRowSelection = false, canSelectRow, getRowId, toolbarActions,
   onFilteredRowsChange, initialColumnVisibility,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
@@ -81,7 +83,9 @@ export function DataTable<TData, TValue>({
   const table = useReactTable({
     data, columns,
     state: { sorting, columnFilters, columnVisibility, globalFilter, rowSelection },
-    enableRowSelection,
+    enableRowSelection: enableRowSelection
+      ? (canSelectRow ? (row) => canSelectRow(row.original) : true)
+      : false,
     getRowId,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
