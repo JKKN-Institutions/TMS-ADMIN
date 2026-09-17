@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Eye, MoreHorizontal } from 'lucide-react';
+import { Eye, MoreHorizontal, Trash2 } from 'lucide-react';
 import type { StaffPassenger } from '@/lib/passengers/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
@@ -11,6 +11,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
@@ -39,7 +40,9 @@ function AssignedBadge({ assigned }: { assigned: boolean }) {
 }
 
 export function getStaffColumns(
-  onView: (s: StaffPassenger) => void
+  onView: (s: StaffPassenger) => void,
+  onRemove: (s: StaffPassenger) => void,
+  canRemove: boolean
 ): ColumnDef<StaffPassenger>[] {
   return [
     {
@@ -158,6 +161,17 @@ export function getStaffColumns(
                 <DropdownMenuItem onSelect={() => open(onView)}>
                   <Eye className="text-gray-500" /> View
                 </DropdownMenuItem>
+                {canRemove && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => open(onRemove)}
+                      className="text-red-600 hover:bg-red-50 focus:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 dark:focus:bg-red-500/10 [&>svg]:text-red-500"
+                    >
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

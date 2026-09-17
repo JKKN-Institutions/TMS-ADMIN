@@ -189,10 +189,30 @@ async function getFees() {
         bandsByFs.set(b.fee_structure_id, arr);
       }
     }
+    // Min/max per-stop price for stop_wise rows (their total_amount is a 0
+    // placeholder), so the page can show a real annual range. One query per
+    // structure keeps each result near one route catalogue (~470 stops).
+    const stopWiseIds = (data ?? []).filter((r) => r.fee_mode === 'stop_wise').map((r) => r.id);
+    const stopRangeByFs = new Map<string, { min: number; max: number }>();
+    await Promise.all(
+      stopWiseIds.map(async (fsId) => {
+        const { data: rateRows, error: rateErr } = await supabase
+          .from('tms_fee_structure_stop_rate')
+          .select('annual_amount')
+          .eq('fee_structure_id', fsId);
+        if (rateErr) {
+          console.error('Fee stop-rate range error:', rateErr);
+          return;
+        }
+        const amounts = (rateRows ?? []).map((x) => Number(x.annual_amount)).filter(Number.isFinite);
+        if (amounts.length) stopRangeByFs.set(fsId, { min: Math.min(...amounts), max: Math.max(...amounts) });
+      })
+    );
     const rows = (data ?? []).map((r) => ({
       ...r,
       transport_year_name: yearMap.get(r.transport_year_id) ?? null,
       bands: r.fee_mode === 'tiered' ? bandsByFs.get(r.id) ?? [] : undefined,
+      stop_rate_range: r.fee_mode === 'stop_wise' ? stopRangeByFs.get(r.id) ?? null : undefined,
     }));
     return NextResponse.json({ success: true, data: rows, count: rows.length });
   } catch (e) {

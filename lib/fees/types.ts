@@ -86,6 +86,7 @@ export interface FeeStructureRow {
   bands?: FeeStructureYearBand[]; // tiered structures only
   stop_terms?: FeeStructureStopTerm[]; // stop_wise structures only
   stop_rates?: FeeStructureStopRate[]; // stop_wise structures only
+  stop_rate_range?: { min: number; max: number } | null; // stop_wise, list endpoint only
 }
 
 // The learner lifecycle states billed when a structure leaves lifecycle_statuses

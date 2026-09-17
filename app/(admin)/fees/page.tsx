@@ -12,6 +12,7 @@ import UniversalStatCard from '@/components/universal-stat-card';
 import { getFeeColumns } from './columns';
 import { inr } from './columns';
 import type { FeeStructureRow } from '@/lib/fees/types';
+import { activeAnnualFeeRange } from '@/lib/fees/annual-range';
 
 async function fetchRows(): Promise<FeeStructureRow[]> {
   const res = await fetch('/api/admin/fees', { credentials: 'same-origin' });
@@ -103,11 +104,12 @@ export default function FeesPage() {
 
   const total = rows.length;
   const active = rows.filter((r) => r.status === 'active').length;
-  const annualValue = rows.filter((r) => r.status === 'active').reduce((s, r) => s + Number(r.total_amount || 0), 0);
+  const range = activeAnnualFeeRange(rows);
+  const rangeLabel = !range ? '—' : range.min === range.max ? inr(range.min) : `${inr(range.min)} – ${inr(range.max)}`;
   const stats = [
     { title: 'Structures', value: total, subtitle: 'All maintenance fee structures', icon: Receipt, color: 'blue' as const },
     { title: 'Active', value: active, subtitle: 'Ready to generate', icon: CheckCircle, color: 'green' as const },
-    { title: 'Active Annual Value', value: inr(annualValue), subtitle: 'Sum of active fees', icon: IndianRupee, color: 'purple' as const },
+    { title: 'Annual Fee Range', value: rangeLabel, subtitle: 'Per person, across active fees', icon: IndianRupee, color: 'purple' as const },
   ];
 
   return (
