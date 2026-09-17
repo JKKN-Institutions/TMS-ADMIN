@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
@@ -107,11 +107,12 @@ async function resolveLearnerId(
 }
 
 async function scan(request: NextRequest, auth: AuthContext) {
+  // Server-Timing, so the time a scan spends here can be read in the phone's
+  // or the laptop's network panel.
+  const t0 = performance.now();
+  const marks: string[] = [];
+  const mark = (name: string) => marks.push(`${name};dur=${(performance.now() - t0).toFixed(0)}`);
   try {
-    if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN))) {
-      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
-    }
-
     const body = (await request.json().catch(() => ({}))) as {
       token?: string; direction?: string; walkUp?: boolean; source?: string;
       tappedAt?: string; clientId?: string;
@@ -123,19 +124,34 @@ async function scan(request: NextRequest, auth: AuthContext) {
 
     const svc = createServiceRoleClient();
 
+    // Speed: these reads do not depend on each other, so they run together
+    // instead of one after another. Every gate below is still judged in the
+    // same order as before and nothing is written until all of them pass —
+    // the only difference is that the card lookup has already happened when a
+    // caller without the scan permission is refused.
+    const [canScan, scanExempt, markingMode, resolved, windows] = await Promise.all([
+      requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN),
+      auth.isSuperAdmin || requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE),
+      loadMarkingMode(svc),
+      resolveLearnerId(String(body.token ?? ''), source, svc),
+      loadAttendanceWindows(svc),
+    ]);
+    mark('gates');
+
+    if (!canScan) {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     // Settings → Marking method. Manual only switches scanning off for ordinary
     // staff; the transport office keeps it.
-    const scanExempt = auth.isSuperAdmin || (await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE));
-    if (!allowedMethods(await loadMarkingMode(svc), scanExempt).scan) {
+    if (!allowedMethods(markingMode, scanExempt).scan) {
       return NextResponse.json(
         { ok: false, clientId: body.clientId ?? null, reason: 'scan_off', error: REJECT_REASON_TEXT.scan_off },
         { status: 409 },
       );
     }
 
-    // Identify the learner from the QR token, a scanned JKKN ID card, or a
-    // typed 6-digit code.
-    const resolved = await resolveLearnerId(String(body.token ?? ''), source, svc);
+    // The learner behind the scanned JKKN ID card.
     if ('error' in resolved) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
@@ -145,7 +161,6 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // Which trip, and whether scanning is open at all. The server clock decides;
     // a scanner that names a different trip is on a stale screen and is refused
     // rather than silently recorded on the other trip. See trip-direction.ts.
-    const windows = await loadAttendanceWindows(svc);
     // Judged at the moment of the SCAN. A scan queued on a bus with no signal
     // arrives late; it counts if it was scanned inside its trip's window today.
     // With no tappedAt this is the same check as before, at arrival.
@@ -165,13 +180,22 @@ async function scan(request: NextRequest, auth: AuthContext) {
       }, { status: tap.reason === 'invalid' ? 400 : 409 });
     }
     const direction: AttDirection = tap.direction;
+    // The IST date of the scan. Identical to istToday() for a live scan.
+    const today = tap.tripDate;
 
-    const { data } = await svc
-      .from('learners_profiles')
-      .select('id, first_name, last_name, roll_number, student_photo_url, transport_route_id, transport_stop_id')
-      .eq('id', learnerId)
-      .maybeSingle();
-    const learner = data as LearnerLite | null;
+    // Again independent of each other, so fetched together. The booking is
+    // only USED once the learner and the route assignment have passed.
+    const [learnerRes, routeIds, booked] = await Promise.all([
+      svc
+        .from('learners_profiles')
+        .select('id, first_name, last_name, roll_number, student_photo_url, transport_route_id, transport_stop_id')
+        .eq('id', learnerId)
+        .maybeSingle(),
+      auth.isSuperAdmin ? Promise.resolve(null) : getAssignedRouteIdsForUser(auth),
+      hasBookingForDate(svc, learnerId, today),
+    ]);
+    mark('learner');
+    const learner = learnerRes.data as LearnerLite | null;
     if (!learner) {
       return NextResponse.json({ ok: false, error: 'Learner not found' }, { status: 404 });
     }
@@ -180,18 +204,14 @@ async function scan(request: NextRequest, auth: AuthContext) {
     }
 
     // Per-scan authority: the staff must be assigned to this learner's route.
-    if (!auth.isSuperAdmin) {
-      const routeIds = await getAssignedRouteIdsForUser(auth);
-      if (!routeIds.includes(learner.transport_route_id)) {
-        return NextResponse.json(
-          { ok: false, error: "You are not assigned to this learner's route" },
-          { status: 403 }
-        );
-      }
+    // routeIds is null only for a super admin, who bypasses this check.
+    if (routeIds !== null && !routeIds.includes(learner.transport_route_id)) {
+      return NextResponse.json(
+        { ok: false, error: "You are not assigned to this learner's route" },
+        { status: 403 }
+      );
     }
 
-    // The IST date of the scan. Identical to istToday() for a live scan.
-    const today = tap.tripDate;
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
 
     // ── Booking state: RECORDED, never a gate ──
@@ -206,7 +226,6 @@ async function scan(request: NextRequest, auth: AuthContext) {
     //
     // Over capacity stays a WARNING on the response, never a refusal — the seat
     // count is advisory (a bus that is full still carried them).
-    const booked = await hasBookingForDate(svc, learner.id, today);
     const isWalkUp = !booked;
     const overCapacity =
       isWalkUp && (await seatsRemaining(svc, learner.transport_route_id, today)) <= 0;
@@ -235,6 +254,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       p_allow_override: true,
     });
 
+    mark('write');
     if (up.error) {
       console.error('boarding scan write error:', up.error);
       return NextResponse.json({ ok: false, error: 'Failed to record attendance' }, { status: 500 });
@@ -290,7 +310,12 @@ async function scan(request: NextRequest, auth: AuthContext) {
         ? { from: outcome.existing_status, by: markerName(outcome.existing_by), at: outcome.existing_at }
         : undefined;
 
-    await logActivity(auth, request, {
+    mark('details');
+
+    // The mark is written; the audit entry must not hold the staffer's screen.
+    // after() runs it once the response has gone. Outside a request scope
+    // after() throws, so fall back to fire-and-forget (as dispatch.ts does).
+    const writeLog = () => logActivity(auth, request, {
       module: 'boarding',
       action: 'scan',
       entityType: 'tms_attendance',
@@ -309,6 +334,12 @@ async function scan(request: NextRequest, auth: AuthContext) {
         matchedBy,
       },
     });
+    try {
+      after(writeLog);
+    } catch {
+      void writeLog();
+    }
+
     return NextResponse.json({
       clientId: body.clientId ?? null,
       ok: true,
@@ -330,7 +361,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       // null, never a zeroed object: on a money panel a 0 reads as
       // "nothing owed", which is the one wrong answer that looks right.
       fees,
-    });
+    }, { headers: { 'Server-Timing': marks.join(', ') } });
   } catch (e) {
     console.error('boarding scan error:', e);
     return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });

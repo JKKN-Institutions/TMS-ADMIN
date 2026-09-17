@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, Clock } from 'lucide-react';
 import {
   classifyCameraError,
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } from '@/lib/boarding/attendance-window';
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
-import { noteRead, type LastRead } from '@/lib/boarding/scan-dedupe';
+import { createScanQueue, onRead, onDone, resetScanQueue } from '@/lib/boarding/scan-queue';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
@@ -68,6 +68,28 @@ type ScanResult = {
 
 const READER_ID = 'scan-dialog-reader';
 const PHOTO_READER_ID = 'scan-dialog-photo-reader';
+
+// The JKKN ID card carries a QR code and nothing else. Left unset, the decoder
+// tries every barcode format on every frame, which is what makes phones
+// without a native BarcodeDetector (iPhone Safari) slow to read.
+const READER_OPTIONS = { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false };
+
+const SCAN_CONFIG = {
+  fps: 15,
+  // Most of the view, not a fixed 250px: a card held a little off-centre still reads.
+  qrbox: (w: number, h: number) => {
+    const side = Math.max(50, Math.floor(Math.min(w, h) * 0.75));
+    return { width: side, height: side };
+  },
+};
+
+// A sharper picture reads the small printed QR from further away. `ideal`
+// never makes a camera refuse; an unknown advanced constraint is ignored.
+const SHARP_VIDEO: MediaTrackConstraints = {
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+  advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+};
 
 const FEE_TONE: Record<FeeTone, string> = {
   paid: 'border-green-400 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200',
@@ -152,12 +174,9 @@ export default function ScanDialog({
   // call (e.g. the visible "Start camera" button) from racing the auto-start effect's
   // in-flight scanner.start() before scannerRef.current is assigned.
   const startingRef = useRef(false);
-  const busyRef = useRef(false);
-  const lastTokenRef = useRef('');
-  const lastSourceRef = useRef<ScanSource>('camera');
-  // The card the camera saw most recently, so a card still held in view is not
-  // re-submitted when the post-request cooldown lapses. See scan-dedupe.ts.
-  const lastReadRef = useRef<LastRead | null>(null);
+  // Which camera reads to send, hold or ignore, so learners can present cards
+  // one after another. See scan-queue.ts.
+  const queueRef = useRef(createScanQueue());
   // Kept current every render so the long-lived scan callback (registered once by the
   // camera-start effect) always reads the latest windows instead of the stale
   // closure captured when the effect last ran.
@@ -221,14 +240,15 @@ export default function ScanDialog({
     return true;
   }
 
-  async function submit(token: string, source: ScanSource, walkUp = false) {
-    if (!token) return;
+  /** Resolves 'failed' only when the scan got no answer and was not queued offline. */
+  async function submit(token: string, source: ScanSource, walkUp = false): Promise<'done' | 'failed'> {
+    if (!token) return 'done';
     // Instant feedback beats a round trip. The SERVER refusal is still the
     // authority; this only spares the staffer the wait.
     const decision = classifyScan(token, source);
     if (decision.refusal === 'typed_jkkn_id') {
       setResult({ ok: false, error: 'Point the camera at the card to use a JKKN ID.' });
-      return;
+      return 'done';
     }
     // Read the CURRENT windows via the ref, not the props closed over when this
     // callback was registered with the scanner — the camera-start effect doesn't restart
@@ -237,16 +257,12 @@ export default function ScanDialog({
     const current = activeDirection(w);
     if (!current) {
       setResult({ ok: false, reason: 'window_closed', error: `Scanning is open ${openHoursText(w)} only.` });
-      return;
+      return 'done';
     }
     if (offlineRef.current && !offlineRef.current.online) {
       await submitOffline(token, source, walkUp, current);
-      return;
+      return 'done';
     }
-    if (busyRef.current && !walkUp) return;
-    busyRef.current = true;
-    lastTokenRef.current = token;
-    lastSourceRef.current = source;
     try {
       const res = await fetch('/api/boarding/scan', {
         method: 'POST',
@@ -261,31 +277,33 @@ export default function ScanDialog({
       } else {
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
       }
+      return 'done';
     } catch {
-      // Forget the card, so holding it up again retries once the cooldown
-      // lapses. Without this a dropped request could never be retried by camera.
-      lastReadRef.current = null;
       // The request never got an answer: treat it as no signal and queue it.
-      if (!(await submitOffline(token, source, walkUp, current))) {
-        setResult({ ok: false, error: 'Network error' });
-      }
-    } finally {
-      setTimeout(() => {
-        busyRef.current = false;
-      }, 1500);
+      if (await submitOffline(token, source, walkUp, current)) return 'done';
+      setResult({ ok: false, error: 'Network error' });
+      // The queue forgets this card, so holding it up again retries it.
+      return 'failed';
     }
   }
 
-  // Every camera decode lands here, ~10 times a second while a card is in view.
-  // Only a read of a NEW card, or of the same card after it has been out of view,
-  // reaches submit(). Typed codes and the walk-up button call submit() directly,
-  // so a staffer's explicit action is never filtered.
+  // Every camera decode lands here, many times a second while a card is in
+  // view. A new card is sent at once; one read while another is saving waits
+  // its turn instead of being dropped, so the next learner needs no tap. The
+  // photo button calls submit() directly, so an explicit action is never filtered.
   function onCameraRead(decoded: string) {
+    const q = queueRef.current;
     const code = classifyScan(decoded, 'camera').code;
-    const { ignore, last } = noteRead(lastReadRef.current, code, Date.now());
-    lastReadRef.current = last;
-    if (ignore) return;
-    void submit(decoded, 'camera');
+    if (onRead(q, code, Date.now()) !== 'submit') return;
+    void (async () => {
+      let next: string | null = code;
+      while (next !== null) {
+        const outcome = await submit(next, 'camera');
+        // The dialog closed and replaced the queue: stop sending.
+        if (queueRef.current !== q) return;
+        next = onDone(q, Date.now(), outcome === 'failed');
+      }
+    })();
   }
 
   async function stopCamera() {
@@ -311,11 +329,15 @@ export default function ScanDialog({
       // start() is still in flight, cameraGenRef will have moved on by the time we get
       // here — that's our signal to stop the just-started stream instead of adopting it.
       const gen = cameraGenRef.current;
-      const config = { fps: 10, qrbox: 250 };
-
       // One attempt = one fresh scanner. Resolves true when the camera is live.
-      const attempt = async (camera: string | MediaTrackConstraints): Promise<true | { err: unknown }> => {
-        const scanner = new Html5Qrcode(READER_ID);
+      // `video` asks for a sharper picture; when set, the library uses it in
+      // place of `camera`.
+      const attempt = async (
+        camera: string | MediaTrackConstraints,
+        video?: MediaTrackConstraints,
+      ): Promise<true | { err: unknown }> => {
+        const scanner = new Html5Qrcode(READER_ID, READER_OPTIONS);
+        const config = video ? { ...SCAN_CONFIG, videoConstraints: video } : SCAN_CONFIG;
         try {
           await scanner.start(camera, config, onCameraRead, () => {});
         } catch (err) {
@@ -339,11 +361,19 @@ export default function ScanDialog({
         return true;
       };
 
-      // 1) The rear camera by facing mode — works on most phones.
-      const first = await attempt({ facingMode: 'environment' });
-      if (first === true) return;
-      let kind = classifyCameraError(first.err);
-      console.error('[scan] camera start failed (facingMode):', first.err);
+      // 1) The rear camera by facing mode, sharp and auto-focusing — works on most phones.
+      const sharp = await attempt({ facingMode: 'environment' }, { facingMode: 'environment', ...SHARP_VIDEO });
+      if (sharp === true) return;
+      let kind = classifyCameraError(sharp.err);
+      console.error('[scan] camera start failed (sharp facingMode):', sharp.err);
+
+      // 1b) The same camera with no picture preferences, as it always started.
+      if (shouldTryOtherCameras(kind) && cameraGenRef.current === gen) {
+        const first = await attempt({ facingMode: 'environment' });
+        if (first === true) return;
+        kind = classifyCameraError(first.err);
+        console.error('[scan] camera start failed (facingMode):', first.err);
+      }
 
       // 2) Some phones refuse facingMode or hold a stuck stream on one lens:
       //    try the listed cameras by id, rear first. Pointless when the camera
@@ -393,7 +423,7 @@ export default function ScanDialog({
     try {
       // html5-qrcode refuses a file scan while the live camera runs.
       await stopCamera();
-      const reader = new Html5Qrcode(PHOTO_READER_ID);
+      const reader = new Html5Qrcode(PHOTO_READER_ID, READER_OPTIONS);
       let decoded: string;
       try {
         decoded = await reader.scanFile(file, false);
@@ -426,8 +456,10 @@ export default function ScanDialog({
     if (!open) {
       setResult(null);
       // Reopening the scanner is a deliberate new session, so the same card
-      // should scan straight away rather than wait out the same-card gap.
-      lastReadRef.current = null;
+      // should scan straight away rather than wait out the same-card gap. The
+      // fresh object also tells a save loop still running to stop sending.
+      resetScanQueue(queueRef.current);
+      queueRef.current = createScanQueue();
     }
   }, [open]);
 
