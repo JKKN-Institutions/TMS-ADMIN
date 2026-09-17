@@ -79,7 +79,7 @@ export function ConcessionPanel({ year }: { year: string }) {
     <div className="space-y-4">
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-900">
         {(Object.keys(KIND_LABEL) as ConcessionKind[]).map((k) => (
-          <button key={k} type="button" onClick={() => setKind(k)}
+          <button key={k} type="button" onClick={() => { setKind(k); setConfirmRows(null); setResetSel(null); }}
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
               kind === k ? 'bg-green-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
             }`}>
@@ -154,6 +154,7 @@ export function ConcessionPanel({ year }: { year: string }) {
         </div>
       ) : (
         <DataTable
+          key={kind}
           columns={columns}
           data={rows}
           entityName="learners"
