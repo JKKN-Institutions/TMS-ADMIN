@@ -1,12 +1,34 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Users } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Trash2, Users } from 'lucide-react';
+import toast from 'react-hot-toast';
 import type { StaffPassenger } from '@/lib/passengers/types';
 import { DataTable } from '@/components/ui/data-table';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { getStaffColumns } from './columns';
+
+// "Delete" = remove from transport. The staff row itself lives in MyJKKN's HR
+// directory and is never deleted (see lib/passengers/remove-staff.ts).
+async function removeFromTransport(ids: string[]) {
+  const res = await fetch('/api/admin/passengers/staff', {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success) throw new Error(json.error || `Failed to remove staff (HTTP ${res.status})`);
+  return json.data as { removed: number; skipped: number; inchargeAssignments: number };
+}
+
+const REMOVE_DESCRIPTION =
+  'They will be taken off transport: removed from this list and their route, and they lose TMS access. ' +
+  'Their MyJKKN staff record is NOT deleted — turn "bus required" back on in MyJKKN to re-add them.';
 
 async function fetchStaff(): Promise<StaffPassenger[]> {
   // `cache: 'no-store'` keeps a brand-new dynamic route from being served a
@@ -56,9 +78,42 @@ export default function StaffPassengersPage() {
     queryFn: fetchStaff,
   });
 
+  const queryClient = useQueryClient();
+  const { can, isSuperAdmin } = usePermissions();
+  const canRemove = isSuperAdmin || can(TMS_PERMISSIONS.ENROLLMENT_MANAGE);
+  const [removeTarget, setRemoveTarget] = useState<{ rows: StaffPassenger[]; reset?: () => void } | null>(null);
+  const [removing, setRemoving] = useState(false);
+
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    setRemoving(true);
+    try {
+      const r = await removeFromTransport(removeTarget.rows.map((s) => s.id));
+      toast.success(`Removed ${r.removed} staff from transport`);
+      if (r.inchargeAssignments > 0) {
+        toast(`${r.inchargeAssignments} active bus in-charge assignment(s) remain — end them on Staff Route Assignments.`, {
+          icon: '⚠️',
+          duration: 8000,
+        });
+      }
+      removeTarget.reset?.();
+      setRemoveTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ['passenger-staff'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove staff');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   const columns = useMemo(
-    () => getStaffColumns((s) => router.push(`/passengers/staff/${s.id}`)),
-    [router]
+    () =>
+      getStaffColumns(
+        (s) => router.push(`/passengers/staff/${s.id}`),
+        (s) => setRemoveTarget({ rows: [s] }),
+        canRemove
+      ),
+    [router, canRemove]
   );
 
   const total = staff.length;
@@ -148,8 +203,34 @@ export default function StaffPassengersPage() {
           getRowId={(s) => s.id}
           searchPlaceholder="Search name, staff ID, email..."
           filters={filters}
+          toolbarActions={({ selectedRows, resetSelection }) =>
+            canRemove && selectedRows.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setRemoveTarget({ rows: selectedRows, reset: resetSelection })}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              >
+                <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
+              </button>
+            ) : null
+          }
         />
       )}
+
+      <ConfirmDialog
+        open={!!removeTarget}
+        onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null); }}
+        title={
+          removeTarget?.rows.length === 1
+            ? `Remove ${removeTarget.rows[0].name} from transport?`
+            : `Remove ${removeTarget?.rows.length ?? 0} staff from transport?`
+        }
+        description={REMOVE_DESCRIPTION}
+        confirmLabel={removeTarget && removeTarget.rows.length > 1 ? 'Delete Selected' : 'Delete'}
+        onConfirm={confirmRemove}
+        loading={removing}
+        danger
+      />
     </div>
   );
 }
