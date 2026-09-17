@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  matchRule, targetTerms, targetTotal, rowTargets, hasPaymentActivity, classifyConcession,
-  type ConcessionRule, type LedgerState,
+  matchRule, targetTerms, targetTotal, rowTargets, hasPaymentActivity, classifyConcession, guardTarget,
+  type ConcessionRule, type ExistingOverride, type LedgerState,
 } from './concession-math';
 import type { BillableTerm } from './resolve-terms';
 
@@ -95,10 +95,12 @@ describe('hasPaymentActivity', () => {
 
 describe('classifyConcession', () => {
   const half = [{ term_no: 1, billable: true, amount: 2750 }];
-  const fy = (overrides: typeof half, ledger: LedgerState[]) =>
+  const halfOverride = (extra?: Partial<ExistingOverride>): ExistingOverride[] =>
+    [{ term_no: 1, billable: true, amount: 2750, reason: null, concession_rule_id: null, ...extra }];
+  const fy = (overrides: ExistingOverride[], ledger: LedgerState[]) =>
     classifyConcession({ kind: 'final_year', terms: half, total: 2750, overrides, ledger });
   it('no bill and matching overrides → applied', () => {
-    expect(fy(half, []).status).toBe('applied');
+    expect(fy(halfOverride(), []).status).toBe('applied');
   });
   it('no bill and no overrides → needs_fix', () => {
     expect(fy([], []).status).toBe('needs_fix');
@@ -110,7 +112,7 @@ describe('classifyConcession', () => {
     expect(fy([], [bill({ moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })]).status).toBe('needs_fix');
   });
   it('fully aligned paid bill with overrides → applied', () => {
-    expect(fy(half, [bill({ ledgerAmount: 2750, moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })]).status).toBe('applied');
+    expect(fy(halfOverride(), [bill({ ledgerAmount: 2750, moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })]).status).toBe('applied');
   });
   it('paid more than the concession → review with a reason (KAMALESH shape)', () => {
     const r = fy([], [bill({ moneyStatus: 'paid', paid: 5500 })]);
@@ -122,32 +124,71 @@ describe('classifyConcession', () => {
     expect(fy([], [bill({ pendingPayment: true })]).status).toBe('review');
   });
   it('cancelled bill or missing money row → review', () => {
-    expect(fy(half, [bill({ ledgerStatus: 'cancelled' })]).status).toBe('review');
-    expect(fy(half, [bill({ moneyStatus: 'cancelled' })]).status).toBe('review');
-    expect(fy(half, [bill({ moneyBillId: null, moneyFinal: null, moneyStatus: null })]).status).toBe('review');
+    expect(fy(halfOverride(), [bill({ ledgerStatus: 'cancelled' })]).status).toBe('review');
+    expect(fy(halfOverride(), [bill({ moneyStatus: 'cancelled' })]).status).toBe('review');
+    expect(fy(halfOverride(), [bill({ moneyBillId: null, moneyFinal: null, moneyStatus: null })]).status).toBe('review');
   });
   it('final_year legacy two-row unpaid ledger → needs_fix, then applied once split', () => {
     const before = [
       bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 3000, moneyFinal: 3000 }),
       bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 2500, moneyFinal: 2500 }),
     ];
-    expect(fy(half, before).status).toBe('needs_fix');
+    expect(fy(halfOverride(), before).status).toBe('needs_fix');
     const after = [
       bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 1500, moneyFinal: 1500 }),
       bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 1250, moneyFinal: 1250 }),
     ];
-    expect(fy(half, after).status).toBe('applied');
+    expect(fy(halfOverride(), after).status).toBe('applied');
   });
   it('final_year zero-amount legacy rows → review', () => {
     const rows = [bill({ feeBillId: 'a', ledgerAmount: 0 }), bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 0 })];
-    expect(fy(half, rows).status).toBe('review');
+    expect(fy(halfOverride(), rows).status).toBe('review');
   });
   it('7.5%: unpaid legacy term-2 row → needs_fix; paid term-2 row → review', () => {
     const t = [{ term_no: 1, billable: true, amount: 500 }];
+    const tOverride: ExistingOverride[] = [{ term_no: 1, billable: true, amount: 500, reason: null, concession_rule_id: null }];
     const t1 = bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 3000, moneyFinal: 500, moneyStatus: 'paid', paid: 500 });
     const run = (ledger: LedgerState[]) =>
-      classifyConcession({ kind: 'scheme_75', terms: t, total: 500, overrides: t, ledger });
+      classifyConcession({ kind: 'scheme_75', terms: t, total: 500, overrides: tOverride, ledger });
     expect(run([t1, bill({ feeBillId: 'b', termNo: 2, moneyFinal: 2500, ledgerAmount: 2500 })]).status).toBe('needs_fix');
     expect(run([t1, bill({ feeBillId: 'b', termNo: 2, moneyFinal: 2500, ledgerAmount: 2500, paid: 2500, moneyStatus: 'paid' })]).status).toBe('review');
+  });
+
+  describe('manual fee exceptions are never overwritten', () => {
+    it('a manual ZERO FEE override differing from the target → review, not needs_fix', () => {
+      const r = fy([{ term_no: 1, billable: true, amount: 0, reason: 'ZERO FEE - hardship case', concession_rule_id: null }], []);
+      expect(r.status).toBe('review');
+      expect(r.reason).toContain('manual fee exception');
+      expect(r.reason).toContain('ZERO FEE');
+    });
+    it('a legacy concession override (known prefix, no rule id, stale amount) is not manual → needs_fix', () => {
+      const r = fy([{ term_no: 1, billable: true, amount: 5500, reason: 'FINAL-YEAR BATCH CLOSURE - old label - 2026-01-01', concession_rule_id: null }], []);
+      expect(r.status).toBe('needs_fix');
+    });
+    it('a manual override already equal to the target is not blocked', () => {
+      const r = fy([{ term_no: 1, billable: true, amount: 2750, reason: 'Term 2 transport fee removed on request', concession_rule_id: null }], []);
+      expect(r.status).toBe('applied');
+    });
+    it('a manual override on a term outside `terms` is ignored', () => {
+      const r = fy([{ term_no: 2, billable: false, amount: null, reason: 'ZERO FEE - unrelated term', concession_rule_id: null }], []);
+      expect(r.status).toBe('needs_fix'); // no bill, no matching override on term 1 → normal needs_fix path
+    });
+  });
+});
+
+describe('guardTarget', () => {
+  it('a zero or negative total is not applicable', () => {
+    expect(guardTarget('final_year', 0, 5500)).toBe('Concession amount is Rs 0 — handle manually');
+    expect(guardTarget('final_year', -1, 5500)).toBe('Concession amount is Rs 0 — handle manually');
+  });
+  it('a scheme_75 amount above the full fee is not applicable', () => {
+    expect(guardTarget('scheme_75', 6000, 5500)).toBe('Scheme amount Rs 6000 is more than the full fee Rs 5500');
+  });
+  it('a final_year total above the full fee is fine (percent caps it at 100)', () => {
+    expect(guardTarget('final_year', 6000, 5500)).toBeNull();
+  });
+  it('an ordinary positive, in-range total is fine', () => {
+    expect(guardTarget('scheme_75', 500, 5500)).toBeNull();
+    expect(guardTarget('final_year', 2750, 5500)).toBeNull();
   });
 });

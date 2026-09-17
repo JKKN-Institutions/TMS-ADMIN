@@ -10,6 +10,10 @@ export type ConcessionKind = 'final_year' | 'scheme_75';
 export type ConcessionStatus = 'applied' | 'needs_fix' | 'review' | 'unresolved';
 
 export const SCHEME_75_SCHOLARSHIP = '7.5% SCHOLARSHIP';
+export const FINAL_YEAR_BATCH_CLOSURE_PREFIX = 'FINAL-YEAR BATCH CLOSURE';
+/** Reason prefixes a concession apply writes. Any other reason on an override
+ * with no concession_rule_id is a MANUAL exception, not a stale concession run. */
+export const CONCESSION_REASON_PREFIXES = [FINAL_YEAR_BATCH_CLOSURE_PREFIX, SCHEME_75_SCHOLARSHIP] as const;
 
 export interface ConcessionRule {
   id: string;
@@ -30,6 +34,13 @@ export interface RuleSubject {
   admission_year: number | null;
   program_id: string | null;
   scholarship_type: string | null;
+}
+
+/** An override row as it exists in tms_fee_override, with the fields needed
+ * to tell a manual fee exception apart from a stale/matching concession run. */
+export interface ExistingOverride extends TermOverride {
+  reason: string | null;
+  concession_rule_id: string | null;
 }
 
 export interface LedgerState {
@@ -132,13 +143,39 @@ function overridesMatch(target: TermOverride[], existing: TermOverride[]): boole
   });
 }
 
+/** True when an override is a manual fee exception (e.g. "ZERO FEE - …"), not a
+ * concession this tab wrote or would overwrite: no rule id, and a reason that
+ * doesn't start with a known concession run's prefix. */
+function isManualException(o: ExistingOverride): boolean {
+  return o.concession_rule_id === null && !CONCESSION_REASON_PREFIXES.some((p) => o.reason?.startsWith(p));
+}
+
+/** review reason when the target amount itself is unusable — before any
+ * ledger/override comparison. */
+export function guardTarget(kind: ConcessionKind, total: number, fullTotal: number): string | null {
+  if (total <= 0) return 'Concession amount is Rs 0 — handle manually';
+  if (kind === 'scheme_75' && total > fullTotal) {
+    return `Scheme amount Rs ${total} is more than the full fee Rs ${fullTotal}`;
+  }
+  return null;
+}
+
 export function classifyConcession(input: {
   kind: ConcessionKind;
   terms: TermOverride[];
   total: number;
-  overrides: TermOverride[];
+  overrides: ExistingOverride[];
   ledger: LedgerState[];
 }): { status: Exclude<ConcessionStatus, 'unresolved'>; reason: string | null } {
+  for (const o of input.overrides) {
+    const target = input.terms.find((t) => t.term_no === o.term_no);
+    if (!target || !isManualException(o)) continue;
+    const matches = target.billable === o.billable && (target.billable ? Number(o.amount) === target.amount : true);
+    if (!matches) {
+      const reason = (o.reason ?? '').slice(0, 120);
+      return { status: 'review', reason: `Has a manual fee exception: ${reason}` };
+    }
+  }
   const targets = rowTargets(input.kind, input.total, input.ledger);
   if (!targets) {
     return { status: 'review', reason: 'Existing term bills have no amount to split the concession across' };
