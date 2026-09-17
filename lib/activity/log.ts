@@ -11,13 +11,13 @@ import type { AuthContext } from '@/lib/api/with-auth';
 export type ActivityAction =
   | 'create' | 'update' | 'delete' | 'import' | 'assign' | 'unassign'
   | 'upload' | 'activate' | 'deactivate' | 'scan' | 'mark' | 'unmark' | 'generate'
-  | 'submit' | 'approve' | 'reject' | 'notify' | 'cancel';
+  | 'submit' | 'approve' | 'reject' | 'notify' | 'cancel' | 'apply';
 
 export type ActivityModule =
   | 'drivers' | 'vehicles' | 'routes' | 'route-optimization' | 'gps-devices'
   | 'passengers' | 'staff-route-assignments' | 'boarding' | 'enrollment'
   | 'grievances' | 'settings' | 'transport-years' | 'fees' | 'notifications'
-  | 'driver-mobiles' | 'transport-vacate';
+  | 'driver-mobiles' | 'transport-vacate' | 'fee-concessions';
 
 export interface ActivityEntry {
   module: ActivityModule;

@@ -94,6 +94,9 @@ export const TMS_PERMISSIONS = {
   FEES_EDIT: 'tms.fees.edit',
   FEES_DELETE: 'tms.fees.delete',
   FEES_GENERATE: 'tms.fees.generate',
+  // Fee Concession tab (Bill Management): list + apply final-year / 7.5% concessions.
+  FEES_CONCESSION_VIEW: 'tms.fees.concession.view',
+  FEES_CONCESSION_APPLY: 'tms.fees.concession.apply',
 
   // Transport notifications module. View = admin list/detail; Send = compose &
   // broadcast; Manage = delete/expire. Consumers read their OWN inbox with no

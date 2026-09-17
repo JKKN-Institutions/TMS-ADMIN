@@ -48,6 +48,7 @@ const ACTION_BADGE: Record<string, string> = {
   submit: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400',
   approve: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400',
   reject: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400',
+  apply: 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-400',
 };
 
 const MODULE_LABEL: Record<string, string> = {
@@ -67,6 +68,7 @@ const MODULE_LABEL: Record<string, string> = {
   'notifications': 'Notifications',
   'driver-mobiles': 'Tracking Mobiles',
   'transport-vacate': 'Transport Vacate',
+  'fee-concessions': 'Fee Concessions',
 };
 
 // Filter dropdown options for the DataTable — derived from the maps above so
