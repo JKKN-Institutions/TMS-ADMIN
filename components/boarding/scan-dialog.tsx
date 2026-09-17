@@ -16,7 +16,7 @@ import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } 
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { createScanQueue, onRead, onDone, resetScanQueue } from '@/lib/boarding/scan-queue';
-import { isVoiceMuted, primeSpeech, setVoiceMuted, speak, withoutBookingPhrase } from '@/lib/boarding/announce';
+import { isVoiceMuted, otherBusFromReply, primeSpeech, scanAnnouncement, setVoiceMuted, speak } from '@/lib/boarding/announce';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
@@ -45,6 +45,8 @@ type ScanResult = {
   direction?: string;
   booked?: boolean;
   walkUp?: boolean;
+  /** The learner booked, or belongs to, another bus. Recorded on this bus anyway. */
+  wrongBus?: { kind: 'booked_other_bus' | 'foreign_learner'; routeNumber: string | null };
   reason?: 'not_booked' | 'window_closed';
   seatsRemaining?: number;
   overCapacity?: boolean;
@@ -212,26 +214,32 @@ export default function ScanDialog({
   const leg = activeDirection(windows);
   const legOpen = leg !== null;
 
-  /** Say "<name>, without booking" once per card. `code` is the cleaned card number. */
-  function announceWithoutBooking(code: string, name: string | null | undefined) {
+  /**
+   * Say `phrase` once per card ("X, without booking", "X, booked on bus N",
+   * "X, belongs to bus N"; null is silence). `code` is the cleaned card number.
+   */
+  function announceOnce(code: string, phrase: string | null) {
+    if (!phrase) return;
     const now = Date.now();
     const at = announcedRef.current.get(code);
     if (at !== undefined && now - at < ANNOUNCE_REPEAT_MS) return;
     announcedRef.current.set(code, now);
-    speak(withoutBookingPhrase(name));
+    speak(phrase);
   }
 
   /**
    * Announce straight from the list already on this phone, the moment the card
    * is read, instead of waiting for the server. "Booked" there means booked on
    * this bus, the same thing the list's "Not booked" label shows. When the list
-   * does not know the card, the server's reply announces it instead.
+   * does not know the card (a learner from another bus, scanned here for the
+   * first time), the server's reply announces it instead.
    */
   function announceFromSavedList(code: string) {
     const roster = offlineRef.current?.roster;
     if (!roster) return;
     const local = resolveScanOffline(code, 'camera', roster);
-    if (local.kind === 'resolved' && !local.booked) announceWithoutBooking(code, local.name);
+    if (local.kind !== 'resolved') return;
+    announceOnce(code, scanAnnouncement({ name: local.name, booked: local.booked, otherBus: local.otherBus }));
   }
 
   /**
@@ -260,12 +268,22 @@ export default function ScanDialog({
     // No booking is no longer a question to answer: an unbooked rider is
     // queued as a walk-up straight away, the same rule the server applies.
     // Asking first is what left them unrecorded when the second tap never came.
-    const unbooked = local.kind === 'resolved' && !local.booked;
+    // "Not booked on this bus" is not "without booking" when the saved list
+    // shows a booking on another bus. The server re-decides both on sync.
+    const otherBus = local.kind === 'resolved' ? local.otherBus : null;
+    const unbooked = local.kind === 'resolved' && !local.booked && otherBus?.kind !== 'booked';
     // Only when the saved roster knows the learner; an unknown card's booking
     // is decided by the server later, so nothing is claimed about it now.
-    if (local.kind === 'resolved' && (walkUp || unbooked)) {
-      announceWithoutBooking(classifyScan(token, source).code, local.name);
+    if (local.kind === 'resolved') {
+      announceOnce(
+        classifyScan(token, source).code,
+        scanAnnouncement({ name: local.name, booked: local.booked && !walkUp, otherBus }),
+      );
     }
+    const offlineWrongBus: ScanResult['wrongBus'] =
+      otherBus?.kind === 'booked' ? { kind: 'booked_other_bus', routeNumber: otherBus.routeNumber }
+      : otherBus?.kind === 'from' ? { kind: 'foreign_learner', routeNumber: otherBus.routeNumber }
+      : undefined;
     await o.queueScan({
       learnerId: local.kind === 'resolved' ? local.learnerId : null,
       token,
@@ -279,6 +297,7 @@ export default function ScanDialog({
       offlineSaved: true,
       unverified: local.kind !== 'resolved' || !local.verified,
       walkUp: walkUp || unbooked,
+      wrongBus: offlineWrongBus,
       learner: local.kind === 'resolved' ? { name: local.name, rollNumber: null } : undefined,
       error: local.kind === 'unknown' ? local.message : undefined,
     });
@@ -321,7 +340,14 @@ export default function ScanDialog({
         setResult(json);
         // Said out loud so the staffer at the door hears it without looking.
         // Usually already said from the phone's list; this covers the rest.
-        if (json.walkUp) announceWithoutBooking(classifyScan(token, source).code, json.learner?.name);
+        announceOnce(
+          classifyScan(token, source).code,
+          scanAnnouncement({
+            name: json.learner?.name,
+            booked: !json.walkUp,
+            otherBus: otherBusFromReply(json.wrongBus),
+          }),
+        );
         onMarked();
       } else {
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
@@ -610,6 +636,13 @@ export default function ScanDialog({
                 {result.walkUp && (
                   <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
                     Travelled without booking — recorded.
+                  </p>
+                )}
+                {result.wrongBus && (
+                  <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                    ⚠ Wrong bus —{' '}
+                    {result.wrongBus.kind === 'booked_other_bus' ? 'booked on' : 'belongs to'} bus{' '}
+                    {result.wrongBus.routeNumber ?? '?'}. Recorded on this bus.
                   </p>
                 )}
                 {result.offlineSaved && (

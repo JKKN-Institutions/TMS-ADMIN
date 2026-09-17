@@ -6,8 +6,8 @@ import { getAssignedRouteIdsForUser, loadMarkerNames } from '@/lib/boarding/iden
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { loadLearnerFeeStatus } from '@/lib/boarding/fee-status';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { hasBookingForDate, seatsRemaining } from '@/lib/booking/repo';
-import { istToday } from '@/lib/booking/window';
+import { getBookingForDate, seatsRemaining } from '@/lib/booking/repo';
+import { decideBus, type WrongBusKind } from '@/lib/boarding/wrong-bus';
 import { loadAttendanceWindows, activeDirection, type AttDirection } from '@/lib/boarding/attendance-window';
 import { judgeTappedAt } from '@/lib/boarding/tapped-at';
 import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
@@ -16,9 +16,14 @@ import { loadMarkingMode, allowedMethods } from '@/lib/boarding/marking-mode';
 /**
  * POST a scanned JKKN ID card → mark the learner present for today.
  *
- * Security: requires tms.attendance.scan; the pass signature is verified
- * the card is resolved through jkkn_identities; and the scanning staff must be assigned to the
- * learner's route (getAssignedRouteIdsForUser) — super admins bypass that check.
+ * Security: requires tms.attendance.scan; the card is resolved through
+ * jkkn_identities; and the scanner must be assigned to a bus
+ * (getAssignedRouteIdsForUser; super admins have none and bypass it).
+ *
+ * The mark is recorded on the bus the learner BOARDED: the scanner's bus. A
+ * learner booked on, or allocated to, another bus is still recorded there,
+ * and the reply says so (wrongBus) — owner ruling 2026-09-17, because the card
+ * read is proof they travelled. See lib/boarding/wrong-bus.ts.
  * Idempotent per (learner, day, direction) via upsert.
  */
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -183,34 +188,36 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // The IST date of the scan. Identical to istToday() for a live scan.
     const today = tap.tripDate;
 
-    // Again independent of each other, so fetched together. The booking is
-    // only USED once the learner and the route assignment have passed.
-    const [learnerRes, routeIds, booked] = await Promise.all([
+    // Again independent of each other, so fetched together.
+    const [learnerRes, routeIds, booking] = await Promise.all([
       svc
         .from('learners_profiles')
         .select('id, first_name, last_name, roll_number, student_photo_url, transport_route_id, transport_stop_id')
         .eq('id', learnerId)
         .maybeSingle(),
       auth.isSuperAdmin ? Promise.resolve(null) : getAssignedRouteIdsForUser(auth),
-      hasBookingForDate(svc, learnerId, today),
+      getBookingForDate(svc, learnerId, today),
     ]);
     mark('learner');
     const learner = learnerRes.data as LearnerLite | null;
     if (!learner) {
       return NextResponse.json({ ok: false, error: 'Learner not found' }, { status: 404 });
     }
-    if (!learner.transport_route_id) {
-      return NextResponse.json({ ok: false, error: 'Learner has no allocated route' }, { status: 409 });
-    }
 
-    // Per-scan authority: the staff must be assigned to this learner's route.
-    // routeIds is null only for a super admin, who bypasses this check.
-    if (routeIds !== null && !routeIds.includes(learner.transport_route_id)) {
-      return NextResponse.json(
-        { ok: false, error: "You are not assigned to this learner's route" },
-        { status: 403 }
-      );
+    // Per-scan authority and the bus: the scanner must be on a bus, and the
+    // mark goes on that bus. routeIds is null only for a super admin.
+    const bus = decideBus({
+      staffRouteIds: routeIds,
+      allocatedRouteId: learner.transport_route_id,
+      allocatedStopId: learner.transport_stop_id,
+      booking,
+    });
+    if (!bus.ok) {
+      const status = bus.error === 'Learner has no allocated route' ? 409 : 403;
+      return NextResponse.json({ ok: false, error: bus.error }, { status });
     }
+    const { busRouteId, wrongBus, bookedRouteId } = bus.decision;
+    const booked = booking !== null;
 
     const name = `${learner.first_name ?? ''} ${learner.last_name ?? ''}`.trim() || 'Learner';
 
@@ -226,9 +233,9 @@ async function scan(request: NextRequest, auth: AuthContext) {
     //
     // Over capacity stays a WARNING on the response, never a refusal — the seat
     // count is advisory (a bus that is full still carried them).
-    const isWalkUp = !booked;
+    const isWalkUp = bus.decision.walkUp;
     const overCapacity =
-      isWalkUp && (await seatsRemaining(svc, learner.transport_route_id, today)) <= 0;
+      isWalkUp && (await seatsRemaining(svc, busRouteId, today)) <= 0;
 
     // Atomic: decision and write in one statement (see the migration comment on
     // tms_mark_attendance). p_allow_override stays TRUE here even after PR B —
@@ -239,8 +246,13 @@ async function scan(request: NextRequest, auth: AuthContext) {
       p_marks: [
         {
           learner_id: learner.id,
-          route_id: learner.transport_route_id,
-          stop_id: learner.transport_stop_id,
+          // The bus boarded. move_route also moves an existing row here (for
+          // example the auto-absent row written on the booked bus), so the
+          // mark shows on the list of the bus the learner is actually on.
+          route_id: busRouteId,
+          stop_id: bus.decision.stopId,
+          move_route: true,
+          booked_route_id: bookedRouteId,
           status: 'present',
           is_walk_up: isWalkUp,
           scanned_at: tap.at.toISOString(),
@@ -272,9 +284,11 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // into { error } instead of rejecting — that is library behaviour, not a
     // guarantee, and a rejection here would have produced a 500 after the
     // attendance row already existed.
+    const routeIdsToName = [...new Set([learner.transport_route_id, wrongBus?.routeId].filter((id): id is string => !!id))];
     const [routeSettled, stopSettled, feesSettled, markerNamesSettled] = await Promise.allSettled([
-      svc.from('tms_route').select('route_number, route_name')
-        .eq('id', learner.transport_route_id).maybeSingle(),
+      routeIdsToName.length
+        ? svc.from('tms_route').select('id, route_number, route_name').in('id', routeIdsToName)
+        : Promise.resolve({ data: [] }),
       learner.transport_stop_id
         ? svc.from('tms_route_stop').select('stop_name').eq('id', learner.transport_stop_id).maybeSingle()
         : Promise.resolve({ data: null }),
@@ -285,8 +299,13 @@ async function scan(request: NextRequest, auth: AuthContext) {
       // errors; allSettled additionally covers a rejected promise.
       loadMarkerNames(svc, [outcome?.existing_by ?? null]),
     ]);
-    const route = (routeSettled.status === 'fulfilled' ? routeSettled.value.data : null) as
-      { route_number: string | null; route_name: string | null } | null;
+    const namedRoutes = ((routeSettled.status === 'fulfilled' ? routeSettled.value.data : null) ?? []) as
+      Array<{ id: string; route_number: string | null; route_name: string | null }>;
+    // The learner's own route, as the panel has always shown it.
+    const route = namedRoutes.find((r) => r.id === learner.transport_route_id) ?? null;
+    const wrongBusReply: { kind: WrongBusKind; routeNumber: string | null } | undefined = wrongBus
+      ? { kind: wrongBus.kind, routeNumber: namedRoutes.find((r) => r.id === wrongBus.routeId)?.route_number ?? null }
+      : undefined;
     const routeLabel = route
       ? [route.route_number, route.route_name].filter(Boolean).join(' — ') || null
       : null;
@@ -324,7 +343,12 @@ async function scan(request: NextRequest, auth: AuthContext) {
       description:
         `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}` +
         (alreadyPresent ? ' — already present, nothing written' : '') +
-        (outcome?.outcome === 'overridden' ? ` — replaced an earlier "${outcome.existing_status}" mark` : ''),
+        (outcome?.outcome === 'overridden' ? ` — replaced an earlier "${outcome.existing_status}" mark` : '') +
+        (wrongBusReply
+          ? wrongBusReply.kind === 'booked_other_bus'
+            ? ` — wrong bus: booked on bus ${wrongBusReply.routeNumber ?? '?'}`
+            : ` — wrong bus: belongs to bus ${wrongBusReply.routeNumber ?? '?'}`
+          : ''),
       metadata: {
         learnerId: learner.id,
         direction,
@@ -332,6 +356,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
         walkUp: isWalkUp,
         outcome: outcome?.outcome ?? null,
         matchedBy,
+        busRouteId,
+        wrongBus: wrongBus ?? null,
       },
     });
     try {
@@ -354,6 +380,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
       direction,
       booked,
       walkUp: isWalkUp,
+      // Said aloud and shown on the panel: "booked on bus N" / "belongs to bus N".
+      wrongBus: wrongBusReply,
       overCapacity: overCapacity || undefined,
       alreadyPresent: alreadyPresent || undefined,
       alreadyMarked,

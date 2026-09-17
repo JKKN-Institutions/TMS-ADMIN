@@ -15,7 +15,17 @@ describe('resolveScanOffline', () => {
   it('resolves a camera-read JKKN ID through the saved card map', () => {
     expect(resolveScanOffline('348295-7', 'camera', roster)).toEqual({
       kind: 'resolved', learnerId: 'b1', name: 'Ravi', booked: false, verified: true, alreadyPresent: false,
+      otherBus: null,
     });
+  });
+
+  it('carries the other bus from the saved list, so the voice can say it at once', () => {
+    const other = { kind: 'booked' as const, routeId: 'r24', routeNumber: '24' };
+    const withOther = {
+      rows: [{ learner_id: 'b1', name: 'Ravi', booked: false, status: 'unmarked', other_bus: other }],
+      cards: { '348295-7': 'b1' },
+    };
+    expect(resolveScanOffline('348295-7', 'camera', withOther)).toMatchObject({ kind: 'resolved', otherBus: other });
   });
 
   it('refuses a typed JKKN ID, exactly as the server does', () => {

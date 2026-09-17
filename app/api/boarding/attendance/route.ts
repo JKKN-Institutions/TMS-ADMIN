@@ -253,7 +253,10 @@ async function mark(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    // Verify each learner actually belongs to this route; grab their stop id.
+    // Verify each learner is on this bus's list; grab their stop id. A learner
+    // is on the list when allocated to this bus, booked on it today, or
+    // already recorded on it today (a learner from another bus whose card was
+    // scanned here -- see lib/boarding/wrong-bus.ts).
     const learnerIds = [...new Set(acceptedMarks.map((m) => m.learnerId).filter(Boolean))];
     const stopByLearner = new Map<string, string | null>();
     for (const c of chunk(learnerIds)) {
@@ -276,10 +279,13 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // Keyed on `today` — the trip_date these marks land on — so the flag can
     // never describe a different day than the row storing it.
     const bookedLearners = new Set<string>();
+    // The bus each learner booked, when it is not this one: stored beside the
+    // mark as booked_route_id.
+    const bookedElsewhere = new Map<string, string>();
     for (const c of chunk(learnerIds)) {
       const { data: bookings, error: bookingError } = await svc
         .from('tms_booking')
-        .select('learner_id')
+        .select('learner_id, route_id, stop_id')
         .eq('travel_date', today)
         .in('learner_id', c);
       if (bookingError) {
@@ -289,7 +295,38 @@ async function mark(request: NextRequest, auth: AuthContext) {
         console.error('boarding manual mark: failed to load bookings:', bookingError);
         return NextResponse.json({ error: 'Failed to check bookings for the day' }, { status: 500 });
       }
-      for (const b of (bookings ?? []) as { learner_id: string }[]) bookedLearners.add(b.learner_id);
+      for (const b of (bookings ?? []) as { learner_id: string; route_id: string; stop_id: string | null }[]) {
+        bookedLearners.add(b.learner_id);
+        if (b.route_id === routeId) {
+          // Booked on this bus: on the list even when allocated elsewhere, and
+          // the booked stop is the one on this bus.
+          stopByLearner.set(b.learner_id, b.stop_id ?? stopByLearner.get(b.learner_id) ?? null);
+        } else {
+          bookedElsewhere.set(b.learner_id, b.route_id);
+        }
+      }
+    }
+
+    // Learners from another bus already recorded on this one today.
+    // NOTE: with inchargeShareScoringEnabled on (off in production as of
+    // 2026-09-17), such learners are in nobody's share, so the share check
+    // above answers not_your_share for them before reaching this point.
+    const notYetOnList = learnerIds.filter((id) => !stopByLearner.has(id));
+    for (const c of chunk(notYetOnList)) {
+      const { data: here, error: hereError } = await svc
+        .from('tms_attendance')
+        .select('learner_id, stop_id')
+        .eq('route_id', routeId)
+        .eq('trip_date', today)
+        .eq('direction', direction)
+        .in('learner_id', c);
+      if (hereError) {
+        console.error('boarding manual mark: failed to load marks on this bus:', hereError);
+        return NextResponse.json({ error: 'Failed to check the bus list' }, { status: 500 });
+      }
+      for (const h of (here ?? []) as { learner_id: string; stop_id: string | null }[]) {
+        stopByLearner.set(h.learner_id, h.stop_id ?? null);
+      }
     }
 
     // ── Absent WITHOUT a ticket is allowed ──
@@ -321,6 +358,10 @@ async function mark(request: NextRequest, auth: AuthContext) {
       learner_id: m.learnerId,
       route_id: routeId,
       stop_id: stopByLearner.get(m.learnerId) ?? null,
+      // Marked on this bus's list, so the row belongs to this bus even when
+      // an earlier write (the auto-absent job on the booked bus) put it elsewhere.
+      move_route: true,
+      booked_route_id: bookedElsewhere.get(m.learnerId) ?? null,
       status: m.status,
       // "Boarded without a booking" -- a claim about RIDING, so it can only
       // be true of a PRESENT mark. See the history above for why.

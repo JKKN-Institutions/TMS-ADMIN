@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { withoutBookingPhrase, spokenName, speak, primeSpeech, isVoiceMuted, setVoiceMuted } from './announce';
+import { withoutBookingPhrase, bookedOnBusPhrase, belongsToBusPhrase, scanAnnouncement, otherBusFromReply, spokenName, speak, primeSpeech, isVoiceMuted, setVoiceMuted } from './announce';
 
 describe('spokenName', () => {
   it('turns stored capitals into a name the voice reads as a word, not letters', () => {
@@ -27,6 +27,61 @@ describe('withoutBookingPhrase', () => {
     expect(withoutBookingPhrase('')).toBe('Learner, without booking');
     // The scan route's own fallback name.
     expect(withoutBookingPhrase('Learner')).toBe('Learner, without booking');
+  });
+});
+
+describe('wrong bus phrases', () => {
+  it('names the bus the learner booked', () => {
+    expect(bookedOnBusPhrase('SRI PRASATH P', '24')).toBe('Sri Prasath P, booked on bus 24');
+  });
+
+  it('names the bus the learner belongs to', () => {
+    expect(belongsToBusPhrase('AJAY P', '24')).toBe('Ajay P, belongs to bus 24');
+  });
+
+  it('says a zero-padded number as a number', () => {
+    expect(bookedOnBusPhrase('KAVIN', '06')).toBe('Kavin, booked on bus 6');
+  });
+
+  it('keeps a non-numeric route label as it is', () => {
+    expect(belongsToBusPhrase('KAVIN', '24A')).toBe('Kavin, belongs to bus 24A');
+  });
+
+  it('falls back when the name or number is missing', () => {
+    expect(bookedOnBusPhrase(null, null)).toBe('Learner, booked on another bus');
+    expect(belongsToBusPhrase('', '  ')).toBe('Learner, belongs to another bus');
+  });
+});
+
+describe('scanAnnouncement', () => {
+  it('is silent for a booked learner on the right bus', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: true })).toBeNull();
+  });
+
+  it('says "without booking" for an unbooked learner', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: false })).toBe('Priya S, without booking');
+  });
+
+  it('a booking on another bus beats "without booking"', () => {
+    expect(scanAnnouncement({ name: 'SRI PRASATH P', booked: false, otherBus: { kind: 'booked', routeNumber: '24' } }))
+      .toBe('Sri Prasath P, booked on bus 24');
+  });
+
+  it('a learner from another bus is named with their bus', () => {
+    expect(scanAnnouncement({ name: 'AJAY P', booked: false, otherBus: { kind: 'from', routeNumber: '24' } }))
+      .toBe('Ajay P, belongs to bus 24');
+  });
+
+  it('"boarded another bus" earlier changes nothing about this scan', () => {
+    expect(scanAnnouncement({ name: 'A', booked: true, otherBus: { kind: 'boarded', routeNumber: '6' } })).toBeNull();
+    expect(scanAnnouncement({ name: 'A', booked: false, otherBus: { kind: 'boarded', routeNumber: '6' } }))
+      .toBe('A, without booking');
+  });
+
+  it('reads the server reply the same way', () => {
+    expect(otherBusFromReply({ kind: 'booked_other_bus', routeNumber: '24' })).toEqual({ kind: 'booked', routeNumber: '24' });
+    expect(otherBusFromReply({ kind: 'foreign_learner', routeNumber: '24' })).toEqual({ kind: 'from', routeNumber: '24' });
+    expect(otherBusFromReply(undefined)).toBeNull();
   });
 });
 

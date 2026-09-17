@@ -33,6 +33,55 @@ export function withoutBookingPhrase(name: string | null | undefined): string {
   return `${spoken}, without booking`;
 }
 
+/** "Sri Prasath P, booked on bus 24": the learner booked a different bus today. */
+export function bookedOnBusPhrase(name: string | null | undefined, routeNumber: string | null | undefined): string {
+  return `${spokenName(name) || 'Learner'}, booked on ${busWords(routeNumber)}`;
+}
+
+/** "Ajay P, belongs to bus 24": the learner is from another bus and did not book this one. */
+export function belongsToBusPhrase(name: string | null | undefined, routeNumber: string | null | undefined): string {
+  return `${spokenName(name) || 'Learner'}, belongs to ${busWords(routeNumber)}`;
+}
+
+/**
+ * What to say for a scan, or null for silence (a booked learner on the right
+ * bus). One rule for the phone's saved list, the server's reply and an offline
+ * save, so they can never disagree about what the staffer hears.
+ *
+ *   another bus booked    -> "X, booked on bus N"
+ *   from another bus      -> "X, belongs to bus N"
+ *   not booked            -> "X, without booking"
+ */
+export function scanAnnouncement(input: {
+  name: string | null | undefined;
+  /** Booked on THIS bus (the saved list) or on any bus (the server). */
+  booked: boolean;
+  otherBus?: { kind: 'booked' | 'boarded' | 'from'; routeNumber: string | null } | null;
+}): string | null {
+  const other = input.otherBus ?? null;
+  if (other?.kind === 'booked') return bookedOnBusPhrase(input.name, other.routeNumber);
+  if (other?.kind === 'from') return belongsToBusPhrase(input.name, other.routeNumber);
+  return input.booked ? null : withoutBookingPhrase(input.name);
+}
+
+/** The server's wrong-bus reply, in the saved list's terms. */
+export function otherBusFromReply(
+  wrongBus: { kind: 'booked_other_bus' | 'foreign_learner'; routeNumber: string | null } | null | undefined,
+): { kind: 'booked' | 'from'; routeNumber: string | null } | null {
+  if (!wrongBus) return null;
+  return { kind: wrongBus.kind === 'booked_other_bus' ? 'booked' : 'from', routeNumber: wrongBus.routeNumber };
+}
+
+/**
+ * "bus 24". A leading zero is dropped so "06" is said "bus 6", not "bus zero
+ * six"; an unknown number becomes "another bus".
+ */
+function busWords(routeNumber: string | null | undefined): string {
+  const n = (routeNumber ?? '').trim();
+  if (!n) return 'another bus';
+  return `bus ${/^\d+$/.test(n) ? String(Number(n)) : n}`;
+}
+
 function speech(): SpeechSynthesis | null {
   return typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
 }

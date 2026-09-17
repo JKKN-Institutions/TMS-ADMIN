@@ -14,6 +14,7 @@ import { loadSchedulingConfig } from '@/lib/settings/scheduling';
 import { delegatedTo, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { isAutoMark } from '@/lib/boarding/auto-mark';
 import { loadRosterFees, UNKNOWN_FEE } from '@/lib/boarding/fee-roster';
+import { withOtherBuses } from '@/lib/boarding/other-bus-roster';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -25,6 +26,8 @@ interface RouteRow { id: string; route_number: string | null }
 interface StopRow { id: string; route_id: string; stop_name: string; stop_time: string | null; evening_time: string | null; sequence_order: number | null }
 interface AttRow {
   learner_id: string;
+  route_id: string;
+  stop_id: string | null;
   status: string | null;
   method: string | null;
   scanned_at: string | null;
@@ -137,7 +140,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       const { data, error } = await svc
         .from('tms_attendance')
         .select(
-          'learner_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
+          'learner_id, route_id, stop_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
         )
         .in('route_id', c)
         .eq('trip_date', date)
@@ -247,7 +250,13 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
 
     const rows: RosterRow[] = [];
     for (const rt of routes) {
-      const riders = await loadRouteAttendanceRoster(svc, rt.id, date);
+      // The bus's own list, plus which of them booked or boarded another bus,
+      // plus learners from other buses recorded on this one.
+      const riders = await withOtherBuses(svc, rt.id, await loadRouteAttendanceRoster(svc, rt.id, date), {
+        date,
+        direction,
+        recordedHere: attRows.filter((a) => a.route_id === rt.id),
+      });
 
       // Owner names genuinely differ per route, so allocation + staff lookup
       // stay inside the loop; there is no clean batch form for them.
