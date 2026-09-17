@@ -22,7 +22,6 @@ import {
   Receipt,
   Wallet,
   Bug,
-  LogOut,
   IndianRupee,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
@@ -66,7 +65,6 @@ export const allNavigation: NavItem[] = [
   { name: 'Transport Years', href: '/transport-years', icon: CalendarRange, permission: TMS_PERMISSIONS.TRANSPORT_YEARS_VIEW, group: 'transport' },
   { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
-  { name: 'Vacate Requests', href: '/vacate-requests', icon: LogOut, permission: TMS_PERMISSIONS.VACATE_VIEW, group: 'services' },
   // Two distinct charges live under /fees: the recurring MAINTENANCE fee the
   // institution collects, and the TRANSPORT FEE charged when it goes unpaid.
   // The child entry is what makes the header read "Transport Fee" on the rates
