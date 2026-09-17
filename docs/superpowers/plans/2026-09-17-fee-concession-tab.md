@@ -62,7 +62,7 @@
 
 **Interfaces:**
 - Produces: table `tms_fee_concession_rule`, table `tms_fee_concession_log`, column `tms_fee_override.concession_rule_id`, function
-  `tms_apply_fee_concession(p_person_id uuid, p_rule_id uuid, p_terms jsonb, p_target_total numeric, p_reason text, p_actor uuid) returns jsonb`
+  `tms_apply_fee_concession(p_person_id uuid, p_rule_id uuid, p_terms jsonb, p_target_total numeric, p_reason text, p_actor uuid) returns jsonb` (**superseded** by the Task 1 amendment below: `p_row_targets jsonb` replaces `p_target_total`)
   returning `{"actions":[{"fee_bill_id":…,"term_no":…,"action":"repriced|ledger_aligned|deleted|unchanged"}]}` (empty array = no bill).
   Errors whose message starts with `CONCESSION_REVIEW:` mean "needs accounts review".
 
@@ -392,6 +392,258 @@ git add supabase/migrations/20260917120000_fee_concessions.sql
 git commit -m "feat(fees): concession rules, audit log and apply function"
 ```
 
+#### Task 1 amendment (after review): per-row targets
+
+`20260917120000` is already applied live, so the fix is a NEW migration. It replaces the apply function with this signature (supersedes the Interfaces line above):
+
+`tms_apply_fee_concession(p_person_id uuid, p_rule_id uuid, p_terms jsonb, p_row_targets jsonb, p_reason text, p_actor uuid) returns jsonb`
+
+- `p_row_targets` = `[{"fee_bill_id": uuid, "target": number|null}]`, one entry per existing `tms_fee_bill` row of the person/year (empty array when the person has no bill). `null` target = delete that row.
+- Returns the same `{"actions":[…]}`; review errors keep the `CONCESSION_REVIEW:` prefix.
+
+- [ ] **Step A1: Write `supabase/migrations/20260917130000_fee_concessions_row_targets.sql`**
+
+```sql
+-- Fee Concession apply function, v2 (review of 20260917120000):
+--  * targets are given PER EXISTING LEDGER ROW (p_row_targets), because ~900
+--    learners hold legacy per-term rows (3000 + 2500) under structures that are
+--    now single-term — per-structure-term targets marked them all "review";
+--  * "payment activity" matches the live bill-delete guard: receipts, pending
+--    transaction items, status other than 'unpaid', or a payment_date;
+--  * the money row is locked before it is checked;
+--  * input sanity: null / duplicate terms, duplicate rows, totals that disagree.
+-- Concurrency: a ledger row the caller did not see (e.g. inserted by cron 23
+-- while the admin was looking at the list) has no target and raises review.
+-- A row inserted after this function's loop is not covered; the overrides are
+-- written first, so the next generator run bills the concession amount and the
+-- tab shows the stray bill as Needs fix again.
+
+drop function if exists public.tms_apply_fee_concession(uuid, uuid, jsonb, numeric, text, uuid);
+
+create or replace function public.tms_apply_fee_concession(
+  p_person_id uuid,
+  p_rule_id uuid,
+  p_terms jsonb,
+  p_row_targets jsonb,
+  p_reason text,
+  p_actor uuid
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_rule public.tms_fee_concession_rule%rowtype;
+  v_before jsonb;
+  v_after jsonb;
+  v_actions jsonb := '[]'::jsonb;
+  v_term jsonb;
+  v_row record;
+  v_sb record;
+  v_terms_total numeric;
+  v_rows_total numeric;
+  v_target numeric;
+  v_paid numeric;
+  v_activity boolean;
+  v_action text;
+begin
+  select * into v_rule from public.tms_fee_concession_rule where id = p_rule_id and is_active;
+  if not found then
+    raise exception 'Concession rule % is missing or inactive', p_rule_id;
+  end if;
+  if p_terms is null or jsonb_typeof(p_terms) <> 'array' or jsonb_array_length(p_terms) = 0 then
+    raise exception 'Concession terms must be a non-empty array';
+  end if;
+  if p_row_targets is null or jsonb_typeof(p_row_targets) <> 'array' then
+    raise exception 'Concession row targets must be an array';
+  end if;
+  if (select count(*) <> count(distinct (t->>'term_no')::int) from jsonb_array_elements(p_terms) t) then
+    raise exception 'Concession terms repeat a term number';
+  end if;
+  if (select count(*) <> count(distinct (t->>'fee_bill_id')::uuid) from jsonb_array_elements(p_row_targets) t) then
+    raise exception 'Concession row targets repeat a bill';
+  end if;
+
+  select coalesce(sum((t->>'amount')::numeric) filter (where (t->>'billable')::boolean), 0)
+    into v_terms_total
+  from jsonb_array_elements(p_terms) t;
+  if v_terms_total <= 0 then
+    raise exception 'Concession total must be positive (got %)', v_terms_total;
+  end if;
+  if jsonb_array_length(p_row_targets) > 0 then
+    select coalesce(sum((t->>'target')::numeric), 0) into v_rows_total
+    from jsonb_array_elements(p_row_targets) t;
+    if v_rows_total <> v_terms_total then
+      raise exception 'Row targets (%) do not add up to the concession total (%)', v_rows_total, v_terms_total;
+    end if;
+  end if;
+
+  v_before := public.tms_fee_concession_snapshot(p_person_id, v_rule.transport_year_id);
+
+  -- 1. Overrides first: without them cron 23 re-bills the full amount.
+  for v_term in select * from jsonb_array_elements(p_terms) loop
+    insert into public.tms_fee_override
+      (person_id, person_type, transport_year_id, term_no, billable, amount, reason, created_by, concession_rule_id)
+    values
+      (p_person_id, 'learner', v_rule.transport_year_id, (v_term->>'term_no')::int,
+       (v_term->>'billable')::boolean, (v_term->>'amount')::numeric, p_reason, p_actor, p_rule_id)
+    on conflict (person_id, transport_year_id, term_no) do update
+      set billable = excluded.billable,
+          amount = excluded.amount,
+          reason = excluded.reason,
+          concession_rule_id = excluded.concession_rule_id,
+          updated_at = now(),
+          updated_by = p_actor;
+  end loop;
+
+  -- 2. Every target must name a live ledger row of this person and year.
+  if exists (
+    select 1 from jsonb_array_elements(p_row_targets) t
+    where not exists (
+      select 1 from public.tms_fee_bill fb
+      where fb.id = (t->>'fee_bill_id')::uuid
+        and fb.person_id = p_person_id
+        and fb.transport_year_id = v_rule.transport_year_id)
+  ) then
+    raise exception 'CONCESSION_REVIEW: bills changed since the list was loaded - refresh and try again';
+  end if;
+
+  -- 3. Correct every existing ledger row.
+  for v_row in
+    select fb.id as fb_id, fb.term_no, fb.amount as fb_amount, fb.status as fb_status,
+           fb.billing_student_bill_id as sb_id
+    from public.tms_fee_bill fb
+    where fb.person_id = p_person_id and fb.transport_year_id = v_rule.transport_year_id
+    order by fb.term_no
+    for update
+  loop
+    select (t->>'target')::numeric into v_target
+    from jsonb_array_elements(p_row_targets) t
+    where (t->>'fee_bill_id')::uuid = v_row.fb_id;
+    if not found then
+      raise exception 'CONCESSION_REVIEW: term % bill appeared after the list was loaded - refresh and try again', v_row.term_no;
+    end if;
+
+    if v_row.fb_status in ('cancelled', 'error') then
+      raise exception 'CONCESSION_REVIEW: term % bill is %', v_row.term_no, v_row.fb_status;
+    end if;
+    if v_row.sb_id is null then
+      raise exception 'CONCESSION_REVIEW: term % bill has no money row', v_row.term_no;
+    end if;
+
+    -- Lock the money row before judging it, so a payment cannot slip in between.
+    select sb.id, sb.final_amount, sb.status, sb.payment_date into v_sb
+    from public.billing_student_bills sb
+    where sb.id = v_row.sb_id
+    for update;
+    if not found then
+      raise exception 'CONCESSION_REVIEW: term % bill has no money row', v_row.term_no;
+    end if;
+    if v_sb.status = 'cancelled' then
+      raise exception 'CONCESSION_REVIEW: term % money bill is cancelled', v_row.term_no;
+    end if;
+
+    select coalesce(sum(amount_paid), 0) into v_paid
+    from public.billing_receipt_items where bill_id = v_sb.id;
+    -- Same test as the live bill-delete guard (tms_fee_bill_cleanup_linked_billing).
+    v_activity := v_paid > 0
+      or v_sb.status is distinct from 'unpaid'
+      or v_sb.payment_date is not null
+      or exists (select 1 from public.payment_transaction_items where bill_id = v_sb.id);
+
+    if v_target is null then
+      if v_activity then
+        raise exception 'CONCESSION_REVIEW: term % is not charged under the concession but has payment activity', v_row.term_no;
+      end if;
+      -- tms_fee_bill cannot be deleted directly; the FK cascade removes it.
+      delete from public.billing_student_bills where id = v_sb.id;
+      v_action := 'deleted';
+    elsif v_sb.final_amount = v_target then
+      if v_row.fb_amount <> v_target then
+        update public.tms_fee_bill set amount = v_target where id = v_row.fb_id;
+        v_action := 'ledger_aligned';
+      else
+        v_action := 'unchanged';
+      end if;
+    elsif v_activity then
+      raise exception 'CONCESSION_REVIEW: term % has Rs % paid on a Rs % % bill; concession is Rs %',
+        v_row.term_no, v_paid, v_sb.final_amount, v_sb.status, v_target;
+    else
+      update public.billing_student_bills
+        set unit_amount = v_target, total_amount = v_target, final_amount = v_target
+        where id = v_sb.id;
+      update public.tms_fee_bill set amount = v_target where id = v_row.fb_id;
+      v_action := 'repriced';
+    end if;
+
+    v_actions := v_actions || jsonb_build_array(jsonb_build_object(
+      'fee_bill_id', v_row.fb_id, 'term_no', v_row.term_no, 'action', v_action));
+  end loop;
+
+  v_after := public.tms_fee_concession_snapshot(p_person_id, v_rule.transport_year_id);
+
+  insert into public.tms_fee_concession_log
+    (rule_id, person_id, transport_year_id, terms, target_total, before, after, actions, actor)
+  values
+    (p_rule_id, p_person_id, v_rule.transport_year_id,
+     jsonb_build_object('terms', p_terms, 'row_targets', p_row_targets),
+     v_terms_total, v_before, v_after, v_actions, p_actor);
+
+  return jsonb_build_object('actions', v_actions);
+end;
+$$;
+
+revoke execute on function public.tms_apply_fee_concession(uuid, uuid, jsonb, jsonb, text, uuid) from public, anon, authenticated;
+grant execute on function public.tms_apply_fee_concession(uuid, uuid, jsonb, jsonb, text, uuid) to service_role;
+```
+
+- [ ] **Step A2: Apply** with `apply_migration`, name `fee_concessions_row_targets`.
+
+- [ ] **Step A3: Verify grants and that the old signature is gone**
+
+```sql
+select has_function_privilege('anon', 'public.tms_apply_fee_concession(uuid,uuid,jsonb,jsonb,text,uuid)', 'execute') anon_exec,
+       has_function_privilege('authenticated', 'public.tms_apply_fee_concession(uuid,uuid,jsonb,jsonb,text,uuid)', 'execute') auth_exec,
+       has_function_privilege('service_role', 'public.tms_apply_fee_concession(uuid,uuid,jsonb,jsonb,text,uuid)', 'execute') svc_exec,
+       (select count(*) from pg_proc where proname = 'tms_apply_fee_concession') versions;
+```
+Expected: `false, false, true, 1`.
+
+- [ ] **Step A4: Rolled-back tests** (each a single call ending in rollback, or a `do` block that raises to roll back; afterwards `select count(*) from tms_fee_override where reason='TEST'` = 0 and `select count(*) from tms_fee_concession_log` = 0). Use the Pharmacy rule id as `:rule`.
+
+  (a) PB22042 (`6ec3d35d-8f33-492a-bfcf-fa0bc0e82fa7`), its single fee bill id as `:fb` (`select id from tms_fee_bill where person_id='6ec3d35d-8f33-492a-bfcf-fa0bc0e82fa7' and transport_year_id='6b3768f9-c9fb-48d5-a955-41949983c3b0'`):
+  `tms_apply_fee_concession('6ec3d35d-…', ':rule', '[{"term_no":1,"billable":true,"amount":2750}]', '[{"fee_bill_id":":fb","target":2750}]', 'TEST', null)` → `unchanged`.
+
+  (b) Legacy two-row unpaid learner — find one:
+```sql
+select fb.person_id,
+       max(fb.id::text) filter (where fb.term_no=1) fb1, max(fb.id::text) filter (where fb.term_no=2) fb2,
+       max(fb.billing_student_bill_id::text) filter (where fb.term_no=1) sb1, max(fb.billing_student_bill_id::text) filter (where fb.term_no=2) sb2
+from tms_fee_bill fb join billing_student_bills sb on sb.id = fb.billing_student_bill_id
+where fb.transport_year_id='6b3768f9-c9fb-48d5-a955-41949983c3b0' and fb.person_type='learner'
+group by fb.person_id
+having count(*)=2 and bool_and(sb.status='unpaid' and sb.payment_date is null and fb.status='generated')
+   and sum(fb.amount)=5500 and min(fb.term_no)=1 and max(fb.term_no)=2
+   and not exists (select 1 from billing_receipt_items ri where ri.bill_id::text in (max(fb.billing_student_bill_id::text) filter (where fb.term_no=1), max(fb.billing_student_bill_id::text) filter (where fb.term_no=2)))
+limit 1;
+```
+  (if the HAVING subquery form is rejected, drop that line and check receipts/payment_transaction_items for the two sb ids separately before using the person). Call with terms `[{"term_no":1,"billable":true,"amount":2750}]` and row targets `fb1→1500, fb2→1250` → two `repriced`; in the same transaction `select id, final_amount, balance_amount from billing_student_bills where id in (sb1, sb2)` → 1500/1500 and 1250/1250.
+
+  (c) Same person, scheme-style: terms `[{"term_no":1,"billable":true,"amount":500}]`, row targets `fb1→500, fb2→null` (the scheme rule id as `:rule`) → `repriced` + `deleted`; in the same transaction `select count(*) from tms_fee_bill where id=fb2` = 0 and `select count(*) from billing_student_bills where id=sb2` = 0.
+
+  (d) Same person, row targets only `fb1→2750` (fb2 missing) with terms 2750 → error `CONCESSION_REVIEW: term 2 bill appeared after …`.
+
+  (e) Row targets `fb1→1500, fb2→1000` with terms 2750 → error "do not add up".
+
+  (f) Terms `[{"term_no":1,…},{"term_no":1,…}]` → error "repeat a term number".
+
+- [ ] **Step A5: Commit**
+
+```bash
+git add supabase/migrations/20260917130000_fee_concessions_row_targets.sql
+git commit -m "fix(fees): apply concession per ledger row with stronger payment guard"
+```
+
 ---
 
 ### Task 2: Pure concession logic
@@ -422,9 +674,17 @@ export const SCHEME_75_SCHOLARSHIP = '7.5% SCHOLARSHIP';
 export function matchRule(rules: ConcessionRule[], kind: ConcessionKind, s: RuleSubject): ConcessionRule | null;
 export function targetTerms(rule: ConcessionRule, full: BillableTerm[]): TermOverride[];
 export function targetTotal(terms: TermOverride[]): number;
-export function rowTarget(rowCount: number, termNo: number, terms: TermOverride[], total: number): number | null | undefined; // undefined = no target for that term
-export function classifyConcession(input: { terms: TermOverride[]; total: number; overrides: TermOverride[]; ledger: LedgerState[] }): { status: Exclude<ConcessionStatus, 'unresolved'>; reason: string | null };
+export function rowTargets(kind: ConcessionKind, total: number, ledger: LedgerState[]): Map<string, number | null> | null; // key = feeBillId; null value = delete the row; null result = cannot split
+export function hasPaymentActivity(row: LedgerState): boolean;
+export function classifyConcession(input: { kind: ConcessionKind; terms: TermOverride[]; total: number; overrides: TermOverride[]; ledger: LedgerState[] }): { status: Exclude<ConcessionStatus, 'unresolved'>; reason: string | null };
 ```
+`LedgerState.pendingPayment` is true when the money row has any `payment_transaction_items` row OR a non-null `payment_date` (the loader folds both in).
+
+**Amendment (ledger ruling, Task 1 review):** 919 learners hold legacy per-term ledgers (term 1 Rs 3,000 + term 2 Rs 2,500) under structures that are now single-term. Targets are therefore computed **per existing ledger row**, not per structure term:
+- one row (or none): the row carries the whole target total;
+- `final_year`, several rows: split the total in proportion to each row's `ledgerAmount` (rows ordered by `termNo`; each `Math.round`, the last row takes the remainder); if the ledger amounts sum to ≤ 0 → cannot split (`null`);
+- `scheme_75`, several rows: the lowest-`termNo` row carries the total, every other row → `null` (delete).
+"Payment activity" (blocks reprice/delete) = `paid > 0 || pendingPayment || moneyStatus !== 'unpaid'`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -432,7 +692,7 @@ export function classifyConcession(input: { terms: TermOverride[]; total: number
 // lib/fees/concession-math.test.ts
 import { describe, it, expect } from 'vitest';
 import {
-  matchRule, targetTerms, targetTotal, rowTarget, classifyConcession,
+  matchRule, targetTerms, targetTotal, rowTargets, hasPaymentActivity, classifyConcession,
   type ConcessionRule, type LedgerState,
 } from './concession-math';
 import type { BillableTerm } from './resolve-terms';
@@ -491,54 +751,96 @@ describe('targetTerms', () => {
   });
 });
 
-describe('rowTarget', () => {
-  const terms = [{ term_no: 1, billable: true, amount: 500 }, { term_no: 2, billable: false, amount: null }];
-  it('a single folded bill carries the whole total', () => {
-    expect(rowTarget(1, 1, terms, 500)).toBe(500);
+describe('rowTargets', () => {
+  it('no rows → empty map; one row carries the whole total', () => {
+    expect(rowTargets('final_year', 2750, [])).toEqual(new Map());
+    expect(rowTargets('scheme_75', 500, [bill({ feeBillId: 'a' })])).toEqual(new Map([['a', 500]]));
   });
-  it('legacy per-term rows carry their own term, null when not billable', () => {
-    expect(rowTarget(2, 1, terms, 500)).toBe(500);
-    expect(rowTarget(2, 2, terms, 500)).toBeNull();
-    expect(rowTarget(2, 3, terms, 500)).toBeUndefined();
+  it('final_year splits legacy rows in proportion to ledger amounts, last row takes the remainder', () => {
+    const rows = [bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 2500 }), bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 3000 })];
+    expect(rowTargets('final_year', 2750, rows)).toEqual(new Map([['a', 1500], ['b', 1250]]));
+    expect(rowTargets('final_year', 2751, rows)).toEqual(new Map([['a', 1501], ['b', 1250]]));
+  });
+  it('final_year keeps the same split once already applied (proportions unchanged)', () => {
+    const rows = [bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 1500 }), bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 1250 })];
+    expect(rowTargets('final_year', 2750, rows)).toEqual(new Map([['a', 1500], ['b', 1250]]));
+  });
+  it('final_year cannot split zero-amount rows', () => {
+    const rows = [bill({ feeBillId: 'a', ledgerAmount: 0 }), bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 0 })];
+    expect(rowTargets('final_year', 2750, rows)).toBeNull();
+  });
+  it('scheme_75 keeps the lowest term and deletes the rest', () => {
+    const rows = [bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 2500 }), bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 3000 })];
+    expect(rowTargets('scheme_75', 500, rows)).toEqual(new Map([['a', 500], ['b', null]]));
+  });
+});
+
+describe('hasPaymentActivity', () => {
+  it('is true for receipts, pending payments, or any non-unpaid money status', () => {
+    expect(hasPaymentActivity(bill({}))).toBe(false);
+    expect(hasPaymentActivity(bill({ paid: 1 }))).toBe(true);
+    expect(hasPaymentActivity(bill({ pendingPayment: true }))).toBe(true);
+    expect(hasPaymentActivity(bill({ moneyStatus: 'partially_paid' }))).toBe(true);
+    expect(hasPaymentActivity(bill({ moneyStatus: 'paid' }))).toBe(true);
   });
 });
 
 describe('classifyConcession', () => {
   const half = [{ term_no: 1, billable: true, amount: 2750 }];
+  const fy = (overrides: typeof half, ledger: LedgerState[]) =>
+    classifyConcession({ kind: 'final_year', terms: half, total: 2750, overrides, ledger });
   it('no bill and matching overrides → applied', () => {
-    expect(classifyConcession({ terms: half, total: 2750, overrides: half, ledger: [] }).status).toBe('applied');
+    expect(fy(half, []).status).toBe('applied');
   });
   it('no bill and no overrides → needs_fix', () => {
-    expect(classifyConcession({ terms: half, total: 2750, overrides: [], ledger: [] }).status).toBe('needs_fix');
+    expect(fy([], []).status).toBe('needs_fix');
   });
   it('unpaid full bill → needs_fix', () => {
-    expect(classifyConcession({ terms: half, total: 2750, overrides: [], ledger: [bill({})] }).status).toBe('needs_fix');
+    expect(fy([], [bill({})]).status).toBe('needs_fix');
   });
   it('money already at target but ledger stale → needs_fix (PB22042 shape)', () => {
-    const r = classifyConcession({ terms: half, total: 2750, overrides: [], ledger: [bill({ moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })] });
-    expect(r.status).toBe('needs_fix');
+    expect(fy([], [bill({ moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })]).status).toBe('needs_fix');
   });
   it('fully aligned paid bill with overrides → applied', () => {
-    const r = classifyConcession({ terms: half, total: 2750, overrides: half, ledger: [bill({ ledgerAmount: 2750, moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })] });
-    expect(r.status).toBe('applied');
+    expect(fy(half, [bill({ ledgerAmount: 2750, moneyFinal: 2750, moneyStatus: 'paid', paid: 2750 })]).status).toBe('applied');
   });
   it('paid more than the concession → review with a reason (KAMALESH shape)', () => {
-    const r = classifyConcession({ terms: half, total: 2750, overrides: [], ledger: [bill({ moneyStatus: 'paid', paid: 5500 })] });
+    const r = fy([], [bill({ moneyStatus: 'paid', paid: 5500 })]);
     expect(r.status).toBe('review');
     expect(r.reason).toContain('5500');
   });
-  it('pending online payment on a wrong-amount bill → review', () => {
-    expect(classifyConcession({ terms: half, total: 2750, overrides: [], ledger: [bill({ pendingPayment: true })] }).status).toBe('review');
+  it('paid status without receipts, or a pending payment, on a wrong-amount bill → review', () => {
+    expect(fy([], [bill({ moneyStatus: 'paid' })]).status).toBe('review');
+    expect(fy([], [bill({ pendingPayment: true })]).status).toBe('review');
   });
-  it('cancelled bill → review', () => {
-    expect(classifyConcession({ terms: half, total: 2750, overrides: half, ledger: [bill({ ledgerStatus: 'cancelled' })] }).status).toBe('review');
-    expect(classifyConcession({ terms: half, total: 2750, overrides: half, ledger: [bill({ moneyStatus: 'cancelled' })] }).status).toBe('review');
+  it('cancelled bill or missing money row → review', () => {
+    expect(fy(half, [bill({ ledgerStatus: 'cancelled' })]).status).toBe('review');
+    expect(fy(half, [bill({ moneyStatus: 'cancelled' })]).status).toBe('review');
+    expect(fy(half, [bill({ moneyBillId: null, moneyFinal: null, moneyStatus: null })]).status).toBe('review');
+  });
+  it('final_year legacy two-row unpaid ledger → needs_fix, then applied once split', () => {
+    const before = [
+      bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 3000, moneyFinal: 3000 }),
+      bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 2500, moneyFinal: 2500 }),
+    ];
+    expect(fy(half, before).status).toBe('needs_fix');
+    const after = [
+      bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 1500, moneyFinal: 1500 }),
+      bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 1250, moneyFinal: 1250 }),
+    ];
+    expect(fy(half, after).status).toBe('applied');
+  });
+  it('final_year zero-amount legacy rows → review', () => {
+    const rows = [bill({ feeBillId: 'a', ledgerAmount: 0 }), bill({ feeBillId: 'b', termNo: 2, ledgerAmount: 0 })];
+    expect(fy(half, rows).status).toBe('review');
   });
   it('7.5%: unpaid legacy term-2 row → needs_fix; paid term-2 row → review', () => {
-    const t = [{ term_no: 1, billable: true, amount: 500 }, { term_no: 2, billable: false, amount: null }];
+    const t = [{ term_no: 1, billable: true, amount: 500 }];
     const t1 = bill({ feeBillId: 'a', termNo: 1, ledgerAmount: 3000, moneyFinal: 500, moneyStatus: 'paid', paid: 500 });
-    expect(classifyConcession({ terms: t, total: 500, overrides: t, ledger: [t1, bill({ feeBillId: 'b', termNo: 2, moneyFinal: 2500, ledgerAmount: 2500 })] }).status).toBe('needs_fix');
-    expect(classifyConcession({ terms: t, total: 500, overrides: t, ledger: [t1, bill({ feeBillId: 'b', termNo: 2, moneyFinal: 2500, ledgerAmount: 2500, paid: 2500, moneyStatus: 'paid' })] }).status).toBe('review');
+    const run = (ledger: LedgerState[]) =>
+      classifyConcession({ kind: 'scheme_75', terms: t, total: 500, overrides: t, ledger });
+    expect(run([t1, bill({ feeBillId: 'b', termNo: 2, moneyFinal: 2500, ledgerAmount: 2500 })]).status).toBe('needs_fix');
+    expect(run([t1, bill({ feeBillId: 'b', termNo: 2, moneyFinal: 2500, ledgerAmount: 2500, paid: 2500, moneyStatus: 'paid' })]).status).toBe('review');
   });
 });
 ```
@@ -638,20 +940,44 @@ export function targetTotal(terms: TermOverride[]): number {
 }
 
 /**
- * The amount one ledger row should carry. A learner normally has ONE folded bill
- * (term_no 1) holding the whole year; legacy learners have one row per term.
- * null = the term is not charged; undefined = no target exists for that term.
+ * What each EXISTING ledger row should carry, keyed by fee bill id. Newer
+ * learners have one folded bill holding the whole year; ~900 learners billed
+ * before the fold still hold one row per term (3000 + 2500) under structures
+ * that are now single-term, so targets follow the rows, not the structure.
+ *   final_year: split in proportion to the rows' ledger amounts (last row takes
+ *               the remainder) — proportions survive an apply, so it is stable.
+ *   scheme_75:  the lowest term keeps the whole amount; other rows → null (delete).
+ * Returns null when a split is impossible (legacy rows summing to 0).
  */
-export function rowTarget(
-  rowCount: number,
-  termNo: number,
-  terms: TermOverride[],
-  total: number
-): number | null | undefined {
-  if (rowCount === 1) return total;
-  const t = terms.find((x) => x.term_no === termNo);
-  if (!t) return undefined;
-  return t.billable ? t.amount : null;
+export function rowTargets(
+  kind: ConcessionKind,
+  total: number,
+  ledger: LedgerState[]
+): Map<string, number | null> | null {
+  const rows = [...ledger].sort((a, b) => a.termNo - b.termNo);
+  const out = new Map<string, number | null>();
+  if (rows.length <= 1) {
+    for (const r of rows) out.set(r.feeBillId, total);
+    return out;
+  }
+  if (kind === 'scheme_75') {
+    rows.forEach((r, i) => out.set(r.feeBillId, i === 0 ? total : null));
+    return out;
+  }
+  const sum = rows.reduce((s, r) => s + r.ledgerAmount, 0);
+  if (sum <= 0) return null;
+  let assigned = 0;
+  rows.forEach((r, i) => {
+    const part = i === rows.length - 1 ? total - assigned : Math.round((total * r.ledgerAmount) / sum);
+    assigned += part;
+    out.set(r.feeBillId, part);
+  });
+  return out;
+}
+
+/** Any sign money has moved (or is moving) on the row's money bill. */
+export function hasPaymentActivity(row: LedgerState): boolean {
+  return row.paid > 0 || row.pendingPayment || row.moneyStatus !== 'unpaid';
 }
 
 function overridesMatch(target: TermOverride[], existing: TermOverride[]): boolean {
@@ -663,11 +989,16 @@ function overridesMatch(target: TermOverride[], existing: TermOverride[]): boole
 }
 
 export function classifyConcession(input: {
+  kind: ConcessionKind;
   terms: TermOverride[];
   total: number;
   overrides: TermOverride[];
   ledger: LedgerState[];
 }): { status: Exclude<ConcessionStatus, 'unresolved'>; reason: string | null } {
+  const targets = rowTargets(input.kind, input.total, input.ledger);
+  if (!targets) {
+    return { status: 'review', reason: 'Existing term bills have no amount to split the concession across' };
+  }
   let needsFix = false;
   for (const row of input.ledger) {
     if (row.ledgerStatus === 'cancelled' || row.ledgerStatus === 'error') {
@@ -679,21 +1010,18 @@ export function classifyConcession(input: {
     if (row.moneyStatus === 'cancelled') {
       return { status: 'review', reason: `Term ${row.termNo} money bill is cancelled` };
     }
-    const target = rowTarget(input.ledger.length, row.termNo, input.terms, input.total);
-    if (target === undefined) {
-      return { status: 'review', reason: `Term ${row.termNo} is billed but has no concession term` };
-    }
+    const target = targets.get(row.feeBillId) ?? null;
     if (target === null) {
-      if (row.paid > 0 || row.pendingPayment) {
+      if (hasPaymentActivity(row)) {
         return { status: 'review', reason: `Term ${row.termNo} is not charged under the concession but Rs ${row.paid} is already paid` };
       }
       needsFix = true;
     } else if (row.moneyFinal === target) {
       if (row.ledgerAmount !== target) needsFix = true;
-    } else if (row.paid > 0 || row.pendingPayment) {
+    } else if (hasPaymentActivity(row)) {
       return {
         status: 'review',
-        reason: `Rs ${row.paid} paid against a Rs ${row.moneyFinal} bill; concession is Rs ${target} — accounts decision`,
+        reason: `Rs ${row.paid} paid against a Rs ${row.moneyFinal} ${row.moneyStatus} bill; concession is Rs ${target} — accounts decision`,
       };
     } else {
       needsFix = true;
@@ -1000,6 +1328,7 @@ export interface ConcessionRow {
   billAmount: number | null; paidAmount: number; billStatus: string | null;
   status: ConcessionStatus; reason: string | null;
   terms: TermOverride[];            // target terms (empty when unresolved)
+  rowTargets: Array<{ fee_bill_id: string; target: number | null }>; // per existing ledger row (empty when unresolved / no bill)
 }
 export interface ConcessionList {
   rows: ConcessionRow[];
@@ -1062,7 +1391,7 @@ import { loadResolveContext } from './structure-context';
 import type { TermOverride } from './overrides';
 import type { FeeStructureRow } from './types';
 import {
-  classifyConcession, matchRule, targetTerms, targetTotal,
+  classifyConcession, matchRule, rowTargets, targetTerms, targetTotal,
   SCHEME_75_SCHOLARSHIP,
   type ConcessionKind, type ConcessionRule, type ConcessionStatus, type LedgerState,
 } from './concession-math';
@@ -1086,6 +1415,7 @@ export interface ConcessionRow {
   status: ConcessionStatus;
   reason: string | null;
   terms: TermOverride[];
+  rowTargets: Array<{ fee_bill_id: string; target: number | null }>;
 }
 
 export interface ConcessionList {
@@ -1223,8 +1553,8 @@ export async function loadConcessionRows(
   }>(svc, 'tms_fee_bill', 'id, person_id, term_no, amount, status, billing_student_bill_id, transport_year_id', candIds, 'person_id');
   const yearFbs = fbs.filter((f) => f.transport_year_id === transportYearId);
   const sbIds = yearFbs.map((f) => f.billing_student_bill_id).filter(Boolean) as string[];
-  const sbs = await selectByIds<{ id: string; final_amount: string | number; status: string }>(
-    svc, 'billing_student_bills', 'id, final_amount, status', sbIds);
+  const sbs = await selectByIds<{ id: string; final_amount: string | number; status: string; payment_date: string | null }>(
+    svc, 'billing_student_bills', 'id, final_amount, status, payment_date', sbIds);
   const receipts = await selectByIds<{ bill_id: string; amount_paid: string | number }>(
     svc, 'billing_receipt_items', 'bill_id, amount_paid', sbIds, 'bill_id');
   const pending = await selectByIds<{ bill_id: string }>(
@@ -1246,7 +1576,8 @@ export async function loadConcessionRows(
       moneyFinal: sb ? Number(sb.final_amount) : null,
       moneyStatus: sb?.status ?? null,
       paid: sb ? paidBy.get(sb.id) ?? 0 : 0,
-      pendingPayment: sb ? pendingSet.has(sb.id) : false,
+      // A payment_date with no receipt still means money moved (mirrors the live bill-delete guard).
+      pendingPayment: sb ? pendingSet.has(sb.id) || sb.payment_date !== null : false,
     });
     ledgerBy.set(f.person_id, list);
   }
@@ -1280,6 +1611,7 @@ export async function loadConcessionRows(
       status: 'unresolved',
       reason: null,
       terms: [],
+      rowTargets: [],
     };
 
     const loaded = ctxBy.get(fs.id)!;
@@ -1298,8 +1630,12 @@ export async function loadConcessionRows(
     const terms = targetTerms(rule, outcome.terms);
     const total = targetTotal(terms);
     const fullTotal = outcome.terms.reduce((s, t) => s + Number(t.amount), 0);
-    const c = classifyConcession({ terms, total, overrides: overridesBy.get(l.id) ?? [], ledger });
-    rows.push({ ...base, fullTotal, targetTotal: total, terms, status: c.status, reason: c.reason });
+    const c = classifyConcession({ kind, terms, total, overrides: overridesBy.get(l.id) ?? [], ledger });
+    const targets = rowTargets(kind, total, ledger);
+    rows.push({
+      ...base, fullTotal, targetTotal: total, terms, status: c.status, reason: c.reason,
+      rowTargets: targets ? [...targets].map(([fee_bill_id, target]) => ({ fee_bill_id, target })) : [],
+    });
   }
 
   for (const r of rows) counts[r.status]++;
@@ -1339,7 +1675,7 @@ export async function applyConcessions(
       p_person_id: id,
       p_rule_id: row.ruleId,
       p_terms: row.terms,
-      p_target_total: row.targetTotal,
+      p_row_targets: row.rowTargets,
       p_reason: reason,
       p_actor: opts.actorId,
     });
