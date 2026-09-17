@@ -102,11 +102,12 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   useEffect(() => {
     if (!elRef.current || mapRef.current) return;
     const map = L.map(elRef.current).setView([latitude, longitude], zoom);
-    // Street basemap: CARTO Voyager — clean, Google-like, free, no API key.
-    const street = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
+    // Street basemap: standard OpenStreetMap tiles (keyless). CARTO Voyager was
+    // dropped because it now watermarks keyless tiles "API KEY REQUIRED".
+    const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 20,
-      attribution: '© OpenStreetMap contributors © CARTO',
+      maxNativeZoom: 19,
+      attribution: '© OpenStreetMap contributors',
     });
     // Satellite basemap: Esri World Imagery — free with attribution, no key.
     const satellite = L.tileLayer(
