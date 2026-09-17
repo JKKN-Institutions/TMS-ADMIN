@@ -144,12 +144,12 @@ export function NotificationsSettings() {
               onChange={toggleReminders}
               className="peer sr-only"
             />
-            <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 peer-disabled:opacity-60"></div>
+            <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-green-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 peer-disabled:opacity-60"></div>
           </label>
         </div>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
         <MessageSquare className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           In-app is the only notification channel this system delivers today. Email, SMS and push are not
@@ -161,13 +161,13 @@ export function NotificationsSettings() {
       <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4 text-sm">
         <Link
           href="/notifications"
-          className="inline-flex items-center gap-1.5 font-medium text-blue-600 hover:text-blue-700 hover:underline"
+          className="inline-flex items-center gap-1.5 font-medium text-green-600 hover:text-green-700 hover:underline"
         >
           <ExternalLink className="h-4 w-4" /> View sent notifications
         </Link>
         <Link
           href="/notifications/new"
-          className="inline-flex items-center gap-1.5 font-medium text-blue-600 hover:text-blue-700 hover:underline"
+          className="inline-flex items-center gap-1.5 font-medium text-green-600 hover:text-green-700 hover:underline"
         >
           <PlusCircle className="h-4 w-4" /> Compose a notification
         </Link>

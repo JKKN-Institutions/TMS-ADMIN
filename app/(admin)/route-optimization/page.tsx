@@ -47,7 +47,7 @@ interface AppliedRun {
 }
 
 const inputCls =
-  'h-[38px] rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500';
+  'h-[38px] rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500';
 
 const routeClassBadge: Record<RouteClassification, { label: string; cls: string }> = {
   empty: { label: 'Empty', cls: 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200' },
@@ -137,7 +137,7 @@ function Badge({ label, cls }: { label: string; cls: string }) {
 function GuideStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-600 text-xs font-semibold text-white">
         {n}
       </span>
       <div>
@@ -190,7 +190,7 @@ function SuggestionRow({
   return (
     <div
       className={`rounded-xl border bg-white ${
-        selected ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-200'
+        selected ? 'border-green-400 ring-1 ring-green-300' : 'border-gray-200'
       }`}
     >
       <div className="flex items-center gap-3 p-4">
@@ -200,7 +200,7 @@ function SuggestionRow({
           disabled={!applicable}
           onChange={() => onToggle(s.routeId)}
           aria-label={`Select ${s.routeName} for consolidation`}
-          className="h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40"
+          className="h-4 w-4 shrink-0 rounded border-gray-300 text-green-600 focus:ring-green-500 disabled:opacity-40"
         />
         <button
           type="button"
@@ -527,7 +527,7 @@ export default function RouteOptimizationPage() {
     <div className="space-y-5 p-4 sm:space-y-6 sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <span className="shrink-0 rounded-xl bg-blue-50 p-2 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300">
+          <span className="shrink-0 rounded-xl bg-green-50 p-2 text-green-600 dark:bg-green-500/15 dark:text-green-300">
             <Zap className="h-6 w-6" />
           </span>
           <div>
@@ -542,9 +542,9 @@ export default function RouteOptimizationPage() {
           type="button"
           onClick={() => setGuideOpen(true)}
           aria-label="How route optimization works"
-          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
         >
-          <HelpCircle className="h-4 w-4 text-blue-600" />
+          <HelpCircle className="h-4 w-4 text-green-600" />
           <span className="hidden sm:inline">How it works</span>
         </button>
       </div>
@@ -561,7 +561,7 @@ export default function RouteOptimizationPage() {
                 if (h === 'planning') setMode('permanent');
               }}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                horizon === h ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+                horizon === h ? 'bg-green-600 text-white' : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
               {h === 'daily' ? 'Daily' : 'Planning'}
@@ -612,7 +612,7 @@ export default function RouteOptimizationPage() {
             type="button"
             onClick={runAnalysis}
             disabled={loading}
-            className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+            className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-4 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             {loading ? 'Analyzing…' : 'Analyze'}
@@ -663,7 +663,7 @@ export default function RouteOptimizationPage() {
             </div>
           )}
           {s.totalBookings === 0 && (
-            <div className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
+            <div className="flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-300">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
                 No bookings are recorded for {analysis.date} yet, so every active bus would run
@@ -675,7 +675,7 @@ export default function RouteOptimizationPage() {
 
           {/* Summary */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-            <StatCard icon={<Bus className="h-5 w-5" />} label="Active routes" value={s.activeRoutes} accent="text-blue-500" />
+            <StatCard icon={<Bus className="h-5 w-5" />} label="Active routes" value={s.activeRoutes} accent="text-green-500" />
             <StatCard icon={<Ticket className="h-5 w-5" />} label="Total bookings" value={s.totalBookings} accent="text-indigo-500" />
             <StatCard icon={<Users className="h-5 w-5" />} label="Routes booked" value={s.routesWithBookings} accent="text-emerald-500" />
             <StatCard icon={<AlertTriangle className="h-5 w-5" />} label="Under-utilized" value={s.underUtilizedRoutes} accent="text-amber-500" />
@@ -710,7 +710,7 @@ export default function RouteOptimizationPage() {
                           {run.mode === 'permanent' ? (
                             <Badge label="Permanent" cls="bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300" />
                           ) : (
-                            <Badge label="Today" cls="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" />
+                            <Badge label="Today" cls="bg-gray-100 text-gray-700 dark:bg-gray-500/15 dark:text-gray-300" />
                           )}
                         </td>
                         <td className="px-4 py-2.5 text-gray-900">{run.total_moves}</td>
@@ -811,10 +811,10 @@ export default function RouteOptimizationPage() {
               <div className="space-y-3">
                 {analysis.rightsize.map((rs) => {
                   const tone =
-                    rs.kind === 'upsize' ? 'text-amber-600' : rs.kind === 'no_fit' ? 'text-red-600' : 'text-blue-600';
+                    rs.kind === 'upsize' ? 'text-amber-600' : rs.kind === 'no_fit' ? 'text-red-600' : 'text-green-600';
                   const badge =
                     rs.kind === 'downsize'
-                      ? { label: 'Downsize', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' }
+                      ? { label: 'Downsize', cls: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300' }
                       : rs.kind === 'upsize'
                         ? { label: 'Upsize', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' }
                         : { label: 'No fit', cls: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300' };
@@ -837,7 +837,7 @@ export default function RouteOptimizationPage() {
                             <button
                               type="button"
                               onClick={() => setRsConfirm(rs)}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-700"
                             >
                               Change vehicle
                             </button>
@@ -937,7 +937,7 @@ export default function RouteOptimizationPage() {
 
       {/* Sticky apply bar */}
       {selected.size > 0 && (
-        <div className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border border-blue-200 bg-white p-4 shadow-lg sm:flex-row sm:items-center sm:justify-between dark:border-blue-500/30">
+        <div className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border border-green-200 bg-white p-4 shadow-lg sm:flex-row sm:items-center sm:justify-between dark:border-green-500/30">
           <span className="text-sm text-gray-700">
             <strong>{selected.size}</strong> route(s) selected ·{' '}
             <strong>{selectedMoves}</strong> passenger move(s)
@@ -953,7 +953,7 @@ export default function RouteOptimizationPage() {
             <button
               type="button"
               onClick={() => setConfirmOpen(true)}
-              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 sm:flex-none sm:py-1.5"
+              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 sm:flex-none sm:py-1.5"
             >
               Apply selected
             </button>
@@ -994,7 +994,7 @@ export default function RouteOptimizationPage() {
                 type="button"
                 onClick={() => applySelected(mode)}
                 disabled={applying}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
               >
                 {applying && <Loader2 className="h-4 w-4 animate-spin" />}
                 {applying ? 'Applying…' : 'Confirm & apply'}
@@ -1072,7 +1072,7 @@ export default function RouteOptimizationPage() {
                 type="button"
                 onClick={() => applyRightsize(rsConfirm)}
                 disabled={applyingRs}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
               >
                 {applyingRs && <Loader2 className="h-4 w-4 animate-spin" />}
                 {applyingRs ? 'Changing…' : 'Confirm & change'}
@@ -1097,7 +1097,7 @@ export default function RouteOptimizationPage() {
           >
             <div className="mb-4 flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
-                <span className="rounded-lg bg-blue-50 p-1.5 text-blue-600">
+                <span className="rounded-lg bg-green-50 p-1.5 text-green-600">
                   <HelpCircle className="h-5 w-5" />
                 </span>
                 <h2 id="guide-title" className="text-lg font-semibold text-gray-900">
@@ -1108,7 +1108,7 @@ export default function RouteOptimizationPage() {
                 type="button"
                 onClick={() => setGuideOpen(false)}
                 aria-label="Close"
-                className="cursor-pointer rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="cursor-pointer rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1139,7 +1139,7 @@ export default function RouteOptimizationPage() {
               <GuideFeature icon={<Users className="h-5 w-5" />} tone="text-emerald-600" title="Consolidation">
                 Moves individual passengers off an under-used bus onto compatible routes that still have free seats.
               </GuideFeature>
-              <GuideFeature icon={<Gauge className="h-5 w-5" />} tone="text-blue-600" title="Right-size vehicles">
+              <GuideFeature icon={<Gauge className="h-5 w-5" />} tone="text-green-600" title="Right-size vehicles">
                 Suggests swapping a route to a better-fitting spare bus (downsize or upsize) based on its actual demand.
               </GuideFeature>
               <GuideFeature icon={<History className="h-5 w-5" />} tone="text-purple-600" title="Daily & Planning horizons">
@@ -1163,7 +1163,7 @@ export default function RouteOptimizationPage() {
               <button
                 type="button"
                 onClick={() => setGuideOpen(false)}
-                className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                className="cursor-pointer rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700"
               >
                 Got it
               </button>

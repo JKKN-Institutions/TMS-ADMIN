@@ -119,7 +119,7 @@ const SettingsPage = () => {
           {/* Booking Configuration */}
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <h4 className="font-medium text-gray-900 mb-4 flex items-center space-x-2">
-              <Calendar className="w-5 h-5 text-blue-600" />
+              <Calendar className="w-5 h-5 text-green-600" />
               <span>Booking Configuration</span>
             </h4>
             
@@ -134,7 +134,7 @@ const SettingsPage = () => {
                     id="enableBookingTimeWindow"
                     checked={schedulingSettings.enableBookingTimeWindow}
                     onChange={(e) => setSchedulingSettings({ ...schedulingSettings, enableBookingTimeWindow: e.target.checked })}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
                   />
                   <label htmlFor="enableBookingTimeWindow" className="ml-2 text-sm text-gray-600">
                     Enforce a daily booking cutoff time
@@ -149,7 +149,7 @@ const SettingsPage = () => {
                 <select
                   value={schedulingSettings.bookingWindowEndHour}
                   onChange={(e) => setSchedulingSettings({ ...schedulingSettings, bookingWindowEndHour: parseInt(e.target.value) })}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 >
                   {Array.from({ length: 24 }, (_, i) => (
                     <option key={i} value={i}>
@@ -172,7 +172,7 @@ const SettingsPage = () => {
                   onChange={(e) => setSchedulingSettings({ ...schedulingSettings, bookingDaysAhead: parseInt(e.target.value) })}
                   min="1"
                   max="10"
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 />
                 <p className="text-sm text-gray-600 mt-1">
                   How many <strong>working</strong> days ahead learners can book. Sundays and dates
@@ -191,7 +191,7 @@ const SettingsPage = () => {
                     id="allowSameDayBooking"
                     checked={schedulingSettings.allowSameDayBooking}
                     onChange={(e) => setSchedulingSettings({ ...schedulingSettings, allowSameDayBooking: e.target.checked })}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
                   />
                   <label htmlFor="allowSameDayBooking" className="ml-2 text-sm text-gray-600">
                     Let learners also book <strong>today</strong>
@@ -212,7 +212,7 @@ const SettingsPage = () => {
                   value={schedulingSettings.sameDayBookingCutoffHour}
                   onChange={(e) => setSchedulingSettings({ ...schedulingSettings, sameDayBookingCutoffHour: parseInt(e.target.value) })}
                   disabled={!schedulingSettings.allowSameDayBooking}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 disabled:bg-gray-100 disabled:text-gray-400"
                 >
                   {Array.from({ length: 24 }, (_, i) => (
                     <option key={i} value={i}>
@@ -236,7 +236,7 @@ const SettingsPage = () => {
                     id="autoGenerateBills"
                     checked={schedulingSettings.autoGenerateBills}
                     onChange={(e) => setSchedulingSettings({ ...schedulingSettings, autoGenerateBills: e.target.checked })}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
                   />
                   <label htmlFor="autoGenerateBills" className="ml-2 text-sm text-gray-600">
                     Bill newly-onboarded learners automatically
@@ -302,7 +302,7 @@ const SettingsPage = () => {
               type="text"
               value={generalSettings.systemName}
               onChange={(e) => setGeneralSettings(prev => ({ ...prev, systemName: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
             />
           </div>
           <div>
@@ -310,7 +310,7 @@ const SettingsPage = () => {
             <select
               value={generalSettings.timezone}
               onChange={(e) => setGeneralSettings(prev => ({ ...prev, timezone: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
             >
               <option value="Asia/Kolkata">Asia/Kolkata</option>
               <option value="UTC">UTC</option>
@@ -322,7 +322,7 @@ const SettingsPage = () => {
             <select
               value={generalSettings.language}
               onChange={(e) => setGeneralSettings(prev => ({ ...prev, language: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
             >
               <option value="en">English</option>
               <option value="hi">Hindi</option>
@@ -334,7 +334,7 @@ const SettingsPage = () => {
             <select
               value={generalSettings.dateFormat}
               onChange={(e) => setGeneralSettings(prev => ({ ...prev, dateFormat: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
             >
               <option value="DD/MM/YYYY">DD/MM/YYYY</option>
               <option value="MM/DD/YYYY">MM/DD/YYYY</option>
@@ -345,7 +345,7 @@ const SettingsPage = () => {
         <div className="mt-6">
           <button
             onClick={() => handleSaveSettings('General')}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
+            className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors flex items-center space-x-2"
           >
             <Save className="w-4 h-4" />
             <span>Save General Settings</span>
@@ -359,7 +359,7 @@ const SettingsPage = () => {
     if (loading) {
       return (
         <div className="flex justify-center items-center py-8">
-          <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+          <RefreshCw className="w-6 h-6 animate-spin text-green-600" />
           <span className="ml-2 text-gray-600">Loading settings...</span>
         </div>
       );
@@ -400,7 +400,7 @@ const SettingsPage = () => {
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center space-x-2 px-3 py-2 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${
                     activeTab === tab.id
-                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                      ? 'bg-green-50 text-green-600 border-b-2 border-green-600'
                       : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >

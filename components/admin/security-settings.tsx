@@ -53,7 +53,7 @@ export function SecuritySettings() {
         <p className="mt-1 text-sm text-gray-600">Real signals from the admin activity log — nothing fabricated.</p>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           Authentication — sessions, two-factor authentication, password policy and IP allow-listing — is
@@ -109,7 +109,7 @@ export function SecuritySettings() {
               <h4 className="text-sm font-medium text-gray-900">Recent admin actions</h4>
               <Link
                 href="/activity-log"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:underline"
               >
                 <ExternalLink className="h-3.5 w-3.5" /> View full log
               </Link>
