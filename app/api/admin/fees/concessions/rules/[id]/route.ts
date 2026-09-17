@@ -33,7 +33,13 @@ async function putRule(request: NextRequest, auth: AuthContext, id: string) {
     }
     const { data, error } = await svc
       .from('tms_fee_concession_rule')
-      .update({ ...parsed.value, updated_at: new Date().toISOString(), updated_by: auth.userId })
+      .update({
+        ...parsed.value,
+        // Omitting is_active on a PUT must never reactivate/deactivate a rule.
+        is_active: parsed.isActiveProvided ? parsed.value.is_active : before.is_active,
+        updated_at: new Date().toISOString(),
+        updated_by: auth.userId,
+      })
       .eq('id', id)
       .select('*')
       .single();

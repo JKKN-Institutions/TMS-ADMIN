@@ -4,7 +4,7 @@ import { parseRuleInput } from './concession-rules';
 describe('parseRuleInput', () => {
   it('accepts a final_year rule and clears annual_amount', () => {
     const r = parseRuleInput({ kind: 'final_year', institution_id: 'i', admission_year: '2022', percent: 50, label: ' Pharm ', annual_amount: 9 });
-    expect(r).toEqual({ ok: true, value: {
+    expect(r).toEqual({ ok: true, isActiveProvided: false, value: {
       kind: 'final_year', institution_id: 'i', admission_year: 2022, program_id: null,
       percent: 50, annual_amount: null, label: 'Pharm', is_active: true,
     } });
@@ -16,7 +16,7 @@ describe('parseRuleInput', () => {
   });
   it('accepts scheme_75 and clears cohort fields', () => {
     const r = parseRuleInput({ kind: 'scheme_75', annual_amount: '500', label: '7.5%', institution_id: 'i' });
-    expect(r).toEqual({ ok: true, value: {
+    expect(r).toEqual({ ok: true, isActiveProvided: false, value: {
       kind: 'scheme_75', institution_id: null, admission_year: null, program_id: null,
       percent: null, annual_amount: 500, label: '7.5%', is_active: true,
     } });
@@ -29,5 +29,13 @@ describe('parseRuleInput', () => {
   it('honours is_active=false', () => {
     const r = parseRuleInput({ kind: 'scheme_75', annual_amount: 500, label: 'x', is_active: false });
     expect(r.ok && r.value.is_active).toBe(false);
+  });
+  it('reports whether is_active was provided, so a PUT can leave it untouched', () => {
+    const omitted = parseRuleInput({ kind: 'scheme_75', annual_amount: 500, label: 'x' });
+    expect(omitted.ok && omitted.isActiveProvided).toBe(false);
+    expect(omitted.ok && omitted.value.is_active).toBe(true); // POST default
+    const provided = parseRuleInput({ kind: 'scheme_75', annual_amount: 500, label: 'x', is_active: false });
+    expect(provided.ok && provided.isActiveProvided).toBe(true);
+    expect(provided.ok && provided.value.is_active).toBe(false);
   });
 });
