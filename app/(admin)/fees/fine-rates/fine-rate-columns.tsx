@@ -42,7 +42,7 @@ export function getFineRateColumns(
     {
       id: 'fine_amount',
       accessorFn: (r) => r.fine_amount,
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Fine" />,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Transport fee" />,
       cell: ({ row }) => {
         const r = row.original;
         const value = draft[r.stop_id] ?? (r.fine_amount === null ? '' : String(r.fine_amount));
@@ -67,7 +67,7 @@ export function getFineRateColumns(
             value={value}
             onChange={(e) => onChange(r.stop_id, e.target.value)}
             placeholder="not set"
-            aria-label={`Fine amount for ${r.stop_name}`}
+            aria-label={`Transport fee amount for ${r.stop_name}`}
             className="h-9 w-32 rounded-lg border border-gray-300 px-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         );

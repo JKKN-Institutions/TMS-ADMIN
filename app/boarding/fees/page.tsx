@@ -18,7 +18,8 @@ interface StaffBill {
 async function fetchMyFees(): Promise<{ bills: StaffBill[]; totalDue: number }> {
   const res = await fetch('/api/boarding/fees');
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load your transport fees');
+  if (!res.ok || !json.success)
+    throw new Error(json.error || 'Failed to load your transport maintenance fee');
   return json.data;
 }
 
@@ -28,7 +29,7 @@ export default function StaffFeesPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16 text-gray-500">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your transport fees…
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your transport maintenance fee…
       </div>
     );
   }
@@ -38,7 +39,7 @@ export default function StaffFeesPage() {
       <div className="mx-auto max-w-2xl p-4">
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-          <span>We could not load your transport fees. Please try again, or contact the transport office.</span>
+          <span>We could not load your transport maintenance fee. Please try again, or contact the transport office.</span>
         </div>
       </div>
     );
@@ -49,13 +50,13 @@ export default function StaffFeesPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Transport Fees</h1>
-        <p className="text-gray-600">Your transport fee for the current year.</p>
+        <h1 className="text-2xl font-bold text-gray-900">Transport Maintenance Fee</h1>
+        <p className="text-gray-600">Your transport maintenance fee for the current year.</p>
       </div>
 
       {bills.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-800">
-          You have no transport fee bills.
+          You have no transport maintenance fee bills.
         </div>
       ) : (
         <>
@@ -77,7 +78,9 @@ export default function StaffFeesPage() {
               >
                 <div className="min-w-0">
                   <p className="font-medium text-gray-900">
-                    {b.yearName ? `Transport fee ${b.yearName}` : 'Transport fee'}
+                    {b.yearName
+                      ? `Transport maintenance fee ${b.yearName}`
+                      : 'Transport maintenance fee'}
                   </p>
                   <p className="truncate text-sm text-gray-500">
                     Due {b.dueDate}

@@ -63,7 +63,7 @@ const MODULE_LABEL: Record<string, string> = {
   'enrollment': 'Enrollment',
   'grievances': 'Grievances',
   'settings': 'Settings',
-  'fees': 'Fees',
+  'fees': 'Fees (maintenance & transport fee)',
   'notifications': 'Notifications',
   'driver-mobiles': 'Tracking Mobiles',
   'transport-vacate': 'Transport Vacate',

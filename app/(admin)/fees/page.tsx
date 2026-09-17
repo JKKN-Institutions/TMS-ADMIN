@@ -105,7 +105,7 @@ export default function FeesPage() {
   const active = rows.filter((r) => r.status === 'active').length;
   const annualValue = rows.filter((r) => r.status === 'active').reduce((s, r) => s + Number(r.total_amount || 0), 0);
   const stats = [
-    { title: 'Fee Structures', value: total, subtitle: 'All structures', icon: Receipt, color: 'blue' as const },
+    { title: 'Structures', value: total, subtitle: 'All maintenance fee structures', icon: Receipt, color: 'blue' as const },
     { title: 'Active', value: active, subtitle: 'Ready to generate', icon: CheckCircle, color: 'green' as const },
     { title: 'Active Annual Value', value: inr(annualValue), subtitle: 'Sum of active fees', icon: IndianRupee, color: 'purple' as const },
   ];
@@ -114,22 +114,24 @@ export default function FeesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Fees</h1>
-          <p className="text-gray-600">Configure transport fee structures and generate bills</p>
+          <h1 className="text-2xl font-bold text-gray-900">Transport Maintenance Fee</h1>
+          <p className="text-gray-600">
+            The recurring charge the institution collects. Configure structures and generate bills.
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Link
             href="/fees/fine-rates"
             className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
-            <IndianRupee className="h-4 w-4" /> Fine Rates
+            <IndianRupee className="h-4 w-4" /> Transport Fee rates
           </Link>
           {canManage && (
             <button
               onClick={() => router.push('/fees/new')}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
             >
-              <Plus className="h-4 w-4" /> Add Fee Structure
+              <Plus className="h-4 w-4" /> Add Structure
             </button>
           )}
         </div>
@@ -154,9 +156,9 @@ export default function FeesPage() {
       <DataTable
         columns={columns}
         data={rows}
-        entityName="fee structures"
+        entityName="maintenance fee structures"
         isLoading={loading}
-        searchPlaceholder="Search fee structure..."
+        searchPlaceholder="Search maintenance fee structure..."
         enableRowSelection={canManage}
         getRowId={(f) => f.id}
         filters={[
@@ -186,7 +188,7 @@ export default function FeesPage() {
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-        title="Delete fee structure?"
+        title="Delete maintenance fee structure?"
         description={deleteTarget ? `This permanently deletes "${deleteTarget.name}". Structures with generated bills cannot be deleted.` : ''}
         confirmLabel="Delete"
         onConfirm={confirmDelete}
@@ -196,8 +198,8 @@ export default function FeesPage() {
       <ConfirmDialog
         open={!!bulkTarget}
         onOpenChange={(open) => { if (!open) setBulkTarget(null); }}
-        title={`Delete ${bulkTarget?.rows.length ?? 0} fee structure(s)?`}
-        description="This permanently deletes the selected fee structures. Any with generated bills will be skipped."
+        title={`Delete ${bulkTarget?.rows.length ?? 0} maintenance fee structure(s)?`}
+        description="This permanently deletes the selected maintenance fee structures. Any with generated bills will be skipped."
         confirmLabel="Delete Selected"
         onConfirm={confirmBulkDelete}
         loading={bulkDeleting}

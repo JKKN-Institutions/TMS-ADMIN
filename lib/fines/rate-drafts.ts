@@ -1,6 +1,6 @@
 // lib/fines/rate-drafts.ts
-// Pure helpers for pricing an unpriced stop from inside the Generate Fine
-// dialog. The dialog never sends an amount to the fine engine — it writes the
+// Pure helpers for pricing an unpriced stop from inside the Charge Transport Fee
+// dialog. The dialog never sends an amount to the charge engine — it writes the
 // amount to the YEAR'S STOP SHEET first, then re-prices. That keeps the sheet
 // the single source of truth for money (see the note in ./fields.ts).
 
@@ -19,8 +19,8 @@ export interface PriceableStop {
  * The stops the operator can fix without leaving the dialog: those skipped
  * purely for want of a rate. Learners with no boarding stop are excluded —
  * there is no stop to price, so that is a passenger-record fix, not a rate fix.
- * Already-priced stops are excluded too, so raising one fine can never re-price
- * a stop for the rest of the year.
+ * Already-priced stops are excluded too, so raising one charge can never
+ * re-price a stop for the rest of the year.
  */
 export function priceableStops(candidates: FineCandidate[]): PriceableStop[] {
   const byStop = new Map<string, PriceableStop>();
@@ -42,9 +42,9 @@ export function priceableStops(candidates: FineCandidate[]): PriceableStop[] {
 }
 
 /**
- * Turn the dialog's draft inputs into the fine-rates payload. A blank draft is
- * DROPPED, never sent: the rates endpoint reads null as "clear this stop", so
- * sending blanks would delete rates the operator never touched.
+ * Turn the dialog's draft inputs into the transport-fee rates payload. A blank
+ * draft is DROPPED, never sent: the rates endpoint reads null as "clear this
+ * stop", so sending blanks would delete rates the operator never touched.
  */
 export function draftsToRates(drafts: Record<string, string>): FineRateInput[] {
   const rates: FineRateInput[] = [];
@@ -57,9 +57,9 @@ export function draftsToRates(drafts: Record<string, string>): FineRateInput[] {
       throw new Error(`Enter a valid amount for this stop.`);
     }
     // resolveFine() treats 0 as unpriced, so a 0 rate would look configured in
-    // the sheet yet still refuse to raise a fine — a confusing dead end.
+    // the sheet yet still refuse to raise a charge — a confusing dead end.
     if (amount <= 0) {
-      throw new Error(`A fine must be greater than zero.`);
+      throw new Error(`A transport fee must be greater than zero.`);
     }
     rates.push({ stop_id, fine_amount: amount });
   }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Receipt, AlertTriangle, CheckCircle2, Info, RefreshCw, Loader2 } from 'lucide-react';
+import { Receipt, AlertTriangle, CheckCircle2, Info, RefreshCw, Loader2, ArrowRight } from 'lucide-react';
 
 interface Term {
   term_no: number;
@@ -25,11 +25,45 @@ interface Access {
   term1_balance: number;
 }
 
+type TransportFeeStatus = 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'cancelled' | 'unknown';
+interface TransportFeeItem {
+  id: string;
+  amount: number;
+  paid_amount: number;
+  due_date: string;
+  reason: string;
+  status: TransportFeeStatus;
+}
+interface RouteCharge {
+  amount: number;
+  route_number: string | null;
+  route_name: string | null;
+  stop_name: string | null;
+}
+interface TransportFees {
+  items: TransportFeeItem[];
+  outstanding: number;
+  total: number;
+  count: number;
+  route_charge: RouteCharge | null;
+}
+
 async function fetchAccess(): Promise<Access> {
   const res = await fetch('/api/student/transport-access', { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load transport fees');
+  if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load your fees');
   return json.data as Access;
+}
+
+const NO_FEES: TransportFees = { items: [], outstanding: 0, total: 0, count: 0, route_charge: null };
+
+async function fetchTransportFees(): Promise<TransportFees> {
+  const res = await fetch('/api/student/transport-fee', { cache: 'no-store', credentials: 'same-origin' });
+  const json = await res.json();
+  // Never fail the whole page for this: the maintenance fee is the part that
+  // controls portal access and must always render.
+  if (!res.ok || !json.success) return NO_FEES;
+  return json.data as TransportFees;
 }
 
 const inr = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -43,10 +77,24 @@ function termBadge(t: Term) {
   return <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-500/15 dark:text-gray-300">Pending</span>;
 }
 
+const TF_BADGE: Record<TransportFeeStatus, string> = {
+  paid: 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-400',
+  partially_paid: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400',
+  unpaid: 'bg-gray-100 text-gray-700 dark:bg-gray-500/15 dark:text-gray-300',
+  overdue: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-400',
+  cancelled: 'bg-slate-100 text-slate-600 line-through dark:bg-slate-500/15 dark:text-slate-400',
+  unknown: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400',
+};
+
 export default function StudentFeesPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['student-transport-access'],
     queryFn: fetchAccess,
+  });
+
+  const { data: transportFees } = useQuery({
+    queryKey: ['student-transport-fee'],
+    queryFn: fetchTransportFees,
   });
 
   const { data: transport } = useQuery({
@@ -73,13 +121,23 @@ export default function StudentFeesPage() {
     return (
       <div className="mx-auto max-w-2xl p-4">
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300">
-          {error instanceof Error ? error.message : 'Could not load your transport fees.'}
+          {error instanceof Error ? error.message : 'Could not load your fees.'}
         </div>
       </div>
     );
   }
 
   const hasTerms = data.terms.length > 0;
+  // Maintenance outstanding comes from the terms, so it stays in step with the
+  // table below rather than being a second, separately-derived number.
+  const maintenanceOutstanding = data.terms.reduce((s, t) => s + Math.max(0, Number(t.balance || 0)), 0);
+  const tf = transportFees ?? NO_FEES;
+  const liveTransportFees = tf.items.filter((i) => i.status !== 'cancelled');
+  const routeCharge = tf.route_charge;
+  // Nothing charged yet: the card shows what the learner's ROUTE would be
+  // charged, which is information, not a debt — so it is never added to any
+  // total and never coloured as money owed.
+  const showsRouteChargeOnly = tf.count === 0 && !!routeCharge;
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4">
@@ -89,7 +147,7 @@ export default function StudentFeesPage() {
             <Receipt className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Transport Fees</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Fees</h1>
             {data.transport_year_name && (
               <p className="truncate text-sm text-gray-500 dark:text-gray-400">{data.transport_year_name}</p>
             )}
@@ -105,6 +163,74 @@ export default function StudentFeesPage() {
         </button>
       </div>
 
+      {/* The two charges, side by side, so the difference is obvious at a glance. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            Transport Maintenance Fee
+          </p>
+          <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{inr(maintenanceOutstanding)}</p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {maintenanceOutstanding > 0 ? 'Still to pay' : 'Fully paid'}
+          </p>
+        </div>
+        <div
+          className={`rounded-xl border p-4 ${
+            tf.outstanding > 0
+              ? 'border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-950/30'
+              : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+          }`}
+        >
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            Transport Fee
+          </p>
+          <p
+            className={`mt-1 text-2xl font-bold ${
+              tf.outstanding > 0
+                ? 'text-red-700 dark:text-red-300'
+                : showsRouteChargeOnly
+                  ? 'text-gray-500 dark:text-gray-400'
+                  : 'text-gray-900 dark:text-white'
+            }`}
+          >
+            {showsRouteChargeOnly ? inr(routeCharge.amount) : inr(tf.outstanding)}
+          </p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {tf.count > 0
+              ? `${tf.count} charge(s) raised`
+              : showsRouteChargeOnly
+                ? 'Your route charge — applies only if the maintenance fee is unpaid'
+                : 'None charged'}
+          </p>
+          {showsRouteChargeOnly && (routeCharge.route_number || routeCharge.stop_name) && (
+            <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
+              {routeCharge.route_number ? `Route ${routeCharge.route_number}` : ''}
+              {routeCharge.route_number && routeCharge.stop_name ? ' · ' : ''}
+              {routeCharge.stop_name ?? ''}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* The rule, in the learner's own words. */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-950/30">
+        <div className="flex items-start gap-3">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm text-amber-900 dark:text-amber-200">
+            The college collects the <strong>Transport Maintenance Fee</strong>. If you do not pay it
+            by the due date, a <strong>Transport Fee</strong> is charged to your account
+            automatically <ArrowRight className="inline h-3.5 w-3.5" /> and you then have to pay that
+            as well. Paying the maintenance fee on time avoids it.
+            {routeCharge ? (
+              <>
+                {' '}
+                On your route that charge is <strong>{inr(routeCharge.amount)}</strong>.
+              </>
+            ) : null}
+          </p>
+        </div>
+      </div>
+
       {/* Status banner */}
       {!data.allowed ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-500/30 dark:bg-red-950/30">
@@ -114,7 +240,7 @@ export default function StudentFeesPage() {
               <p className="font-semibold text-red-800 dark:text-red-300">Portal access restricted</p>
               {data.reason === 'term1_unpaid' ? (
                 <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
-                  Your <strong>first term</strong> transport fee of <strong>{inr(data.term1_balance)}</strong>
+                  Your <strong>first term</strong> transport maintenance fee of <strong>{inr(data.term1_balance)}</strong>
                   {data.term1_due_date ? <> (due {fmtDate(data.term1_due_date)})</> : null} is not fully paid.
                   Clear it at the transport office to unlock bus booking and the rest of the portal.
                 </p>
@@ -122,13 +248,13 @@ export default function StudentFeesPage() {
                 // Distinct from term1_unpaid on purpose: paying cannot fix this,
                 // so the learner must be told to contact the office instead.
                 <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
-                  Your transport fee for this year has not been generated yet, so bus booking is
-                  locked. Please contact the transport office — there is nothing to pay until they
-                  raise your bill.
+                  Your transport maintenance fee for this year has not been generated yet, so bus
+                  booking is locked. Please contact the transport office — there is nothing to pay
+                  until they raise your bill.
                 </p>
               ) : (
                 <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
-                  You have <strong>{data.overdue_count}</strong> overdue transport term{data.overdue_count === 1 ? '' : 's'} totalling{' '}
+                  You have <strong>{data.overdue_count}</strong> overdue maintenance term{data.overdue_count === 1 ? '' : 's'} totalling{' '}
                   <strong>{inr(data.total_owed)}</strong>. Please clear the overdue amount at the transport office to restore access to the rest of the portal.
                 </p>
               )}
@@ -139,14 +265,14 @@ export default function StudentFeesPage() {
         <div className="rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-500/30 dark:bg-green-950/30">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-            <p className="text-sm font-medium text-green-800 dark:text-green-300">You're up to date on your transport fees.</p>
+            <p className="text-sm font-medium text-green-800 dark:text-green-300">You&apos;re up to date on your transport maintenance fee.</p>
           </div>
         </div>
       ) : (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
           <div className="flex items-center gap-3">
             <Info className="h-5 w-5 text-gray-500" />
-            <p className="text-sm text-gray-600 dark:text-gray-300">No transport fees are currently assigned to your account.</p>
+            <p className="text-sm text-gray-600 dark:text-gray-300">No transport maintenance fee is currently assigned to your account.</p>
           </div>
         </div>
       )}
@@ -156,7 +282,7 @@ export default function StudentFeesPage() {
           review I5). */}
       {transport?.stop_wise && transport?.stop_name && (
         <div className="mb-4 rounded-lg border bg-muted/40 p-4 dark:bg-muted/20">
-          <p className="text-sm text-muted-foreground">Your transport fee is based on your boarding stop</p>
+          <p className="text-sm text-muted-foreground">Your maintenance fee is based on your boarding stop</p>
           <p className="mt-1 font-medium">
             {transport.stop_name}
             {transport.route_label ? ` · Route ${transport.route_label}` : ''}
@@ -164,9 +290,11 @@ export default function StudentFeesPage() {
         </div>
       )}
 
-      {/* Terms — stacked cards on mobile (no cramped/clipped table), table from sm up */}
+      {/* ── Transport Maintenance Fee ── */}
       {hasTerms && (
-        <>
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Transport Maintenance Fee</h2>
+
           {/* Mobile: one card per term, so nothing overflows a narrow screen */}
           <div className="space-y-3 sm:hidden">
             {data.terms.map((t, i) => (
@@ -219,11 +347,57 @@ export default function StudentFeesPage() {
               </tbody>
             </table>
           </div>
-        </>
+        </section>
       )}
 
+      {/* ── Transport Fee (charged when the maintenance fee goes unpaid) ── */}
+      {liveTransportFees.length > 0 ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Transport Fee</h2>
+          <div className="space-y-3">
+            {liveTransportFees.map((f) => (
+              <div
+                key={f.id}
+                className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-lg font-bold text-gray-900 dark:text-white">{inr(f.amount)}</span>
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${TF_BADGE[f.status]}`}>
+                    {f.status.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{f.reason}</p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Due {fmtDate(f.due_date)}
+                  {f.paid_amount > 0 ? ` · ${inr(f.paid_amount)} paid` : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : routeCharge ? (
+        // Nothing charged. Show the route's rate so the learner knows what is at
+        // stake, worded so it can never be mistaken for a bill.
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Transport Fee</h2>
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+            <p className="text-sm text-gray-700 dark:text-gray-200">
+              No transport fee has been charged to you. On your route
+              {routeCharge.route_number ? ` (Route ${routeCharge.route_number}` : ''}
+              {routeCharge.route_number && routeCharge.route_name ? ` — ${routeCharge.route_name}` : ''}
+              {routeCharge.route_number ? ')' : ''} the charge would be{' '}
+              <strong>{inr(routeCharge.amount)}</strong> if the maintenance fee is not paid by the
+              due date.
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              You do not owe this amount today.
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <p className="text-xs text-gray-400 dark:text-gray-500">
-        Payments are recorded by the transport office. If you've paid but still see an overdue status, please tap Refresh or contact the office.
+        Payments are recorded by the transport office. If you&apos;ve paid but still see an overdue status, please tap Refresh or contact the office.
       </p>
     </div>
   );

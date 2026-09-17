@@ -19,7 +19,11 @@ describe('formatInr', () => {
 
 describe('buildStaffBillNotification', () => {
   it('names the transport year in the title', () => {
-    expect(buildStaffBillNotification(BASE).title).toBe('Transport fee 2026-2027 — bill generated');
+    // "maintenance fee" is load-bearing wording: the bare "Transport fee" now
+    // means the penalty charged when this bill goes unpaid, not this bill.
+    expect(buildStaffBillNotification(BASE).title).toBe(
+      'Transport maintenance fee 2026-2027 — bill generated'
+    );
   });
 
   it('states the amount and the due date in the body', () => {

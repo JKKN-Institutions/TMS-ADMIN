@@ -45,10 +45,10 @@ export function buildStaffBillNotification(input: StaffBillNotificationInput): {
   const stopClause = input.stopName ? ` It is based on your boarding stop, ${input.stopName}.` : '';
 
   return {
-    title: `Transport fee ${input.yearName} — bill generated`,
+    title: `Transport maintenance fee ${input.yearName} — bill generated`,
     body:
-      `Your transport fee for ${input.yearName} is ${amount}, due ${due}.` +
-      `${stopClause} Open Transport Fees to see the full details, and contact the transport office to pay.`,
+      `Your transport maintenance fee for ${input.yearName} is ${amount}, due ${due}.` +
+      `${stopClause} Open Fees to see the full details, and contact the transport office to pay.`,
     category: 'transport',
     url: '/boarding/fees',
   };

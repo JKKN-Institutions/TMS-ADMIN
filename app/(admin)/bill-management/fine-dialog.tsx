@@ -10,7 +10,7 @@ import type { TransportBillRow } from '@/lib/fees/bills';
 import { inr } from './columns';
 import { previewFines, createFines, saveFineRates } from './fines-api';
 
-/** Default due date: 15 days out. A fine dated in the past is born overdue. */
+/** Default due date: 15 days out. A charge dated in the past is born overdue. */
 function defaultDueDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 15);
@@ -40,7 +40,7 @@ export function FineDialog({
   const [savingRates, setSavingRates] = useState(false);
 
   // One key per opening of the dialog: a retried submission is a no-op, while a
-  // deliberate second fine (new dialog) gets a new key and is allowed.
+  // deliberate second charge (new dialog) gets a new key and is allowed.
   const idempotencyKey = useRef<string>('');
   useEffect(() => {
     if (open) {
@@ -52,7 +52,7 @@ export function FineDialog({
   }, [open]);
 
   // Selection is over BILL rows: ticking Term 1 and Term 2 of one learner must
-  // produce ONE fine. Staff rows cannot be fined (no learners_profiles row).
+  // produce ONE charge. Staff rows cannot be charged (no learners_profiles row).
   const { personIds, staffCount, sourceBillByPerson } = useMemo(() => {
     const byPerson = new Map<string, string>();
     let staff = 0;
@@ -76,7 +76,7 @@ export function FineDialog({
     enabled: open && personIds.length > 0,
   });
 
-  const finable = useMemo(
+  const chargeable = useMemo(
     () => (data?.candidates ?? []).filter((c) => c.amount !== null),
     [data]
   );
@@ -94,9 +94,10 @@ export function FineDialog({
   );
 
   /**
-   * Save the typed amounts into the year's fine sheet, then re-price. This is a
-   * SEPARATE act from raising the fine: the rate is permanent and applies to
-   * every learner at that stop, so it gets its own click and its own audit entry.
+   * Save the typed amounts into the year's transport-fee sheet, then re-price.
+   * This is a SEPARATE act from raising the charge: the rate is permanent and
+   * applies to every learner at that stop, so it gets its own click and its own
+   * audit entry.
    */
   async function saveRates() {
     setSavingRates(true);
@@ -107,7 +108,7 @@ export function FineDialog({
       setRateDrafts({});
       await refetch();
       toast.success(
-        `Saved ${rates.length} stop rate(s) to the fine sheet. Re-priced the selection.`
+        `Saved ${rates.length} stop rate(s) to the transport fee sheet. Re-priced the selection.`
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the stop rates');
@@ -120,7 +121,7 @@ export function FineDialog({
 
   async function submit() {
     // Typed-but-unsaved amounts are not in the sheet, so those learners would be
-    // skipped without explanation. Refuse rather than under-fine silently.
+    // skipped without explanation. Refuse rather than under-charge silently.
     if (filledDrafts > 0) {
       toast.error(`Save the ${filledDrafts} stop rate(s) first, or clear them.`);
       return;
@@ -136,13 +137,13 @@ export function FineDialog({
         idempotencyKey: idempotencyKey.current,
         sourceBillByPerson,
       });
-      toast.success(`Raised ${result.created} fine(s) totalling ${inr(result.totalAmount)}.`);
-      if (result.duplicates) toast(`${result.duplicates} already raised — skipped.`);
-      if (result.errors) toast.error(`${result.errors} fine(s) failed. Check the Fines tab.`);
+      toast.success(`Charged ${result.created} learner(s) ${inr(result.totalAmount)} in transport fees.`);
+      if (result.duplicates) toast(`${result.duplicates} already charged — skipped.`);
+      if (result.errors) toast.error(`${result.errors} charge(s) failed. Check the Transport Fee tab.`);
       onDone();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not raise the fines');
+      toast.error(e instanceof Error ? e.message : 'Could not charge the transport fee');
     } finally {
       setSubmitting(false);
     }
@@ -151,15 +152,16 @@ export function FineDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Generate fine</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Charge transport fee</h2>
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          The amount comes from each learner&apos;s boarding stop in this year&apos;s fine sheet. It is
-          raised as a separate bill and does not affect their transport access.
+          For learners who have not paid the maintenance fee. The amount comes from each
+          learner&apos;s boarding stop in this year&apos;s transport fee sheet. It is raised as a
+          separate bill and does not affect their transport access.
         </p>
 
         {staffCount > 0 && (
           <p className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-            {staffCount} staff row(s) skipped — fines apply to learners only.
+            {staffCount} staff row(s) skipped — the transport fee applies to learners only.
           </p>
         )}
 
@@ -179,7 +181,7 @@ export function FineDialog({
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Late payment — August"
+              placeholder="e.g. Maintenance fee unpaid — August"
               className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
           </label>
@@ -206,7 +208,7 @@ export function FineDialog({
                   <th className="px-3 py-2">Learner</th>
                   <th className="px-3 py-2">Route</th>
                   <th className="px-3 py-2">Stop</th>
-                  <th className="px-3 py-2 text-right">Fine</th>
+                  <th className="px-3 py-2 text-right">Transport fee</th>
                 </tr>
               </thead>
               <tbody>
@@ -238,13 +240,13 @@ export function FineDialog({
                           onChange={(e) =>
                             setRateDrafts((d) => ({ ...d, [c.stop_id as string]: e.target.value }))
                           }
-                          placeholder="Set fine ₹"
-                          aria-label={`Fine amount for ${c.stop_name ?? 'this stop'}`}
+                          placeholder="Set fee ₹"
+                          aria-label={`Transport fee amount for ${c.stop_name ?? 'this stop'}`}
                           className="h-8 w-28 rounded-lg border border-amber-300 bg-amber-50 px-2 text-right text-sm text-gray-900 placeholder:text-amber-700/60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-gray-100 dark:placeholder:text-amber-300/60"
                         />
                       ) : (
                         <span className="text-amber-700 dark:text-amber-400">
-                          {c.skip_reason ? FINE_SKIP_LABEL[c.skip_reason] : 'Not finable'}
+                          {c.skip_reason ? FINE_SKIP_LABEL[c.skip_reason] : 'Cannot be charged'}
                         </span>
                       )}
                     </td>
@@ -258,9 +260,9 @@ export function FineDialog({
         {unpricedStops.length > 0 && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
             <p className="text-sm text-amber-900 dark:text-amber-200">
-              {unpricedStops.length} stop(s) have no fine configured. Enter an amount above to
-              price them — it is saved to this year&apos;s fine sheet and applies to{' '}
-              <strong>every learner boarding that stop</strong>, not just this fine.
+              {unpricedStops.length} stop(s) have no transport fee configured. Enter an amount above
+              to price them — it is saved to this year&apos;s transport fee sheet and applies to{' '}
+              <strong>every learner boarding that stop</strong>, not just this charge.
             </p>
             {unpricedStops.some((s) => s.learner_count > 1) && (
               <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
@@ -285,7 +287,7 @@ export function FineDialog({
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-gray-700 dark:text-gray-200">
-            {finable.length} learner(s) · total{' '}
+            {chargeable.length} learner(s) · total{' '}
             <span className="font-semibold">{inr(data?.totalAmount ?? 0)}</span>
           </p>
           <div className="flex gap-2">
@@ -299,11 +301,11 @@ export function FineDialog({
             <button
               type="button"
               onClick={submit}
-              disabled={submitting || finable.length === 0 || reason.trim() === ''}
+              disabled={submitting || chargeable.length === 0 || reason.trim() === ''}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Raise {finable.length} fine(s)
+              Charge {chargeable.length} learner(s)
             </button>
           </div>
         </div>

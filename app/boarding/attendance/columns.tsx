@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock, IndianRupee } from 'lucide-react';
 import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
@@ -77,6 +77,40 @@ function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
       <TicketX className="h-3 w-3 shrink-0" /> Not booked
     </span>
   );
+}
+
+const INR = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+
+/**
+ * The learner's transport MAINTENANCE fee position — the recurring charge the
+ * institution collects. Not the Transport Fee, which is the separate penalty
+ * raised when this goes unpaid (tms_fee_fine); that never appears here.
+ *
+ * DISPLAY ONLY. Nothing on this screen is withheld because of fees: staff mark
+ * and scan a rider who owes money exactly as they would any other, and this
+ * badge exists so the transport office can see who that is afterwards.
+ *
+ * 'unknown' prints an em dash rather than a guess. A failed fee read must never
+ * render as "Paid" — on a money column the wrong answer looks like a right one.
+ * An UNBILLED rider reads "No bill", not "Unpaid": they owe nothing yet.
+ */
+function FeeBadge({ fee }: { fee: RosterRow['fee'] }) {
+  const state = fee?.state ?? 'unknown';
+  if (state === 'paid')
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/15 dark:text-green-300">
+        <IndianRupee className="h-3 w-3" /> Paid
+      </span>
+    );
+  if (state === 'unpaid')
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">
+        <IndianRupee className="h-3 w-3 shrink-0" />
+        {fee?.owed ? `Unpaid ₹${INR.format(fee.owed)}` : 'Unpaid'}
+      </span>
+    );
+  if (state === 'none') return <span className="text-xs text-gray-400">No bill</span>;
+  return <span className="text-xs text-gray-400">—</span>;
 }
 
 /**
@@ -274,6 +308,16 @@ export function getRosterColumns(opts: {
       // because a half-shown label is exactly the confusion being fixed.
       size: 190,
       cell: ({ row }) => <TicketBadge booked={row.original.booked} walkUp={row.original.is_walk_up} />,
+    },
+    {
+      id: 'fee',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Maintenance fee" />,
+      // The filter values are the states themselves, so "who boarded owing
+      // money" is one click on a 1,600-row roster.
+      accessorFn: (r) => r.fee?.state ?? 'unknown',
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      size: 130,
+      cell: ({ row }) => <FeeBadge fee={row.original.fee} />,
     },
     ...(opts.hasOwners ? [ownerColumn] : []),
     {

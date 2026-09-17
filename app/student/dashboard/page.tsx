@@ -152,7 +152,7 @@ export default function StudentDashboardPage() {
         />
         <StatCard
           icon={CreditCard}
-          label="Transport fee"
+          label="Maintenance fee"
           value={fee.value}
           tone="bg-gradient-to-br from-orange-500 to-amber-600"
           badge={
@@ -174,8 +174,9 @@ export default function StudentDashboardPage() {
         >
           <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
           <p className="text-sm text-red-800 dark:text-red-200">
-            You have <strong>{overdueCount}</strong> overdue transport term{overdueCount === 1 ? '' : 's'}{' '}
-            totalling <strong>{inr(totalOwed)}</strong>. Tap to view and clear your transport fees.
+            You have <strong>{overdueCount}</strong> overdue maintenance term{overdueCount === 1 ? '' : 's'}{' '}
+            totalling <strong>{inr(totalOwed)}</strong>. Tap to view and clear it before a transport
+            fee is charged.
           </p>
         </button>
       )}

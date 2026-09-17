@@ -243,7 +243,7 @@ const SettingsPage = () => {
                   </label>
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
-                  Runs every 15 minutes for fee structures marked &ldquo;Auto-generate&rdquo;.
+                  Runs every 15 minutes for maintenance fee structures marked &ldquo;Auto-generate&rdquo;.
                   Bills use each structure&rsquo;s configured due dates, so a learner
                   onboarded after a term fell due is billed as overdue.
                 </p>

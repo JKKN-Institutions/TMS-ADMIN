@@ -1,9 +1,13 @@
 import type { FeeTerm, LearnerFeeStatus } from './fee-status';
 
 /**
- * fee-badge — turns a scanned learner's fee record into the one badge a
- * boarding staffer reads at the bus door: paid, or not. Pure, so every case
- * below is pinned by a test rather than by eye.
+ * fee-badge — turns a scanned learner's MAINTENANCE fee record into the one
+ * badge a boarding staffer reads at the bus door: paid, or not. Pure, so every
+ * case below is pinned by a test rather than by eye.
+ *
+ * Every label says "maintenance" on purpose: the bare "Transport Fee" is the
+ * separate penalty raised when this goes unpaid (tms_fee_fine), which this
+ * badge never reports.
  *
  * BUILT FROM THE TERMS, NOT THE PORTAL VERDICT. The access function's
  * `allowed` / `reason` answers "may this learner use the portal", which is a
@@ -30,7 +34,11 @@ export interface FeeBadge {
   detail: string | null;
 }
 
-const UNAVAILABLE: FeeBadge = { tone: 'unknown', label: 'Fee status unavailable', detail: null };
+const UNAVAILABLE: FeeBadge = {
+  tone: 'unknown',
+  label: 'Maintenance fee status unavailable',
+  detail: null,
+};
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -65,10 +73,13 @@ export function feeBadge(fees: LearnerFeeStatus | null | undefined): FeeBadge | 
 
   if (fees.terms.length === 0) {
     if (fees.reason === 'term1_not_billed' || fees.reason === 'no_bills') {
-      return { tone: 'none', label: 'No fee bill yet', detail: null };
+      return { tone: 'none', label: 'No maintenance fee bill yet', detail: null };
     }
     if (fees.reason === 'no_transport_obligation') {
-      return { tone: 'none', label: 'No transport fee', detail: null };
+      // NOT "No transport fee": the bare Transport Fee is now the penalty
+      // charged when the maintenance fee goes unpaid, so that wording would
+      // claim the opposite of what this branch means.
+      return { tone: 'none', label: 'No maintenance fee', detail: null };
     }
     return UNAVAILABLE;
   }
@@ -78,7 +89,9 @@ export function feeBadge(fees: LearnerFeeStatus | null | undefined): FeeBadge | 
   if (unpaid.length === 0) {
     // Everything billed is settled, and the verdict must agree before this
     // may read as paid. A blocked learner with nothing unpaid is inconsistent.
-    return fees.allowed ? { tone: 'paid', label: 'Fees paid', detail: null } : UNAVAILABLE;
+    return fees.allowed
+      ? { tone: 'paid', label: 'Maintenance fee paid', detail: null }
+      : UNAVAILABLE;
   }
 
   const amount = unpaidAmount(unpaid);

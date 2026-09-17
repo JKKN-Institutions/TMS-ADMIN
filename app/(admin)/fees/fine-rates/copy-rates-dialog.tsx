@@ -106,7 +106,7 @@ export function CopyRatesDialog({
     setApplying(true);
     try {
       const result = await postCopy({ year, fee_structure_id: structureId, mode: 'apply', overwrite });
-      toast.success(`Copied ${result.written ?? result.will_write} fine rate(s).`);
+      toast.success(`Copied ${result.written ?? result.will_write} transport fee rate(s).`);
       onDone();
       onClose();
     } catch (e) {
@@ -122,24 +122,24 @@ export function CopyRatesDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-          Copy from fee structure
+          Copy from maintenance fee
         </h2>
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          Copies a stop-wise structure&apos;s annual amount into this year&apos;s fine sheet, stop for
-          stop. It is a one-time copy — later changes to the fee structure do <strong>not</strong>{' '}
-          follow through, so re-run this after revising rates.
+          Copies a stop-wise maintenance structure&apos;s annual amount into this year&apos;s
+          transport fee sheet, stop for stop. It is a one-time copy — later changes to the
+          maintenance fee do <strong>not</strong> follow through, so re-run this after revising rates.
         </p>
 
         <div className="mt-4">
           <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-            Source fee structure
+            Source maintenance fee structure
           </span>
           {loadingStructures ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">Loading structures…</p>
           ) : options.length === 0 ? (
             <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-              No stop-wise fee structure exists for this transport year, so there are no per-stop
-              amounts to copy.
+              No stop-wise maintenance fee structure exists for this transport year, so there are no
+              per-stop amounts to copy.
             </p>
           ) : (
             <SelectMenu
@@ -147,7 +147,7 @@ export function CopyRatesDialog({
               onValueChange={setStructureId}
               options={options}
               placeholder="Choose a stop-wise structure…"
-              ariaLabel="Source fee structure"
+              ariaLabel="Source maintenance fee structure"
             />
           )}
         </div>
@@ -160,7 +160,7 @@ export function CopyRatesDialog({
             className="mt-0.5 h-4 w-4"
           />
           <span>
-            Overwrite stops that already have a different fine
+            Overwrite stops that already have a different transport fee
             <span className="block text-xs text-gray-500 dark:text-gray-400">
               Off: hand-set amounts are kept and only unpriced stops are filled.
             </span>

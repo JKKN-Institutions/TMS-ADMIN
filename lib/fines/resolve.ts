@@ -1,14 +1,15 @@
 // lib/fines/resolve.ts
-// Pure money maths for a manual fine: a learner's boarding stop chooses the
-// amount. Unresolvable learners are SKIPPED and reported, never guessed and
-// never silently priced at zero — the reason codes mirror
-// lib/fees/resolve-terms.ts so the same words reach the operator.
+// Pure money maths for a TRANSPORT FEE charge (the penalty raised when the
+// maintenance fee goes unpaid): a learner's boarding stop chooses the amount.
+// Unresolvable learners are SKIPPED and reported, never guessed and never
+// silently priced at zero — the reason codes mirror lib/fees/resolve-terms.ts
+// so the same words reach the operator.
 
 export type FineSkipReason = 'no_stop' | 'no_stop_rate';
 
 export const FINE_SKIP_LABEL: Record<FineSkipReason, string> = {
   no_stop: 'No boarding stop on record',
-  no_stop_rate: 'No fine configured for this stop',
+  no_stop_rate: 'No transport fee configured for this stop',
 };
 
 export type FineResolution =
