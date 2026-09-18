@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { withoutBookingPhrase, bookedOnBusPhrase, belongsToBusPhrase, scanAnnouncement, otherBusFromReply, spokenName, speak, primeSpeech, isVoiceMuted, setVoiceMuted } from './announce';
+import { withoutBookingPhrase, bookedOnBusPhrase, belongsToBusPhrase, scanAnnouncement, scanExtras, refusalAnnouncement, otherBusFromReply, spokenName, speak, primeSpeech, isVoiceMuted, setVoiceMuted } from './announce';
 
 describe('spokenName', () => {
   it('turns stored capitals into a name the voice reads as a word, not letters', () => {
@@ -54,8 +54,23 @@ describe('wrong bus phrases', () => {
 });
 
 describe('scanAnnouncement', () => {
-  it('is silent for a booked learner on the right bus', () => {
-    expect(scanAnnouncement({ name: 'PRIYA S', booked: true })).toBeNull();
+  it('says "present" for a booked learner on the right bus', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: true })).toBe('Priya S, present');
+  });
+
+  it('says "already marked" before anything else', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: true, alreadyMarked: true })).toBe('Priya S, already marked');
+    expect(scanAnnouncement({
+      name: 'SRI PRASATH P', booked: false, alreadyMarked: true, otherBus: { kind: 'booked', routeNumber: '24' },
+    })).toBe('Sri Prasath P, already marked');
+  });
+
+  it('says "saved on phone" when there was no signal', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: true, offlineSaved: true })).toBe('Priya S, saved on phone');
+  });
+
+  it('falls back to "Learner" rather than an empty name', () => {
+    expect(scanAnnouncement({ name: null, booked: true })).toBe('Learner, present');
   });
 
   it('says "without booking" for an unbooked learner', () => {
@@ -73,7 +88,7 @@ describe('scanAnnouncement', () => {
   });
 
   it('"boarded another bus" earlier changes nothing about this scan', () => {
-    expect(scanAnnouncement({ name: 'A', booked: true, otherBus: { kind: 'boarded', routeNumber: '6' } })).toBeNull();
+    expect(scanAnnouncement({ name: 'A', booked: true, otherBus: { kind: 'boarded', routeNumber: '6' } })).toBe('A, present');
     expect(scanAnnouncement({ name: 'A', booked: false, otherBus: { kind: 'boarded', routeNumber: '6' } }))
       .toBe('A, without booking');
   });
@@ -82,6 +97,45 @@ describe('scanAnnouncement', () => {
     expect(otherBusFromReply({ kind: 'booked_other_bus', routeNumber: '24' })).toEqual({ kind: 'booked', routeNumber: '24' });
     expect(otherBusFromReply({ kind: 'foreign_learner', routeNumber: '24' })).toEqual({ kind: 'from', routeNumber: '24' });
     expect(otherBusFromReply(undefined)).toBeNull();
+  });
+});
+
+describe('scanExtras', () => {
+  it('says nothing for a paid learner on a bus with room', () => {
+    expect(scanExtras({ feeTone: 'paid' })).toBeNull();
+    expect(scanExtras({})).toBeNull();
+    expect(scanExtras({ feeTone: 'none' })).toBeNull();
+    expect(scanExtras({ feeTone: 'unknown' })).toBeNull();
+  });
+
+  it('names money owed, whatever the due date says', () => {
+    expect(scanExtras({ feeTone: 'overdue' })).toBe('Fees not paid');
+    expect(scanExtras({ feeTone: 'due' })).toBe('Fees not paid');
+  });
+
+  it('warns about a full bus, and joins both facts', () => {
+    expect(scanExtras({ overCapacity: true })).toBe('Bus full');
+    expect(scanExtras({ feeTone: 'overdue', overCapacity: true })).toBe('Fees not paid. Bus full');
+  });
+});
+
+describe('refusalAnnouncement', () => {
+  it('says what went wrong in a few words', () => {
+    expect(refusalAnnouncement('card_unknown')).toBe('Card not recognised');
+    expect(refusalAnnouncement('card_retired')).toBe('Card retired');
+    expect(refusalAnnouncement('not_learner_card')).toBe('Not a learner card');
+    expect(refusalAnnouncement('no_route')).toBe('No bus for this learner');
+    expect(refusalAnnouncement('not_your_bus')).toBe('Not your bus');
+    expect(refusalAnnouncement('window_closed')).toBe('Scanning closed');
+    expect(refusalAnnouncement('scan_off')).toBe('Scanning is off');
+    expect(refusalAnnouncement('forbidden')).toBe('Not allowed');
+    expect(refusalAnnouncement('typed_card')).toBe('Point the camera at the card');
+  });
+
+  it('never announces an unknown refusal as success', () => {
+    expect(refusalAnnouncement('something_new')).toBe('Not saved, try again');
+    expect(refusalAnnouncement(undefined)).toBe('Not saved, try again');
+    expect(refusalAnnouncement(null)).toBe('Not saved, try again');
   });
 });
 

@@ -57,11 +57,62 @@ export function scanAnnouncement(input: {
   /** Booked on THIS bus (the saved list) or on any bus (the server). */
   booked: boolean;
   otherBus?: { kind: 'booked' | 'boarded' | 'from'; routeNumber: string | null } | null;
-}): string | null {
+  /** Someone had already marked this learner present; nothing was written. */
+  alreadyMarked?: boolean;
+  /** Kept on the phone because there was no signal. */
+  offlineSaved?: boolean;
+}): string {
+  const who = spokenName(input.name) || 'Learner';
+  // Said first because it is what the staffer must act on: the learner is
+  // through either way, but this one means "someone else already had them".
+  if (input.alreadyMarked) return `${who}, already marked`;
+  if (input.offlineSaved) return `${who}, saved on phone`;
   const other = input.otherBus ?? null;
   if (other?.kind === 'booked') return bookedOnBusPhrase(input.name, other.routeNumber);
   if (other?.kind === 'from') return belongsToBusPhrase(input.name, other.routeNumber);
-  return input.booked ? null : withoutBookingPhrase(input.name);
+  if (!input.booked) return withoutBookingPhrase(input.name);
+  return `${who}, present`;
+}
+
+/**
+ * The second, shorter sentence: what the SERVER knows and the phone did not.
+ * Null when it adds nothing, so an ordinary paid booked learner hears one
+ * sentence and the queue keeps moving.
+ */
+export function scanExtras(input: {
+  /** As decided by lib/boarding/fee-badge.ts, the tested rule for the panel. */
+  feeTone?: 'paid' | 'overdue' | 'due' | 'none' | 'unknown' | null;
+  overCapacity?: boolean;
+}): string | null {
+  const parts: string[] = [];
+  if (input.feeTone === 'overdue' || input.feeTone === 'due') parts.push('Fees not paid');
+  if (input.overCapacity) parts.push('Bus full');
+  return parts.length ? parts.join('. ') : null;
+}
+
+/**
+ * A refused scan, said in the fewest words that tell the staffer what to do.
+ * `reason` is the server's machine-readable code; the text falls back to a
+ * generic "not saved" so a new refusal is never announced as success.
+ */
+export function refusalAnnouncement(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'card_unknown': return 'Card not recognised';
+    case 'card_retired': return 'Card retired';
+    case 'not_learner_card': return 'Not a learner card';
+    case 'not_a_card': return 'Not a learner card';
+    case 'no_route': return 'No bus for this learner';
+    case 'not_your_bus': return 'Not your bus';
+    case 'window_closed': return 'Scanning closed';
+    case 'scan_off': return 'Scanning is off';
+    case 'forbidden': return 'Not allowed';
+    case 'learner_not_found': return 'Learner not found';
+    // Refused on the phone itself.
+    case 'typed_card': return 'Point the camera at the card';
+    case 'photo_unreadable': return 'Card not read, try again';
+    case 'needs_signal': return 'Needs signal';
+    default: return 'Not saved, try again';
+  }
 }
 
 /** The server's wrong-bus reply, in the saved list's terms. */

@@ -53,7 +53,11 @@ interface ScanOutcome {
 }
 
 type MatchedBy = 'jkkn_id';
-type Resolved = { learnerId: string; matchedBy: MatchedBy } | { error: string; status: number };
+type Resolved =
+  | { learnerId: string; matchedBy: MatchedBy }
+  // `reason` is a short code the phone turns into a spoken refusal
+  // (refusalAnnouncement in lib/boarding/announce.ts). The text stays the panel's.
+  | { error: string; status: number; reason: string };
 
 /**
  * Resolve the learner behind a scan. ONE credential is accepted: the printed
@@ -73,10 +77,10 @@ async function resolveLearnerId(
   const decision = classifyScan(raw, source);
 
   if (decision.refusal === 'typed_jkkn_id') {
-    return { error: 'Point the camera at the card to use a JKKN ID.', status: 400 };
+    return { error: 'Point the camera at the card to use a JKKN ID.', status: 400, reason: 'typed_card' };
   }
   if (decision.shape !== 'jkkn_id') {
-    return { error: 'Not a JKKN ID card. Scan the card, or mark the learner by hand.', status: 400 };
+    return { error: 'Not a JKKN ID card. Scan the card, or mark the learner by hand.', status: 400, reason: 'not_a_card' };
   }
 
   const { data, error } = await svc
@@ -86,13 +90,13 @@ async function resolveLearnerId(
     .maybeSingle();
   if (error) {
     console.error('boarding scan jkkn id lookup error:', error);
-    return { error: 'Could not read the identity register', status: 500 };
+    return { error: 'Could not read the identity register', status: 500, reason: 'register_failed' };
   }
   const row = data as { learner_profile_id: string | null; person_kind: string | null; retired_at: string | null } | null;
-  if (!row) return { error: 'Card not recognised.', status: 404 };
+  if (!row) return { error: 'Card not recognised.', status: 404, reason: 'card_unknown' };
   // Retired numbers are kept forever so they are never reissued, but a
   // retired card must never mark anyone present.
-  if (row.retired_at) return { error: 'This card has been retired. Issue a new one.', status: 409 };
+  if (row.retired_at) return { error: 'This card has been retired. Issue a new one.', status: 409, reason: 'card_retired' };
   if (!row.learner_profile_id) {
     // The only fact ESTABLISHED here is that the card has no learner link.
     // person_kind is what separates staff from associates and visitors, so
@@ -106,6 +110,7 @@ async function resolveLearnerId(
     return {
       error: `This card belongs to ${holder}, so nothing was recorded. If they are a learner, mark them by hand.`,
       status: 409,
+      reason: 'not_learner_card',
     };
   }
   return { learnerId: row.learner_profile_id, matchedBy: 'jkkn_id' };
@@ -144,7 +149,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
     mark('gates');
 
     if (!canScan) {
-      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+      return NextResponse.json({ ok: false, reason: 'forbidden', error: 'Forbidden' }, { status: 403 });
     }
 
     // Settings → Marking method. Manual only switches scanning off for ordinary
@@ -158,7 +163,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
 
     // The learner behind the scanned JKKN ID card.
     if ('error' in resolved) {
-      return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+      return NextResponse.json({ ok: false, reason: resolved.reason, error: resolved.error }, { status: resolved.status });
     }
     const learnerId = resolved.learnerId;
     const matchedBy = resolved.matchedBy;
@@ -201,7 +206,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
     mark('learner');
     const learner = learnerRes.data as LearnerLite | null;
     if (!learner) {
-      return NextResponse.json({ ok: false, error: 'Learner not found' }, { status: 404 });
+      return NextResponse.json({ ok: false, reason: 'learner_not_found', error: 'Learner not found' }, { status: 404 });
     }
 
     // Per-scan authority and the bus: the scanner must be on a bus, and the
@@ -214,7 +219,10 @@ async function scan(request: NextRequest, auth: AuthContext) {
     });
     if (!bus.ok) {
       const status = bus.error === 'Learner has no allocated route' ? 409 : 403;
-      return NextResponse.json({ ok: false, error: bus.error }, { status });
+      return NextResponse.json(
+        { ok: false, reason: status === 409 ? 'no_route' : 'not_your_bus', error: bus.error },
+        { status },
+      );
     }
     const { busRouteId, wrongBus, bookedRouteId } = bus.decision;
     const booked = booking !== null;
@@ -269,7 +277,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
     mark('write');
     if (up.error) {
       console.error('boarding scan write error:', up.error);
-      return NextResponse.json({ ok: false, error: 'Failed to record attendance' }, { status: 500 });
+      return NextResponse.json({ ok: false, reason: 'write_failed', error: 'Failed to record attendance' }, { status: 500 });
     }
 
     // A re-scan of an already-present learner writes NOTHING, so credit for the

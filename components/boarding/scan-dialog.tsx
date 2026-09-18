@@ -16,7 +16,10 @@ import { activeDirection, LEG_NAME, type AttendanceWindows, type AttDirection } 
 import { openHoursText } from '@/lib/boarding/trip-direction';
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { createScanQueue, onRead, onDone, resetScanQueue } from '@/lib/boarding/scan-queue';
-import { isVoiceMuted, otherBusFromReply, primeSpeech, scanAnnouncement, setVoiceMuted, speak } from '@/lib/boarding/announce';
+import {
+  isVoiceMuted, otherBusFromReply, primeSpeech, refusalAnnouncement, scanAnnouncement, scanExtras,
+  setVoiceMuted, speak,
+} from '@/lib/boarding/announce';
 import { feeBadge, type FeeTone } from '@/lib/boarding/fee-badge';
 import { resolveScanOffline } from '@/lib/boarding/offline/local-scan';
 import type { QueueScanInput } from '@/components/boarding/offline/use-offline-attendance';
@@ -218,12 +221,13 @@ export default function ScanDialog({
    * Say `phrase` once per card ("X, without booking", "X, booked on bus N",
    * "X, belongs to bus N"; null is silence). `code` is the cleaned card number.
    */
-  function announceOnce(code: string, phrase: string | null) {
+  function announceOnce(code: string, phrase: string | null, slot: 'main' | 'extra' = 'main') {
     if (!phrase) return;
+    const key = slot === 'main' ? code : `${code}:${slot}`;
     const now = Date.now();
-    const at = announcedRef.current.get(code);
+    const at = announcedRef.current.get(key);
     if (at !== undefined && now - at < ANNOUNCE_REPEAT_MS) return;
-    announcedRef.current.set(code, now);
+    announcedRef.current.set(key, now);
     speak(phrase);
   }
 
@@ -237,9 +241,17 @@ export default function ScanDialog({
   function announceFromSavedList(code: string) {
     const roster = offlineRef.current?.roster;
     if (!roster) return;
+    // Never promise a mark the server is about to refuse: outside the scan
+    // window, submit() refuses and says "Scanning closed" instead.
+    if (!activeDirection(windowsRef.current)) return;
     const local = resolveScanOffline(code, 'camera', roster);
     if (local.kind !== 'resolved') return;
-    announceOnce(code, scanAnnouncement({ name: local.name, booked: local.booked, otherBus: local.otherBus }));
+    announceOnce(code, scanAnnouncement({
+      name: local.name,
+      booked: local.booked,
+      otherBus: local.otherBus,
+      alreadyMarked: local.alreadyPresent,
+    }));
   }
 
   /**
@@ -253,16 +265,20 @@ export default function ScanDialog({
     const o = offlineRef.current;
     if (!o) return false;
     const local = resolveScanOffline(token, source, o.roster ?? { rows: [] });
+    const spokenCode = classifyScan(token, source).code;
     if (local.kind === 'refused') {
       setResult({ ok: false, error: local.message });
+      announceOnce(spokenCode, refusalAnnouncement(source === 'typed' ? 'typed_card' : 'not_a_card'), 'extra');
       return true;
     }
     if (source !== 'camera') {
       setResult({ ok: false, error: 'Typed codes need signal. Scan the QR or the ID card instead.' });
+      announceOnce(spokenCode, refusalAnnouncement('needs_signal'), 'extra');
       return true;
     }
     if (local.kind === 'resolved' && local.alreadyPresent) {
       setResult({ ok: true, alreadyMarked: { by: 'you or a colleague', at: null }, learner: { name: local.name, rollNumber: null } });
+      announceOnce(spokenCode, scanAnnouncement({ name: local.name, booked: local.booked, alreadyMarked: true }));
       return true;
     }
     // No booking is no longer a question to answer: an unbooked rider is
@@ -276,8 +292,10 @@ export default function ScanDialog({
     // is decided by the server later, so nothing is claimed about it now.
     if (local.kind === 'resolved') {
       announceOnce(
-        classifyScan(token, source).code,
-        scanAnnouncement({ name: local.name, booked: local.booked && !walkUp, otherBus }),
+        spokenCode,
+        // Says "saved on phone" rather than "present": nothing has reached the
+        // server yet, and the staffer should know the difference.
+        scanAnnouncement({ name: local.name, booked: local.booked && !walkUp, otherBus, offlineSaved: true }),
       );
     }
     const offlineWrongBus: ScanResult['wrongBus'] =
@@ -313,6 +331,7 @@ export default function ScanDialog({
     const decision = classifyScan(token, source);
     if (decision.refusal === 'typed_jkkn_id') {
       setResult({ ok: false, error: 'Point the camera at the card to use a JKKN ID.' });
+      announceOnce(decision.code, refusalAnnouncement('typed_card'), 'extra');
       return 'done';
     }
     // Read the CURRENT windows via the ref, not the props closed over when this
@@ -322,6 +341,7 @@ export default function ScanDialog({
     const current = activeDirection(w);
     if (!current) {
       setResult({ ok: false, reason: 'window_closed', error: `Scanning is open ${openHoursText(w)} only.` });
+      announceOnce(decision.code, refusalAnnouncement('window_closed'), 'extra');
       return 'done';
     }
     if (offlineRef.current && !offlineRef.current.online) {
@@ -339,24 +359,35 @@ export default function ScanDialog({
       if (json.ok) {
         setResult(json);
         // Said out loud so the staffer at the door hears it without looking.
-        // Usually already said from the phone's list; this covers the rest.
+        // The first sentence is usually already said from the phone's list;
+        // this covers the cards the list does not know. The second is what
+        // only the server knows (fees, a full bus) and is skipped when there
+        // is nothing to add, so an ordinary paid rider hears one short line.
+        const code = classifyScan(token, source).code;
+        announceOnce(code, scanAnnouncement({
+          name: json.learner?.name,
+          booked: !json.walkUp,
+          otherBus: otherBusFromReply(json.wrongBus),
+          alreadyMarked: Boolean(json.alreadyMarked),
+        }));
         announceOnce(
-          classifyScan(token, source).code,
-          scanAnnouncement({
-            name: json.learner?.name,
-            booked: !json.walkUp,
-            otherBus: otherBusFromReply(json.wrongBus),
-          }),
+          code,
+          scanExtras({ feeTone: feeBadge(json.fees)?.tone ?? null, overCapacity: json.overCapacity }),
+          'extra',
         );
         onMarked();
       } else {
         setResult({ ok: false, ...json, error: json.error || json.reason || 'Scan failed' });
+        // Refusals are spoken too: on a moving bus an unnoticed refusal is a
+        // learner who travels unrecorded.
+        announceOnce(classifyScan(token, source).code, refusalAnnouncement(json.reason), 'extra');
       }
       return 'done';
     } catch {
       // The request never got an answer: treat it as no signal and queue it.
       if (await submitOffline(token, source, walkUp, current)) return 'done';
       setResult({ ok: false, error: 'Network error' });
+      announceOnce(decision.code, refusalAnnouncement('network'), 'extra');
       // The queue forgets this card, so holding it up again retries it.
       return 'failed';
     }
@@ -514,6 +545,7 @@ export default function ScanDialog({
     } catch (err) {
       console.error('[scan] photo decode failed:', err);
       setResult({ ok: false, error: 'Could not read the card in that photo. Hold the card flat, fill the frame, avoid glare, and try again.' });
+      speak(refusalAnnouncement('photo_unreadable'));
     } finally {
       setReadingPhoto(false);
     }
