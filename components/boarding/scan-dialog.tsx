@@ -578,27 +578,57 @@ export default function ScanDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Scan boarding pass{leg ? ` · ${LEG_NAME[leg]}` : ''}</DialogTitle>
+      {/* A phone held one-handed at a bus door: the sheet may not grow past the
+          screen, and everything it does show has to be reachable. Without the
+          height cap and the scroll, a result carrying a photo, a fee panel and
+          a wrong-bus line ran off the bottom with no way to reach it. */}
+      <DialogContent className="flex max-h-[92dvh] max-w-md flex-col gap-3 overflow-y-auto p-4 sm:p-6">
+        <DialogHeader className="space-y-0">
+          <DialogTitle className="flex items-center justify-between gap-2 text-base">
+            {/* The transport pass was retired on 2026-09-12; the card is the
+                only credential, so the title no longer promises a pass. */}
+            <span>Scan ID card</span>
+            {leg && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                {LEG_NAME[leg]}
+              </span>
+            )}
+          </DialogTitle>
         </DialogHeader>
 
         {!legOpen && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
             <Clock className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              Scanning is open {openHoursText(windows)} only.
-            </span>
+            <span>Scanning is open {openHoursText(windows)} only.</span>
           </div>
         )}
 
-        <div id={READER_ID} className="w-full overflow-hidden rounded-md" />
+        {/* The camera's space is reserved whether or not it is running, so
+            starting it does not shove the buttons down under the staffer's
+            thumb mid-tap. */}
+        <div className="relative grid min-h-[240px] w-full place-items-center overflow-hidden rounded-xl border bg-muted/40">
+          <div id={READER_ID} className="w-full" />
+          {!scanning && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-xs text-muted-foreground">
+              <Camera className="h-7 w-7" />
+              <span>{legOpen ? 'Tap Start camera, then hold the ID card in the frame' : 'Camera off'}</span>
+            </div>
+          )}
+        </div>
         <div id={PHOTO_READER_ID} className="hidden" />
 
-        <div className="flex gap-2">
+        {/* Directly under the camera, where the staffer is already looking.
+            Below the buttons and the hint it sat off the bottom of a phone
+            screen, so the answer to "did that scan work?" was out of sight. */}
+        {result && <ResultPanel result={result} />}
+
+        {/* One primary action across the full width, the fallbacks under it.
+            Three buttons on one row left each about 100px wide on a 360px
+            phone, with labels clipped and targets too small for a moving bus. */}
+        <div className="space-y-2">
           {!scanning ? (
             <Button
-              className="flex-1"
+              className="h-12 w-full text-base"
               onClick={() => {
                 primeSpeech();
                 void startCamera();
@@ -608,53 +638,70 @@ export default function ScanDialog({
               {legOpen ? 'Start camera' : 'Scanning closed'}
             </Button>
           ) : (
-            <Button variant="outline" className="flex-1" onClick={stopCamera}>
-              Stop
+            <Button variant="outline" className="h-12 w-full text-base" onClick={stopCamera}>
+              Stop camera
             </Button>
           )}
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => {
-              primeSpeech();
-              photoInputRef.current?.click();
-            }}
-            disabled={!legOpen || readingPhoto}
-          >
-            <Camera className="mr-1.5 h-4 w-4" />
-            {readingPhoto ? 'Reading…' : 'Scan from photo'}
-          </Button>
-          <input
-            ref={photoInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={onPhotoPicked}
-          />
-          <Button
-            variant="outline"
-            size="icon"
-            className="shrink-0"
-            onClick={toggleVoice}
-            aria-pressed={voiceMuted}
-            aria-label={voiceMuted ? 'Turn voice on' : 'Mute voice'}
-            title={voiceMuted ? 'Voice off — tap to hear "without booking" again' : 'Voice on — tap to mute'}
-          >
-            {voiceMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="h-11 flex-1"
+              onClick={() => {
+                primeSpeech();
+                photoInputRef.current?.click();
+              }}
+              disabled={!legOpen || readingPhoto}
+            >
+              <Camera className="mr-1.5 h-4 w-4" />
+              {readingPhoto ? 'Reading…' : 'Scan from photo'}
+            </Button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={onPhotoPicked}
+            />
+            <Button
+              variant="outline"
+              className="h-11 w-11 shrink-0 p-0"
+              onClick={toggleVoice}
+              aria-pressed={voiceMuted}
+              aria-label={voiceMuted ? 'Turn the voice on' : 'Mute the voice'}
+              title={voiceMuted ? 'Voice off — tap to hear scans again' : 'Voice on — tap to mute'}
+            >
+              {voiceMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </Button>
+          </div>
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Scan the learner&apos;s JKKN ID card. If the live camera does not start or cannot read the
-          card, tap <span className="font-medium">Scan from photo</span> and take a picture of the card.
+          Card will not read? Tap <span className="font-medium">Scan from photo</span> and take a picture of it.
         </p>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        {result && (
-          <div className={`rounded-lg border p-3 text-sm ${result.ok ? 'border-green-400' : 'border-red-400'}`}>
+/**
+ * The scan result, unchanged in what it says: the same status line, the same
+ * learner block, the same fee panel and the same warnings, in the same order.
+ * What changed is how fast it reads at arm's length on a moving bus — a tinted
+ * panel and a status line the staffer can take in without stopping.
+ */
+function ResultPanel({ result }: { result: ScanResult }) {
+  return (
+        <div
+          className={`rounded-xl border-2 p-3 text-sm ${
+            result.ok
+              ? 'border-green-400 bg-green-50 dark:border-green-800 dark:bg-green-950/30'
+              : 'border-red-400 bg-red-50 dark:border-red-800 dark:bg-red-950/30'
+          }`}
+        >
             {result.ok ? (
               <div className="space-y-2">
-                <p className="font-medium text-green-700 dark:text-green-300">
+                <p className="text-base font-semibold text-green-700 dark:text-green-300">
                   {result.offlineSaved
                     ? '✓ Saved on this phone'
                     : result.alreadyMarked ? '✓ Already marked present' : '✓ Marked present'}
@@ -691,11 +738,11 @@ export default function ScanDialog({
                     <img
                       src={result.learner.photoUrl}
                       alt=""
-                      className="h-14 w-14 shrink-0 rounded-md border object-cover"
+                      className="h-16 w-16 shrink-0 rounded-md border object-cover"
                     />
                   ) : null}
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{result.learner?.name}</p>
+                    <p className="truncate text-base font-semibold">{result.learner?.name}</p>
                     {result.learner?.rollNumber && (
                       <p className="truncate text-xs text-muted-foreground">{result.learner.rollNumber}</p>
                     )}
@@ -732,11 +779,8 @@ export default function ScanDialog({
                 )}
               </div>
             ) : (
-              <p className="text-red-700 dark:text-red-300">✗ {result.error}</p>
+              <p className="text-base font-semibold text-red-700 dark:text-red-300">✗ {result.error}</p>
             )}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+        </div>
   );
 }
