@@ -31,6 +31,10 @@ function row(over: Partial<TransportBillRow> = {}): TransportBillRow {
     status: 'unpaid',
     payment_date: null,
     billing_student_bill_id: null,
+    payment_mode: null,
+    payment_modes: [],
+    receipt_number: null,
+    payment_reference: null,
     ...over,
   };
 }

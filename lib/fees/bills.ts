@@ -8,6 +8,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveApplicablePeople } from './applicability';
 import { currentYearOf, deriveStudyYear, bandForYear } from './year-of-study';
+import { loadPaymentModeMap } from './receipts';
+import type { PaymentMode } from './payment-mode';
+import { selectByIds } from './select-by-ids';
 
 export type BillStatus =
   | 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'staff_deferred' | 'cancelled' | 'unknown';
@@ -39,6 +42,14 @@ export interface TransportBillRow {
   status: BillStatus;
   payment_date: string | null;
   billing_student_bill_id: string | null;
+  /** HOW the money arrived, derived from billing_receipts. null = nothing receipted. */
+  payment_mode: PaymentMode | null;
+  /** Every distinct mode behind a 'mixed' row, for the cell's tooltip. */
+  payment_modes: PaymentMode[];
+  /** Receipt number(s) backing this bill, joined for display. */
+  receipt_number: string | null;
+  /** Reference from the latest receipt — a pay_… id, a DD number, … */
+  payment_reference: string | null;
 }
 
 export interface BillSummary {
@@ -148,32 +159,6 @@ export function stopWiseBillable(stopId: string | null | undefined, pricedStopId
   return !!stopId && pricedStopIds.has(stopId);
 }
 
-// PostgREST serializes `.in('col', ids)` into the request URL. A few hundred
-// UUIDs overflow the Supabase API gateway's request-size limit (measured on this
-// project: 500 ids → 200 OK, 768 ids → HTTP 400 "Bad Request"), which supabase-js
-// surfaces as { data: null, error }. Left UNCHECKED that yields an empty map and
-// silently mislabels every bill 'unknown'. So: batch ids into small chunks AND
-// throw on error (fail loud) instead of returning a quietly-wrong result.
-const IN_CHUNK = 150;
-
-async function selectByIds<T = Record<string, unknown>>(
-  supabase: SupabaseClient,
-  table: string,
-  columns: string,
-  ids: string[],
-  idColumn = 'id'
-): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < ids.length; i += IN_CHUNK) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(columns)
-      .in(idColumn, ids.slice(i, i + IN_CHUNK));
-    if (error) throw error;
-    out.push(...((data ?? []) as T[]));
-  }
-  return out;
-}
 
 // Resolve learner/staff display names + their institution_id + department_id in two
 // batch queries. department_id feeds Bill Management's department-wise analytics;
@@ -398,11 +383,14 @@ export async function loadTransportBills(
   // Batch 1: the four lookups that depend only on the ledger, fired in PARALLEL.
   // These were six sequential awaits — each its own Supabase round trip, paid end
   // to end on every Bill Management load; the independent ones now overlap.
-  const [peopleMap, billMap, structureMap, yearMap] = await Promise.all([
+  const [peopleMap, billMap, structureMap, yearMap, modeMap] = await Promise.all([
     resolvePeople(supabase, learnerIds, staffIds),
     loadBillMap(supabase, billIds),
     nameMapFor(supabase, 'tms_fee_structure', 'name', structureIds),
     nameMapFor(supabase, 'tms_transport_year', 'name', yearIds),
+    // HOW the money arrived. Rides in batch 1 because it depends only on the
+    // ledger's billing_student_bill_ids, so it costs no extra wall-clock.
+    loadPaymentModeMap(supabase, billIds),
   ]);
 
   // Batch 2: the lookups that need batch-1 results (institution + department ids
@@ -428,6 +416,7 @@ export async function loadTransportBills(
     const route = (person?.transport_stop_id ? routeMap.get(person.transport_stop_id) : null) ?? NO_ROUTE;
     const billRef = r.billing_student_bill_id as string | null;
     const bill = billRef ? billMap.get(billRef) : undefined;
+    const pay = billRef ? modeMap.get(billRef) : undefined;
     // Prefer the LIVE money row for amount/due_date so MyJKKN edits reflect; fall back
     // to the ledger snapshot for staff (no money row) or a missing row.
     const amount = personType === 'learner' && bill ? bill.final : Number(r.amount ?? 0);
@@ -498,6 +487,13 @@ export async function loadTransportBills(
       status,
       payment_date: paymentDate,
       billing_student_bill_id: billRef,
+      // Staff bills never reach here with a mode: they have no money row and so
+      // no receipt. tms_fee_bill.payment_reference is all that is recorded for
+      // them, so surface that rather than leaving the column blank.
+      payment_mode: pay?.mode ?? null,
+      payment_modes: pay?.modes ?? [],
+      receipt_number: pay?.receiptNumbers.length ? pay.receiptNumbers.join(', ') : null,
+      payment_reference: pay?.reference ?? ((r.payment_reference as string | null) || null),
     };
   });
 

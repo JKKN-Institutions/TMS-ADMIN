@@ -7,9 +7,11 @@ function row(over: Partial<TransportBillRow> = {}): TransportBillRow {
   return {
     id: 'r', person_id: 'p', person_type: 'learner', person_name: '—', code: null,
     institution_id: null, institution_name: null, department_id: null, department_name: null,
+    route_id: null, route_number: null, route_name: null,
     structure_id: 's', structure_name: null,
     transport_year_id: 'y', year_name: null, academic_year_id: null, academic_year_name: null,
     term_no: 1, amount: 0, due_date: '2026-12-31', paid_amount: 0, pending_amount: 0,
+    payment_mode: null, payment_modes: [], receipt_number: null, payment_reference: null,
     status: 'unpaid', payment_date: null, billing_student_bill_id: null, ...over,
   };
 }

@@ -24,6 +24,7 @@ import {
   learnerPaymentBreakdown, termBreakdown, groupByInstitution, groupByDepartment,
   UNASSIGNED_KEY, type GroupStat,
 } from '@/lib/fees/bill-analytics';
+import { collectionByMode } from '@/lib/fees/payment-mode';
 
 // Learner buckets on the reserved good→serious status scale (icon + label, never color-alone).
 const BUCKETS = [
@@ -178,6 +179,8 @@ function AnalyticsSection({
 }) {
   const learners = useMemo(() => learnerPaymentBreakdown(rows), [rows]);
   const terms = useMemo(() => termBreakdown(rows), [rows]);
+  const modes = useMemo(() => collectionByMode(rows), [rows]);
+  const modeTotal = modes.reduce((t, m) => t + m.collected, 0);
   const paidInclPartial = learners.fullyPaid + learners.partiallyPaid;
 
   const billed = summary.totalBilledAmount;
@@ -304,6 +307,58 @@ function AnalyticsSection({
           rows: terms.map((t) => [t.term_no, t.learners, t.fullyPaidLearners, t.partialLearners, t.unpaidLearners, t.collected, t.pending]),
         }}
       />
+
+      {/* How the money arrived. ONE series (collected amount), so it takes ONE
+          color and the axis labels carry identity — and the reserved status
+          tokens stay out of it, because a payment mode is not a good/bad state.
+          Cash dominates transport collection (~95% by value), so the other modes
+          are slivers on a linear axis by design; the table twin carries the exact
+          rupees and each mode's share. Totals reconcile with COLLECTED, not
+          Billed: a bill with nothing receipted has no mode to sit under. */}
+      <ChartCard
+        title="How the money arrived"
+        subtitle={`Collection by payment mode ${scope}`}
+        hasData={modes.length > 0}
+        emptyMessage="No receipted payment yet."
+        chart={
+          <ResponsiveContainer width="100%" height={Math.max(160, modes.length * 46 + 24)}>
+            <BarChart data={modes} layout="vertical" margin={{ top: 4, right: 76, bottom: 4, left: 8 }} barCategoryGap="30%">
+              <CartesianGrid {...gridProps} horizontal={false} />
+              <XAxis type="number" tick={axisTick} axisLine={axisLine} tickLine={false} tickFormatter={inrCompact} />
+              <YAxis type="category" dataKey="label" width={110} tick={axisTick} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{ fill: 'var(--viz-grid)', opacity: 0.4 }} content={<VizTooltip valueFmt={inr} />} />
+              <Bar dataKey="collected" name="Collected" fill="var(--viz-accent)" radius={[0, 4, 4, 0]} maxBarSize={22}>
+                <LabelList dataKey="collected" position="right" fill="var(--viz-tick)" fontSize={11} formatter={(v: number) => inrCompact(v)} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        }
+        table={
+          <VizTable
+            head={['Mode', 'Collected', 'Share', 'Bills', 'People']}
+            rows={modes.map((m) => [
+              m.label,
+              inr(m.collected),
+              modeTotal > 0 ? `${((m.collected / modeTotal) * 100).toFixed(1)}%` : '—',
+              num(m.bills),
+              num(m.people),
+            ])}
+          />
+        }
+        csv={{
+          filename: `bill-analytics-by-payment-mode${yearLabel ? `-${yearLabel}` : ''}.csv`,
+          head: ['Mode', 'Collected', 'Bills', 'People'],
+          rows: modes.map((m) => [m.label, m.collected, m.bills, m.people]),
+        }}
+      />
+
+      {modeTotal < summary.collectedAmount && (
+        <p className="text-xs text-muted-foreground">
+          {inr(summary.collectedAmount - modeTotal)} of collection has no receipt behind it in
+          billing_receipts — staff bills are marked paid in TMS itself, which records a reference
+          but no mode.
+        </p>
+      )}
     </div>
   );
 }

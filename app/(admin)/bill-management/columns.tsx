@@ -6,6 +6,7 @@ import { GraduationCap, Users } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { TransportBillRow, BillStatus } from '@/lib/fees/bills';
+import { NO_PAYMENT_MODE, PAYMENT_MODE_LABELS, type PaymentMode } from '@/lib/fees/payment-mode';
 
 export const inr = (n: number | string | null | undefined) =>
   `₹${Number(n ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -32,6 +33,41 @@ export const billStatusBadge = (status: BillStatus) => (
     {status.replace(/_/g, ' ')}
   </span>
 );
+
+// Cash is the overwhelming default here (~95% of transport collection by value),
+// so it gets the quiet neutral treatment and the exceptions get the colour.
+const MODE_STYLE: Record<PaymentMode, string> = {
+  cash: 'bg-gray-100 text-gray-700 dark:bg-gray-500/15 dark:text-gray-300',
+  online: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-400',
+  dd: 'bg-teal-100 text-teal-800 dark:bg-teal-500/15 dark:text-teal-400',
+  cheque: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-500/15 dark:text-cyan-400',
+  bank_transfer: 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-400',
+  combined: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400',
+  mixed: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400',
+  other: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300',
+};
+
+export const paymentModeBadge = (row: TransportBillRow) => {
+  if (!row.payment_mode) {
+    return <span className="text-sm text-gray-400">—</span>;
+  }
+  // 'mixed' is ours (several receipts, different modes); 'combined' is the
+  // accountant's own single-receipt cash+online, which has no stored breakdown.
+  const title =
+    row.payment_mode === 'mixed'
+      ? row.payment_modes.map((m) => PAYMENT_MODE_LABELS[m]).join(' + ')
+      : row.payment_mode === 'combined'
+        ? 'One receipt recorded as more than one mode — no breakdown is stored'
+        : (row.receipt_number ?? undefined);
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${MODE_STYLE[row.payment_mode]}`}
+    >
+      {PAYMENT_MODE_LABELS[row.payment_mode]}
+    </span>
+  );
+};
 
 const typeBadge = (t: TransportBillRow['person_type']) => (
   <span
@@ -182,6 +218,32 @@ export function getBillColumns(): ColumnDef<TransportBillRow>[] {
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       cell: ({ row }) => billStatusBadge(row.original.status),
       size: 130,
+    },
+    {
+      // Filtering by mode means filtering by HOW money arrived, so an unpaid bill
+      // has none. It maps to the explicit NO_PAYMENT_MODE bucket rather than being
+      // dropped: the page's KPI tiles recompute from the filtered rows, and
+      // silently losing unpaid rows would break Billed === Collected + Pending.
+      id: 'payment_mode',
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Payment mode" />,
+      accessorFn: (r) => r.payment_mode ?? NO_PAYMENT_MODE,
+      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      cell: ({ row }) => paymentModeBadge(row.original),
+      size: 140,
+    },
+    {
+      id: 'receipt',
+      // Hidden by default — the receipt number and reference are drill-down
+      // detail, but they belong in the global search so an accountant can paste a
+      // receipt number or a pay_… id and find the bill.
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Receipt" />,
+      accessorFn: (r) => [r.receipt_number, r.payment_reference].filter(Boolean).join(' '),
+      cell: ({ row }) => (
+        <span className="text-sm text-gray-600 dark:text-gray-300">
+          {row.original.receipt_number || row.original.payment_reference || '—'}
+        </span>
+      ),
+      size: 150,
     },
     {
       id: 'type',
