@@ -64,7 +64,13 @@ interface DataTableProps<TData, TValue> {
 
 // "licenseNumber" -> "License Number" for the column-visibility menu.
 function prettifyColumnId(id: string) {
-  return id.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
+  // snake_case ids are as common here as camelCase ones ('academic_year',
+  // 'payment_mode'), and without the underscore pass the View menu listed them
+  // verbatim as "Academic_year".
+  return id
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, (c) => c.toUpperCase());
 }
 
 export function DataTable<TData, TValue>({
@@ -142,7 +148,12 @@ export function DataTable<TData, TValue>({
               {filteredCount !== totalRows ? <span className="text-gray-400">(of {totalRows.toLocaleString()})</span> : null}
             </span>
             <span className="text-gray-500">Page <span className="font-medium text-gray-700">{pageIndex + 1}</span> of {pageCount}</span>
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{percentOfTotal}% of total</span>
+            <span
+              className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+              title="How far through the matching rows this page reaches"
+            >
+              {percentOfTotal}% viewed
+            </span>
             {selectedCount > 0 && (
               <span className="font-medium text-green-600">Selected: {selectedCount.toLocaleString()}</span>
             )}
@@ -160,10 +171,12 @@ export function DataTable<TData, TValue>({
           {globalSearch && (
             // NEVER `flex-1` here. `flex-1` is `flex: 1 1 0%` -- a ZERO basis -- so the
             // search claims no space of its own and is left with whatever its siblings
-            // decline, while every FilterSelect reserves `basis-40` (160px) up front.
+            // decline, while every FilterSelect claims its content width up front.
             // Being the only growable item made it the only STARVABLE one. Measured
             // usable text width (box minus the 40px `pl-10!` gutter and 12px right pad),
-            // against the ~215px a 34-char placeholder needs:
+            // against the ~215px a 34-char placeholder needs (measured when each
+            // FilterSelect reserved a flat 160px; they are content-sized with a
+            // 120px floor now, which only widens the margin below):
             //   320px -> 84    360px -> -44    390px -> -14    414px -> 10    640px -> 96
             // Negative means the padding alone overflowed the box. Worst at 360-390px,
             // and NOT monotonic -- widening the screen let a second filter join the row
@@ -330,13 +343,33 @@ export function FilterSelect({
   const selected = options.find((o) => o.value === value);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex h-[38px] basis-40 min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
-        <span className="truncate">{selected ? selected.label : `${title}: All`}</span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
+      <DropdownMenuTrigger
+        aria-label={selected ? `${title}: ${selected.label}` : `Filter by ${title.toLowerCase()}`}
+        className={`inline-flex h-[38px] min-w-[7.5rem] max-w-[15rem] shrink-0 basis-auto items-center justify-between gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 ${
+          selected
+            ? 'border-green-600/40 bg-green-50 text-gray-900 hover:bg-green-100 dark:border-green-500/40 dark:bg-green-500/10 dark:text-gray-100 dark:hover:bg-green-500/20'
+            : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+        }`}
+      >
+        {/* The title STAYS when a value is picked. Showing the value alone
+            ("Cash") left a row of orphan words with no clue which dropdown each
+            belonged to — unreadable once a table carried five filters.
+            Grouped in one flex box so justify-between splits label-from-chevron
+            and never pushes the divider away from the value it separates. */}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{title}</span>
+          {selected && (
+            <>
+              <span aria-hidden className="h-4 w-px shrink-0 bg-green-600/30 dark:bg-green-400/30" />
+              <span className="truncate font-semibold text-green-700 dark:text-green-400">{selected.label}</span>
+            </>
+          )}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 ${selected ? 'text-green-700/70 dark:text-green-400/70' : 'text-gray-400'}`} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[10rem] overflow-y-auto">
         <DropdownMenuItem onSelect={() => onChange(undefined)}>
-          <Check className={value ? 'opacity-0' : 'opacity-100'} /> {title}: All
+          <Check className={value ? 'opacity-0' : 'opacity-100'} /> All
         </DropdownMenuItem>
         {options.map((o) => (
           <DropdownMenuItem key={o.value} onSelect={() => onChange(o.value)}>
