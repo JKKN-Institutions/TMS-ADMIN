@@ -1,4 +1,5 @@
 import type { TransportBillRow } from '@/lib/fees/bills';
+import { PAYMENT_MODE_LABELS } from '@/lib/fees/payment-mode';
 
 // Export transport bill rows (selected, or all when none selected) to .xlsx.
 // Mirrors the module export helpers (vehicle-export.ts / coverage-export.ts).
@@ -27,11 +28,15 @@ export async function exportBills(rows: TransportBillRow[], yearLabel?: string) 
     'Due date': fmtDate(r.due_date),
     Status: r.status.replace(/_/g, ' '),
     'Payment date': fmtDate(r.payment_date),
+    'Payment mode': r.payment_mode ? PAYMENT_MODE_LABELS[r.payment_mode] : '',
+    Receipt: r.receipt_number ?? '',
+    Reference: r.payment_reference ?? '',
   }));
 
   const header = [
     'Person', 'Code', 'Type', 'Institution', 'Structure', 'Academic year', 'Term', 'Transport year',
     'Amount', 'Paid', 'Pending', 'Due date', 'Status', 'Payment date',
+    'Payment mode', 'Receipt', 'Reference',
   ];
   const ws = XLSX.utils.json_to_sheet(data, { header });
   const wb = XLSX.utils.book_new();

@@ -18,6 +18,7 @@ import { fetchFines, cancelFine } from './fines-api';
 import { getFineColumns } from './fine-columns';
 import type { FineRow } from '@/lib/fines/list';
 import { summarizeBills, type TransportBillRow } from '@/lib/fees/bills';
+import { paymentModeFilterOptions } from '@/lib/fees/payment-mode';
 import { FineDialog } from './fine-dialog';
 import { ConcessionPanel } from './concessions/concession-panel';
 
@@ -130,6 +131,9 @@ export default function BillManagementPage() {
   // routes that actually have bills in view. People with no boarding stop carry
   // no route and are excluded from every route selection.
   const billRouteOptions = useMemo(() => routeFilterOptions(rows), [rows]);
+  // Built from the rows on screen, so a mode nobody used this year (cheque, say)
+  // never shows as an option that filters to nothing.
+  const billModeOptions = useMemo(() => paymentModeFilterOptions(rows), [rows]);
   const unbilledRouteOptions = useMemo(
     () => routeFilterOptions(unbilled?.people ?? []),
     [unbilled]
@@ -254,7 +258,7 @@ export default function BillManagementPage() {
           getRowId={(r) => r.id}
           enableRowSelection
           onFilteredRowsChange={onFilteredRowsChange}
-          initialColumnVisibility={{ route: false }}
+          initialColumnVisibility={{ route: false, receipt: false }}
           searchPlaceholder="Search person, code or institution..."
           filters={[
             ...(billInstitutionOptions.length
@@ -275,6 +279,9 @@ export default function BillManagementPage() {
                 { label: 'Cancelled', value: 'cancelled' },
               ],
             },
+            ...(billModeOptions.length
+              ? [{ columnId: 'payment_mode', title: 'Payment mode', options: billModeOptions }]
+              : []),
             TYPE_FILTER,
           ]}
           toolbarActions={({ selectedRows }) => (
