@@ -13,14 +13,19 @@
  * every resolved scan is a camera-read JKKN ID, so it is always true.
  */
 import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
+import type { OtherBus } from '@/lib/booking/roster';
 
 export type LocalScan =
   | { kind: 'refused'; message: string }
-  | { kind: 'resolved'; learnerId: string; name: string; booked: boolean; verified: boolean; alreadyPresent: boolean }
+  | {
+      kind: 'resolved'; learnerId: string; name: string; booked: boolean; verified: boolean; alreadyPresent: boolean;
+      /** Another bus involved today, as the saved list shows it. Null on older snapshots. */
+      otherBus: OtherBus | null;
+    }
   | { kind: 'unknown'; message: string };
 
 interface SavedRoster {
-  rows: Array<{ learner_id: string; name: string; booked: boolean; status: string }>;
+  rows: Array<{ learner_id: string; name: string; booked: boolean; status: string; other_bus?: OtherBus | null }>;
   cards?: Record<string, string>;
 }
 
@@ -48,5 +53,6 @@ export function resolveScanOffline(raw: string, source: ScanSource, roster: Save
     // camera-read JKKN ID resolved through the saved roster.
     verified: true,
     alreadyPresent: row.status === 'present',
+    otherBus: row.other_bus ?? null,
   };
 }

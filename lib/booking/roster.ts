@@ -18,11 +18,26 @@ import { decideMark, canClearMark, type MarkStatus } from '@/lib/boarding/attend
 import { UNKNOWN_FEE, type RosterFee } from '@/lib/boarding/fee-roster';
 import { bookedCount, routeCapacity } from './repo';
 
+/**
+ * A learner on this bus's list whose day involves another bus:
+ *   booked  — allocated here, but booked another bus today;
+ *   boarded — on this list, but recorded boarding another bus;
+ *   from    — belongs to another bus, recorded boarding this one.
+ * See lib/boarding/wrong-bus.ts.
+ */
+export interface OtherBus {
+  kind: 'booked' | 'boarded' | 'from';
+  routeId: string;
+  routeNumber: string | null;
+}
+
 export interface RosterRider {
   learner_id: string;
   name: string;
   roll: string | null;
   stop_id: string | null;
+  /** Set only by the attendance roster. */
+  other_bus?: OtherBus | null;
   /**
    * Did this rider book a seat for the day? Optional so the booking-only callers
    * (driver Boardings, boarding dashboard) stay unchanged — an absent flag means
@@ -161,6 +176,8 @@ export interface RosterRow {
   scanned_at: string | null;
   /** false = on the bus roster but holds no ticket (no booking) for this day. */
   booked: boolean;
+  /** Another bus involved today ("Booked on bus 24", "From bus 24"). Absent on older snapshots. */
+  other_bus?: OtherBus | null;
   /**
    * True when this mark records a boarding with NO booking for the day -- the
    * "travelled without a ticket" record. Distinct from `!booked`, and the
@@ -383,6 +400,7 @@ export function buildRosterRows(
       // after the mark (or cancelled after it) must not silently rewrite what
       // the in-charge recorded at the time they saw the student board.
       is_walk_up: marked ? att!.is_walk_up : false,
+      other_bus: rider.other_bus ?? null,
       owner_email: owner?.staff_email ?? null,
       owner_name: owner?.name ?? null,
       is_mine: inScope,

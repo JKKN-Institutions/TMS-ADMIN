@@ -84,7 +84,7 @@ export function SystemSettings() {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="rounded-lg border border-gray-200 bg-white p-4">
             <h4 className="mb-3 flex items-center gap-2 font-medium text-gray-900">
-              <Server className="h-5 w-5 text-blue-600" />
+              <Server className="h-5 w-5 text-green-600" />
               Application
             </h4>
             <div className="space-y-2 text-sm">

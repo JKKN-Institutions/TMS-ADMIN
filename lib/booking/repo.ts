@@ -11,6 +11,27 @@ function isMissingTable(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === '42P01';
 }
 
+/**
+ * The learner's booking for the date: which bus and stop, or null. One booking
+ * per learner per day (the live table holds no duplicates); the first is used
+ * if that ever changes.
+ */
+export async function getBookingForDate(
+  svc: SupabaseClient,
+  learnerId: string,
+  date: string,
+): Promise<{ routeId: string; stopId: string | null } | null> {
+  const { data, error } = await svc
+    .from('tms_booking')
+    .select('route_id, stop_id')
+    .eq('learner_id', learnerId)
+    .eq('travel_date', date)
+    .limit(1);
+  if (error && !isMissingTable(error)) throw error;
+  const row = ((data ?? []) as Array<{ route_id: string; stop_id: string | null }>)[0];
+  return row ? { routeId: row.route_id, stopId: row.stop_id ?? null } : null;
+}
+
 /** True if the learner holds a booking for the given date (presence = booked). */
 export async function hasBookingForDate(
   svc: SupabaseClient,

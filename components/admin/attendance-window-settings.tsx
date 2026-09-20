@@ -116,7 +116,7 @@ export function AttendanceWindowSettings() {
             <label
               key={m}
               className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
-                markingMode === m ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-gray-200'
+                markingMode === m ? 'border-green-500 bg-green-50 dark:bg-green-500/10' : 'border-gray-200'
               }`}
             >
               <input
@@ -125,7 +125,7 @@ export function AttendanceWindowSettings() {
                 value={m}
                 checked={markingMode === m}
                 onChange={() => setMarkingMode(m)}
-                className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                className="mt-0.5 h-4 w-4 text-green-600 focus:ring-green-500"
               />
               <span>
                 <span className="block font-medium text-gray-900">{MARKING_MODE_LABEL[m]}</span>
@@ -156,7 +156,7 @@ export function AttendanceWindowSettings() {
               type="checkbox"
               checked={evening.active}
               onChange={(e) => setEvening({ ...evening, active: e.target.checked })}
-              className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
             />
           </label>
           <div className={evening.active ? '' : 'opacity-50'}>
@@ -170,7 +170,7 @@ export function AttendanceWindowSettings() {
         </div>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+      <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
         <Clock className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           Turn off <strong>Enforce</strong> on the morning trip to allow scanning at any time. To use
@@ -182,7 +182,7 @@ export function AttendanceWindowSettings() {
         type="button"
         onClick={save}
         disabled={saving || loadFailed}
-        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+        className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
       >
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
         Save attendance settings
@@ -208,7 +208,7 @@ function WindowCard({
             type="checkbox"
             checked={value.enabled}
             onChange={(e) => onChange({ ...value, enabled: e.target.checked })}
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
           />
           Enforce
         </label>
@@ -221,7 +221,7 @@ function WindowCard({
             value={value.start}
             disabled={!value.enabled}
             onChange={(e) => onChange({ ...value, start: e.target.value })}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500"
           />
         </div>
         <div>
@@ -231,7 +231,7 @@ function WindowCard({
             value={value.end}
             disabled={!value.enabled}
             onChange={(e) => onChange({ ...value, end: e.target.value })}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500"
           />
         </div>
       </div>

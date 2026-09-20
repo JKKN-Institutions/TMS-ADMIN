@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock, IndianRupee } from 'lucide-react';
+import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock, IndianRupee, Bus } from 'lucide-react';
 import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
@@ -59,6 +59,31 @@ function StatusBadge({ status, pending }: { status: RosterRow['status']; pending
  *
  * Same student before and after the Boarded tap; the badge is what changes.
  */
+const OTHER_BUS_TEXT: Record<NonNullable<RosterRow['other_bus']>['kind'], string> = {
+  booked: 'Booked on bus',
+  boarded: 'Boarded bus',
+  from: 'From bus',
+};
+
+/**
+ * The ticket badge, plus a second line when another bus is involved today:
+ * "Booked on bus 24" (booked elsewhere), "Boarded bus 49" (recorded on another
+ * bus), "From bus 24" (belongs to another bus, recorded on this one).
+ */
+function TicketCell({ row }: { row: RosterRow }) {
+  const other = row.other_bus ?? null;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <TicketBadge booked={row.booked} walkUp={row.is_walk_up} />
+      {other && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
+          <Bus className="h-3 w-3 shrink-0" /> {OTHER_BUS_TEXT[other.kind]} {other.routeNumber ?? '?'}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function TicketBadge({ booked, walkUp }: { booked: boolean; walkUp: boolean }) {
   if (booked)
     return (
@@ -307,7 +332,7 @@ export function getRosterColumns(opts: {
       // laptop; it wraps inside the pill on a phone rather than truncating,
       // because a half-shown label is exactly the confusion being fixed.
       size: 190,
-      cell: ({ row }) => <TicketBadge booked={row.original.booked} walkUp={row.original.is_walk_up} />,
+      cell: ({ row }) => <TicketCell row={row.original} />,
     },
     {
       id: 'fee',
