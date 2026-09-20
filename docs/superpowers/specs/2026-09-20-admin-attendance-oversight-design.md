@@ -105,8 +105,24 @@ a flag the scanner did set. One write path, one set of rules.
 
 Unnecessary. The aggregate runs in **19 ms** for a 25-route × 16-day grid on the
 existing `idx_tms_attendance_trip (route_id, trip_date)` index, verified with
-`explain analyze` against production. No migration, no new index, nothing to
-keep in sync.
+`explain analyze` against production. No new index, nothing to keep in sync.
+
+### The grid needs one read-only SQL function
+
+supabase-js cannot run raw SQL, and PostgREST caps reads at 1,000 rows while a
+90-day grid touches ~28,000 attendance rows. Aggregating in TypeScript would
+mean paginating tens of thousands of rows over the wire on every page load.
+
+So the grid ships **one additive, read-only function**,
+`tms_attendance_coverage(p_from date, p_to date, p_direction text)`, returning
+**one row per route** with the day counts as a `jsonb` array:
+`(route_id, route_number, route_name, roster int, days jsonb)` where each day is
+`{d, h, a, x}` — date, human marks, auto marks, holiday flag. One row per route
+means the result is 25 rows for **any** range length, so the 1,000-row cap can
+never be reached and the date range needs no artificial limit.
+
+This is the only migration in the plan. It creates a function and grants
+EXECUTE; it adds no table, alters no column, and writes nothing.
 
 ## Architecture
 
@@ -201,7 +217,9 @@ callers, so no new exemption logic is introduced — only the date is authorized
 
 DELETE gets the same dimension; without it a back-dated mistake is permanent.
 
-**No migration.** The RPC, the table and the index are all already capable.
+**No migration for the write path.** The RPC, the table and the index are all
+already capable; only the API's date handling changes. The plan's single
+migration is the read-only coverage function described above.
 
 ## Safety rules
 
