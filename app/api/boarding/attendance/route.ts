@@ -70,8 +70,14 @@ function chunk<T>(arr: T[], size = 150): T[][] {
  * null floor must never reach a comparison.
  */
 async function loadTransportYearStart(svc: SupabaseClient): Promise<string | null> {
-  const { data } = await svc
+  const { data, error } = await svc
     .from('tms_transport_year').select('start_date').eq('is_current', true).maybeSingle();
+  if (error) {
+    // resolveFloor's fallback still applies on null -- log so a broken query
+    // doesn't silently widen the floor without anyone noticing.
+    console.error('boarding attendance: failed to load transport year start:', error);
+    return null;
+  }
   return (data as { start_date: string } | null)?.start_date ?? null;
 }
 
@@ -164,7 +170,9 @@ async function mark(request: NextRequest, auth: AuthContext) {
     const dated = decideTripDate({
       requested: body.date,
       today: istToday(),
-      floor: await loadTransportYearStart(svc),
+      // decideTripDate never reads `floor` when `requested` is absent/empty, and
+      // ~500 phone marks/day send no date -- skip the query on that path.
+      floor: body.date ? await loadTransportYearStart(svc) : null,
       isSuperAdmin: auth.isSuperAdmin,
       isOverrideHolder,
     });
@@ -397,7 +405,12 @@ async function mark(request: NextRequest, auth: AuthContext) {
       // never where. The upsert's conflict key excludes route_id, so moving a
       // past row would rewrite that day's bus and stop from today's allocation.
       move_route: !backdated,
-      booked_route_id: bookedElsewhere.get(m.learnerId) ?? null,
+      // Same-day only, for the same reason: bookedElsewhere is computed against
+      // the route being marked TODAY, so a back-dated mark from a different
+      // bus's list would overwrite a past row's recorded (possibly wrong) bus.
+      // Omitted -- not null -- so the RPC's `case when m ? 'booked_route_id'`
+      // leaves the row's existing value untouched.
+      ...(backdated ? {} : { booked_route_id: bookedElsewhere.get(m.learnerId) ?? null }),
       status: m.status,
       // "Boarded without a booking" -- a claim about RIDING, so it can only
       // be true of a PRESENT mark. See the history above for why.
@@ -689,31 +702,30 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: decided.error, reason: decided.reason }, { status: decided.status });
     }
     const direction: AttDirection = decided.direction;
-    // See the note on the marking path above: the trip_date rows are matched
-    // and deleted by stays on UTC (pre-existing, shared with the QR scanner);
-    // only the authorization date is IST.
-    // ── Arbitration, which this endpoint never had ──
-    // Until now nothing in the UI called DELETE, so "any assigned staff may
-    // wipe any mark on the route" was unreachable rather than safe. The Undo
-    // control on a without-ticket row makes it reachable, so the rule that
-    // guards every other write applies here too: your own mark, an orphaned
-    // one, or the transport office. canClearMark is the same authority the
-    // roster's can_edit hint is rendered from.
+    // isOverrideHolder is resolved once, early: decideTripDate needs it right
+    // below to judge a back-dated request, and canClearMark needs it again
+    // further down to judge ownership of an existing mark -- see the
+    // Arbitration comment near that check for what the permission means here.
     const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
-    // Undo needs the same date dimension as the mark, or a back-dated mistake
-    // is permanent. isOverrideHolder is resolved further down in this function
-    // today; hoist that lookup above this block so the decision can use it.
+    // Undo needs the same date dimension as the mark, so a back-dated mistake
+    // can be corrected too.
     const dated = decideTripDate({
       requested: body.date,
       today: istToday(),
-      floor: await loadTransportYearStart(svc),
+      // decideTripDate never reads `floor` when `requested` is absent/empty --
+      // skip the query on the common (no-date) path.
+      floor: body.date ? await loadTransportYearStart(svc) : null,
       isSuperAdmin: auth.isSuperAdmin,
       isOverrideHolder,
     });
     if (!dated.ok) {
       return NextResponse.json({ error: dated.error, reason: dated.reason }, { status: dated.status });
     }
-    const today = dated.date;
+    // Same-day behaviour unchanged: the delete's trip_date filter stays on UTC,
+    // exactly as before this feature existed (that UTC/IST split is
+    // pre-existing and out of scope here). A back-dated undo matches rows on
+    // the named day instead, for both the delete filter and authorization.
+    const today = dated.isBackdated ? dated.date : new Date().toISOString().slice(0, 10);
     const authDate = dated.date;
 
     const cfg = await loadSchedulingConfig(svc);
@@ -735,6 +747,14 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       }
     }
 
+    // ── Arbitration, which this endpoint never had ──
+    // Until now nothing in the UI called DELETE, so "any assigned staff may
+    // wipe any mark on the route" was unreachable rather than safe. The Undo
+    // control on a without-ticket row makes it reachable, so the rule that
+    // guards every other write applies here too: your own mark, an orphaned
+    // one, or the transport office. canClearMark is the same authority the
+    // roster's can_edit hint is rendered from.
+    //
     // Chunked, and the error CHECKED. An oversized `.in()` returns HTTP 400 with
     // no rows, and an empty result here reads as "no existing mark" — which
     // canClearMark answers with `true`. That is the one direction this gate must
@@ -798,8 +818,10 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       module: 'boarding',
       action: 'unmark',
       entityType: 'tms_attendance',
-      description: `Cleared attendance for ${cleared} learner(s) on route ${routeId} (${direction})`,
-      metadata: { routeId, direction, count: cleared },
+      description:
+        `Cleared attendance for ${cleared} learner(s) on route ${routeId} (${direction})` +
+        (dated.isBackdated ? ` — BACK-DATED to ${today}` : ''),
+      metadata: { routeId, direction, count: cleared, backdated: dated.isBackdated, tripDate: today },
     });
     return NextResponse.json({ success: true, cleared });
   } catch (e) {
