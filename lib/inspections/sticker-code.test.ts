@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeReg, stickerPath, stickerUrl, parseStickerScan } from './sticker-code';
+import { normalizeReg, stickerPath, stickerUrl, parseStickerScan, STICKER_ORIGIN } from './sticker-code';
+
+describe('STICKER_ORIGIN', () => {
+  it('defaults to the fixed production host when the env var is unset', () => {
+    // Stickers are permanent, so the origin must never come from the browser.
+    // NEXT_PUBLIC_TMS_STICKER_ORIGIN is unset in the test run, so the default applies.
+    expect(process.env.NEXT_PUBLIC_TMS_STICKER_ORIGIN).toBeFalsy();
+    expect(STICKER_ORIGIN).toBe('https://tms.jkkn.ai');
+  });
+});
 
 describe('normalizeReg', () => {
   it('uppercases and strips spaces, dashes and dots', () => {

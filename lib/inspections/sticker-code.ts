@@ -5,6 +5,15 @@
  * Pure (no I/O): shared by the scanner, the sticker page and the API.
  */
 
+/**
+ * Stickers are PRINTED and stuck inside buses permanently — they can outlive
+ * whatever host happened to render the page that generated them. So the QR
+ * origin is fixed to the production domain, never taken from
+ * `window.location.origin` (which would bake in localhost or a preview URL).
+ * Override only via env for non-default deployments.
+ */
+export const STICKER_ORIGIN = process.env.NEXT_PUBLIC_TMS_STICKER_ORIGIN || 'https://tms.jkkn.ai';
+
 /** Uppercase, strip everything that is not A–Z / 0–9. */
 export function normalizeReg(raw: string): string {
   return raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
