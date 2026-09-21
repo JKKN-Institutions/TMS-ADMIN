@@ -5,6 +5,10 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
 import { BusCard } from '@/components/inspections/bus-card';
+import { OUTCOME_META } from '@/components/inspections/learner-scan-dialog';
+import { headcountDelta } from '@/lib/inspections/overview';
+import { LEG_NAME } from '@/lib/boarding/attendance-window';
+import { fmtIST } from '@/lib/inspections/format';
 import { fetchInspection } from '../inspection-api';
 
 const RESULT = {
@@ -19,6 +23,8 @@ export default function InspectionReportPage({ params }: { params: Promise<{ id:
   if (isError || !data) return <p className="text-red-600 dark:text-red-400">Inspection not found. <Link href="/inspections" className="underline">Back</Link></p>;
 
   const failed = data.items.filter((i) => i.result === 'fail');
+  const { riders, learnerChecks } = data;
+  const delta = riders.leg && riders.headcount != null && riders.boarded != null ? headcountDelta(riders.headcount, riders.boarded) : null;
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <DetailPageHeader
@@ -30,6 +36,43 @@ export default function InspectionReportPage({ params }: { params: Promise<{ id:
           : <Link href={`/inspections/${id}/check`} className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white">Continue draft</Link>}
       />
       <BusCard detail={data} />
+      <SectionCard title="Riders at inspection">
+        {riders.leg ? (
+          <div className="space-y-1 text-sm">
+            <p>
+              <b>{LEG_NAME[riders.leg]}</b>: counted {riders.headcount ?? '—'} · boarded {riders.boarded ?? '—'} · booked {riders.booked ?? '—'}
+            </p>
+            {delta && (
+              <p className={delta.diff === 0 ? 'text-green-700 dark:text-green-400' : 'font-medium text-amber-700 dark:text-amber-400'}>{delta.label}</p>
+            )}
+            {riders.headcount != null && riders.boarded == null && (
+              <p className="text-gray-500 dark:text-gray-400">No route on record, so there was no boarded count to compare</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Headcount not taken</p>
+        )}
+      </SectionCard>
+      <SectionCard title={`Learner ID checks (${learnerChecks.length})`}>
+        {learnerChecks.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No ID cards were checked</p>
+        ) : (
+          <ul className="divide-y divide-gray-100 text-sm dark:divide-gray-800">
+            {learnerChecks.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium">{c.name ?? 'Unknown learner'}</span>
+                  {c.roll && <span className="text-gray-500 dark:text-gray-400"> · {c.roll}</span>}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_META[c.outcome].chip}`}>{OUTCOME_META[c.outcome].label}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{fmtIST(c.scannedAt)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
       {failed.length > 0 && (
         <SectionCard title={`Failed items (${failed.length})`}>
           <ul className="space-y-3">
