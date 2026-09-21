@@ -1,132 +1,225 @@
 # 48-hour transport fee payment timer — design
 
-Date: 2026-09-21 · Status: approved in chat, pending plan confirmation
+Date: 2026-09-21 · Status: approved in chat, pending spec review
+
+Supersedes the earlier same-day "reminder only" version of this spec (commit
+7376afc). The user chose automatic Transport Fee raising over reminder-only.
 
 ## Goal
 
-An admin starts a 48-hour payment window for a transport year. Every learner
-who still owes transport maintenance fees for that year sees a live countdown on
-every page of the learner portal, and receives an in-app notification the moment
-the window starts. At zero the timer turns into a "time is up" message.
-**Nothing is locked, charged or changed automatically** — any follow-up is a
-manual admin decision.
+Every learner whose Term 1 Transport Maintenance Fee is unpaid gets a personal
+48-hour countdown, shown on every learner portal page. If it is still unpaid
+when the countdown reaches zero, a **Transport Fee** (the fine category, see
+`project_transport_fee_category_split`) equal to the learner's route charge is
+raised automatically, **on top of** the maintenance fee.
 
 ## Decisions (made with the user)
 
 | Question | Decision |
 |---|---|
-| What does it count to? | An admin-started window: deadline = start + exactly 48 hours |
-| What happens at zero? | Reminder only. Optional admin message shown under the timer |
-| Who sees it? | Learners with an outstanding balance on a live transport bill in that year |
-| Where? | One bar in the learner portal layout → appears on every learner page |
-| How do learners notice? | The bar, plus one urgent in-app notification when the window starts |
+| When does the 48h start? | At go-live (the moment an admin switches the feature on) for everyone unpaid then; for bills created later, at bill creation. `expires_at = max(enabled_at, bill.created_at) + 48h` |
+| What happens to the maintenance bill at expiry? | Kept. The Transport Fee is added on top — no cancellation (`fn_cancel_student_bill` cannot be called by a cron anyway) |
+| What counts as "paid"? | Term 1 cleared, by the existing `term1PaidLearnerIds()` rule (instalment 1 settled, or whole bill paid when it has no instalments) — the same rule as the portal access gate |
+| Concessions? | Learners with any `tms_fee_override` row for the year are excluded (no timer, no auto-fine). Admins may still fine them manually |
+| Fine amount | The route charge from `tms_fine_stop_rate` (every stop = its route's final-stop amount) |
+| Fine due date | Expiry date + `fine_due_days` (default 7) |
+| How often? | At most one auto-fine per learner per transport year |
+| Notifications | On timer start; reminder ~6h before expiry; when the fine is raised; plus a banner on every portal page |
+| Staff | Out of scope |
 
 ## Facts this design rests on (measured 2026-09-21)
 
-- All 2026-27 due dates (31 Jul, 31 Aug) have passed; **0** owing learners have a
-  due date still ahead, and the learners who owe are already locked out and
-  confined to `/student/fees`. A countdown to existing due dates would show
-  nothing, which is why the deadline is admin-started.
-- `tms_push_subscription` has **0** rows. Web push is built but reaches nobody.
-- **450** learners owe. Only **189** are reachable by `learners_profiles.profile_id`;
-  **206** more only by college/student email (the same fallback the access RPC
-  `tms_student_transport_access` uses); **55** have no portal account at all.
-  Targeting by `profile_id` alone would silently skip 206 learners.
-- The DB runs in UTC; the existing overdue lock flips at 05:30 IST. This feature
-  stores an absolute `timestamptz`, so it is unaffected. The lock timing is a
-  separate, known issue and out of scope.
+- All 2026-27 learner maintenance due dates (31 Jul, 31 Aug) have passed. A
+  timer anchored to bill creation or due date would fine every unpaid learner at
+  launch — hence the go-live anchor.
+- About **450** learners owe. Only **189** are reachable via
+  `learners_profiles.profile_id`; **206** only via college/student email (the
+  fallback `tms_student_transport_access` uses); **55** have no portal account.
+  The existing `notifyLearner()` resolves by `profile_id` only and would
+  silently skip the 206 — this feature must use the email fallback.
+- Owing learners are locked out and confined to `/student/fees`.
+- `tms_push_subscription` has 0 rows; in-app notifications are the real channel.
+- No 48h/grace/fine automation exists in code or DB today (checked cron.job,
+  public functions, and `lib/fines` callers — fines are created only by the
+  admin Fines dialog via `createFines()`).
 
 ## Data
 
-New table `public.tms_fee_payment_deadline`:
+### New table `public.tms_fee_payment_notice`
+
+One row per learner per transport year.
 
 | column | type | notes |
 |---|---|---|
 | id | uuid pk | `gen_random_uuid()` |
-| transport_year_id | uuid not null | fk → `tms_transport_year(id)` on delete cascade |
-| starts_at | timestamptz not null | default `now()` |
-| ends_at | timestamptz not null | check `ends_at = starts_at + interval '48 hours'` |
-| message | text null | check `char_length(message) <= 160` |
-| is_active | boolean not null | default true |
-| notified_count | integer not null | default 0 |
-| created_by | uuid null | the admin |
-| created_at | timestamptz not null | default `now()` |
-| stopped_at / stopped_by | timestamptz / uuid null | set on Stop or when superseded |
+| person_id | uuid not null | `learners_profiles.id` |
+| transport_year_id | uuid not null | fk → `tms_transport_year(id)` |
+| source_bill_id | uuid null | the Term 1 `tms_fee_bill` row that triggered it |
+| started_at | timestamptz not null | |
+| expires_at | timestamptz not null | |
+| reminder_sent_at | timestamptz null | set once; reminder is never re-sent |
+| status | text not null | check in (`running`, `paid`, `fined`, `cancelled`) |
+| fine_id | uuid null | fk → `tms_fee_fine(id)`; set when `fined` |
+| created_at / updated_at | timestamptz not null | default `now()` |
 
-- Partial unique index on `(transport_year_id) where is_active` — at most one
-  active window per year, enforced by the database even under concurrent starts.
-- RLS enabled, no policies: service role only, matching the other `tms_` tables.
-- Expiry does NOT flip `is_active`; "expired" is derived from `ends_at` at read time.
+- Unique `(person_id, transport_year_id)` — enforces "at most one notice, hence
+  one auto-fine, per learner per year" even under overlapping sweeps.
+- Index on `(status, expires_at)` for the sweep.
+- RLS enabled, no policies: service role only, matching the other `tms_` fee tables.
+
+### Setting
+
+`admin_settings` row, `setting_type = 'fee_payment_notice'`:
+
+```json
+{ "enabled": false, "window_hours": 48, "reminder_hours_before": 6,
+  "fine_due_days": 7, "enabled_at": null }
+```
+
+- Turning **on** stamps `enabled_at = now()` — this is go-live.
+- Turning **off** halts the sweep entirely. Running notices are left as they are.
+  Turning back **on** stamps a new `enabled_at`, and every `running` notice gets
+  `expires_at = new enabled_at + window_hours` (and `reminder_sent_at` cleared),
+  so no learner is fined for time that passed while the feature was paused.
+- Edited in Settings → Fees; gated by `tms.settings.manage`; logged to the
+  Activity Log (module `settings`, action `update`).
+
+## The sweep
+
+`GET /api/cron/fee-payment-notices` — the same shape as
+`app/api/cron/auto-generate-bills/route.ts`:
+
+- `Authorization: Bearer $CRON_SECRET`; path added to the proxy's exact-path
+  cron allowlist.
+- `?dryRun=1` computes and reports, writes nothing.
+- Scheduled by pg_cron every 5 minutes via `net.http_get` using the
+  `tms_app_url` vault secret (same as job `tms-auto-generate-bills`).
+- Logic lives in `lib/fees/payment-notice/sweep.ts`; the route is a thin shell.
+
+Each run, only if `enabled`, in this order:
+
+1. **Close paid.** `paid = term1PaidLearnerIds(currentYear)`. Every `running`
+   notice whose person is in `paid` → `status = 'paid'`.
+2. **Open new.** Candidates = learners with a live (`status = 'generated'`)
+   Term 1 `tms_fee_bill` in the current year, not in `paid`, with no
+   `tms_fee_override` row for the year, with a positive `tms_fine_stop_rate` for
+   their stop, and with no notice this year. Insert `running` with
+   `started_at = now()`, `expires_at = max(enabled_at, bill.created_at) + window`.
+   Conflict on the unique key is ignored. Notify each (see Notifications).
+3. **Remind.** `running`, `reminder_sent_at is null`,
+   `expires_at - now() <= reminder_hours_before` → send reminder, stamp
+   `reminder_sent_at`.
+4. **Fine.** `running` and `expires_at <= now()`. For each, re-check against
+   the step-1 `paid` set and the override table, then call the existing
+   `createFines()` with:
+   - `personIds: [person_id]`, `transportYearId: currentYear`
+   - `reason: 'Transport Maintenance Fee unpaid 48 hours after notice'`
+   - `dueDate: expiry date (IST) + fine_due_days`
+   - `idempotencyKey: 'payment-notice:<notice id>'` (per-person suffix is added
+     by `createFines`)
+   - `actorId: null`, `notify: true`,
+     `sourceBillByPerson: { [person_id]: source_bill_id }`
+   Then read the fine back by idempotency key and set `status = 'fined'`,
+   `fine_id`. `created` or `duplicates` both count as success.
+
+### Failure handling
+
+- If `createFines` **skips** the learner (e.g. stop rate removed since the
+  notice opened), the notice stays `running`, the skip is logged, and it is
+  retried each sweep. A notice never becomes `fined` without a real fine row.
+- One learner's error is counted and the sweep continues.
+- Every chunked `.in()` uses ≤150 ids and checks `error` (gateway limit).
+- The route returns `{ opened, paid, reminded, fined, skipped, errors, dryRun }`.
+- Each auto-fine is written to the Activity Log as a system action, module
+  `fees` (existing union member — no union change).
+
+## Notifications
+
+- Resolve recipients the way `tms_student_transport_access` does: `profile_id`,
+  then lower-cased college/student email → `profiles.id`. Implemented as a
+  batch resolver `resolveLearnerProfileIds(svc, learnerIds)` in
+  `lib/notifications/`, used for all three messages below. `createFines()`'s
+  own `notifyLearner()` call is switched to the same resolver so the fine
+  notice also reaches the 206 email-only learners.
+- Timer start: "Pay your Transport Maintenance Fee by <date, time IST> or a
+  Transport Fee of ₹X will be added." — url `/student/fees`, category `fees`.
+- Reminder: "About 6 hours left to pay your Transport Maintenance Fee before a
+  Transport Fee of ₹X is added."
+- Fine raised: the existing `createFines()` message.
+- All best-effort: a notification failure never blocks a state change or a fine.
+
+## Learner portal
+
+### Data
+
+`GET /api/student/transport-access` — already fetched by the learner layout,
+exempt from the payment gate, shared under one query key by the layout,
+dashboard and fees page — gains two fields, added in the route handler (the
+shared RPC is **not** modified):
+
+```ts
+payment_notice: { status: 'running' | 'fined'; expires_at: string; amount: number } | null
+server_now: string
+```
+
+- Resolves the learner the same way the RPC does, reads their notice for the
+  current transport year. `paid` / `cancelled` / none → `null`.
+- `amount`: the fine amount (`fined`) or route charge (`running`).
+
+### `PaymentNoticeBar`
+
+Mounted in `app/student/layout.tsx` directly above `content-body`, so it shows
+on every learner page including `/student/fees`.
+
+| state | when | shows |
+|---|---|---|
+| `running` | > 6h left | amber: "Pay your Transport Maintenance Fee within HH:MM:SS, or a Transport Fee of ₹X will be added." + **Pay now** → `/student/fees` |
+| `urgent` | ≤ 6h left | same, red |
+| `processing` | ≤ 0, still `running` | "Time's up — Transport Fee being added…" |
+| `fined` | status `fined` | red: "A Transport Fee of ₹X has been added because the maintenance fee wasn't paid in time." + link |
+| `hidden` | `null` | nothing |
+
+`/student/fees` also renders a larger card variant of the same component (full
+deadline date/time, time left, both amounts).
+
+Tailwind v4 tinted alerts need explicit `dark:` variants; strip uses
+`min-w-0` / `flex-wrap` for phone widths.
+
+### Timer correctness
+
+- The server is the clock: `offset = server_now − Date.now()` captured on each
+  response; `remaining = expires_at − (Date.now() + offset)`.
+- Recomputed from absolute time every second — no decrementing counter, so a
+  backgrounded tab is correct as soon as it is shown again.
+- While a notice is `running` the access query refetches every 60s and on window
+  focus, so a payment clears the bar within a minute.
+- Display `HH:MM:SS` (max 48:00:00), clamped at 0.
+- The browser clock decides only what the bar **displays**; the sweep alone
+  decides when a fine is raised, from the stored `expires_at`.
 
 ## Admin
 
-Location: Bill Management header, beside the transport-year selector.
-
-- **Idle:** "Start 48-hour deadline" button. Disabled when "All years" is selected
-  or the admin lacks `tms.fees.edit`.
-- **Dialog:** shows the computed end time, an optional message (≤160 chars), and the
-  audience: "Notifies N learners who still owe · M have no portal account".
-- **Running:** live countdown, end time, and a Stop button.
-- Starting while one is active supersedes it: the old row gets
-  `is_active=false, stopped_at, stopped_by`, then the new row is inserted.
-
-API `app/api/admin/fees/payment-deadline/route.ts` (withAuth + service role):
-
-| verb | perm | does |
-|---|---|---|
-| GET `?yearId=` | `tms.fees.view` | active window for the year (or null) + audience counts |
-| POST `{ yearId, message? }` | `tms.fees.edit` | supersede, insert, notify, log |
-| DELETE `?yearId=` | `tms.fees.edit` | stop the active window, log |
-
-Activity log: module `fees`; action `create` on start, `cancel` on stop (both
-already in the closed unions — no union change).
-
-## Learner
-
-- `GET /api/student/transport-access` (already exempt from the payment gate and
-  already shared by the dashboard and fees page under one query key) gains two
-  fields: `payment_deadline: { ends_at, message } | null` and `server_now`.
-  `payment_deadline` is non-null only when the learner owes (sum of term balances
-  > 0) and the active window for the RPC's own `transport_year_id` (the learner's
-  current transport year) has `ends_at > now() - 24h`. A window started on a
-  non-current year is therefore visible to admins only.
-  **The shared RPC is not modified**; the route handler adds the fields.
-- `PaymentDeadlineBar` mounted in `app/student/layout.tsx` directly above
-  `content-body`, so every learner page — including `/student/fees`, the only page
-  a locked learner can reach — shows it.
-- States: `running` amber (> 12h left), `urgent` red (≤ 12h), `expired`
-  ("Time is up — pay at the transport office today") for 24h after `ends_at`,
-  then `hidden`.
-- Link: "View fee details" → `/student/fees`.
-
-## Timer correctness
-
-- The server is the clock: `offset = server_now − Date.now()` captured when the
-  response arrives; remaining = `ends_at − (Date.now() + offset)`.
-- Recomputed from absolute time every second — no decrementing counter, so a
-  backgrounded tab is correct the moment it is shown again.
-- While a window is active the access query refetches every 60s and on window
-  focus, so a payment recorded at the office clears the bar.
-- Display format `HH:MM:SS` (max 48:00:00); clamps at 0.
-
-## Notification
-
-On start, one `dispatchNotification` with targeting `{ type: 'users', user_ids }`,
-priority `urgent`, url `/student/fees`, `expiresAt = ends_at`,
-`idempotencyKey = 'fee-deadline:<id>'`. Audience = profile ids of owing learners
-resolved via `profile_id`, then college/student email (lower-cased both sides).
-Web push rides the same dispatch for any subscriber.
+- Settings → Fees: the switch plus `window_hours`, `reminder_hours_before`,
+  `fine_due_days`. The switch shows `enabled_at` when on.
+- Bill Management: a read-only "Payment notices" view — running (time left),
+  paid, fined — for the selected transport year. `tms.fees.view`.
+- No manual start/extend/cancel in this version.
 
 ## Out of scope
 
-Staff; fines; automatic locking; SMS/WhatsApp; staged 7d/3d/1d reminders; the
-05:30 IST lock-timing fix.
+Staff; cancelling or replacing the maintenance bill; SMS/WhatsApp; locking
+changes; the 05:30 IST lock-timing issue; re-noticing a learner after a fine.
 
 ## Testing
 
-- Unit (vitest): state selector, `HH:MM:SS` formatting, clock-offset maths, POST
-  body validation, learner-payload shaping (owes vs paid; expired window).
-- DB: migration applied; constraint and partial unique index verified by
-  attempting a second active insert.
+- Unit (vitest): `computeExpiry` incl. the re-enable reset; sweep step ordering
+  (paid-just-before-expiry is never fined); exclusions (override, no stop rate);
+  idempotent re-run creates nothing; skipped fine keeps notice `running`; bar
+  state selector; `HH:MM:SS` formatting; clock-offset maths; recipient resolver
+  (profile_id, email fallback, no account).
+- Sweep tests use a fake Supabase client, matching `lib/fees/generate.test.ts`.
+- DB: migration applied; unique key verified by a second insert.
+- Live `?dryRun=1` against production before switching on — expect ~450 to open.
 - Build + `tsc` filtered to touched files (repo baseline is red).
-- Manual in the user's browser (auth-gated): start → learner sees bar → stop.
+- Manual in the user's browser (auth-gated): switch on → learner sees bar →
+  pay → bar clears; a test learner left unpaid is fined at expiry.
