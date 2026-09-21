@@ -3,6 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { loadMarkerNames } from '@/lib/boarding/identity';
+import { withOtherBuses } from '@/lib/boarding/other-bus-roster';
 import {
   loadRouteAttendanceRoster, buildRosterRows,
   type OrderedStop, type RosterRow, type RosterAttendance,
@@ -22,7 +23,7 @@ interface StopRow {
   stop_time: string | null; evening_time: string | null; sequence_order: number | null;
 }
 interface AttRow {
-  learner_id: string; status: string | null; method: string | null;
+  learner_id: string; stop_id: string | null; status: string | null; method: string | null;
   scanned_at: string | null; scanned_by: string | null; is_walk_up: boolean | null;
   previous_status: string | null; previous_scanned_by: string | null; previous_scanned_at: string | null;
 }
@@ -86,7 +87,7 @@ async function getAdminRoster(request: NextRequest, auth: AuthContext) {
     const { data: attData, error: attError } = await svc
       .from('tms_attendance')
       .select(
-        'learner_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
+        'learner_id, stop_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
       )
       .eq('route_id', routeId).eq('trip_date', date).eq('direction', direction);
     if (attError) {
@@ -116,7 +117,16 @@ async function getAdminRoster(request: NextRequest, auth: AuthContext) {
       });
     }
 
-    const riders = await loadRouteAttendanceRoster(svc, routeId, date);
+    // Same as the staff roster: the bus's own list, plus which of them booked or
+    // boarded another bus, plus learners from other buses recorded on this one.
+    // Without it a stranger's mark is counted in the coverage grid but missing
+    // here, and a learner who boarded elsewhere reads as a plain "Unmarked".
+    // Best-effort: a failed lookup returns the list untagged.
+    const riders = await withOtherBuses(svc, routeId, await loadRouteAttendanceRoster(svc, routeId, date), {
+      date,
+      direction,
+      recordedHere: attRows,
+    });
 
     // An admin on this screen is the correction path by definition: they hold
     // tms.attendance.view, and the write route re-decides every gate server-side

@@ -42,6 +42,13 @@ const STATUS_CLASS: Record<RosterRow['status'], string> = {
   unmarked: 'bg-muted text-muted-foreground',
 };
 
+/** Worded exactly as the staff screen (app/boarding/attendance/columns.tsx). */
+const OTHER_BUS_TEXT: Record<NonNullable<RosterRow['other_bus']>['kind'], string> = {
+  booked: 'Booked on bus',
+  boarded: 'Boarded bus',
+  from: 'From bus',
+};
+
 const STATUS_LABEL: Record<RosterRow['status'], string> = {
   present: 'Present',
   absent: 'Absent',
@@ -178,6 +185,14 @@ export default function AttendanceDayPage({
                   <td className="px-3 py-2 text-muted-foreground">{r.stop_name}</td>
                   <td className="px-3 py-2 text-muted-foreground">
                     {r.is_walk_up ? 'Rode without ticket' : r.booked ? 'Booked' : 'No ticket'}
+                    {/* Another bus is involved today. "Boarded bus N" is why a
+                        back-dated mark from this page is refused: that day's row
+                        belongs to bus N and must be corrected from its page. */}
+                    {r.other_bus && (
+                      <span className="block text-xs text-muted-foreground">
+                        {OTHER_BUS_TEXT[r.other_bus.kind]} {r.other_bus.routeNumber ?? '?'}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_CLASS[r.status]}`}>
