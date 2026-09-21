@@ -68,6 +68,19 @@ export function makeFakeSupabase(
       return ins;
     };
 
+    b.upsert = (payload: unknown, options?: unknown) => {
+      call.ops.push(['upsert', [payload, options]]);
+      const upErr = opts.insertErrors?.[table] ?? err();
+      const rowsOut = (Array.isArray(payload) ? payload : [payload]).map((r, i) => ({
+        id: `fake-${table}-up-${++insertSeq}-${i}`,
+        ...(r as object),
+      }));
+      const up: any = { select: () => up };
+      up.then = (res: any, rej: any) =>
+        Promise.resolve({ data: upErr ? null : rowsOut, error: upErr }).then(res, rej);
+      return up;
+    };
+
     b.update = (payload: unknown) => {
       call.ops.push(['update', [payload]]);
       return b;
