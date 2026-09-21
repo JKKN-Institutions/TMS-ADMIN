@@ -36,6 +36,17 @@ async function fetchRoster(routeId: string, date: string, direction: string): Pr
   return result.data as AdminRosterResponse;
 }
 
+/** The success body of POST /api/boarding/attendance. */
+interface MarkResponse {
+  success: true;
+  updated: number;
+  skipped: number;
+  locked: Array<{ learnerId: string; status: string; markedByName: string; markedAt: string | null }>;
+  dropped: number;
+}
+
+type MarkChoice = 'present' | 'absent';
+
 const STATUS_CLASS: Record<RosterRow['status'], string> = {
   present: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
   absent: 'bg-red-500/15 text-red-700 dark:text-red-400',
@@ -73,26 +84,63 @@ export default function AttendanceDayPage({
   const { isSuperAdmin, can } = usePermissions();
   const canMark = isSuperAdmin || can(TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Bulk marking: which status is awaiting confirmation, and whether the batch
+  // is in flight. No window.confirm -- an inline row asks instead.
+  const [bulkConfirm, setBulkConfirm] = useState<MarkChoice | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const istToday = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const isFuture = date > istToday;
+  const legName = direction === 'return' ? 'Evening' : 'Morning';
+
+  // The "nobody ever marked this route" case: every unmarked learner in one
+  // batch. A learner who BOARDED another bus is left out -- their row for the
+  // day belongs to that bus and the server refuses a back-dated mark on it.
+  // "Booked on bus N" is left out too: the tag cannot say whether a row
+  // already exists on bus N (the auto-absent job writes on the booked bus),
+  // and one such row makes the server refuse the WHOLE batch.
+  const bulkTargets = (data?.rows ?? []).filter(
+    (r) => r.status === 'unmarked' && r.other_bus?.kind !== 'boarded' && r.other_bus?.kind !== 'booked',
+  );
 
   /**
-   * Mark one learner. `date` is sent explicitly — that is the whole point of
-   * this screen, and the server re-decides whether this caller may name it.
+   * One POST for any number of marks -- shared by the row buttons and the bulk
+   * buttons. `date` is sent explicitly -- that is the whole point of this
+   * screen, and the server re-decides whether this caller may name it.
    */
-  async function mark(learnerId: string, status: 'present' | 'absent') {
+  async function submitMarks(marks: Array<{ learnerId: string; status: MarkChoice }>): Promise<MarkResponse> {
+    const res = await fetch('/api/boarding/attendance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ routeId, direction, date, marks }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save');
+    return {
+      success: true,
+      updated: result.updated ?? 0,
+      skipped: result.skipped ?? 0,
+      locked: Array.isArray(result.locked) ? result.locked : [],
+      dropped: result.dropped ?? 0,
+    };
+  }
+
+  async function refreshAfterMark() {
+    await queryClient.invalidateQueries({
+      queryKey: ['admin-attendance-roster', routeId, date, direction],
+    });
+    // The coverage grid counts these rows; leaving it stale would show the
+    // cell still red after the day was filled in.
+    await queryClient.invalidateQueries({ queryKey: ['attendance-coverage'] });
+  }
+
+  /** Mark one learner. */
+  async function mark(learnerId: string, status: MarkChoice) {
     setBusyId(learnerId);
     try {
-      const res = await fetch('/api/boarding/attendance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          routeId, direction, date,
-          marks: [{ learnerId, status }],
-        }),
-      });
-      const result = await res.json();
-      if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save');
-      if (result.locked?.length > 0) {
+      const result = await submitMarks([{ learnerId, status }]);
+      if (result.locked.length > 0) {
         // A partially locked batch must never render as a clean sweep.
         toast(result.locked[0].markedByName
           ? `Already marked by ${result.locked[0].markedByName}`
@@ -100,16 +148,34 @@ export default function AttendanceDayPage({
       } else {
         toast.success(status === 'present' ? 'Marked present' : 'Marked absent');
       }
-      await queryClient.invalidateQueries({
-        queryKey: ['admin-attendance-roster', routeId, date, direction],
-      });
-      // The coverage grid counts these rows; leaving it stale would show the
-      // cell still red after the day was filled in.
-      await queryClient.invalidateQueries({ queryKey: ['attendance-coverage'] });
+      await refreshAfterMark();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save attendance');
     } finally {
       setBusyId(null);
+    }
+  }
+
+  /** Mark every bulk target with one status, in ONE request. */
+  async function markAll(status: MarkChoice) {
+    const targets = bulkTargets;
+    setBulkConfirm(null);
+    if (targets.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const result = await submitMarks(targets.map((r) => ({ learnerId: r.learner_id, status })));
+      const parts = [`${result.updated} marked ${status}`];
+      if (result.locked.length > 0) parts.push(`${result.locked.length} already marked by someone else`);
+      if (result.dropped > 0) parts.push(`${result.dropped} refused`);
+      const msg = parts.join(', ');
+      // A batch with anything left undone must never read as a clean sweep.
+      if (result.locked.length === 0 && result.dropped === 0) toast.success(msg);
+      else toast(msg, { icon: '⚠️' });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save attendance');
+    } finally {
+      setBulkBusy(false);
+      await refreshAfterMark();
     }
   }
 
@@ -124,7 +190,7 @@ export default function AttendanceDayPage({
           {data ? `${data.route.route_number ?? '—'} ${data.route.route_name ?? ''}` : 'Route'}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {date} · {direction === 'return' ? 'Evening' : 'Morning'} trip
+          {date} · {legName} trip
         </p>
       </header>
 
@@ -161,6 +227,47 @@ export default function AttendanceDayPage({
           notified, and the auto-absent job will not fill in the rest of this day — it closes each
           route-day once, on the day itself.
         </p>
+      )}
+
+      {canMark && !isFuture && data && !isError && bulkTargets.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {(['present', 'absent'] as const).map((st) => (
+              <button
+                key={st}
+                type="button"
+                disabled={bulkBusy || busyId !== null}
+                onClick={() => setBulkConfirm(st)}
+                className="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                Mark {bulkTargets.length} unmarked as {STATUS_LABEL[st]}
+              </button>
+            ))}
+          </div>
+          {bulkConfirm && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <span className="min-w-0 text-foreground">
+                Mark {bulkTargets.length} learners {STATUS_LABEL[bulkConfirm]} for {date} ({legName})?
+              </span>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => markAll(bulkConfirm)}
+                className="rounded bg-primary px-3 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => setBulkConfirm(null)}
+                className="rounded border border-border px-3 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {data && !isError && (
@@ -206,7 +313,7 @@ export default function AttendanceDayPage({
                     <td className="whitespace-nowrap px-3 py-2">
                       <button
                         type="button"
-                        disabled={busyId === r.learner_id}
+                        disabled={busyId === r.learner_id || bulkBusy}
                         onClick={() => mark(r.learner_id, 'present')}
                         className="rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
                       >
@@ -214,7 +321,7 @@ export default function AttendanceDayPage({
                       </button>
                       <button
                         type="button"
-                        disabled={busyId === r.learner_id}
+                        disabled={busyId === r.learner_id || bulkBusy}
                         onClick={() => mark(r.learner_id, 'absent')}
                         className="ml-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
                       >
