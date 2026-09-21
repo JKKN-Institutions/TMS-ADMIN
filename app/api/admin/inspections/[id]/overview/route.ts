@@ -49,6 +49,7 @@ async function staffForEmail(svc: Svc, email: string): Promise<StaffRow | null> 
       .from('staff')
       .select('id, first_name, last_name, phone, email, institution_email, profile_id')
       .ilike(column, pattern)
+      .order('id')
       .limit(1));
     if (rows?.[0]) return rows[0];
   }

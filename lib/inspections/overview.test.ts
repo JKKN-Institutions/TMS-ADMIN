@@ -36,6 +36,34 @@ describe('inchargeDuty', () => {
   it('lists markers who are not assigned', () => expect(r.otherMarkers).toEqual([{ profileId: 'p7', marks: 1 }]));
 });
 
+describe('inchargeDuty edge cases', () => {
+  it('counts a mark once, for the first in-charge that matches, when two share an email', () => {
+    const r = inchargeDuty(
+      [
+        { staffEmail: 'a@jkkn.ac.in', name: 'First', phone: null, profileIds: [], emails: ['shared@jkkn.ac.in'] },
+        { staffEmail: 'b@jkkn.ac.in', name: 'Second', phone: null, profileIds: [], emails: ['Shared@jkkn.ac.in'] },
+      ],
+      [{ scannedBy: 'p1', scannedAt: '2026-09-21T02:01:00Z', markerEmail: 'shared@jkkn.ac.in' }],
+      [],
+    );
+    expect(r.duty[0].marks).toBe(1);
+    expect(r.duty[1].marks).toBe(0);
+    expect(r.otherMarkers).toEqual([]);
+  });
+  it('orders timestamps by time, not by string, across fractional-second formats', () => {
+    const r = inchargeDuty(
+      [{ staffEmail: 'a@jkkn.ac.in', name: 'A', phone: null, profileIds: ['p1'], emails: [] }],
+      [
+        { scannedBy: 'p1', scannedAt: '2026-09-21T02:01:00.500Z', markerEmail: null },
+        { scannedBy: 'p1', scannedAt: '2026-09-21T02:01:00Z', markerEmail: null },
+      ],
+      [],
+    );
+    expect(r.duty[0].firstAt).toBe('2026-09-21T02:01:00Z');
+    expect(r.duty[0].lastAt).toBe('2026-09-21T02:01:00.500Z');
+  });
+});
+
 describe('headcountDelta', () => {
   it('no count yet', () => expect(headcountDelta(null, 10)).toEqual({ diff: null, label: 'Not counted yet' }));
   it('matches', () => expect(headcountDelta(10, 10)).toEqual({ diff: 0, label: 'Matches boarded count' }));

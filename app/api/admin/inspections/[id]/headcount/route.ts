@@ -21,12 +21,16 @@ async function saveHeadcount(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const id = idFrom(request);
-    const body = (await request.json().catch(() => ({}))) as { leg?: unknown; counted?: unknown };
+    const raw: unknown = await request.json().catch(() => ({}));
+    const body = (raw && typeof raw === 'object' ? raw : {}) as { leg?: unknown; counted?: unknown };
     if (body.leg !== 'onward' && body.leg !== 'return') {
       return NextResponse.json({ error: 'Choose the morning or evening trip' }, { status: 400 });
     }
     const leg: Leg = body.leg;
-    const counted = body.counted === undefined ? null : body.counted;
+    if (!('counted' in body)) {
+      return NextResponse.json({ error: 'counted is required (use null to clear)' }, { status: 400 });
+    }
+    const counted = body.counted;
     if (counted !== null && (typeof counted !== 'number' || !Number.isInteger(counted) || counted < 0 || counted > 500)) {
       return NextResponse.json({ error: 'The headcount must be a whole number from 0 to 500' }, { status: 400 });
     }

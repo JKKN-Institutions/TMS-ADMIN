@@ -4,7 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { requirePerm } from '@/lib/inspections/server';
 import { istToday } from '@/lib/booking/window';
-import { classifyScan } from '@/lib/boarding/scan-resolve';
+import { classifyScan, type ScanSource } from '@/lib/boarding/scan-resolve';
 import { loadLearnerFeeStatus } from '@/lib/boarding/fee-status';
 import { feeBadge } from '@/lib/boarding/fee-badge';
 import { learnerOutcome } from '@/lib/inspections/overview';
@@ -25,8 +25,13 @@ async function scanLearner(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const id = idFrom(request);
-    const body = (await request.json().catch(() => ({}))) as { code?: unknown };
-    const decision = classifyScan(typeof body.code === 'string' ? body.code : '', 'camera');
+    const body = (await request.json().catch(() => ({}))) as { code?: unknown; source?: unknown };
+    const source: ScanSource = body.source === 'typed' ? 'typed' : 'camera';
+    const decision = classifyScan(typeof body.code === 'string' ? body.code : '', source);
+    // The card number is public, so a typed one is no evidence the card is here.
+    if (decision.refusal === 'typed_jkkn_id') {
+      return NextResponse.json({ error: 'Point the camera at the card to use a JKKN ID.' }, { status: 400 });
+    }
     if (decision.shape !== 'jkkn_id' || decision.refusal) {
       return NextResponse.json({ error: 'That is not a JKKN ID card' }, { status: 400 });
     }
@@ -97,6 +102,16 @@ async function scanLearner(request: NextRequest, auth: AuthContext) {
         feesOk = badge?.tone !== 'overdue';
         feeLabel = badge?.label ?? null;
       }
+    }
+
+    // A submit can land while the lookups above run; the report must not gain rows after it.
+    const { data: still, error: stillErr } = await svc.from('tms_inspection').select('status').eq('id', id).maybeSingle();
+    if (stillErr) {
+      console.error('inspection learner scan: re-check inspection error:', stillErr);
+      return NextResponse.json({ error: 'Failed to load inspection' }, { status: 500 });
+    }
+    if (!still || still.status !== 'draft') {
+      return NextResponse.json({ error: 'This inspection is already submitted' }, { status: 409 });
     }
 
     const known = !!learnerId;

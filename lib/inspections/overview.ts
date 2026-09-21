@@ -33,7 +33,8 @@ const lc = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
  * Who of the assigned in-charges marked this bus today. Staff have up to three
  * emails and may mark from a profile whose email differs from the assignment,
  * so a mark belongs to an in-charge when its profile id OR its marker email
- * matches any of theirs (case-insensitive). Unmatched markers are returned too.
+ * matches any of theirs (case-insensitive). Each mark is claimed by at most one
+ * in-charge (the first match in list order). Unmatched markers are returned too.
  */
 export function inchargeDuty(
   incharges: InchargeInput[],
@@ -47,12 +48,15 @@ export function inchargeDuty(
     const emails = new Set(ic.emails.map(lc));
     const mine: string[] = [];
     marks.forEach((m, idx) => {
+      // A mark belongs to ONE in-charge: the first in list order that matches.
+      if (claimed.has(idx)) return;
       if (ids.has(m.scannedBy) || (m.markerEmail && emails.has(lc(m.markerEmail)))) {
         mine.push(m.scannedAt);
         claimed.add(idx);
       }
     });
-    mine.sort();
+    // By time, not string: '…:00.500Z' sorts before '…:00Z' as text.
+    mine.sort((a, b) => Date.parse(a) - Date.parse(b));
     const key = lc(ic.staffEmail);
     return {
       staffEmail: ic.staffEmail, name: ic.name, phone: ic.phone,
