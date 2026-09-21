@@ -3,8 +3,9 @@
 /**
  * One route, one date, one leg — the drill-down from a coverage cell.
  *
- * Read-only in this task; Task 9 adds the marking controls for super admins and
- * tms.attendance.override holders.
+ * Super admins and tms.attendance.override holders also get marking controls:
+ * per-row Present/Absent and a bulk "mark every unmarked learner" for routes
+ * nobody marked. Future dates show no marking at all -- the server refuses them.
  */
 
 import React, { use, useState } from 'react';
@@ -136,7 +137,8 @@ export default function AttendanceDayPage({
   }
 
   /** Mark one learner. */
-  async function mark(learnerId: string, status: MarkChoice) {
+  async function mark(row: RosterRow, status: MarkChoice) {
+    const learnerId = row.learner_id;
     setBusyId(learnerId);
     try {
       const result = await submitMarks([{ learnerId, status }]);
@@ -145,6 +147,9 @@ export default function AttendanceDayPage({
         toast(result.locked[0].markedByName
           ? `Already marked by ${result.locked[0].markedByName}`
           : 'Some marks were already taken', { icon: '⚠️' });
+      } else if (result.updated === 0) {
+        // Same status already on the row: nothing changed, so don't claim a mark.
+        toast(`Already recorded ${status}${row.method === 'auto' ? ' by the auto-absent job' : ''}`);
       } else {
         toast.success(status === 'present' ? 'Marked present' : 'Marked absent');
       }
@@ -194,7 +199,7 @@ export default function AttendanceDayPage({
         </p>
       </header>
 
-      {data && data.counts.auto > 0 && (
+      {data && !isError && data.counts.auto > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
           <p className="min-w-0 text-foreground">
@@ -203,7 +208,7 @@ export default function AttendanceDayPage({
         </div>
       )}
 
-      {data && (
+      {data && !isError && (
         <div className="flex flex-wrap gap-4 text-sm">
           <span>Total <strong className="tabular-nums">{data.counts.total}</strong></span>
           <span>Present <strong className="tabular-nums">{data.counts.present}</strong></span>
@@ -221,7 +226,7 @@ export default function AttendanceDayPage({
         </p>
       )}
 
-      {canMark && data && date !== new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) && (
+      {canMark && data && !isError && date < istToday && (
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-foreground">
           You are marking a past date. These marks are recorded against {date}, learners are not
           notified, and the auto-absent job will not fill in the rest of this day — it closes each
@@ -281,7 +286,7 @@ export default function AttendanceDayPage({
                 <th className="px-3 py-2">Ticket</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Marked by</th>
-                {canMark && <th className="px-3 py-2">Mark</th>}
+                {canMark && !isFuture && <th className="px-3 py-2">Mark</th>}
               </tr>
             </thead>
             <tbody>
@@ -309,12 +314,12 @@ export default function AttendanceDayPage({
                   <td className="px-3 py-2 text-muted-foreground">
                     {r.method === 'auto' ? 'Auto-absent job' : r.marked_by_name ?? '—'}
                   </td>
-                  {canMark && (
+                  {canMark && !isFuture && (
                     <td className="whitespace-nowrap px-3 py-2">
                       <button
                         type="button"
                         disabled={busyId === r.learner_id || bulkBusy}
-                        onClick={() => mark(r.learner_id, 'present')}
+                        onClick={() => mark(r, 'present')}
                         className="rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
                       >
                         Present
@@ -322,7 +327,7 @@ export default function AttendanceDayPage({
                       <button
                         type="button"
                         disabled={busyId === r.learner_id || bulkBusy}
-                        onClick={() => mark(r.learner_id, 'absent')}
+                        onClick={() => mark(r, 'absent')}
                         className="ml-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
                       >
                         Absent

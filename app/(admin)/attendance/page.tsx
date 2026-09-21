@@ -105,7 +105,7 @@ export default function AttendanceCoveragePage() {
         </label>
       </div>
 
-      {data && data.summary.neverMarkedRoutes.length > 0 && (
+      {data && !isError && data.summary.neverMarkedRoutes.length > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" aria-hidden="true" />
           <p className="min-w-0 text-foreground">
@@ -122,7 +122,7 @@ export default function AttendanceCoveragePage() {
         </div>
       )}
 
-      {data && data.summary.autoOnlyRouteDays > 0 && (
+      {data && !isError && data.summary.autoOnlyRouteDays > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
           <p className="min-w-0 text-foreground">

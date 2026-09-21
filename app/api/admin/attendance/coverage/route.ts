@@ -21,6 +21,12 @@ function minusDays(date: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d) - days * 86_400_000).toISOString().slice(0, 10);
 }
 
+/** Whole days since the epoch for a YYYY-MM-DD date, in UTC. */
+function dayNumber(date: string): number {
+  const [y, m, d] = date.split('-').map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86_400_000);
+}
+
 /**
  * GET /api/admin/attendance/coverage — the routes x service-days grid.
  *
@@ -42,6 +48,11 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
     }
     if (from > to) {
       return NextResponse.json({ error: 'from must not be after to' }, { status: 400 });
+    }
+    // Cap the range: the grid is one column per day, and an unbounded range is
+    // an unbounded RPC. Integer UTC day numbers, so no timezone can shift it.
+    if (dayNumber(to) - dayNumber(from) > 366) {
+      return NextResponse.json({ error: 'Choose a range of 366 days or less' }, { status: 400 });
     }
     const direction = url.searchParams.get('direction') === 'return' ? 'return' : 'onward';
 
