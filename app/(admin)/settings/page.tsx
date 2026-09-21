@@ -13,7 +13,8 @@ import {
   AlertTriangle,
   Bus,
   Calendar,
-  Clock
+  Clock,
+  Timer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { defaultSchedulingSettings, type SchedulingSettings } from '../../../lib/scheduling-config';
@@ -21,6 +22,7 @@ import { AttendanceWindowSettings } from '@/components/admin/attendance-window-s
 import { NotificationsSettings } from '@/components/admin/notifications-settings';
 import { SecuritySettings } from '@/components/admin/security-settings';
 import { SystemSettings } from '@/components/admin/system-settings';
+import { FeeNoticeSettings } from '@/components/admin/fee-notice-settings';
 
 // Scheduling settings are loaded here via a real API call. Notifications and
 // Security also load real data now (NotificationsSettings/SecuritySettings
@@ -68,7 +70,7 @@ const SettingsPage = () => {
   React.useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
-    const validTabs = ['general', 'scheduling', 'attendance', 'notifications', 'security', 'system'];
+    const validTabs = ['general', 'scheduling', 'attendance', 'fee-notice', 'notifications', 'security', 'system'];
     if (tabParam && validTabs.includes(tabParam)) {
       setActiveTab(tabParam);
     }
@@ -78,6 +80,7 @@ const SettingsPage = () => {
     { id: 'general', name: 'General', icon: Settings },
     { id: 'scheduling', name: 'Scheduling', icon: Bus },
     { id: 'attendance', name: 'Attendance', icon: Clock },
+    { id: 'fee-notice', name: 'Fee Notice', icon: Timer },
     { id: 'notifications', name: 'Notifications', icon: Bell },
     { id: 'security', name: 'Security', icon: Shield },
     { id: 'system', name: 'System', icon: Server }
@@ -372,6 +375,8 @@ const SettingsPage = () => {
         return renderSchedulingSettings();
       case 'attendance':
         return <AttendanceWindowSettings />;
+      case 'fee-notice':
+        return <FeeNoticeSettings />;
       case 'notifications':
         return <NotificationsSettings />;
       case 'security':
