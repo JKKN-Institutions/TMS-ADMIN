@@ -1562,7 +1562,7 @@ export default function InspectionStickersPage() {
 
 - [ ] **Step 4: Type-check** — `npx tsc --noEmit -p . 2>&1 | grep "(admin)/inspections" || echo CLEAN` → `CLEAN`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add "app/(admin)/inspections/inspection-api.ts" "app/(admin)/inspections/page.tsx" "app/(admin)/inspections/stickers"
