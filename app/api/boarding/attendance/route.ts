@@ -17,6 +17,7 @@ import { partitionByTap } from '@/lib/boarding/tapped-at';
 import { buildMarkResults } from '@/lib/boarding/mark-results';
 import { REJECT_REASON_TEXT, type MarkRejectReason } from '@/lib/boarding/offline/protocol';
 import { loadMarkingMode, allowedMethods } from '@/lib/boarding/marking-mode';
+import { decideTripDate } from '@/lib/boarding/backdate';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -61,6 +62,17 @@ function chunk<T>(arr: T[], size = 150): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+/**
+ * The current transport year's start, or null when no year is marked current.
+ * `resolveFloor` turns a null into a safe fallback -- see backdate.ts for why a
+ * null floor must never reach a comparison.
+ */
+async function loadTransportYearStart(svc: SupabaseClient): Promise<string | null> {
+  const { data } = await svc
+    .from('tms_transport_year').select('start_date').eq('is_current', true).maybeSingle();
+  return (data as { start_date: string } | null)?.start_date ?? null;
 }
 
 /**
@@ -119,7 +131,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     }
 
     const body = (await request.json().catch(() => ({}))) as {
-      routeId?: string; direction?: string; marks?: MarkInput[];
+      routeId?: string; direction?: string; marks?: MarkInput[]; date?: string;
     };
     const routeId = String(body.routeId ?? '');
     const marks = Array.isArray(body.marks) ? body.marks : [];
@@ -143,6 +155,23 @@ async function mark(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
+
+    // ── The date dimension ──
+    // An absent `date` keeps the legacy contract byte for byte: the server
+    // decides today and the phone is unaffected. A named PAST date is the
+    // transport office's correction path, and it is the one gate this endpoint
+    // never had -- every other exemption for these callers already existed.
+    const dated = decideTripDate({
+      requested: body.date,
+      today: istToday(),
+      floor: await loadTransportYearStart(svc),
+      isSuperAdmin: auth.isSuperAdmin,
+      isOverrideHolder,
+    });
+    if (!dated.ok) {
+      return NextResponse.json({ error: dated.error, reason: dated.reason }, { status: dated.status });
+    }
+    const backdated = dated.isBackdated;
 
     // Which trip, and is its window open. Two contracts:
     //  - LEGACY: no mark carries tappedAt. The server clock decides the trip
@@ -216,11 +245,15 @@ async function mark(request: NextRequest, auth: AuthContext) {
     // deliberately left on UTC. That is pre-existing behaviour shared with the
     // QR scanner, and changing which date a mark lands on is out of scope here
     // and would be dangerous. Only the authorization lookup moves to IST.
-    const authDate = legacy ? istToday() : tap.tripDate;
+    // A back-dated request overrides both: a mark for 2026-09-01 is authorized
+    // against that day's cover and stored under that day, whatever the clock
+    // says. Same-day behaviour is untouched -- when `date` is absent these fall
+    // back to exactly the previous expressions.
+    const authDate = backdated ? dated.date : legacy ? istToday() : tap.tripDate;
     // Legacy requests keep storing under the UTC date (see the note above).
     // Offline-aware requests store under the IST date of the tap. Inside the
     // attendance window the two are the same calendar day.
-    const today = legacy ? new Date().toISOString().slice(0, 10) : tap.tripDate;
+    const today = backdated ? dated.date : legacy ? new Date().toISOString().slice(0, 10) : tap.tripDate;
 
     if (acceptedMarks.length === 0) {
       // Every mark was refused for its timing. Not an error: the outbox needs
@@ -360,7 +393,10 @@ async function mark(request: NextRequest, auth: AuthContext) {
       stop_id: stopByLearner.get(m.learnerId) ?? null,
       // Marked on this bus's list, so the row belongs to this bus even when
       // an earlier write (the auto-absent job on the booked bus) put it elsewhere.
-      move_route: true,
+      // Same-day only: a BACK-DATED mark records whether the learner travelled,
+      // never where. The upsert's conflict key excludes route_id, so moving a
+      // past row would rewrite that day's bus and stop from today's allocation.
+      move_route: !backdated,
       booked_route_id: bookedElsewhere.get(m.learnerId) ?? null,
       status: m.status,
       // "Boarded without a booking" -- a claim about RIDING, so it can only
@@ -465,7 +501,10 @@ async function mark(request: NextRequest, auth: AuthContext) {
     const notified = ((outcomes ?? []) as RpcMarkOutcome[]).filter(
       (o) => o.outcome === 'inserted' && walkUpIds.has(o.learner_id),
     );
-    if (notified.length > 0) {
+    // A back-fill must not accuse anyone. Marking a month of history would tell
+    // hundreds of learners "you travelled without a booking" about trips three
+    // weeks gone, and the message reads as an accusation even when it is right.
+    if (notified.length > 0 && !backdated) {
       const { data: rt } = await svc
         .from('tms_route').select('route_number').eq('id', routeId).maybeSingle();
       const routeNumber = (rt as { route_number: string | null } | null)?.route_number;
@@ -493,11 +532,13 @@ async function mark(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_attendance',
       description:
         `Manually marked attendance for ${written} learner(s) on route ${routeId} (${direction})` +
+        (backdated ? ` — BACK-DATED to ${today}` : '') +
         (notified.length > 0 ? ` — ${notified.length} without a ticket` : '') +
         (overrides > 0 ? ` — ${overrides} replaced an earlier mark` : ''),
       metadata: {
         routeId, direction, count: written, skipped, overrides,
         locked: locked.length, dropped: summary.dropped, walkUps: notified.length,
+        backdated, tripDate: today,
       },
     });
     // A partially locked batch still succeeds: one taken row must not fail the
@@ -613,7 +654,7 @@ async function getHistory(request: NextRequest, auth: AuthContext) {
   }
 }
 
-interface ClearInput { routeId?: string; direction?: string; learnerIds?: string[] }
+interface ClearInput { routeId?: string; direction?: string; learnerIds?: string[]; date?: string }
 
 /* ── Clear marks (DELETE) ───────────────────────────────────────────────────
  * Revert one or many learners to "Unmarked" for today + a direction by deleting
@@ -651,8 +692,29 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     // See the note on the marking path above: the trip_date rows are matched
     // and deleted by stays on UTC (pre-existing, shared with the QR scanner);
     // only the authorization date is IST.
-    const today = new Date().toISOString().slice(0, 10);
-    const authDate = istToday();
+    // ── Arbitration, which this endpoint never had ──
+    // Until now nothing in the UI called DELETE, so "any assigned staff may
+    // wipe any mark on the route" was unreachable rather than safe. The Undo
+    // control on a without-ticket row makes it reachable, so the rule that
+    // guards every other write applies here too: your own mark, an orphaned
+    // one, or the transport office. canClearMark is the same authority the
+    // roster's can_edit hint is rendered from.
+    const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
+    // Undo needs the same date dimension as the mark, or a back-dated mistake
+    // is permanent. isOverrideHolder is resolved further down in this function
+    // today; hoist that lookup above this block so the decision can use it.
+    const dated = decideTripDate({
+      requested: body.date,
+      today: istToday(),
+      floor: await loadTransportYearStart(svc),
+      isSuperAdmin: auth.isSuperAdmin,
+      isOverrideHolder,
+    });
+    if (!dated.ok) {
+      return NextResponse.json({ error: dated.error, reason: dated.reason }, { status: dated.status });
+    }
+    const today = dated.date;
+    const authDate = dated.date;
 
     const cfg = await loadSchedulingConfig(svc);
     const { data: callerProfile } = await auth.supabase
@@ -673,14 +735,6 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
       }
     }
 
-    // ── Arbitration, which this endpoint never had ──
-    // Until now nothing in the UI called DELETE, so "any assigned staff may
-    // wipe any mark on the route" was unreachable rather than safe. The Undo
-    // control on a without-ticket row makes it reachable, so the rule that
-    // guards every other write applies here too: your own mark, an orphaned
-    // one, or the transport office. canClearMark is the same authority the
-    // roster's can_edit hint is rendered from.
-    const isOverrideHolder = await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
     // Chunked, and the error CHECKED. An oversized `.in()` returns HTTP 400 with
     // no rows, and an empty result here reads as "no existing mark" — which
     // canClearMark answers with `true`. That is the one direction this gate must
