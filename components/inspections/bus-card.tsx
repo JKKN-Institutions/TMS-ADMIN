@@ -1,6 +1,7 @@
 import { Phone } from 'lucide-react';
 import type { InspectionDetail, InspectionOverview } from '@/lib/inspections/types';
 import type { DocTone } from '@/lib/inspections/doc-status';
+import { fmtIST, fmtTime } from '@/lib/inspections/format';
 
 const TONE: Record<DocTone, string> = {
   valid: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
@@ -9,9 +10,6 @@ const TONE: Record<DocTone, string> = {
   missing: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not recorded');
-const fmtTime = (t: string | null) => (t ? t.slice(0, 5) : '—');
-const fmtIST = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
 
 function driverTripLine(trip: InspectionOverview['driverTrip']): string {
   if (!trip || !trip.startedAt) return 'No trip started in the driver app today';
@@ -19,7 +17,12 @@ function driverTripLine(trip: InspectionOverview['driverTrip']): string {
   return `Trip in progress since ${fmtIST(trip.startedAt)}`;
 }
 
-export function BusCard({ detail, overview }: { detail: InspectionDetail; overview?: InspectionOverview }) {
+export function BusCard({ detail, overview, overviewError }: {
+  detail: InspectionDetail;
+  overview?: InspectionOverview;
+  /** The live overview read failed — say so instead of silently dropping its lines. */
+  overviewError?: boolean;
+}) {
   const { vehicle, route, driver, previous } = detail;
   return (
     <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
@@ -42,6 +45,7 @@ export function BusCard({ detail, overview }: { detail: InspectionDetail; overvi
         </p>
       )}
       {overview && <p className="text-sm text-gray-600 dark:text-gray-400">{driverTripLine(overview.driverTrip)}</p>}
+      {!overview && overviewError && <p className="text-xs text-red-600 dark:text-red-400">Could not load route/trip details</p>}
       <div className="flex flex-wrap gap-2">
         {vehicle.docs.map((d) => (
           <span key={d.key} title={fmt(d.expiry)} className={`rounded-full px-2.5 py-1 text-xs font-medium ${TONE[d.tone]}`}>

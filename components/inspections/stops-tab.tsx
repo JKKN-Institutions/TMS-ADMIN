@@ -1,7 +1,6 @@
 import type { Leg } from '@/lib/inspections/overview';
 import type { InspectionOverview } from '@/lib/inspections/types';
-
-const fmtTime = (t: string | null) => (t ? t.slice(0, 5) : '—');
+import { fmtTime } from '@/lib/inspections/format';
 
 export function StopsTab({ stops, leg, riderCounts }: {
   stops: InspectionOverview['stops'];

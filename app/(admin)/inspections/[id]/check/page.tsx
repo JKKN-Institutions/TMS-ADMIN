@@ -190,7 +190,7 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
 
       {showLegSwitch && <LegSwitch value={leg} onChange={setLeg} />}
 
-      {tab === 'bus' && <BusCard detail={data} overview={overview} />}
+      {tab === 'bus' && <BusCard detail={data} overview={overview} overviewError={overviewQuery.isError} />}
 
       {tab === 'stops' && (
         overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
@@ -210,13 +210,12 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
         overview ? <StaffTab overview={overview} /> : null
       )}
 
-      {tab === 'checklist' && (
-        <>
-          <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} disabled={submitting} />
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)" disabled={submitting}
-            className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900 disabled:opacity-50" />
-        </>
-      )}
+      {/* Always mounted (only hidden) so an in-flight photo upload's spinner/error survives a tab switch. */}
+      <div className={tab === 'checklist' ? 'space-y-5' : 'hidden'}>
+        <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} disabled={submitting} />
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)" disabled={submitting}
+          className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900 disabled:opacity-50" />
+      </div>
 
       <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur lg:bottom-0 dark:border-gray-800 dark:bg-gray-950/95">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">

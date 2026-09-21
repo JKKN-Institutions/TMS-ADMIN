@@ -1,8 +1,6 @@
 import { Phone } from 'lucide-react';
 import type { InspectionOverview } from '@/lib/inspections/types';
-
-const fmtIST = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
+import { fmtIST } from '@/lib/inspections/format';
 
 function PhoneLink({ phone }: { phone: string | null }) {
   if (!phone) return null;
