@@ -434,6 +434,56 @@ async function mark(request: NextRequest, auth: AuthContext) {
       });
     }
 
+    // ── Back-dated only: refuse a mark whose day's row sits on another bus ──
+    // The upsert's conflict key is (learner_id, trip_date, direction) -- it has
+    // no route -- and a back-dated mark sends move_route: false. So a back-dated
+    // mark from bus A's list for a learner already recorded on bus B that day
+    // would land on B's row and rewrite its status (a real "present" on B turned
+    // "absent" from A's page), and p_allow_override would let it through the
+    // lock. Refuse the whole request instead; the admin corrects it from B's
+    // page. A same-day (no `date`) request never reaches this block.
+    if (backdated) {
+      const elsewhere: Array<{ learnerId: string; routeId: string }> = [];
+      for (const c of chunk(rows.map((r) => r.learner_id))) {
+        const { data: existing, error: existingError } = await svc
+          .from('tms_attendance')
+          .select('learner_id, route_id')
+          .eq('trip_date', today)
+          .eq('direction', direction)
+          .in('learner_id', c);
+        if (existingError) {
+          // Fail closed: without knowing where the rows sit, a write could
+          // overwrite another bus's record.
+          console.error('boarding manual mark: failed to load existing attendance:', existingError);
+          return NextResponse.json({ error: 'Failed to load attendance' }, { status: 500 });
+        }
+        for (const e of (existing ?? []) as { learner_id: string; route_id: string | null }[]) {
+          if (e.route_id !== null && e.route_id !== routeId) {
+            elsewhere.push({ learnerId: e.learner_id, routeId: e.route_id });
+          }
+        }
+      }
+      if (elsewhere.length > 0) {
+        const otherRouteIds = [...new Set(elsewhere.map((e) => e.routeId))];
+        const numberById = new Map<string, string | null>();
+        const { data: otherRoutes } = await svc
+          .from('tms_route').select('id, route_number').in('id', otherRouteIds.slice(0, 150));
+        for (const r of (otherRoutes ?? []) as RouteRow[]) numberById.set(r.id, r.route_number);
+        const learners = elsewhere.map((e) => ({
+          learnerId: e.learnerId, routeId: e.routeId, routeNumber: numberById.get(e.routeId) ?? null,
+        }));
+        const firstBus = learners[0].routeNumber ?? 'another bus';
+        return NextResponse.json(
+          {
+            error: `Recorded on bus ${firstBus} that day. Correct it from that bus's page.`,
+            reason: 'recorded_on_other_bus',
+            learners,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     // Atomic: the decision and the write are ONE statement per learner, inside
     // the database. The read-then-upsert this replaces held nothing between the
     // two, so two of a route's dozen staff tapping the same learner in the same
