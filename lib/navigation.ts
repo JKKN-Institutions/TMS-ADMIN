@@ -23,6 +23,7 @@ import {
   Wallet,
   Bug,
   IndianRupee,
+  ClipboardList,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -60,6 +61,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Routes', href: '/routes', icon: Route, permission: TMS_PERMISSIONS.ROUTES_VIEW, group: 'transport' },
   { name: 'Schedules', href: '/schedules', icon: Calendar, permission: TMS_PERMISSIONS.SCHEDULES_VIEW, group: 'transport' },
   { name: 'Bookings', href: '/bookings', icon: CalendarCheck, permission: TMS_PERMISSIONS.BOOKINGS_VIEW, group: 'transport' },
+  { name: 'Attendance', href: '/attendance', icon: ClipboardList, permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, group: 'transport' },
   { name: 'Route Optimization', href: '/route-optimization', icon: Zap, permission: TMS_PERMISSIONS.ROUTES_EDIT, group: 'transport' },
   { name: 'Staff Assignments', href: '/staff-route-assignments', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
   { name: 'Transport Years', href: '/transport-years', icon: CalendarRange, permission: TMS_PERMISSIONS.TRANSPORT_YEARS_VIEW, group: 'transport' },
