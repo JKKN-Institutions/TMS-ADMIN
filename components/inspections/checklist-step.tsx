@@ -14,7 +14,7 @@ const BTN: Record<ItemResult, [string, string]> = {
   pass: ['Pass', 'bg-green-600 text-white'], fail: ['Fail', 'bg-red-600 text-white'], na: ['N/A', 'bg-gray-600 text-white'],
 };
 
-function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
+function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto, disabled }: {
   item: InspectionItemDTO;
   onChange: (p: Patch) => void;
   // Append/remove a single photo against whatever the CURRENT item state is
@@ -23,6 +23,7 @@ function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
   // async upload — that array can go stale while `uploadPhoto` is in flight.
   onAddPhoto: (path: string, url: string) => void;
   onRemovePhoto: (index: number) => void;
+  disabled?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -31,7 +32,7 @@ function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || item.photoPaths.length >= 3) return;
+    if (disabled || !file || item.photoPaths.length >= 3) return;
     setUploading(true); setErr(null);
     try {
       const path = await uploadPhoto(file);
@@ -48,8 +49,8 @@ function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
         </p>
         <div className="flex gap-1">
           {(Object.keys(BTN) as ItemResult[]).map((r) => (
-            <button key={r} type="button" onClick={() => onChange({ result: r })}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold ${item.result === r ? BTN[r][1] : 'border border-gray-300 dark:border-gray-700'}`}>
+            <button key={r} type="button" disabled={disabled} onClick={() => onChange({ result: r })}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${item.result === r ? BTN[r][1] : 'border border-gray-300 dark:border-gray-700'}`}>
               {BTN[r][0]}
             </button>
           ))}
@@ -57,21 +58,21 @@ function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
       </div>
       {item.result === 'fail' && (
         <div className="space-y-2 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
-          <textarea value={item.note ?? ''} onChange={(e) => onChange({ note: e.target.value })} rows={2}
-            placeholder="What is wrong? (required)" className="w-full rounded-md border border-red-200 p-2 text-sm dark:border-red-900 dark:bg-gray-900" />
+          <textarea value={item.note ?? ''} onChange={(e) => onChange({ note: e.target.value })} rows={2} disabled={disabled}
+            placeholder="What is wrong? (required)" className="w-full rounded-md border border-red-200 p-2 text-sm disabled:opacity-50 dark:border-red-900 dark:bg-gray-900" />
           <div className="flex flex-wrap items-center gap-2">
             {item.photoUrls.map((u, i) => (
               <div key={item.photoPaths[i]} className="relative">
                 {u ? <img src={u} alt="" className="h-16 w-16 rounded object-cover" /> : <div className="h-16 w-16 rounded bg-gray-200 dark:bg-gray-800" />}
-                <button type="button" aria-label="Remove photo" className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white"
+                <button type="button" aria-label="Remove photo" disabled={disabled} className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white disabled:opacity-50"
                   onClick={() => onRemovePhoto(i)}>
                   <X className="h-3 w-3" />
                 </button>
               </div>
             ))}
             {item.photoPaths.length < 3 && (
-              <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()}
-                className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-gray-400 text-gray-500 dark:border-gray-600 dark:text-gray-400">
+              <button type="button" disabled={uploading || disabled} onClick={() => fileRef.current?.click()}
+                className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-gray-400 text-gray-500 disabled:opacity-50 dark:border-gray-600 dark:text-gray-400">
                 {uploading ? '…' : <Camera className="h-5 w-5" />}
               </button>
             )}
@@ -84,12 +85,13 @@ function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
   );
 }
 
-export function ChecklistStep({ items, onChange, onAddPhoto, onRemovePhoto, onMarkRemainingPass }: {
+export function ChecklistStep({ items, onChange, onAddPhoto, onRemovePhoto, onMarkRemainingPass, disabled }: {
   items: InspectionItemDTO[];
   onChange: (id: string, patch: Patch) => void;
   onAddPhoto: (id: string, path: string, url: string) => void;
   onRemovePhoto: (id: string, index: number) => void;
   onMarkRemainingPass: () => void;
+  disabled?: boolean;
 }) {
   const groups = items.reduce<Record<string, InspectionItemDTO[]>>((acc, i) => { (acc[i.category] ??= []).push(i); return acc; }, {});
   const answered = items.filter((i) => i.result).length;
@@ -97,7 +99,7 @@ export function ChecklistStep({ items, onChange, onAddPhoto, onRemovePhoto, onMa
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-gray-600 dark:text-gray-400">{answered} / {items.length} answered</p>
-        <button type="button" onClick={onMarkRemainingPass} className="text-sm font-medium text-green-700 hover:underline dark:text-green-400">Mark remaining as Pass</button>
+        <button type="button" disabled={disabled} onClick={onMarkRemainingPass} className="text-sm font-medium text-green-700 hover:underline disabled:opacity-50 dark:text-green-400">Mark remaining as Pass</button>
       </div>
       {Object.entries(groups).map(([cat, list]) => (
         <div key={cat} className="rounded-xl border border-gray-200 bg-white px-4 dark:border-gray-800 dark:bg-gray-900">
@@ -110,6 +112,7 @@ export function ChecklistStep({ items, onChange, onAddPhoto, onRemovePhoto, onMa
                 onChange={(p) => onChange(i.id, p)}
                 onAddPhoto={(path, url) => onAddPhoto(i.id, path, url)}
                 onRemovePhoto={(index) => onRemovePhoto(i.id, index)}
+                disabled={disabled}
               />
             ))}
           </ul>

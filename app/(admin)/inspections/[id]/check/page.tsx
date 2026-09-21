@@ -150,9 +150,9 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
         subtitle={saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Not saved — will retry on next change' : 'All changes saved'}
       />
       <BusCard detail={data} />
-      <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} />
-      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)"
-        className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900" />
+      <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} disabled={submitting} />
+      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)" disabled={submitting}
+        className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900 disabled:opacity-50" />
       <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur lg:bottom-0 dark:border-gray-800 dark:bg-gray-950/95">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
           <p className="text-sm">Result so far: <b className={preview === 'fail' ? 'text-red-600 dark:text-red-400' : preview === 'pass' ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}>{preview.replace(/_/g, ' ')}</b></p>
