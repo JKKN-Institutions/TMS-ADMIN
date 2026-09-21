@@ -1810,14 +1810,43 @@ and replace with:
 *after* the block above. Move that line to just before `const dated = ...`, and
 delete it from its old position.
 
-- [ ] **Step 8: Verify `move_route` is never set**
+- [ ] **Step 8: Make `move_route` same-day only**
 
-Search the file:
+Since this plan was written, the wrong-bus feature (commit `7d543c2`) made every
+manual mark send `move_route: true`, so a mark pulls that day's row onto the bus
+it was marked on. That is right for a mark made on the bus today. For a
+BACK-DATED mark it is the exact hazard Safety Rule 2 forbids: the upsert's
+conflict key excludes `route_id`, so marking route 37 for 2026-09-01 would
+rewrite that day's record onto route 37 and the learner's CURRENT stop, even if
+they rode a different bus that day.
+
+In the `rows` mapping inside `mark()`, find:
+
+```ts
+      // Marked on this bus's list, so the row belongs to this bus even when
+      // an earlier write (the auto-absent job on the booked bus) put it elsewhere.
+      move_route: true,
+```
+
+and replace it with:
+
+```ts
+      // Marked on this bus's list, so the row belongs to this bus even when
+      // an earlier write (the auto-absent job on the booked bus) put it elsewhere.
+      // Same-day only: a BACK-DATED mark records whether the learner travelled,
+      // never where. The upsert's conflict key excludes route_id, so moving a
+      // past row would rewrite that day's bus and stop from today's allocation.
+      move_route: !backdated,
+```
+
+Leave `booked_route_id` as it is: `bookedElsewhere` is built from `tms_booking`
+filtered on `today`, which Step 4 now feeds with the requested date, so it
+already describes the day being marked.
+
+Then verify there is exactly one `move_route`, and that it is the conditional:
 
 Run: `grep -n "move_route" app/api/boarding/attendance/route.ts`
-Expected: **no output.** The manual mark path never sets it, and must not start.
-If this ever returns a hit, a back-dated correction would rewrite the historical
-boarding stop, because the upsert's conflict target excludes `route_id`.
+Expected: exactly one line, containing `move_route: !backdated,`.
 
 - [ ] **Step 9: Verify the whole suite and the build**
 
@@ -2122,7 +2151,7 @@ roughly double this plan's length for value the user ranked third. It should get
 its own plan once the grid is in use and its shape is informed by real use.
 
 **Safety rules, traced to steps:** no notification on back-fill → Task 8 Step 5
-and verified in Task 9 Step 6; never set `move_route` → Task 8 Step 8; walk-up
+and verified in Task 9 Step 6; never move a back-dated row (`move_route: !backdated`) → Task 8 Step 8; walk-up
 derivation follows the date → Task 8 Step 4 (`today` feeds the existing booking
 lookup); `.in()` chunking → unchanged, existing `chunk()` helpers retained;
 activity log flag → Task 8 Step 6; auto-close not retriggered → surfaced to the
