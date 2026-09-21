@@ -28,3 +28,15 @@ export interface InspectionDetail {
   previous: { id: string; submittedAt: string; result: InspectionResult } | null;
   items: InspectionItemDTO[];
 }
+
+import type { Leg, InchargeDuty } from './overview';
+export interface InspectionOverview {
+  leg: Leg;
+  date: string;
+  route: { id: string; number: string | null; name: string | null; start: string | null; end: string | null; departure: string | null; arrival: string | null; capacity: number | null } | null;
+  stops: { id: string; order: number | null; name: string; morning: string | null; evening: string | null; major: boolean }[];
+  driverTrip: { status: string; startedAt: string | null; endedAt: string | null } | null;
+  incharges: InchargeDuty[];
+  otherMarkers: { name: string; marks: number }[];
+  staffRiders: { staffId: string; name: string; designation: string | null; phone: string | null; stopName: string | null }[];
+}
