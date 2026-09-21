@@ -117,6 +117,12 @@ export const TMS_PERMISSIONS = {
   INSPECTION_VIEW: 'tms.inspection.view',
   INSPECTION_CONDUCT: 'tms.inspection.conduct',
   INSPECTION_MANAGE: 'tms.inspection.manage',
+
+  // Route Checkers (Transport Head assigns staff to verify riders on a route).
+  // Checker API access is NOT gated by this key — it comes from the
+  // assignment itself (tms_route_checker_route_ids). This key gates the
+  // Transport Head's admin screens: assign/unassign checkers, view history.
+  ROUTE_CHECK_MANAGE: 'tms.route_check.manage',
 } as const;
 
 export type TmsPermissionKey =

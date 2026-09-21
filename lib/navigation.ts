@@ -25,6 +25,7 @@ import {
   IndianRupee,
   ClipboardList,
   ShieldCheck,
+  UserSearch,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -57,6 +58,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Drivers', href: '/drivers', icon: UserCheck, permission: TMS_PERMISSIONS.DRIVERS_VIEW, group: 'transport' },
   { name: 'Vehicles', href: '/vehicles', icon: Car, permission: TMS_PERMISSIONS.VEHICLES_VIEW, group: 'transport' },
   { name: 'Bus Inspection', href: '/inspections', icon: ShieldCheck, permission: TMS_PERMISSIONS.INSPECTION_VIEW, group: 'transport' },
+  { name: 'Route Checkers', href: '/route-checkers', icon: UserSearch, permission: TMS_PERMISSIONS.ROUTE_CHECK_MANAGE, group: 'transport' },
   { name: 'GPS Devices', href: '/gps-devices', icon: Navigation, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
   { name: 'Tracking Mobiles', href: '/driver-mobiles', icon: Smartphone, permission: TMS_PERMISSIONS.DRIVER_MOBILES_VIEW, group: 'transport' },
   { name: 'Track All', href: '/track-all', icon: Bus, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
