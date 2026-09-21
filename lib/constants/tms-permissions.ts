@@ -110,6 +110,13 @@ export const TMS_PERMISSIONS = {
   DRIVER_MOBILES_CREATE: 'tms.driver_mobiles.create',
   DRIVER_MOBILES_EDIT: 'tms.driver_mobiles.edit',
   DRIVER_MOBILES_DELETE: 'tms.driver_mobiles.delete',
+
+  // Bus inspection (Transport Head checking). View = dashboard/reports;
+  // Conduct = scan a bus and run an inspection; Manage = checklist, issues,
+  // grounding, stickers. Seeded on transport_head in 20260921100000.
+  INSPECTION_VIEW: 'tms.inspection.view',
+  INSPECTION_CONDUCT: 'tms.inspection.conduct',
+  INSPECTION_MANAGE: 'tms.inspection.manage',
 } as const;
 
 export type TmsPermissionKey =

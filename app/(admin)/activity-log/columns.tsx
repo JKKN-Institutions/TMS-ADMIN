@@ -69,6 +69,7 @@ const MODULE_LABEL: Record<string, string> = {
   'driver-mobiles': 'Tracking Mobiles',
   'transport-vacate': 'Transport Vacate',
   'fee-concessions': 'Fee Concessions',
+  'inspections': 'Bus Inspection',
 };
 
 // Filter dropdown options for the DataTable — derived from the maps above so
