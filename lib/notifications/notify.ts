@@ -1,5 +1,6 @@
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { dispatchNotification } from '@/lib/notifications/dispatch';
+import { resolveLearnerProfileIds } from '@/lib/notifications/learner-recipients';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
@@ -26,7 +27,9 @@ export async function notifyProfile(
       body: opts.body,
       category: opts.category ?? 'general',
       url: opts.url ?? null,
-      createdBy: opts.actorId,
+      // '' (a system actor) is not a uuid; tms_notification.created_by would
+      // reject it and the notification would be silently dropped.
+      createdBy: opts.actorId || null,
       targeting: { type: 'users', user_ids: [opts.profileId] },
     });
     return true;
@@ -38,20 +41,15 @@ export async function notifyProfile(
 
 /**
  * Create an in-app notification targeted at a learner (by learner_id). Resolves the
- * learner's auth profile_id, then delegates to notifyProfile. No-op if the learner
- * has no auth identity yet.
+ * learner's auth profile by profile_id, then college/student email, then delegates
+ * to notifyProfile. No-op if the learner has no auth identity yet.
  */
 export async function notifyLearner(
   svc: Svc,
   opts: { learnerId: string; actorId: string; title: string; body: string; category?: string; url?: string },
 ): Promise<void> {
   try {
-    const { data: lp } = await svc
-      .from('learners_profiles')
-      .select('profile_id')
-      .eq('id', opts.learnerId)
-      .maybeSingle();
-    const profileId = (lp as { profile_id: string | null } | null)?.profile_id;
+    const profileId = (await resolveLearnerProfileIds(svc as never, [opts.learnerId])).get(opts.learnerId);
     if (!profileId) return;
     await notifyProfile(svc, {
       profileId,
