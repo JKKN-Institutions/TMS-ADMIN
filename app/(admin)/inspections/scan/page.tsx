@@ -6,14 +6,18 @@ import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { DetailPageHeader } from '@/components/ui/detail-view';
 import { BusScanner } from '@/components/inspections/bus-scanner';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { fetchDashboard, resolveSticker, startInspection, currentPosition } from '../inspection-api';
 
 export default function ScanBusPage() {
   const router = useRouter();
+  const { can, isLoading: permsLoading } = usePermissions();
+  const canConduct = can(TMS_PERMISSIONS.INSPECTION_CONDUCT);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [manual, setManual] = useState('');
-  const { data } = useQuery({ queryKey: ['inspections', 'dashboard'], queryFn: fetchDashboard });
+  const { data } = useQuery({ queryKey: ['inspections', 'dashboard'], queryFn: fetchDashboard, enabled: canConduct });
 
   async function open(vehicleId: string) {
     busyRef.current = true;
@@ -41,6 +45,15 @@ export default function ScanBusPage() {
   function onManualInspect() {
     if (busyRef.current) return;
     void open(manual);
+  }
+
+  if (!permsLoading && !canConduct) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        You don&apos;t have access to scan bus inspections.{' '}
+        <a href="/inspections" className="text-green-700 underline dark:text-green-400">Back to Bus Inspection</a>
+      </div>
+    );
   }
 
   return (
