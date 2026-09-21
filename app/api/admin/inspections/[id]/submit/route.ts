@@ -22,18 +22,29 @@ async function submitInspection(request: NextRequest, auth: AuthContext) {
     if (ins.inspected_by !== auth.userId && !auth.isSuperAdmin) {
       return NextResponse.json({ error: 'Only the inspector who started this inspection can submit it' }, { status: 403 });
     }
-    const { data: rows } = await svc.from('tms_inspection_item').select('severity, result, note, label').eq('inspection_id', id);
+    const { data: rows, error: rowsErr } = await svc.from('tms_inspection_item').select('severity, result, note, label').eq('inspection_id', id);
+    if (rowsErr) {
+      console.error('submit inspection error:', rowsErr);
+      return NextResponse.json({ error: 'Failed to load checklist answers' }, { status: 500 });
+    }
     const items = (rows ?? []) as { severity: Severity; result: ItemResult | null; note: string | null; label: string }[];
+    if (items.length === 0) {
+      return NextResponse.json({ error: 'This inspection has no checklist items', blockers: ['This inspection has no checklist items'] }, { status: 400 });
+    }
     const blockers = submitBlockers(items);
     if (blockers.length) return NextResponse.json({ error: blockers.join('; '), blockers }, { status: 400 });
 
     const result = computeResult(items);
-    const { error } = await svc.from('tms_inspection')
+    const { data: updated, error } = await svc.from('tms_inspection')
       .update({ status: 'submitted', result, submitted_at: new Date().toISOString(), notes: body.notes?.trim() || null })
-      .eq('id', id).eq('status', 'draft');
+      .eq('id', id).eq('status', 'draft')
+      .select('id');
     if (error) {
       console.error('submit inspection error:', error);
       return NextResponse.json({ error: 'Failed to submit inspection' }, { status: 500 });
+    }
+    if (!updated?.length) {
+      return NextResponse.json({ error: 'This inspection is already submitted' }, { status: 409 });
     }
     const { data: bus } = await svc.from('tms_vehicle').select('registration_number').eq('id', ins.vehicle_id).maybeSingle();
     await logActivity(auth, request, {

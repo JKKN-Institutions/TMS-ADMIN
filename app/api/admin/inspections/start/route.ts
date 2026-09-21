@@ -55,14 +55,16 @@ async function startInspection(request: NextRequest, auth: AuthContext) {
     const { data: checklist, error: clErr } = await svc
       .from('tms_inspection_checklist_item').select('id, category, label, severity, sort_order').eq('is_active', true).order('sort_order');
     if (clErr || !checklist?.length) {
-      await svc.from('tms_inspection').delete().eq('id', created.id);
+      const { error: delErr } = await svc.from('tms_inspection').delete().eq('id', created.id);
+      if (delErr) console.error('start inspection cleanup error:', delErr);
       return NextResponse.json({ error: 'The checklist is empty — add checklist items first' }, { status: 409 });
     }
     const { error: itemsErr } = await svc.from('tms_inspection_item').insert(
       checklist.map((c) => ({ inspection_id: created.id, checklist_item_id: c.id, category: c.category, label: c.label, severity: c.severity, sort_order: c.sort_order })),
     );
     if (itemsErr) {
-      await svc.from('tms_inspection').delete().eq('id', created.id);
+      const { error: delErr } = await svc.from('tms_inspection').delete().eq('id', created.id);
+      if (delErr) console.error('start inspection cleanup error:', delErr);
       console.error('start inspection items error:', itemsErr);
       return NextResponse.json({ error: 'Failed to start inspection' }, { status: 500 });
     }
