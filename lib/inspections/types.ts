@@ -1,0 +1,30 @@
+import type { InspectionResult, ItemResult, Severity } from './result';
+import type { DueState } from './due';
+import type { DocStatus } from './doc-status';
+
+export interface DashboardBus {
+  vehicleId: string; registration: string; model: string | null; status: string;
+  routeLabel: string | null; lastSubmittedAt: string | null; lastResult: InspectionResult | null;
+  lastInspectionId: string | null; draftInspectionId: string | null;
+  due: { state: DueState; dueOn: string | null; daysLeft: number | null };
+}
+export interface DashboardData {
+  intervalDays: number;
+  tiles: { overdue: number; dueSoon: number; never: number; grounded: number; openIssues: number };
+  buses: DashboardBus[];
+}
+export interface InspectionItemDTO {
+  id: string; category: string; label: string; severity: Severity; sortOrder: number;
+  result: ItemResult | null; note: string | null; photoPaths: string[]; photoUrls: (string | null)[];
+}
+export interface InspectionDetail {
+  id: string; status: 'draft' | 'submitted'; result: InspectionResult | null;
+  startedAt: string; submittedAt: string | null; notes: string | null;
+  inspectorName: string | null; isMine: boolean;
+  location: { status: string | null; distanceM: number | null };
+  vehicle: { id: string; registration: string; model: string | null; capacity: number | null; status: string; docs: DocStatus[]; firstAidAvailable: boolean | null };
+  route: { id: string; number: string | null; name: string | null } | null;
+  driver: { staffId: string; name: string; phone: string | null } | null;
+  previous: { id: string; submittedAt: string; result: InspectionResult } | null;
+  items: InspectionItemDTO[];
+}
