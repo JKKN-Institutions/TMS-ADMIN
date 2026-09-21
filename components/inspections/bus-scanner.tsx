@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera } from 'lucide-react';
-import { classifyCameraError, cameraErrorMessage, shouldTryOtherCameras, pickBackCamera } from '@/lib/boarding/camera-errors';
+import { classifyCameraError, cameraErrorMessage, shouldTryOtherCameras, pickBackCamera, isFreshCapture } from '@/lib/boarding/camera-errors';
 import { parseStickerScan } from '@/lib/inspections/sticker-code';
 
 const READER_ID = 'bus-sticker-reader';
@@ -21,7 +21,7 @@ const SHARP_VIDEO: MediaTrackConstraints = {
 export function BusScanner({
   onCode, paused, parse = parseStickerScan,
   rejectMessage = 'That QR is not a bus sticker. Scan the sticker inside the bus.',
-  subject = 'bus sticker',
+  subject = 'bus sticker', photoMode = 'any',
 }: {
   onCode: (code: string) => void;
   paused: boolean;
@@ -30,6 +30,11 @@ export function BusScanner({
   rejectMessage?: string;
   /** What is being scanned, for the camera/photo error wording ("bus sticker", "ID card"). */
   subject?: string;
+  /**
+   * 'fresh-only' accepts only a photo just taken with the camera (a saved or
+   * downloaded picture of a public ID card is no proof the card is present).
+   */
+  photoMode?: 'any' | 'fresh-only';
 }) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const genRef = useRef(0);
@@ -114,6 +119,10 @@ export function BusScanner({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (photoMode === 'fresh-only' && !isFreshCapture(file, Date.now())) {
+      setError('Take a new photo of the ID card with the camera. Saved or downloaded pictures are not accepted.');
+      return;
+    }
     await stop();
     const reader = new Html5Qrcode(PHOTO_READER_ID, READER_OPTIONS);
     try { onRead(await reader.scanFile(file, false)); }

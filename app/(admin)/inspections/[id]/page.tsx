@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
 import { BusCard } from '@/components/inspections/bus-card';
-import { OUTCOME_META } from '@/components/inspections/learner-scan-dialog';
+import { OUTCOME_META } from '@/lib/inspections/outcome-meta';
 import { headcountDelta } from '@/lib/inspections/overview';
 import { LEG_NAME } from '@/lib/boarding/attendance-window';
 import { fmtIST } from '@/lib/inspections/format';
@@ -18,9 +18,9 @@ const ITEM = { pass: 'text-green-700 dark:text-green-400', fail: 'text-red-700 d
 
 export default function InspectionReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data, isLoading, isError } = useQuery({ queryKey: ['inspection', id], queryFn: () => fetchInspection(id) });
+  const { data, isLoading, isError, refetch } = useQuery({ queryKey: ['inspection', id], queryFn: () => fetchInspection(id) });
   if (isLoading) return <div className="h-40 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />;
-  if (isError || !data) return <p className="text-red-600 dark:text-red-400">Inspection not found. <Link href="/inspections" className="underline">Back</Link></p>;
+  if (!data) return <p className="text-red-600 dark:text-red-400">Inspection not found. <Link href="/inspections" className="underline">Back</Link></p>;
 
   const failed = data.items.filter((i) => i.result === 'fail');
   const { riders, learnerChecks } = data;
@@ -35,12 +35,18 @@ export default function InspectionReportPage({ params }: { params: Promise<{ id:
         actions={data.result ? <span className={`rounded-lg px-3 py-1.5 text-sm font-bold text-white ${RESULT[data.result][1]}`}>{RESULT[data.result][0]}</span>
           : <Link href={`/inspections/${id}/check`} className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white">Continue draft</Link>}
       />
+      {isError && (
+        <p className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+          <span className="min-w-0">Couldn&apos;t refresh — showing last loaded data</span>
+          <button type="button" onClick={() => void refetch()} className="font-semibold underline">Retry</button>
+        </p>
+      )}
       <BusCard detail={data} />
       <SectionCard title="Riders at inspection">
-        {riders.leg ? (
+        {riders.leg && riders.headcount != null ? (
           <div className="space-y-1 text-sm">
             <p>
-              <b>{LEG_NAME[riders.leg]}</b>: counted {riders.headcount ?? '—'} · boarded {riders.boarded ?? '—'} · booked {riders.booked ?? '—'}
+              <b>{LEG_NAME[riders.leg]}</b>: counted {riders.headcount} · boarded {riders.boarded ?? '—'} · booked {riders.booked ?? '—'}
             </p>
             {delta && (
               <p className={delta.diff === 0 ? 'text-green-700 dark:text-green-400' : 'font-medium text-amber-700 dark:text-amber-400'}>{delta.label}</p>
@@ -50,7 +56,14 @@ export default function InspectionReportPage({ params }: { params: Promise<{ id:
             )}
           </div>
         ) : (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Headcount not taken</p>
+          <div className="space-y-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Headcount not taken</p>
+            {riders.leg && (riders.boarded != null || riders.booked != null) && (
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {LEG_NAME[riders.leg]}: boarded {riders.boarded ?? '—'} · booked {riders.booked ?? '—'}
+              </p>
+            )}
+          </div>
         )}
       </SectionCard>
       <SectionCard title={`Learner ID checks (${learnerChecks.length})`}>

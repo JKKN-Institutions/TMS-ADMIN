@@ -32,7 +32,7 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
   const { id } = use(params);
   const router = useRouter();
   const qc = useQueryClient();
-  const { data, isLoading, isError, error } = useQuery({ queryKey: ['inspection', id], queryFn: () => fetchInspection(id), refetchOnWindowFocus: false });
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['inspection', id], queryFn: () => fetchInspection(id), refetchOnWindowFocus: false });
 
   const [items, setItems] = useState<InspectionItemDTO[]>([]);
   const [notes, setNotes] = useState('');
@@ -182,7 +182,8 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
   }
 
   if (isLoading) return <div className="h-40 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />;
-  if (isError || !data) return <p className="text-red-600 dark:text-red-400">{(error as Error)?.message ?? 'Inspection not found'}</p>;
+  // Only a missing inspection blanks the screen; a failed background refetch keeps the last data (I1).
+  if (!data) return <p className="text-red-600 dark:text-red-400">{(error as Error)?.message ?? 'Inspection not found'}</p>;
   if (!data.isMine) return <p className="text-amber-700 dark:text-amber-400">This draft was started by {data.inspectorName ?? 'another inspector'}; only they can continue it.</p>;
 
   const preview = computeResult(items);
@@ -195,6 +196,12 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
         backHref="/inspections" title={`Inspect ${data.vehicle.registration}`}
         subtitle={saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Not saved — will retry on next change' : 'All changes saved'}
       />
+      {isError && (
+        <p className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+          <span className="min-w-0">Couldn&apos;t refresh — showing last loaded data</span>
+          <button type="button" onClick={() => void refetch()} className="font-semibold underline">Retry</button>
+        </p>
+      )}
       <div className="sticky top-0 z-10 -mx-4 overflow-x-auto border-b border-gray-200 bg-white/95 px-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/95">
         <div className="flex w-max gap-1 py-2">
           {TABS.map((t) => (

@@ -6,37 +6,8 @@ import toast from 'react-hot-toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BusScanner } from '@/components/inspections/bus-scanner';
 import { classifyScan } from '@/lib/boarding/scan-resolve';
-import type { LearnerOutcome } from '@/lib/inspections/overview';
+import { OUTCOME_META } from '@/lib/inspections/outcome-meta';
 import { scanLearner, type LearnerScanResult } from '@/app/(admin)/inspections/inspection-api';
-
-/** Label + chip/card colours per verdict — shared with the inspection report. */
-export const OUTCOME_META: Record<LearnerOutcome, { label: string; icon: string; chip: string; card: string }> = {
-  ok: {
-    label: 'OK', icon: '✅',
-    chip: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-    card: 'border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-200',
-  },
-  wrong_bus: {
-    label: 'Wrong bus', icon: '⚠️',
-    chip: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-    card: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
-  },
-  not_booked: {
-    label: 'Not booked today', icon: '⚠️',
-    chip: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-    card: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
-  },
-  fee_due: {
-    label: 'Fee due', icon: '⚠️',
-    chip: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-    card: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
-  },
-  unknown_card: {
-    label: 'Unknown card', icon: '❌',
-    chip: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-    card: 'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200',
-  },
-};
 
 /** Camera reads only: a JKKN ID card number, or null so the scanner shows its reject message. */
 const parseJkknId = (raw: string): string | null => {
@@ -82,7 +53,7 @@ export function LearnerScanDialog({ inspectionId, open, onClose }: { inspectionI
       const r = await scanLearner(inspectionId, code);
       if (gen === genRef.current) setVerdict({ kind: 'result', code, r });
       setChecks((prev) => [{ at: Date.now(), code, r }, ...prev]);
-      void qc.invalidateQueries({ queryKey: ['inspection', inspectionId] });
+      void qc.invalidateQueries({ queryKey: ['inspection', inspectionId], exact: true });
     } catch (e) {
       const message = (e as Error).message || 'Could not check the card';
       toast.error(message);
@@ -124,6 +95,7 @@ export function LearnerScanDialog({ inspectionId, open, onClose }: { inspectionI
               parse={parseJkknId}
               rejectMessage="That QR is not a JKKN ID card. Scan the QR on the learner's ID card."
               subject="ID card"
+              photoMode="fresh-only"
             />
             {busy && <p className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">Checking card…</p>}
           </div>

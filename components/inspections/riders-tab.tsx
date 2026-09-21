@@ -64,23 +64,30 @@ export function RidersTab({ detail, overview, leg, date, roster }: {
   const storedForLeg = stored.leg === leg ? stored.headcount : null;
   const [input, setInput] = useState(storedForLeg == null ? '' : String(storedForLeg));
   const [saving, setSaving] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
-  useEffect(() => { setInput(storedForLeg == null ? '' : String(storedForLeg)); }, [leg, storedForLeg]);
+  useEffect(() => { setInput(storedForLeg == null ? '' : String(storedForLeg)); setInputError(null); }, [leg, storedForLeg]);
+  const otherLegSnapshot = stored.leg !== null && stored.leg !== leg;
 
   const rows = roster.data?.rows;
   const counts = roster.data?.counts;
   const groups = useMemo(() => (rows ? groupByStop(rows, overview?.stops) : []), [rows, overview?.stops]);
   const booked = rows ? rows.filter((r) => r.booked).length : null;
   const capacity = overview?.route?.capacity ?? detail.vehicle.capacity;
-  const delta = counts ? headcountDelta(storedForLeg, counts.present) : null;
+  const delta = counts && !roster.isError ? headcountDelta(storedForLeg, counts.present) : null;
 
-  async function onSave() {
+  /** Save the typed count. Only digits 0–500; an empty box never clears (that is the Clear button). */
+  function onSave() {
     const trimmed = input.trim();
-    const counted = trimmed === '' ? null : Number(trimmed);
-    if (counted !== null && (!Number.isInteger(counted) || counted < 0 || counted > 500)) {
-      toast.error('Enter a whole number from 0 to 500');
+    if (!/^\d{1,3}$/.test(trimmed) || Number(trimmed) > 500) {
+      setInputError(trimmed === '' ? 'Enter the number of people counted' : 'Enter a whole number from 0 to 500');
       return;
     }
+    void persist(Number(trimmed));
+  }
+
+  async function persist(counted: number | null) {
+    setInputError(null);
     setSaving(true);
     try {
       await saveHeadcount(detail.id, leg, counted);
@@ -103,7 +110,7 @@ export function RidersTab({ detail, overview, leg, date, roster }: {
       {/* Counts */}
       {hasRoute && (
         roster.isLoading ? <div className="h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
-        counts && (
+        !roster.isError && counts && (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             {([
               ['Booked', booked, ''],
@@ -127,23 +134,40 @@ export function RidersTab({ detail, overview, leg, date, roster }: {
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2">
             <input
-              type="number" inputMode="numeric" min={0} max={500} step={1}
-              value={input} onChange={(e) => setInput(e.target.value)} disabled={saving}
-              placeholder="People counted" aria-label="People counted"
+              type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} autoComplete="off"
+              value={input} onChange={(e) => { setInput(e.target.value); setInputError(null); }} disabled={saving}
+              placeholder="People counted" aria-label="People counted" aria-invalid={!!inputError}
               className="w-36 min-w-0 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 disabled:opacity-50"
             />
             <button type="button" onClick={onSave} disabled={saving}
               className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
               {saving ? 'Saving…' : 'Save headcount'}
             </button>
+            {storedForLeg != null && (
+              <button type="button" onClick={() => void persist(null)} disabled={saving}
+                className="rounded-lg px-2 py-2 text-sm text-gray-600 underline hover:text-gray-900 disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-100">
+                Clear
+              </button>
+            )}
           </div>
         )}
-        {stored.leg ? (
+        {canEdit && inputError && <p className="text-sm text-red-600 dark:text-red-400">{inputError}</p>}
+        {canEdit && otherLegSnapshot && stored.leg && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">Saving replaces the {LEG_NAME[stored.leg]} count</p>
+        )}
+        {stored.leg && stored.headcount != null ? (
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Saved ({LEG_NAME[stored.leg]}): counted {stored.headcount ?? '—'} · boarded {stored.boarded ?? '—'} · booked {stored.booked ?? '—'}
+            Saved ({LEG_NAME[stored.leg]}): counted {stored.headcount} · boarded {stored.boarded ?? '—'} · booked {stored.booked ?? '—'}
           </p>
         ) : (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Headcount not taken</p>
+          <>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Headcount not taken</p>
+            {stored.leg && (stored.boarded != null || stored.booked != null) && (
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {LEG_NAME[stored.leg]}: boarded {stored.boarded ?? '—'} · booked {stored.booked ?? '—'}
+              </p>
+            )}
+          </>
         )}
         {delta && delta.diff !== null && (
           <p className={`text-sm font-medium ${delta.diff === 0 ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'}`}>
