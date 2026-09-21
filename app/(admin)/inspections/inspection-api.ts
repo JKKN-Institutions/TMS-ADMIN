@@ -1,5 +1,6 @@
-import type { DashboardData, InspectionDetail } from '@/lib/inspections/types';
+import type { DashboardData, InspectionDetail, InspectionOverview } from '@/lib/inspections/types';
 import type { InspectionResult, ItemResult } from '@/lib/inspections/result';
+import type { Leg } from '@/lib/inspections/overview';
 
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
@@ -23,6 +24,9 @@ export async function startInspection(vehicleId: string, pos: { lat: number; lng
 }
 export async function fetchInspection(id: string): Promise<InspectionDetail> {
   return (await json<{ data: InspectionDetail }>(await fetch(`/api/admin/inspections/${id}`))).data;
+}
+export async function fetchOverview(id: string, leg: Leg): Promise<InspectionOverview> {
+  return (await json<{ data: InspectionOverview }>(await fetch(`/api/admin/inspections/${id}/overview?leg=${leg}`))).data;
 }
 export async function saveItems(id: string, items: { id: string; result: ItemResult | null; note: string | null; photoPaths: string[] }[]) {
   await json(await fetch(`/api/admin/inspections/${id}/items`, {

@@ -7,11 +7,24 @@ import toast from 'react-hot-toast';
 import { DetailPageHeader } from '@/components/ui/detail-view';
 import { BusCard } from '@/components/inspections/bus-card';
 import { ChecklistStep } from '@/components/inspections/checklist-step';
+import { LegSwitch } from '@/components/inspections/leg-switch';
+import { StopsTab } from '@/components/inspections/stops-tab';
+import { StaffTab } from '@/components/inspections/staff-tab';
 import { computeResult, submitBlockers } from '@/lib/inspections/result';
 import type { InspectionItemDTO } from '@/lib/inspections/types';
-import { fetchInspection, saveItems, submitInspection } from '../../inspection-api';
+import { defaultLeg, type Leg } from '@/lib/inspections/overview';
+import { istMinutesOfDay } from '@/lib/boarding/attendance-window';
+import { fetchInspection, fetchOverview, saveItems, submitInspection } from '../../inspection-api';
 
 type Patch = Partial<Pick<InspectionItemDTO, 'result' | 'note'>>;
+type Tab = 'bus' | 'stops' | 'riders' | 'staff' | 'checklist';
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'bus', label: 'Bus' },
+  { key: 'stops', label: 'Stops' },
+  { key: 'riders', label: 'Riders' },
+  { key: 'staff', label: 'Staff' },
+  { key: 'checklist', label: 'Checklist' },
+];
 
 export default function InspectionCheckPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -23,6 +36,13 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
   const [notes, setNotes] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [submitting, setSubmitting] = useState(false);
+  const [tab, setTab] = useState<Tab>('bus');
+  const [leg, setLeg] = useState<Leg>(() => defaultLeg(istMinutesOfDay()));
+  const overviewQuery = useQuery({
+    queryKey: ['inspection', id, 'overview', leg],
+    queryFn: () => fetchOverview(id, leg),
+    refetchOnWindowFocus: false,
+  });
   const dirty = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seeded = useRef(false);
@@ -142,6 +162,8 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
   if (!data.isMine) return <p className="text-amber-700 dark:text-amber-400">This draft was started by {data.inspectorName ?? 'another inspector'}; only they can continue it.</p>;
 
   const preview = computeResult(items);
+  const overview = overviewQuery.data;
+  const showLegSwitch = tab === 'stops' || tab === 'riders' || tab === 'staff';
   return (
     <div className="mx-auto max-w-2xl space-y-5 pb-40">
       <DetailPageHeader
@@ -149,10 +171,53 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
         backHref="/inspections" title={`Inspect ${data.vehicle.registration}`}
         subtitle={saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Not saved — will retry on next change' : 'All changes saved'}
       />
-      <BusCard detail={data} />
-      <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} disabled={submitting} />
-      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)" disabled={submitting}
-        className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900 disabled:opacity-50" />
+      <div className="sticky top-0 z-10 -mx-4 overflow-x-auto border-b border-gray-200 bg-white/95 px-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/95">
+        <div className="flex w-max gap-1 py-2">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium ${
+                tab === t.key ? 'bg-green-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {showLegSwitch && <LegSwitch value={leg} onChange={setLeg} />}
+
+      {tab === 'bus' && <BusCard detail={data} overview={overview} />}
+
+      {tab === 'stops' && (
+        overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
+        overviewQuery.isError ? <p className="text-red-600 dark:text-red-400">{(overviewQuery.error as Error)?.message ?? 'Could not load stops'}</p> :
+        overview ? <StopsTab stops={overview.stops} leg={leg} /> : null
+      )}
+
+      {tab === 'riders' && (
+        overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
+        overviewQuery.isError ? <p className="text-red-600 dark:text-red-400">{(overviewQuery.error as Error)?.message ?? 'Could not load riders'}</p> :
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading riders…</p>
+      )}
+
+      {tab === 'staff' && (
+        overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
+        overviewQuery.isError ? <p className="text-red-600 dark:text-red-400">{(overviewQuery.error as Error)?.message ?? 'Could not load staff'}</p> :
+        overview ? <StaffTab overview={overview} /> : null
+      )}
+
+      {tab === 'checklist' && (
+        <>
+          <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} disabled={submitting} />
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)" disabled={submitting}
+            className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900 disabled:opacity-50" />
+        </>
+      )}
+
       <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur lg:bottom-0 dark:border-gray-800 dark:bg-gray-950/95">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
           <p className="text-sm">Result so far: <b className={preview === 'fail' ? 'text-red-600 dark:text-red-400' : preview === 'pass' ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}>{preview.replace(/_/g, ' ')}</b></p>

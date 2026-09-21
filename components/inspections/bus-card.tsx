@@ -1,5 +1,5 @@
 import { Phone } from 'lucide-react';
-import type { InspectionDetail } from '@/lib/inspections/types';
+import type { InspectionDetail, InspectionOverview } from '@/lib/inspections/types';
 import type { DocTone } from '@/lib/inspections/doc-status';
 
 const TONE: Record<DocTone, string> = {
@@ -9,8 +9,17 @@ const TONE: Record<DocTone, string> = {
   missing: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 };
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not recorded');
+const fmtTime = (t: string | null) => (t ? t.slice(0, 5) : '—');
+const fmtIST = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
 
-export function BusCard({ detail }: { detail: InspectionDetail }) {
+function driverTripLine(trip: InspectionOverview['driverTrip']): string {
+  if (!trip || !trip.startedAt) return 'No trip started in the driver app today';
+  if (trip.endedAt) return `Trip started ${fmtIST(trip.startedAt)} · ended ${fmtIST(trip.endedAt)}`;
+  return `Trip in progress since ${fmtIST(trip.startedAt)}`;
+}
+
+export function BusCard({ detail, overview }: { detail: InspectionDetail; overview?: InspectionOverview }) {
   const { vehicle, route, driver, previous } = detail;
   return (
     <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
@@ -26,6 +35,13 @@ export function BusCard({ detail }: { detail: InspectionDetail }) {
           {driver.phone && <a href={`tel:${driver.phone}`} className="inline-flex items-center gap-1 text-green-700 hover:underline dark:text-green-400"><Phone className="h-3.5 w-3.5" />{driver.phone}</a>}
         </p>
       ) : <p className="text-sm text-amber-700 dark:text-amber-400">No driver linked to this bus's route</p>}
+      {overview?.route && (overview.route.start || overview.route.end) && (
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          {overview.route.start ?? '—'} → {overview.route.end ?? '—'}
+          {' · '}Dep {fmtTime(overview.route.departure)} · Arr {fmtTime(overview.route.arrival)}
+        </p>
+      )}
+      {overview && <p className="text-sm text-gray-600 dark:text-gray-400">{driverTripLine(overview.driverTrip)}</p>}
       <div className="flex flex-wrap gap-2">
         {vehicle.docs.map((d) => (
           <span key={d.key} title={fmt(d.expiry)} className={`rounded-full px-2.5 py-1 text-xs font-medium ${TONE[d.tone]}`}>
