@@ -133,15 +133,20 @@ as $$
            'd', d.trip_date,
            'h', coalesce(m.human, 0),
            'a', coalesce(m.auto, 0),
-           'x', (h.exception_date is not null)
+           -- EXISTS, not a join: the unique indexes allow BOTH an all-routes
+           -- row and a per-route row for the same date, and a join would then
+           -- emit that route-day twice -- duplicating the day in the array and
+           -- doubling its counts.
+           'x', exists (
+             select 1 from tms_service_calendar h
+              where h.exception_date = d.trip_date
+                and (h.route_id is null or h.route_id = r.id)
+           )
          ) order by d.trip_date)
   from tms_route r
   cross join days d
   left join marks m  on m.route_id = r.id and m.trip_date = d.trip_date
   left join roster ro on ro.route_id = r.id
-  left join tms_service_calendar h
-         on h.exception_date = d.trip_date
-        and (h.route_id is null or h.route_id = r.id)
   where r.status = 'active'
   group by r.id, r.route_number, r.route_name, ro.total
   order by r.route_number;
@@ -151,8 +156,9 @@ revoke all on function public.tms_attendance_coverage(date, date, text) from pub
 grant execute on function public.tms_attendance_coverage(date, date, text) to service_role;
 ```
 
-The body has exactly three left joins — `marks m`, `roster ro`,
-`tms_service_calendar h` — plus the `cross join` that produces the day series.
+The body has exactly two left joins — `marks m` and `roster ro` — plus the
+`cross join` that produces the day series. The holiday flag is an `exists`
+subquery, never a join (see the comment in the SQL).
 
 - [ ] **Step 2: Apply the migration to the live database**
 
@@ -216,7 +222,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `lib/attendance/coverage.test.ts`
 
 **Interfaces:**
-- Consumes: `isSunday` from `@/lib/booking/window`.
+- Consumes: nothing. (Sundays are already excluded by the SQL day series.)
 - Produces:
   - `type CoverageState = 'marked' | 'partial' | 'auto_only' | 'not_marked' | 'holiday'`
   - `DEFAULT_COVERAGE_THRESHOLD = 0.6`
