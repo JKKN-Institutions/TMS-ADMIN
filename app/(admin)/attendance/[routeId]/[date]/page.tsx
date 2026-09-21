@@ -7,11 +7,14 @@
  * tms.attendance.override holders.
  */
 
-import React, { use } from 'react';
+import React, { use, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Clock } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import type { RosterRow } from '@/lib/booking/roster';
 
 interface AdminRosterResponse {
@@ -59,6 +62,50 @@ export default function AttendanceDayPage({
     queryFn: () => fetchRoster(routeId, date, direction),
   });
 
+  const queryClient = useQueryClient();
+  const { isSuperAdmin, can } = usePermissions();
+  const canMark = isSuperAdmin || can(TMS_PERMISSIONS.ATTENDANCE_OVERRIDE);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  /**
+   * Mark one learner. `date` is sent explicitly — that is the whole point of
+   * this screen, and the server re-decides whether this caller may name it.
+   */
+  async function mark(learnerId: string, status: 'present' | 'absent') {
+    setBusyId(learnerId);
+    try {
+      const res = await fetch('/api/boarding/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          routeId, direction, date,
+          marks: [{ learnerId, status }],
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save');
+      if (result.locked?.length > 0) {
+        // A partially locked batch must never render as a clean sweep.
+        toast(result.locked[0].markedByName
+          ? `Already marked by ${result.locked[0].markedByName}`
+          : 'Some marks were already taken', { icon: '⚠️' });
+      } else {
+        toast.success(status === 'present' ? 'Marked present' : 'Marked absent');
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ['admin-attendance-roster', routeId, date, direction],
+      });
+      // The coverage grid counts these rows; leaving it stale would show the
+      // cell still red after the day was filled in.
+      await queryClient.invalidateQueries({ queryKey: ['attendance-coverage'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save attendance');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="space-y-4 p-4 md:p-6">
       <Link href="/attendance" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
@@ -101,6 +148,14 @@ export default function AttendanceDayPage({
         </p>
       )}
 
+      {canMark && data && date !== new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) && (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-foreground">
+          You are marking a past date. These marks are recorded against {date}, learners are not
+          notified, and the auto-absent job will not fill in the rest of this day — it closes each
+          route-day once, on the day itself.
+        </p>
+      )}
+
       {data && !isError && (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-sm">
@@ -112,6 +167,7 @@ export default function AttendanceDayPage({
                 <th className="px-3 py-2">Ticket</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Marked by</th>
+                {canMark && <th className="px-3 py-2">Mark</th>}
               </tr>
             </thead>
             <tbody>
@@ -131,6 +187,26 @@ export default function AttendanceDayPage({
                   <td className="px-3 py-2 text-muted-foreground">
                     {r.method === 'auto' ? 'Auto-absent job' : r.marked_by_name ?? '—'}
                   </td>
+                  {canMark && (
+                    <td className="whitespace-nowrap px-3 py-2">
+                      <button
+                        type="button"
+                        disabled={busyId === r.learner_id}
+                        onClick={() => mark(r.learner_id, 'present')}
+                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                      >
+                        Present
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === r.learner_id}
+                        onClick={() => mark(r.learner_id, 'absent')}
+                        className="ml-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                      >
+                        Absent
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
