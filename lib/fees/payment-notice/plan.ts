@@ -55,10 +55,13 @@ export function planSweep(input: PlanInput): SweepPlan {
       continue;
     }
     if (!n.reminder_sent_at && expMs - nowMs <= cfg.reminderHoursBefore * HOUR_MS) {
-      plan.remind.push({
-        notice_id: n.id, person_id: n.person_id, expires_at: n.expires_at,
-        amount: fineAmount.get(n.person_id) ?? 0,
-      });
+      const amount = fineAmount.get(n.person_id);
+      if (amount && amount > 0) {
+        plan.remind.push({
+          notice_id: n.id, person_id: n.person_id, expires_at: n.expires_at,
+          amount,
+        });
+      }
     }
   }
 

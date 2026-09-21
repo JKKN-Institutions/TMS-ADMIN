@@ -87,4 +87,9 @@ describe('planSweep — running notices', () => {
     }));
     expect(plan).toEqual({ markPaid: [], cancel: [], open: [], remind: [], fine: [] });
   });
+
+  it('sends no reminder when the learner has no fine amount', () => {
+    const inside = notice({ person_id: 'Z', expires_at: '2026-09-23T11:00:00.000Z' });
+    expect(planSweep(input({ notices: [inside] })).remind).toEqual([]);
+  });
 });
