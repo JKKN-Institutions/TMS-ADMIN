@@ -23,6 +23,7 @@ const PUBLIC_PATHS = new Set([
   // stays absent, matching on source text — so do not write that prefix as a
   // quoted string anywhere in this file, not even in a comment.
   '/api/cron/auto-generate-bills',
+  '/api/cron/fee-payment-notices',
   // Recomputes in-charge share ownership only — moves no money, removes no
   // role. Safety net for the recompute hooks on the assignment/enrollment
   // APIs.
