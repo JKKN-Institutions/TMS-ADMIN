@@ -12,6 +12,7 @@ type Svc = ReturnType<typeof createServiceRoleClient>;
 
 // /api/admin/inspections/<id>/overview
 const idFrom = (r: NextRequest) => new URL(r.url).pathname.split('/').filter(Boolean)[3] ?? '';
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 const CHUNK = 150;
 function chunks<T>(xs: T[]): T[][] {
@@ -64,6 +65,7 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
     const leg: Leg = new URL(request.url).searchParams.get('leg') === 'return' ? 'return' : 'onward';
     const date = istToday();
     const id = idFrom(request);
+    if (!UUID.test(id)) return NextResponse.json({ error: 'Inspection not found' }, { status: 404 });
     const svc = createServiceRoleClient();
 
     const { data: ins, error: insErr } = await svc.from('tms_inspection').select('route_id, vehicle_id').eq('id', id).maybeSingle();
@@ -95,8 +97,9 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
         .not('scanned_by', 'is', null)
         // NULL <> 'auto' is NULL in SQL, so a bare neq would drop method-less rows.
         .or('method.is.null,method.neq.auto'),
-      svc.from('staff').select('id, first_name, last_name, designation, phone, transport_stop_id')
-        .eq('bus_required', true).eq('transport_route_id', routeId).eq('is_active', true),
+      svc.from('staff').select('id, first_name, last_name, designation, transport_stop_id')
+        .eq('bus_required', true).eq('transport_route_id', routeId).eq('is_active', true)
+        .order('first_name'),
     ]);
 
     const route = must<{
@@ -109,7 +112,7 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
     const assignments = must<{ id: string; staff_email: string }[]>('overview assignments', assignQ) ?? [];
     const absences = must<{ staff_email: string; covering_assignment_id: string | null }[]>('overview absences', absenceQ) ?? [];
     const markRows = must<{ scanned_by: string; scanned_at: string }[]>('overview marks', marksQ) ?? [];
-    const riderRows = must<{ id: string; first_name: string | null; last_name: string | null; designation: string | null; phone: string | null; transport_stop_id: string | null }[]>('overview staff riders', ridersQ) ?? [];
+    const riderRows = must<{ id: string; first_name: string | null; last_name: string | null; designation: string | null; transport_stop_id: string | null }[]>('overview staff riders', ridersQ) ?? [];
 
     // In-charges: resolve each distinct assignment email to its staff row.
     const assignEmails = [...new Set(assignments.map((a) => a.staff_email.trim().toLowerCase()).filter(Boolean))];
@@ -174,7 +177,7 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
         return { name: p?.full_name || p?.email || 'Staff', marks: o.marks };
       }),
       staffRiders: riderRows.map((r) => ({
-        staffId: r.id, name: fullName(r) || '—', designation: r.designation, phone: r.phone,
+        staffId: r.id, name: fullName(r) || '—', designation: r.designation,
         stopName: r.transport_stop_id ? stopName.get(r.transport_stop_id) ?? null : null,
       })),
     };

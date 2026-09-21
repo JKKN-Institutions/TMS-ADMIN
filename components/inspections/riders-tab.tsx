@@ -92,7 +92,12 @@ export function RidersTab({ detail, overview, leg, date, roster }: {
     try {
       await saveHeadcount(detail.id, leg, counted);
       toast.success(counted === null ? 'Headcount cleared' : 'Headcount saved');
-      await qc.invalidateQueries({ queryKey: ['inspection', detail.id] });
+      // Exact keys only: a headcount save changes the inspection detail and
+      // this leg's roster (present/boarded), never the bus overview.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['inspection', detail.id], exact: true }),
+        qc.invalidateQueries({ queryKey: ['inspection', detail.id, 'roster', leg] }),
+      ]);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {

@@ -9,6 +9,7 @@ import type { Leg } from '@/lib/inspections/overview';
 
 // /api/admin/inspections/<id>/headcount
 const idFrom = (r: NextRequest) => new URL(r.url).pathname.split('/').filter(Boolean)[3] ?? '';
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
  * PUT { leg, counted } — the Transport Head's people count, snapshotted with
@@ -21,6 +22,7 @@ async function saveHeadcount(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const id = idFrom(request);
+    if (!UUID.test(id)) return NextResponse.json({ error: 'Inspection not found' }, { status: 404 });
     const raw: unknown = await request.json().catch(() => ({}));
     const body = (raw && typeof raw === 'object' ? raw : {}) as { leg?: unknown; counted?: unknown };
     if (body.leg !== 'onward' && body.leg !== 'return') {

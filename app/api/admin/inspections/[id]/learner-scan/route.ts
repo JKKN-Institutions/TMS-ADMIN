@@ -12,6 +12,7 @@ import { logActivity } from '@/lib/activity/log';
 
 // /api/admin/inspections/<id>/learner-scan
 const idFrom = (r: NextRequest) => new URL(r.url).pathname.split('/').filter(Boolean)[3] ?? '';
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
  * POST { code } — VERIFY ONLY. The Transport Head scans a learner's JKKN ID
@@ -25,8 +26,13 @@ async function scanLearner(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const id = idFrom(request);
+    if (!UUID.test(id)) return NextResponse.json({ error: 'Inspection not found' }, { status: 404 });
     const body = (await request.json().catch(() => ({}))) as { code?: unknown; source?: unknown };
-    const source: ScanSource = body.source === 'typed' ? 'typed' : 'camera';
+    // Fail-closed: only an explicit 'camera' counts as a camera read. The
+    // client fetcher always sends 'camera' (inspection-api.ts scanLearner),
+    // so an older or misbehaving caller degrades to 'typed' — the stricter
+    // path — never the other way round.
+    const source: ScanSource = body.source === 'camera' ? 'camera' : 'typed';
     const decision = classifyScan(typeof body.code === 'string' ? body.code : '', source);
     // The card number is public, so a typed one is no evidence the card is here.
     if (decision.refusal === 'typed_jkkn_id') {

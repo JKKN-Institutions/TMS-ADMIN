@@ -42,5 +42,5 @@ export interface InspectionOverview {
   driverTrip: { status: string; startedAt: string | null; endedAt: string | null } | null;
   incharges: InchargeDuty[];
   otherMarkers: { name: string; marks: number }[];
-  staffRiders: { staffId: string; name: string; designation: string | null; phone: string | null; stopName: string | null }[];
+  staffRiders: { staffId: string; name: string; designation: string | null; stopName: string | null }[];
 }
