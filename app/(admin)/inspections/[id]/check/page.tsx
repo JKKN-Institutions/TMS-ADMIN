@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useRef, useState } from 'react';
+import { use, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -10,11 +10,13 @@ import { ChecklistStep } from '@/components/inspections/checklist-step';
 import { LegSwitch } from '@/components/inspections/leg-switch';
 import { StopsTab } from '@/components/inspections/stops-tab';
 import { StaffTab } from '@/components/inspections/staff-tab';
+import { RidersTab } from '@/components/inspections/riders-tab';
 import { computeResult, submitBlockers } from '@/lib/inspections/result';
 import type { InspectionItemDTO } from '@/lib/inspections/types';
 import { defaultLeg, type Leg } from '@/lib/inspections/overview';
 import { istMinutesOfDay } from '@/lib/boarding/attendance-window';
-import { fetchInspection, fetchOverview, saveItems, submitInspection } from '../../inspection-api';
+import { istToday } from '@/lib/booking/window';
+import { fetchInspection, fetchOverview, fetchRoster, saveItems, submitInspection } from '../../inspection-api';
 
 type Patch = Partial<Pick<InspectionItemDTO, 'result' | 'note'>>;
 type Tab = 'bus' | 'stops' | 'riders' | 'staff' | 'checklist';
@@ -43,6 +45,28 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
     queryFn: () => fetchOverview(id, leg),
     refetchOnWindowFocus: false,
   });
+  // The check screen is a live view of today, so the roster day is always IST today.
+  const [rosterDate] = useState(() => istToday());
+  const routeId = data?.route?.id ?? null;
+  const rosterQuery = useQuery({
+    queryKey: ['inspection', id, 'roster', leg],
+    queryFn: () => fetchRoster(routeId as string, rosterDate, leg),
+    enabled: !!routeId,
+    refetchOnWindowFocus: false,
+  });
+  const stopRiderCounts = useMemo(() => {
+    const rows = rosterQuery.data?.rows;
+    if (!rows) return undefined;
+    const m = new Map<string, { booked: number; boarded: number }>();
+    for (const r of rows) {
+      if (!r.stop_id) continue;
+      const c = m.get(r.stop_id) ?? { booked: 0, boarded: 0 };
+      if (r.booked) c.booked += 1;
+      if (r.status === 'present') c.boarded += 1;
+      m.set(r.stop_id, c);
+    }
+    return m;
+  }, [rosterQuery.data]);
   const dirty = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seeded = useRef(false);
@@ -195,14 +219,10 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
       {tab === 'stops' && (
         overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
         overviewQuery.isError ? <p className="text-red-600 dark:text-red-400">{(overviewQuery.error as Error)?.message ?? 'Could not load stops'}</p> :
-        overview ? <StopsTab stops={overview.stops} leg={leg} /> : null
+        overview ? <StopsTab stops={overview.stops} leg={leg} riderCounts={stopRiderCounts} /> : null
       )}
 
-      {tab === 'riders' && (
-        overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
-        overviewQuery.isError ? <p className="text-red-600 dark:text-red-400">{(overviewQuery.error as Error)?.message ?? 'Could not load riders'}</p> :
-        <p className="text-sm text-gray-500 dark:text-gray-400">Loading riders…</p>
-      )}
+      {tab === 'riders' && <RidersTab detail={data} overview={overview} leg={leg} date={rosterDate} roster={rosterQuery} />}
 
       {tab === 'staff' && (
         overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :

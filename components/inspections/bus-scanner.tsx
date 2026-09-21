@@ -18,20 +18,36 @@ const SHARP_VIDEO: MediaTrackConstraints = {
   advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
 };
 
-export function BusScanner({ onCode, paused }: { onCode: (code: string) => void; paused: boolean }) {
+export function BusScanner({
+  onCode, paused, parse = parseStickerScan,
+  rejectMessage = 'That QR is not a bus sticker. Scan the sticker inside the bus.',
+  subject = 'bus sticker',
+}: {
+  onCode: (code: string) => void;
+  paused: boolean;
+  /** Turns a raw QR read into the code to hand to `onCode`, or null to reject it. */
+  parse?: (raw: string) => string | null;
+  rejectMessage?: string;
+  /** What is being scanned, for the camera/photo error wording ("bus sticker", "ID card"). */
+  subject?: string;
+}) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const genRef = useRef(0);
   const startingRef = useRef(false);
   const pausedRef = useRef(paused);
   const onCodeRef = useRef(onCode);
+  const parseRef = useRef(parse);
+  const rejectRef = useRef(rejectMessage);
   const [error, setError] = useState<string | null>(null);
   pausedRef.current = paused;
   onCodeRef.current = onCode;
+  parseRef.current = parse;
+  rejectRef.current = rejectMessage;
 
   function onRead(text: string) {
     if (pausedRef.current) return;
-    const code = parseStickerScan(text);
-    if (!code) { setError('That QR is not a bus sticker. Scan the sticker inside the bus.'); return; }
+    const code = parseRef.current(text);
+    if (!code) { setError(rejectRef.current); return; }
     setError(null);
     // Next decode frame (~80ms away) must not re-fire before the `paused` prop
     // catches up from the parent's state update; the parent resets this via a
@@ -80,7 +96,7 @@ export function BusScanner({ onCode, paused }: { onCode: (code: string) => void;
           }
         } catch (err) { kind = classifyCameraError(err); }
       }
-      if (genRef.current === gen) setError(cameraErrorMessage(kind).replace('ID card', 'bus sticker'));
+      if (genRef.current === gen) setError(cameraErrorMessage(kind).replace('ID card', subject));
     } finally {
       startingRef.current = false;
     }
@@ -101,7 +117,7 @@ export function BusScanner({ onCode, paused }: { onCode: (code: string) => void;
     await stop();
     const reader = new Html5Qrcode(PHOTO_READER_ID, READER_OPTIONS);
     try { onRead(await reader.scanFile(file, false)); }
-    catch { setError('Could not read the sticker in that photo. Fill the frame with the QR and avoid glare.'); }
+    catch { setError(`Could not read the ${subject} in that photo. Fill the frame with the QR and avoid glare.`); }
     finally { try { reader.clear(); } catch { /* ignore */ } genRef.current++; void start(); }
   }
 
