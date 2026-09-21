@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -11,10 +11,12 @@ import { fetchDashboard, resolveSticker, startInspection, currentPosition } from
 export default function ScanBusPage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [manual, setManual] = useState('');
   const { data } = useQuery({ queryKey: ['inspections', 'dashboard'], queryFn: fetchDashboard });
 
   async function open(vehicleId: string) {
+    busyRef.current = true;
     setBusy(true);
     try {
       const pos = await currentPosition();
@@ -23,15 +25,22 @@ export default function ScanBusPage() {
       router.push(`/inspections/${inspectionId}/check`);
     } catch (e) {
       toast.error((e as Error).message);
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function onCode(code: string) {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try { const bus = await resolveSticker(code); await open(bus.vehicleId); }
-    catch (e) { toast.error((e as Error).message); setBusy(false); }
+    catch (e) { toast.error((e as Error).message); busyRef.current = false; setBusy(false); }
+  }
+
+  function onManualInspect() {
+    if (busyRef.current) return;
+    void open(manual);
   }
 
   return (
@@ -49,7 +58,7 @@ export default function ScanBusPage() {
             <option value="">Select bus…</option>
             {data?.buses.map((b) => <option key={b.vehicleId} value={b.vehicleId}>{b.registration}{b.routeLabel ? ` — ${b.routeLabel}` : ''}</option>)}
           </select>
-          <button disabled={!manual || busy} onClick={() => open(manual)} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Inspect</button>
+          <button disabled={!manual || busy} onClick={onManualInspect} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Inspect</button>
         </div>
       </div>
     </div>

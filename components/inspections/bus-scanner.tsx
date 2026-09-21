@@ -33,6 +33,10 @@ export function BusScanner({ onCode, paused }: { onCode: (code: string) => void;
     const code = parseStickerScan(text);
     if (!code) { setError('That QR is not a bus sticker. Scan the sticker inside the bus.'); return; }
     setError(null);
+    // Next decode frame (~80ms away) must not re-fire before the `paused` prop
+    // catches up from the parent's state update; the parent resets this via a
+    // re-render (to false on error, or it stays true once the page navigates).
+    pausedRef.current = true;
     onCodeRef.current(code);
   }
 

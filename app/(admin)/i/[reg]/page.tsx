@@ -5,6 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { resolveSticker, startInspection, currentPosition } from '../../inspections/inspection-api';
 
+/** decodeURIComponent, but a malformed segment (e.g. a stray `%`) falls back to the raw text instead of throwing. */
+function safeDecode(raw: string): string {
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
 export default function StickerLandingPage({ params }: { params: Promise<{ reg: string }> }) {
   const { reg } = use(params);
   const router = useRouter();
@@ -33,7 +38,7 @@ export default function StickerLandingPage({ params }: { params: Promise<{ reg: 
           <Link href="/inspections/scan" className="inline-block rounded-lg bg-green-600 px-4 py-2 font-semibold text-white">Pick the bus manually</Link>
         </>
       ) : (
-        <p className="text-gray-600">Opening inspection for {decodeURIComponent(reg)}…</p>
+        <p className="text-gray-600">Opening inspection for {safeDecode(reg)}…</p>
       )}
     </div>
   );
