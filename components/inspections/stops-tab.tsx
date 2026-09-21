@@ -2,15 +2,25 @@ import type { Leg } from '@/lib/inspections/overview';
 import type { InspectionOverview } from '@/lib/inspections/types';
 import { fmtTime } from '@/lib/inspections/format';
 
-export function StopsTab({ stops, leg, riderCounts }: {
+export function StopsTab({ stops, leg, riderCounts, registered }: {
   stops: InspectionOverview['stops'];
   leg: Leg;
   riderCounts?: Map<string, { booked: number; boarded: number }>;
+  /** Registered learners per stop id (route allocation). */
+  registered?: InspectionOverview['registered'];
 }) {
   if (!stops.length) {
     return <p className="text-sm text-gray-500 dark:text-gray-400">No stops recorded for this route</p>;
   }
   return (
+    <div className="space-y-2">
+    {registered && (
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        <b className="text-gray-900 dark:text-gray-100">{registered.learners}</b> learners registered on this route
+        {registered.staff > 0 && <> · {registered.staff} staff</>}
+        {registered.noStop > 0 && <> · {registered.noStop} without a stop set</>}
+      </p>
+    )}
     <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white dark:divide-gray-800 dark:border-gray-800 dark:bg-gray-900">
       {stops.map((s) => {
         const time = leg === 'onward' ? s.morning : s.evening;
@@ -31,14 +41,17 @@ export function StopsTab({ stops, leg, riderCounts }: {
               {fmtTime(time)}
               {otherTime && <span className="ml-1 text-xs text-gray-400 dark:text-gray-500">({fmtTime(otherTime)})</span>}
             </span>
-            {counts && (
+            {(counts || registered) && (
               <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
-                {counts.boarded}/{counts.booked} boarded
+                {registered && <>{registered.byStop[s.id] ?? 0} registered</>}
+                {registered && counts && ' · '}
+                {counts && <>{counts.boarded}/{counts.booked} boarded</>}
               </span>
             )}
           </li>
         );
       })}
     </ul>
+    </div>
   );
 }

@@ -43,4 +43,6 @@ export interface InspectionOverview {
   incharges: InchargeDuty[];
   otherMarkers: { name: string; marks: number }[];
   staffRiders: { staffId: string; name: string; designation: string | null; stopName: string | null }[];
+  /** Registered (allocated) to the route — learners by pickup stop, plus staff riders. */
+  registered: { learners: number; staff: number; byStop: Record<string, number>; noStop: number };
 }

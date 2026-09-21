@@ -5,7 +5,8 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { requirePerm } from '@/lib/inspections/server';
 import { istToday } from '@/lib/booking/window';
 import { emailIlikePattern } from '@/lib/identity/email-match';
-import { inchargeDuty, type InchargeInput, type Leg, type MarkInput } from '@/lib/inspections/overview';
+import { countRegistered, inchargeDuty, type InchargeInput, type Leg, type MarkInput } from '@/lib/inspections/overview';
+import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 import type { InspectionOverview } from '@/lib/inspections/types';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
@@ -75,11 +76,14 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
     }
     if (!ins) return NextResponse.json({ error: 'Inspection not found' }, { status: 404 });
 
-    const empty: InspectionOverview = { leg, date, route: null, stops: [], driverTrip: null, incharges: [], otherMarkers: [], staffRiders: [] };
+    const empty: InspectionOverview = {
+      leg, date, route: null, stops: [], driverTrip: null, incharges: [], otherMarkers: [], staffRiders: [],
+      registered: { learners: 0, staff: 0, byStop: {}, noStop: 0 },
+    };
     if (!ins.route_id) return NextResponse.json({ success: true, data: empty });
     const routeId = ins.route_id as string;
 
-    const [routeQ, busQ, stopsQ, tripQ, assignQ, absenceQ, marksQ, ridersQ] = await Promise.all([
+    const [routeQ, busQ, stopsQ, tripQ, assignQ, absenceQ, marksQ, ridersQ, registeredQ] = await Promise.all([
       svc.from('tms_route')
         .select('id, route_number, route_name, start_location, end_location, departure_time, arrival_time, total_capacity')
         .eq('id', routeId).maybeSingle(),
@@ -100,6 +104,12 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
       svc.from('staff').select('id, first_name, last_name, designation, transport_stop_id')
         .eq('bus_required', true).eq('transport_route_id', routeId).eq('is_active', true)
         .order('first_name'),
+      // Same allocation filter as loadRouteAttendanceRoster, so "Registered"
+      // matches the roster's own starting list.
+      svc.from('learners_profiles').select('transport_stop_id')
+        .eq('transport_route_id', routeId).eq('bus_required', true)
+        .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
+        .range(0, 4999),
     ]);
 
     const route = must<{
@@ -113,6 +123,8 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
     const absences = must<{ staff_email: string; covering_assignment_id: string | null }[]>('overview absences', absenceQ) ?? [];
     const markRows = must<{ scanned_by: string; scanned_at: string }[]>('overview marks', marksQ) ?? [];
     const riderRows = must<{ id: string; first_name: string | null; last_name: string | null; designation: string | null; transport_stop_id: string | null }[]>('overview staff riders', ridersQ) ?? [];
+    const registeredRows = must<{ transport_stop_id: string | null }[]>('overview registered learners', registeredQ) ?? [];
+    const reg = countRegistered(registeredRows.map((r) => r.transport_stop_id));
 
     // In-charges: resolve each distinct assignment email to its staff row.
     const assignEmails = [...new Set(assignments.map((a) => a.staff_email.trim().toLowerCase()).filter(Boolean))];
@@ -180,6 +192,7 @@ async function getOverview(request: NextRequest, auth: AuthContext) {
         staffId: r.id, name: fullName(r) || '—', designation: r.designation,
         stopName: r.transport_stop_id ? stopName.get(r.transport_stop_id) ?? null : null,
       })),
+      registered: { learners: reg.total, staff: riderRows.length, byStop: reg.byStop, noStop: reg.noStop },
     };
     return NextResponse.json({ success: true, data });
   } catch (e) {

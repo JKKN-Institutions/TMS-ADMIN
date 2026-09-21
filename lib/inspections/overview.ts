@@ -75,3 +75,18 @@ export function headcountDelta(counted: number | null, boarded: number): { diff:
   if (diff === 0) return { diff, label: 'Matches boarded count' };
   return diff > 0 ? { diff, label: `${diff} more than boarded` } : { diff, label: `${-diff} fewer than boarded` };
 }
+
+/**
+ * Learners registered (allocated) to a route, from each one's pickup stop id.
+ * "Registered" is the route's allocation — not today's bookings, and not the
+ * attendance roster, which also lists riders booked or scanned from other buses.
+ */
+export function countRegistered(stopIds: (string | null)[]): { total: number; byStop: Record<string, number>; noStop: number } {
+  const byStop: Record<string, number> = {};
+  let noStop = 0;
+  for (const s of stopIds) {
+    if (s) byStop[s] = (byStop[s] ?? 0) + 1;
+    else noStop += 1;
+  }
+  return { total: stopIds.length, byStop, noStop };
+}
