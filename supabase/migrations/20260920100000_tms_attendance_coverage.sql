@@ -40,10 +40,15 @@ as $$
     from generate_series(p_from, p_to, interval '1 day') d
     where extract(dow from d) <> 0
   ),
+  -- Mirrors ACTIVE_LIFECYCLE_STATUSES (lib/passengers/types.ts) and
+  -- loadRouteAttendanceRoster (lib/booking/roster.ts), so a grid cell's
+  -- roster denominator equals the drill-down page's total. Keep these two
+  -- in sync by hand -- there is no shared SQL source of truth for the list.
   roster as (
     select transport_route_id as route_id, count(*)::int as total
     from learners_profiles
     where bus_required and transport_route_id is not null
+      and lifecycle_status in ('active', 'admitted', 'account')
     group by 1
   ),
   marks as (
