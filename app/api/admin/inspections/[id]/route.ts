@@ -6,6 +6,7 @@ import { requirePerm, staffBrief, INSPECTION_PHOTO_BUCKET } from '@/lib/inspecti
 import { vehicleDocStatuses } from '@/lib/inspections/doc-status';
 import { istToday } from '@/lib/booking/window';
 import type { InspectionDetail } from '@/lib/inspections/types';
+import type { LearnerOutcome } from '@/lib/inspections/overview';
 
 function idFrom(request: NextRequest) {
   // /api/admin/inspections/<id>
@@ -40,6 +41,28 @@ async function getInspection(request: NextRequest, auth: AuthContext) {
       const { data: urls } = await svc.storage.from(INSPECTION_PHOTO_BUCKET).createSignedUrls(paths, 3600);
       for (const u of urls ?? []) if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
     }
+    // Learner ID card checks (verify-only), newest first, with names.
+    const { data: checkRows, error: checksErr } = await svc.from('tms_inspection_learner_check')
+      .select('id, learner_id, outcome, scanned_at').eq('inspection_id', id).order('scanned_at', { ascending: false });
+    if (checksErr) {
+      console.error('get inspection learner checks error:', checksErr);
+      return NextResponse.json({ error: 'Failed to load learner card checks' }, { status: 500 });
+    }
+    const checks = (checkRows ?? []) as { id: string; learner_id: string | null; outcome: LearnerOutcome; scanned_at: string }[];
+    const learnerIds = [...new Set(checks.map((c) => c.learner_id).filter((x): x is string => !!x))];
+    const learners = new Map<string, { name: string | null; roll: string | null }>();
+    for (let i = 0; i < learnerIds.length; i += 150) {
+      const { data: lrows, error: lErr } = await svc.from('learners_profiles')
+        .select('id, first_name, last_name, roll_number').in('id', learnerIds.slice(i, i + 150));
+      if (lErr) {
+        console.error('get inspection learner names error:', lErr);
+        return NextResponse.json({ error: 'Failed to load learner card checks' }, { status: 500 });
+      }
+      for (const l of (lrows ?? []) as { id: string; first_name: string | null; last_name: string | null; roll_number: string | null }[]) {
+        learners.set(l.id, { name: `${l.first_name ?? ''} ${l.last_name ?? ''}`.trim() || null, roll: l.roll_number });
+      }
+    }
+
     const prev = (prevQ.data ?? [])[0] as { id: string; submitted_at: string; result: 'pass' | 'pass_with_issues' | 'fail' } | undefined;
 
     const data: InspectionDetail = {
@@ -59,6 +82,16 @@ async function getInspection(request: NextRequest, auth: AuthContext) {
         id: i.id, category: i.category, label: i.label, severity: i.severity, sortOrder: i.sort_order,
         result: i.result, note: i.note, photoPaths: i.photo_paths ?? [],
         photoUrls: (i.photo_paths ?? []).map((p) => signed.get(p) ?? null),
+      })),
+      riders: {
+        leg: ins.riders_leg ?? null, headcount: ins.headcount_observed ?? null,
+        booked: ins.riders_booked ?? null, boarded: ins.riders_boarded ?? null,
+      },
+      learnerChecks: checks.map((c) => ({
+        id: c.id,
+        name: c.learner_id ? learners.get(c.learner_id)?.name ?? null : null,
+        roll: c.learner_id ? learners.get(c.learner_id)?.roll ?? null : null,
+        outcome: c.outcome, scannedAt: c.scanned_at,
       })),
     };
     return NextResponse.json({ success: true, data });

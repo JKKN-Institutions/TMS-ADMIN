@@ -27,9 +27,13 @@ export interface InspectionDetail {
   driver: { staffId: string; name: string; phone: string | null } | null;
   previous: { id: string; submittedAt: string; result: InspectionResult } | null;
   items: InspectionItemDTO[];
+  /** Headcount snapshot (null leg = not taken yet). */
+  riders: { leg: 'onward' | 'return' | null; headcount: number | null; booked: number | null; boarded: number | null };
+  /** Verify-only learner ID card checks, newest first. */
+  learnerChecks: { id: string; name: string | null; roll: string | null; outcome: LearnerOutcome; scannedAt: string }[];
 }
 
-import type { Leg, InchargeDuty } from './overview';
+import type { Leg, InchargeDuty, LearnerOutcome } from './overview';
 export interface InspectionOverview {
   leg: Leg;
   date: string;
