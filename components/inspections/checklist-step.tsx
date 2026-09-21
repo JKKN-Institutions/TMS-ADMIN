@@ -6,7 +6,7 @@ import type { InspectionItemDTO } from '@/lib/inspections/types';
 import type { ItemResult } from '@/lib/inspections/result';
 import { uploadPhoto } from '@/app/(admin)/inspections/inspection-api';
 
-type Patch = Partial<Pick<InspectionItemDTO, 'result' | 'note' | 'photoPaths' | 'photoUrls'>>;
+type Patch = Partial<Pick<InspectionItemDTO, 'result' | 'note'>>;
 const CATEGORY_TITLE: Record<string, string> = {
   documents: 'Documents', safety: 'Safety', mechanical: 'Mechanical', body_interior: 'Body & interior', driver: 'Driver',
 };
@@ -14,7 +14,16 @@ const BTN: Record<ItemResult, [string, string]> = {
   pass: ['Pass', 'bg-green-600 text-white'], fail: ['Fail', 'bg-red-600 text-white'], na: ['N/A', 'bg-gray-600 text-white'],
 };
 
-function ItemRow({ item, onChange }: { item: InspectionItemDTO; onChange: (p: Patch) => void }) {
+function ItemRow({ item, onChange, onAddPhoto, onRemovePhoto }: {
+  item: InspectionItemDTO;
+  onChange: (p: Patch) => void;
+  // Append/remove a single photo against whatever the CURRENT item state is
+  // (applied by the parent via a functional setState update), instead of the
+  // row sending a whole photoPaths/photoUrls array it captured before an
+  // async upload — that array can go stale while `uploadPhoto` is in flight.
+  onAddPhoto: (path: string, url: string) => void;
+  onRemovePhoto: (index: number) => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -26,7 +35,7 @@ function ItemRow({ item, onChange }: { item: InspectionItemDTO; onChange: (p: Pa
     setUploading(true); setErr(null);
     try {
       const path = await uploadPhoto(file);
-      onChange({ photoPaths: [...item.photoPaths, path], photoUrls: [...item.photoUrls, URL.createObjectURL(file)] });
+      onAddPhoto(path, URL.createObjectURL(file));
     } catch (x) { setErr((x as Error).message + ' — tap the camera to retry'); }
     finally { setUploading(false); }
   }
@@ -55,7 +64,7 @@ function ItemRow({ item, onChange }: { item: InspectionItemDTO; onChange: (p: Pa
               <div key={item.photoPaths[i]} className="relative">
                 {u ? <img src={u} alt="" className="h-16 w-16 rounded object-cover" /> : <div className="h-16 w-16 rounded bg-gray-200 dark:bg-gray-800" />}
                 <button type="button" aria-label="Remove photo" className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white"
-                  onClick={() => onChange({ photoPaths: item.photoPaths.filter((_, j) => j !== i), photoUrls: item.photoUrls.filter((_, j) => j !== i) })}>
+                  onClick={() => onRemovePhoto(i)}>
                   <X className="h-3 w-3" />
                 </button>
               </div>
@@ -75,8 +84,12 @@ function ItemRow({ item, onChange }: { item: InspectionItemDTO; onChange: (p: Pa
   );
 }
 
-export function ChecklistStep({ items, onChange, onMarkRemainingPass }: {
-  items: InspectionItemDTO[]; onChange: (id: string, patch: Patch) => void; onMarkRemainingPass: () => void;
+export function ChecklistStep({ items, onChange, onAddPhoto, onRemovePhoto, onMarkRemainingPass }: {
+  items: InspectionItemDTO[];
+  onChange: (id: string, patch: Patch) => void;
+  onAddPhoto: (id: string, path: string, url: string) => void;
+  onRemovePhoto: (id: string, index: number) => void;
+  onMarkRemainingPass: () => void;
 }) {
   const groups = items.reduce<Record<string, InspectionItemDTO[]>>((acc, i) => { (acc[i.category] ??= []).push(i); return acc; }, {});
   const answered = items.filter((i) => i.result).length;
@@ -90,7 +103,15 @@ export function ChecklistStep({ items, onChange, onMarkRemainingPass }: {
         <div key={cat} className="rounded-xl border border-gray-200 bg-white px-4 dark:border-gray-800 dark:bg-gray-900">
           <h3 className="pt-3 text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{CATEGORY_TITLE[cat] ?? cat}</h3>
           <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-            {list.map((i) => <ItemRow key={i.id} item={i} onChange={(p) => onChange(i.id, p)} />)}
+            {list.map((i) => (
+              <ItemRow
+                key={i.id}
+                item={i}
+                onChange={(p) => onChange(i.id, p)}
+                onAddPhoto={(path, url) => onAddPhoto(i.id, path, url)}
+                onRemovePhoto={(index) => onRemovePhoto(i.id, index)}
+              />
+            ))}
           </ul>
         </div>
       ))}

@@ -11,7 +11,7 @@ import { computeResult, submitBlockers } from '@/lib/inspections/result';
 import type { InspectionItemDTO } from '@/lib/inspections/types';
 import { fetchInspection, saveItems, submitInspection } from '../../inspection-api';
 
-type Patch = Partial<Pick<InspectionItemDTO, 'result' | 'note' | 'photoPaths' | 'photoUrls'>>;
+type Patch = Partial<Pick<InspectionItemDTO, 'result' | 'note'>>;
 
 export default function InspectionCheckPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -26,54 +26,92 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
   const dirty = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seeded = useRef(false);
-  // Tracks the in-flight autosave request so submit can wait for it instead of
-  // racing it — otherwise a submit that lands between "flush started" and
-  // "flush resolved" can read `dirty` before the save clears it, or fire a
-  // second concurrent PUT to the same items.
-  const savingRef = useRef<Promise<void> | null>(null);
+  const mounted = useRef(true);
+  // Mirrors `items` outside React's render cycle so flush() always PUTs the
+  // latest values — a setTimeout captured from an earlier render (or a flush
+  // chained behind a slower prior save) must never read/save a stale array.
+  const latestItemsRef = useRef<InspectionItemDTO[]>([]);
+  // Serializes autosaves: every flush() chains onto the tail of this promise
+  // instead of firing independently, so an earlier (slower) request can never
+  // land after a later one and overwrite it with stale answers. onSubmit
+  // awaits this same tail so it never races an in-flight/queued save (R8).
+  const savingRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    latestItemsRef.current = items;
+  }, [items]);
 
   useEffect(() => {
     if (!data || seeded.current) return;
     seeded.current = true;
     if (data.status === 'submitted') { router.replace(`/inspections/${id}`); return; }
     setItems(data.items);
+    latestItemsRef.current = data.items;
   }, [data, id, router]);
 
-  async function flush(current: InspectionItemDTO[]) {
-    const ids = [...dirty.current];
-    if (!ids.length) return;
-    dirty.current.clear();
-    setSaveState('saving');
-    const run = (async () => {
+  // Unmount cleanup: cancel the pending debounce timer, fire a best-effort
+  // final flush of anything still dirty (fire-and-forget — the component is
+  // gone so nothing here touches state), and release local photo previews.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+      if (dirty.current.size) void flush();
+      latestItemsRef.current.forEach((i) => i.photoUrls.forEach((u) => { if (u?.startsWith('blob:')) URL.revokeObjectURL(u); }));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function flush(): Promise<void> {
+    const run = savingRef.current.then(async () => {
+      const ids = [...dirty.current];
+      if (!ids.length) return;
+      dirty.current.clear();
+      if (mounted.current) setSaveState('saving');
+      const current = latestItemsRef.current;
       try {
         await saveItems(id, current.filter((i) => ids.includes(i.id)).map((i) => ({ id: i.id, result: i.result, note: i.note, photoPaths: i.photoPaths })));
-        setSaveState('saved');
+        // M-5: only report "saved" if nothing became dirty again while this
+        // request was in flight; otherwise a later save is still owed.
+        if (mounted.current) setSaveState(dirty.current.size ? 'saving' : 'saved');
       } catch {
         ids.forEach((x) => dirty.current.add(x)); // keep for the next attempt
-        setSaveState('error');
+        if (mounted.current) setSaveState('error');
       }
-    })();
+    });
     savingRef.current = run;
-    try {
-      await run;
-    } finally {
-      if (savingRef.current === run) savingRef.current = null;
-    }
+    return run;
   }
 
-  function update(next: InspectionItemDTO[], changed: string[]) {
-    setItems(next);
-    changed.forEach((x) => dirty.current.add(x));
+  function update(updater: (prev: InspectionItemDTO[]) => InspectionItemDTO[], changedIds: string[]) {
+    setItems((prev) => {
+      const next = updater(prev);
+      latestItemsRef.current = next;
+      return next;
+    });
+    changedIds.forEach((x) => dirty.current.add(x));
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => void flush(next), 1500);
+    timer.current = setTimeout(() => void flush(), 1500);
   }
 
   const onChange = (itemId: string, patch: Patch) =>
-    update(items.map((i) => (i.id === itemId ? { ...i, ...patch } : i)), [itemId]);
+    update((prev) => prev.map((i) => (i.id === itemId ? { ...i, ...patch } : i)), [itemId]);
+
+  const onAddPhoto = (itemId: string, path: string, url: string) =>
+    update((prev) => prev.map((i) => (i.id === itemId ? { ...i, photoPaths: [...i.photoPaths, path], photoUrls: [...i.photoUrls, url] } : i)), [itemId]);
+
+  const onRemovePhoto = (itemId: string, index: number) => {
+    const removedUrl = items.find((i) => i.id === itemId)?.photoUrls[index];
+    if (removedUrl?.startsWith('blob:')) URL.revokeObjectURL(removedUrl);
+    update((prev) => prev.map((i) => (i.id === itemId
+      ? { ...i, photoPaths: i.photoPaths.filter((_, j) => j !== index), photoUrls: i.photoUrls.filter((_, j) => j !== index) }
+      : i)), [itemId]);
+  };
 
   const onMarkRemainingPass = () => {
     const changed = items.filter((i) => !i.result).map((i) => i.id);
-    update(items.map((i) => (i.result ? i : { ...i, result: 'pass' as const })), changed);
+    update((prev) => prev.map((i) => (i.result ? i : { ...i, result: 'pass' as const })), changed);
   };
 
   async function onSubmit() {
@@ -81,11 +119,12 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
     if (blockers.length) { toast.error(blockers.join(' · ')); return; }
     setSubmitting(true);
     try {
-      if (timer.current) clearTimeout(timer.current);
-      // Never submit while an autosave is still in flight: wait for it, then
-      // run a final flush to catch anything the debounce timer hadn't sent yet.
-      if (savingRef.current) await savingRef.current;
-      await flush(items);
+      if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+      // Never submit while an autosave is in flight or queued: wait for the
+      // whole save chain, then run one more flush to catch anything that was
+      // still dirty when the last queued save took its snapshot.
+      await savingRef.current;
+      await flush();
       if (dirty.current.size) throw new Error('Could not save your answers — check the connection and try again');
       const { result } = await submitInspection(id, notes || null);
       toast.success(result === 'pass' ? 'Inspection passed' : result === 'fail' ? 'Inspection FAILED — critical items failed' : 'Passed with issues');
@@ -104,17 +143,17 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
 
   const preview = computeResult(items);
   return (
-    <div className="mx-auto max-w-2xl space-y-5 pb-28">
+    <div className="mx-auto max-w-2xl space-y-5 pb-40">
       <DetailPageHeader
         crumbs={[{ label: 'Bus Inspection', href: '/inspections' }, { label: data.vehicle.registration }]}
         backHref="/inspections" title={`Inspect ${data.vehicle.registration}`}
         subtitle={saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Not saved — will retry on next change' : 'All changes saved'}
       />
       <BusCard detail={data} />
-      <ChecklistStep items={items} onChange={onChange} onMarkRemainingPass={onMarkRemainingPass} />
+      <ChecklistStep items={items} onChange={onChange} onAddPhoto={onAddPhoto} onRemovePhoto={onRemovePhoto} onMarkRemainingPass={onMarkRemainingPass} />
       <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Overall remarks (optional)"
         className="w-full rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800 dark:bg-gray-900" />
-      <div className="fixed inset-x-0 bottom-16 z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur lg:bottom-0 dark:border-gray-800 dark:bg-gray-950/95">
+      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur lg:bottom-0 dark:border-gray-800 dark:bg-gray-950/95">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
           <p className="text-sm">Result so far: <b className={preview === 'fail' ? 'text-red-600 dark:text-red-400' : preview === 'pass' ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}>{preview.replace(/_/g, ' ')}</b></p>
           <button disabled={submitting} onClick={onSubmit} className="rounded-lg bg-green-600 px-5 py-2.5 font-semibold text-white disabled:opacity-50">
