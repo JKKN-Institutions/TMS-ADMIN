@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { exactIlikePattern, dedupeCandidates, sortCandidates, jkknFallbackCodes, type Candidate } from './resolve';
+import { exactIlikePattern, dedupeCandidates, sortCandidates, jkknFallbackCodes, isActiveLifecycle, type Candidate } from './resolve';
 
 const c = (over: Partial<Candidate>): Candidate => ({
   personKind: 'learner',
@@ -8,6 +8,7 @@ const c = (over: Partial<Candidate>): Candidate => ({
   code: null,
   routeId: null,
   matchedBy: 'roll_number',
+  active: true,
   ...over,
 });
 
@@ -23,6 +24,13 @@ describe('exactIlikePattern', () => {
   });
   it('trims whitespace', () => {
     expect(exactIlikePattern('  AB12 ')).toBe('AB12');
+  });
+  it('returns null for a value containing * (PostgREST turns * into %, unescapable)', () => {
+    expect(exactIlikePattern('AB*12')).toBeNull();
+    expect(exactIlikePattern('*')).toBeNull();
+  });
+  it('returns null for an empty value', () => {
+    expect(exactIlikePattern('   ')).toBeNull();
   });
 });
 
@@ -51,6 +59,15 @@ describe('sortCandidates', () => {
     ];
     expect(sortCandidates(list, 'R').map((x) => x.id)).toEqual(['e', 'd', 'c', 'b', 'a']);
   });
+  it('this route first, then active before inactive (even across names)', () => {
+    const list = [
+      c({ id: 'off-active', name: 'Anu', routeId: 'other', active: true }),
+      c({ id: 'on-inactive', name: 'Anbu', routeId: 'R', active: false }),
+      c({ id: 'on-active', name: 'Zeno', routeId: 'R', active: true }),
+      c({ id: 'off-inactive', name: 'Aadhi', routeId: 'other', active: false }),
+    ];
+    expect(sortCandidates(list, 'R').map((x) => x.id)).toEqual(['on-active', 'on-inactive', 'off-active', 'off-inactive']);
+  });
   it('does not mutate its input', () => {
     const list = [c({ id: 'a', name: 'B' }), c({ id: 'b', name: 'A' })];
     sortCandidates(list, 'R');
@@ -61,5 +78,15 @@ describe('sortCandidates', () => {
 describe('jkknFallbackCodes', () => {
   it('tries the bare 7 digits first, then the dashed form', () => {
     expect(jkknFallbackCodes('123457-2')).toEqual(['1234572', '123457-2']);
+  });
+});
+
+describe('isActiveLifecycle', () => {
+  it('active statuses are active; graduated / inactive / null are not', () => {
+    expect(isActiveLifecycle('account')).toBe(true);
+    expect(isActiveLifecycle('active')).toBe(true);
+    expect(isActiveLifecycle('graduated')).toBe(false);
+    expect(isActiveLifecycle('inactive')).toBe(false);
+    expect(isActiveLifecycle(null)).toBe(false);
   });
 });

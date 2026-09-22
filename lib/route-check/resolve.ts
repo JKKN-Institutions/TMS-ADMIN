@@ -21,6 +21,8 @@ export interface Candidate {
   code: string | null;
   routeId: string | null;
   matchedBy: MatchedBy;
+  /** Learner lifecycle in ACTIVE_LIFECYCLE_STATUSES / staff is_active. The UI badges false as "inactive". */
+  active: boolean;
 }
 
 export interface ResolveResult {
@@ -36,9 +38,17 @@ export interface ResolveResult {
  * An `.ilike()` pattern that matches `value` exactly (case-insensitive): the
  * LIKE wildcards % and _ (and the escape char \) are escaped so an id_code such
  * as `AB_12` cannot match `ABX12`. Same escaping as emailIlikePattern.
+ *
+ * PostgREST also rewrites every `*` in a like/ilike pattern to `%` before it
+ * reaches Postgres, regardless of any backslash, so a `*` cannot be escaped.
+ * A value containing `*` therefore has no exact pattern: returns null and the
+ * caller skips the lookup. (classifyCard strips Code 39 `*` and its id_code
+ * alphabet excludes it, so this is defence in depth.)
  */
-export function exactIlikePattern(value: string): string {
-  return value.trim().replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&');
+export function exactIlikePattern(value: string): string | null {
+  const v = value.trim();
+  if (v === '' || v.includes('*')) return null;
+  return v.replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&');
 }
 
 /** First occurrence of each (personKind, id) wins. */
@@ -54,16 +64,25 @@ export function dedupeCandidates(list: Candidate[]): Candidate[] {
   return out;
 }
 
-/** This route's candidates first, then by name (case-insensitive), then learners before staff. */
+/**
+ * This route's candidates first, then active before inactive, then by name
+ * (case-insensitive), then learners before staff.
+ */
 export function sortCandidates(list: Candidate[], routeId: string): Candidate[] {
   return [...list].sort((a, b) => {
     const ra = a.routeId === routeId ? 0 : 1;
     const rb = b.routeId === routeId ? 0 : 1;
     if (ra !== rb) return ra - rb;
+    if (a.active !== b.active) return a.active ? -1 : 1;
     const byName = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     if (byName !== 0) return byName;
     return a.personKind === b.personKind ? 0 : a.personKind === 'learner' ? -1 : 1;
   });
+}
+
+/** True when a learner lifecycle_status counts as active. */
+export function isActiveLifecycle(status: string | null | undefined): boolean {
+  return (ACTIVE_LIFECYCLE_STATUSES as readonly string[]).includes(status ?? '');
 }
 
 /** Values to try as an id_code when a JKKN-ID-shaped scan has no identity row (7-digit register numbers). */
@@ -77,8 +96,8 @@ function fullName(first: string | null, last: string | null): string {
 
 // ── Row shapes ────────────────────────────────────────────────────────────────
 
-const LEARNER_COLS = 'id, first_name, last_name, roll_number, register_number, transport_route_id';
-const STAFF_COLS = 'id, first_name, last_name, staff_id, transport_route_id';
+const LEARNER_COLS = 'id, first_name, last_name, roll_number, register_number, transport_route_id, lifecycle_status';
+const STAFF_COLS = 'id, first_name, last_name, staff_id, transport_route_id, is_active';
 
 interface LearnerRow {
   id: string;
@@ -87,6 +106,7 @@ interface LearnerRow {
   roll_number: string | null;
   register_number: string | null;
   transport_route_id: string | null;
+  lifecycle_status: string | null;
 }
 interface StaffRow {
   id: string;
@@ -94,6 +114,7 @@ interface StaffRow {
   last_name: string | null;
   staff_id: string | null;
   transport_route_id: string | null;
+  is_active: boolean | null;
 }
 
 function learnerCandidate(r: LearnerRow, matchedBy: MatchedBy): Candidate {
@@ -101,9 +122,13 @@ function learnerCandidate(r: LearnerRow, matchedBy: MatchedBy): Candidate {
     personKind: 'learner',
     id: r.id,
     name: fullName(r.first_name, r.last_name),
-    code: r.roll_number ?? r.register_number ?? null,
+    // Show the value the scan actually matched; otherwise roll, then register.
+    code: matchedBy === 'register_number'
+      ? (r.register_number ?? r.roll_number ?? null)
+      : (r.roll_number ?? r.register_number ?? null),
     routeId: r.transport_route_id ?? null,
     matchedBy,
+    active: isActiveLifecycle(r.lifecycle_status),
   };
 }
 function staffCandidate(r: StaffRow, matchedBy: MatchedBy): Candidate {
@@ -114,6 +139,7 @@ function staffCandidate(r: StaffRow, matchedBy: MatchedBy): Candidate {
     code: r.staff_id ?? null,
     routeId: r.transport_route_id ?? null,
     matchedBy,
+    active: r.is_active === true,
   };
 }
 
@@ -133,32 +159,27 @@ async function staffBy(svc: Svc, col: 'id' | 'profile_id', value: string, matche
 
 /**
  * Exact (case-insensitive) id_code match on roll_number, register_number and
- * staff_id, 5 per column. Only active-lifecycle learners and active staff —
- * but learners not on any bus are kept (that is a legitimate finding).
+ * staff_id, 5 per column, run in parallel. No lifecycle / is_active filter: a
+ * still-allocated inactive learner's barcode must identify them just as their
+ * QR does (candidates carry `active`; inactive ones sort after active).
+ * Learners not on any bus are kept too (a legitimate "not on route" finding).
  */
 async function byIdCode(svc: Svc, value: string): Promise<Candidate[]> {
   const pattern = exactIlikePattern(value);
-  if (!pattern) return [];
-  const out: Candidate[] = [];
-  for (const col of ['roll_number', 'register_number'] as const) {
-    const { data, error } = await svc
-      .from('learners_profiles')
-      .select(LEARNER_COLS)
-      .ilike(col, pattern)
-      .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
-      .limit(5);
-    if (error) throw new Error(`resolveCard: learner ${col} lookup failed: ${error.message}`);
-    out.push(...((data ?? []) as LearnerRow[]).map((r) => learnerCandidate(r, col)));
-  }
-  const { data, error } = await svc
-    .from('staff')
-    .select(STAFF_COLS)
-    .ilike('staff_id', pattern)
-    .eq('is_active', true)
-    .limit(5);
-  if (error) throw new Error(`resolveCard: staff_id lookup failed: ${error.message}`);
-  out.push(...((data ?? []) as StaffRow[]).map((r) => staffCandidate(r, 'staff_id')));
-  return out;
+  if (pattern === null) return [];
+  const [roll, reg, staff] = await Promise.all([
+    svc.from('learners_profiles').select(LEARNER_COLS).ilike('roll_number', pattern).limit(5),
+    svc.from('learners_profiles').select(LEARNER_COLS).ilike('register_number', pattern).limit(5),
+    svc.from('staff').select(STAFF_COLS).ilike('staff_id', pattern).limit(5),
+  ]);
+  if (roll.error) throw new Error(`resolveCard: learner roll_number lookup failed: ${roll.error.message}`);
+  if (reg.error) throw new Error(`resolveCard: learner register_number lookup failed: ${reg.error.message}`);
+  if (staff.error) throw new Error(`resolveCard: staff_id lookup failed: ${staff.error.message}`);
+  return [
+    ...((roll.data ?? []) as LearnerRow[]).map((r) => learnerCandidate(r, 'roll_number')),
+    ...((reg.data ?? []) as LearnerRow[]).map((r) => learnerCandidate(r, 'register_number')),
+    ...((staff.data ?? []) as StaffRow[]).map((r) => staffCandidate(r, 'staff_id')),
+  ];
 }
 
 export async function resolveCard(svc: Svc, raw: string, routeId: string): Promise<ResolveResult> {
@@ -188,6 +209,7 @@ export async function resolveCard(svc: Svc, raw: string, routeId: string): Promi
     } else {
       // No identity row: a 7-digit register number read off a Code 39 barcode
       // looks exactly like a dash-less JKKN ID. Try it as an id_code.
+      // Collision risk: a register number equal to an ISSUED JKKN ID would resolve to the ID holder and never reach here (none exist as of 2026-09-21).
       for (const v of jkknFallbackCodes(code)) found.push(...(await byIdCode(svc, v)));
     }
   } else if (shape === 'uuid') {
