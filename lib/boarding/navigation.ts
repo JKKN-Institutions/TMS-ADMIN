@@ -1,4 +1,4 @@
-import { LayoutDashboard, Route as RouteIcon, Users, ListChecks, MapPin, MessageCircle, Bell, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Route as RouteIcon, Users, ListChecks, MapPin, MessageCircle, Bell, ClipboardCheck, type LucideIcon } from 'lucide-react';
 
 export interface BoardingNavItem {
   name: string;
@@ -18,6 +18,12 @@ export const boardingNavigation: BoardingNavItem[] = [
   { name: 'Notifications', shortName: 'Alerts', href: '/boarding/notifications', icon: Bell },
 ];
 
+/** Route Check destination — not part of `boardingNavigation`; the layout composes
+ *  it in for checker-assigned staffers (see task-8-brief.md, "Nav"). */
+export const ROUTE_CHECK_NAV: BoardingNavItem = {
+  name: 'Route Check', shortName: 'Check', href: '/boarding/route-check', icon: ClipboardCheck,
+};
+
 const TITLES: Record<string, string> = {
   '/boarding/dashboard': 'Dashboard',
   '/boarding/routes': 'My Route',
@@ -26,10 +32,12 @@ const TITLES: Record<string, string> = {
   '/boarding/attendance': 'Attendance',
   '/boarding/grievances': 'Grievances',
   '/boarding/notifications': 'Notifications',
+  '/boarding/route-check': 'Route Check',
 };
 
 /** Page title for the header — handles the dynamic roster route too. */
 export function deriveBoardingPageTitle(pathname: string): string {
   if (pathname.startsWith('/boarding/routes/')) return 'Route Roster';
+  if (pathname.startsWith('/boarding/route-check')) return 'Route Check';
   return TITLES[pathname] ?? 'Boarding';
 }

@@ -7,6 +7,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { resolveStaffId } from '@/lib/identity/staff-lookup';
 import { loadStaffBillState } from '@/lib/fees/staff-bill-state';
 import { deriveInChargeGate } from '@/lib/boarding/incharge-gate';
+import { checkerRouteIds } from '@/lib/route-check/access';
 
 /**
  * Boarding-portal access gate. A staffer may use the portal only if they are
@@ -26,7 +27,7 @@ async function getAccess(auth: AuthContext) {
     if (auth.isSuperAdmin) {
       return NextResponse.json({ success: true, data: {
         allowed: true, assignedRouteCount: 0, eligible: false, hasRoute: false,
-        superAdmin: true, gate: 'in_duty', outstandingAmount: 0,
+        superAdmin: true, gate: 'in_duty', outstandingAmount: 0, checkerRouteCount: 0,
       } });
     }
     // Eligibility is computed regardless of the scan permission — an eligible-but-
@@ -49,6 +50,12 @@ async function getAccess(auth: AuthContext) {
     // are locked out. Failures here fall through to the outer catch, which fails
     // closed.
     const svc = createServiceRoleClient();
+
+    // Route checkers: access comes from the assignment (verified login email), not a role.
+    // Fail-soft here: a failed RPC must not turn an in-charge's gate into 'denied'.
+    let checkerRouteCount = 0;
+    try { checkerRouteCount = (await checkerRouteIds(svc, auth.userId)).length; }
+    catch (e) { console.error('boarding access: checkerRouteIds failed:', e); }
 
     let hasOutstandingBill = false;
     let outstandingAmount = 0;
@@ -105,6 +112,7 @@ async function getAccess(auth: AuthContext) {
         hasRoute: elig.hasRoute,
         gate,
         outstandingAmount,
+        checkerRouteCount,
         ...(feeCheckReason ? { reason: feeCheckReason } : {}),
       },
     });
@@ -113,7 +121,7 @@ async function getAccess(auth: AuthContext) {
     // Fail closed — if we can't confirm access, don't grant it.
     return NextResponse.json({ success: true, data: {
       allowed: false, assignedRouteCount: 0, eligible: false, hasRoute: false,
-      gate: 'denied', outstandingAmount: 0,
+      gate: 'denied', outstandingAmount: 0, checkerRouteCount: 0,
     } });
   }
 }
