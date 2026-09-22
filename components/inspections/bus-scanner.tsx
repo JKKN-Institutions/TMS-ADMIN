@@ -6,13 +6,27 @@ import { Camera } from 'lucide-react';
 import { classifyCameraError, cameraErrorMessage, shouldTryOtherCameras, pickBackCamera, isFreshCapture } from '@/lib/boarding/camera-errors';
 import { parseStickerScan } from '@/lib/inspections/sticker-code';
 
-const READER_ID = 'bus-sticker-reader';
-const PHOTO_READER_ID = 'bus-sticker-photo-reader';
-const READER_OPTIONS = { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false };
-const SCAN_CONFIG = {
-  fps: 12,
-  qrbox: (w: number, h: number) => { const s = Math.max(50, Math.floor(Math.min(w, h) * 0.75)); return { width: s, height: s }; },
+const DEFAULT_FORMATS = [Html5QrcodeSupportedFormats.QR_CODE];
+const readerOptions = (formats: Html5QrcodeSupportedFormats[]) => {
+  // Only opt into the BarCodeDetector path when a 1D barcode format is
+  // requested, so the default QR-only options object is unchanged.
+  const wantsBarcodes = formats.some((f) => f !== Html5QrcodeSupportedFormats.QR_CODE);
+  return {
+    formatsToSupport: formats,
+    verbose: false,
+    ...(wantsBarcodes ? { experimentalFeatures: { useBarCodeDetectorIfSupported: true } } : {}),
+  };
 };
+const scanConfig = (frame: 'square' | 'wide') => frame === 'wide'
+  ? {
+    fps: 12,
+    qrbox: (w: number, h: number) => ({ width: Math.floor(w * 0.85), height: Math.min(Math.floor(h * 0.45), 220) }),
+    aspectRatio: 1.6,
+  }
+  : {
+    fps: 12,
+    qrbox: (w: number, h: number) => { const s = Math.max(50, Math.floor(Math.min(w, h) * 0.75)); return { width: s, height: s }; },
+  };
 const SHARP_VIDEO: MediaTrackConstraints = {
   width: { ideal: 1280 }, height: { ideal: 720 },
   advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
@@ -22,6 +36,7 @@ export function BusScanner({
   onCode, paused, parse = parseStickerScan,
   rejectMessage = 'That QR is not a bus sticker. Scan the sticker inside the bus.',
   subject = 'bus sticker', photoMode = 'any',
+  formats = DEFAULT_FORMATS, frame = 'square', readerId,
 }: {
   onCode: (code: string) => void;
   paused: boolean;
@@ -35,7 +50,15 @@ export function BusScanner({
    * downloaded picture of a public ID card is no proof the card is present).
    */
   photoMode?: 'any' | 'fresh-only';
+  /** Barcode symbologies to decode; default QR only. */
+  formats?: Html5QrcodeSupportedFormats[];
+  /** 'square' (QR) or 'wide' (1D barcodes + QR): 85% width × min(45% height, 220px). */
+  frame?: 'square' | 'wide';
+  /** Unique element-id prefix when two scanners can exist on one page. */
+  readerId?: string;
 }) {
+  const READER_ID = `${readerId ?? 'bus-sticker'}-reader`;
+  const PHOTO_READER_ID = `${readerId ?? 'bus-sticker'}-photo-reader`;
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const genRef = useRef(0);
   const startingRef = useRef(false);
@@ -73,8 +96,9 @@ export function BusScanner({
     const gen = genRef.current;
     try {
       const attempt = async (camera: string | MediaTrackConstraints, video?: MediaTrackConstraints): Promise<true | { err: unknown }> => {
-        const s = new Html5Qrcode(READER_ID, READER_OPTIONS);
-        try { await s.start(camera, video ? { ...SCAN_CONFIG, videoConstraints: video } : SCAN_CONFIG, onRead, () => {}); }
+        const s = new Html5Qrcode(READER_ID, readerOptions(formats));
+        const config = scanConfig(frame);
+        try { await s.start(camera, video ? { ...config, videoConstraints: video } : config, onRead, () => {}); }
         catch (err) { try { s.clear(); } catch { /* ignore */ } return { err }; }
         if (genRef.current !== gen) { try { await s.stop(); await s.clear(); } catch { /* ignore */ } return true; }
         scannerRef.current = s;
@@ -124,7 +148,7 @@ export function BusScanner({
       return;
     }
     await stop();
-    const reader = new Html5Qrcode(PHOTO_READER_ID, READER_OPTIONS);
+    const reader = new Html5Qrcode(PHOTO_READER_ID, readerOptions(formats));
     try { onRead(await reader.scanFile(file, false)); }
     catch { setError(`Could not read the ${subject} in that photo. Fill the frame with the QR and avoid glare.`); }
     finally { try { reader.clear(); } catch { /* ignore */ } genRef.current++; void start(); }
@@ -132,7 +156,7 @@ export function BusScanner({
 
   return (
     <div className="space-y-3">
-      <div id={READER_ID} className="mx-auto aspect-square w-full max-w-sm overflow-hidden rounded-xl bg-black" />
+      <div id={READER_ID} className={`mx-auto w-full max-w-sm overflow-hidden rounded-xl bg-black ${frame === 'wide' ? 'aspect-[1.6]' : 'aspect-square'}`} />
       <div id={PHOTO_READER_ID} className="hidden" />
       {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">{error}</p>}
       <input ref={photoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />

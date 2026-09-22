@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/providers/auth-provider';
 import { useTheme, type Theme } from '@/components/theme-provider';
-import { boardingNavigation, deriveBoardingPageTitle } from '@/lib/boarding/navigation';
+import { boardingNavigation, deriveBoardingPageTitle, ROUTE_CHECK_NAV } from '@/lib/boarding/navigation';
 import BoardingBottomNav from '@/components/boarding-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
@@ -124,8 +124,11 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   // Portal access requires an ACTUAL route assignment, not just the permission.
   // Authoritative check is server-side (/api/boarding/access). Super admins pass.
   const [access, setAccess] = useState<
-    'checking' | 'allowed' | 'choose' | 'must_pay' | 'denied' | 'offline_unknown'
+    'checking' | 'allowed' | 'checker_only' | 'choose' | 'must_pay' | 'denied' | 'offline_unknown'
   >('checking');
+  // Route-checker composition: how many active routes this staffer checks, and
+  // whether they're a super admin (who always sees the full Route Check nav).
+  const [checker, setChecker] = useState<{ count: number; superAdmin: boolean }>({ count: 0, superAdmin: false });
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('tms-boarding-sidebar-collapsed') === '1');
@@ -151,9 +154,11 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
     const pid = profile.id;
     let cancelled = false;
     (async () => {
+      // Saved verdicts are now client states (see below), so this also passes
+      // 'allowed' and 'checker_only' through unchanged.
       const gateToAccess = (gate: string | undefined) =>
-        gate === 'in_duty' ? 'allowed'
-        : gate === 'choose' || gate === 'must_pay' || gate === 'denied' ? gate
+        gate === 'in_duty' || gate === 'allowed' ? 'allowed'
+        : gate === 'checker_only' || gate === 'choose' || gate === 'must_pay' || gate === 'denied' ? gate
         : 'denied';
       let res: Response;
       try {
@@ -175,8 +180,19 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
           // lib/boarding/incharge-gate.ts, published via /api/boarding/access.
           const gate = d.gate as 'in_duty' | 'choose' | 'must_pay' | 'denied' | undefined;
           if (gate === 'in_duty' || gate === 'choose' || gate === 'must_pay' || gate === 'denied') {
-            void saveAccess(offlineKv(), pid, istToday(), gate, new Date()).catch(() => {});
-            setAccess(gateToAccess(gate));
+            const count = Number(d.checkerRouteCount) || 0;
+            const superAdmin = d.superAdmin === true;
+            setChecker({ count, superAdmin });
+            // A checker with no in-charge duty today still gets the checker-only
+            // shell instead of being denied; in-duty always wins ('allowed').
+            // 'choose' and 'must_pay' take precedence over 'checker_only' so an
+            // eligible-but-undecided or fee-blocked in-charge still reaches
+            // /boarding/in-charge -- only a flat 'denied' upgrades to
+            // 'checker_only' when the staffer holds a checker route
+            // (spec: "in-charges who are also checkers see both").
+            const next = gate === 'in_duty' ? 'allowed' : (gate === 'denied' && count > 0) ? 'checker_only' : gateToAccess(gate);
+            void saveAccess(offlineKv(), pid, istToday(), next, new Date()).catch(() => {});
+            setAccess(next);
           } else {
             // A 200 with no usable gate -- e.g. a captive portal answering with
             // an HTML body that json() silently turns into {}. Not a real
@@ -210,6 +226,13 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   useEffect(() => {
     if (access === 'allowed' && pathname === '/boarding/in-charge') {
       router.replace('/boarding/attendance');
+    }
+  }, [access, pathname, router]);
+
+  // A checker-only staffer (no in-charge duty today) is confined to Route Check.
+  useEffect(() => {
+    if (access === 'checker_only' && !pathname.startsWith('/boarding/route-check')) {
+      router.replace('/boarding/route-check');
     }
   }, [access, pathname, router]);
 
@@ -307,6 +330,13 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
   }
 
   const pageTitle = deriveBoardingPageTitle(pathname);
+  // checker_only: confined to Route Check alone. allowed: the full boarding nav,
+  // plus Route Check when this staffer also checks at least one route (or is a
+  // super admin, who always sees it). Both render the same full shell.
+  const navItems =
+    access === 'checker_only' ? [ROUTE_CHECK_NAV]
+    : (checker.count > 0 || checker.superAdmin) ? [...boardingNavigation, ROUTE_CHECK_NAV]
+    : boardingNavigation;
 
   return (
     <BugReporterWrapper>
@@ -330,7 +360,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
           <div className="sidebar-section">
             <div className="sidebar-section-title">BOARDING</div>
             <div className="space-y-1">
-              {boardingNavigation.map((item) => {
+              {navItems.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(item.href + '/');
                 const Icon = item.icon;
                 return (
@@ -392,7 +422,7 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
       </div>
 
       {/* Mobile-only bottom navigation (replaces the sidebar < lg). */}
-      <BoardingBottomNav />
+      <BoardingBottomNav items={navItems} />
     </div>
     </BugReporterWrapper>
   );
