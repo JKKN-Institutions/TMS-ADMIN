@@ -7,11 +7,16 @@ import { classifyCameraError, cameraErrorMessage, shouldTryOtherCameras, pickBac
 import { parseStickerScan } from '@/lib/inspections/sticker-code';
 
 const DEFAULT_FORMATS = [Html5QrcodeSupportedFormats.QR_CODE];
-const readerOptions = (formats: Html5QrcodeSupportedFormats[]) => ({
-  formatsToSupport: formats,
-  verbose: false,
-  experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-});
+const readerOptions = (formats: Html5QrcodeSupportedFormats[]) => {
+  // Only opt into the BarCodeDetector path when a 1D barcode format is
+  // requested, so the default QR-only options object is unchanged.
+  const wantsBarcodes = formats.some((f) => f !== Html5QrcodeSupportedFormats.QR_CODE);
+  return {
+    formatsToSupport: formats,
+    verbose: false,
+    ...(wantsBarcodes ? { experimentalFeatures: { useBarCodeDetectorIfSupported: true } } : {}),
+  };
+};
 const scanConfig = (frame: 'square' | 'wide') => frame === 'wide'
   ? {
     fps: 12,
