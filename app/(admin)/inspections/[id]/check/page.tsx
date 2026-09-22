@@ -226,7 +226,7 @@ export default function InspectionCheckPage({ params }: { params: Promise<{ id: 
       {tab === 'stops' && (
         overviewQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
         overviewQuery.isError ? <p className="text-red-600 dark:text-red-400">{(overviewQuery.error as Error)?.message ?? 'Could not load stops'}</p> :
-        overview ? <StopsTab stops={overview.stops} leg={leg} riderCounts={stopRiderCounts} /> : null
+        overview ? <StopsTab stops={overview.stops} leg={leg} riderCounts={stopRiderCounts} registered={overview.registered} /> : null
       )}
 
       {tab === 'riders' && <RidersTab detail={data} overview={overview} leg={leg} date={rosterDate} roster={rosterQuery} />}

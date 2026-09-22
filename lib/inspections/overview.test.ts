@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultLeg, learnerOutcome, inchargeDuty, headcountDelta } from './overview';
+import { defaultLeg, learnerOutcome, inchargeDuty, headcountDelta, countRegistered } from './overview';
 
 describe('defaultLeg', () => {
   it('morning before noon', () => { expect(defaultLeg(7 * 60)).toBe('onward'); expect(defaultLeg(11 * 60 + 59)).toBe('onward'); });
@@ -69,4 +69,13 @@ describe('headcountDelta', () => {
   it('matches', () => expect(headcountDelta(10, 10)).toEqual({ diff: 0, label: 'Matches boarded count' }));
   it('extra people', () => expect(headcountDelta(12, 10)).toEqual({ diff: 2, label: '2 more than boarded' }));
   it('missing people', () => expect(headcountDelta(9, 10)).toEqual({ diff: -1, label: '1 fewer than boarded' }));
+});
+
+describe('countRegistered', () => {
+  it('totals learners and groups them by stop, counting missing stops separately', () => {
+    expect(countRegistered(['s1', 's1', 's2', null])).toEqual({ total: 4, byStop: { s1: 2, s2: 1 }, noStop: 1 });
+  });
+  it('empty route', () => {
+    expect(countRegistered([])).toEqual({ total: 0, byStop: {}, noStop: 0 });
+  });
 });

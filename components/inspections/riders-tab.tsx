@@ -116,8 +116,9 @@ export function RidersTab({ detail, overview, leg, date, roster }: {
       {hasRoute && (
         roster.isLoading ? <div className="h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" /> :
         !roster.isError && counts && (
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
             {([
+              ['Registered', overview ? overview.registered.learners : null, 'text-blue-700 dark:text-blue-400'],
               ['Booked', booked, ''],
               ['Present', counts.present, 'text-green-700 dark:text-green-400'],
               ['Absent', counts.absent, 'text-red-700 dark:text-red-400'],
@@ -127,6 +128,9 @@ export function RidersTab({ detail, overview, leg, date, roster }: {
               <div key={label} className="min-w-0 rounded-lg border border-gray-200 bg-white p-2 text-center dark:border-gray-800 dark:bg-gray-900">
                 <p className={`text-lg font-bold ${tone}`}>{value ?? '—'}</p>
                 <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{label}</p>
+                {label === 'Registered' && !!overview?.registered.staff && (
+                  <p className="truncate text-[10px] text-gray-400 dark:text-gray-500">+{overview.registered.staff} staff</p>
+                )}
               </div>
             ))}
           </div>
