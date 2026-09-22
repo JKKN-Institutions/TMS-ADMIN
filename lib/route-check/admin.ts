@@ -82,6 +82,7 @@ type StaffRow = {
   first_name: string | null;
   last_name: string | null;
   designation: string | null;
+  staff_id: string | null;
   email: string | null;
   institution_email: string | null;
   profile_id: string | null;
@@ -89,7 +90,7 @@ type StaffRow = {
 };
 type ProfileRow = { id: string; email: string | null; full_name: string | null; designation: string | null };
 
-const STAFF_COLS = 'id, first_name, last_name, designation, email, institution_email, profile_id, is_active';
+const STAFF_COLS = 'id, first_name, last_name, designation, staff_id, email, institution_email, profile_id, is_active';
 const PROFILE_COLS = 'id, email, full_name, designation';
 
 /** Staff whose email OR institution_email equals `email` (case-insensitive). */

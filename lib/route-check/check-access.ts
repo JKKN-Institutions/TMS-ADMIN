@@ -11,6 +11,9 @@ import type { CheckLeg, CheckStatus } from './types';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
+/** /api/boarding/route-check/<checkId>/... → checkId */
+export const checkIdFromUrl = (url: string) => new URL(url).pathname.split('/').filter(Boolean)[3] ?? '';
+
 export interface CheckRow {
   id: string; route_id: string; vehicle_id: string | null; checker_id: string; check_date: string; leg: CheckLeg;
   status: CheckStatus; headcount: number | null; unknown_count: number | null; notes: string | null;
