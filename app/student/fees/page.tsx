@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Receipt, AlertTriangle, CheckCircle2, Info, RefreshCw, Loader2, ArrowRight } from 'lucide-react';
+import { PaymentNoticeBar } from '@/components/student/payment-notice-bar';
 
 interface Term {
   term_no: number;
@@ -141,6 +142,7 @@ export default function StudentFeesPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4">
+      <PaymentNoticeBar variant="card" />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-600">

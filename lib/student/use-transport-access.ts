@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import type { PaymentNoticePayload } from '@/lib/fees/payment-notice/bar-state';
 
 /** One transport-fee term (instalment) for the current transport year. */
 export interface TransportTerm {
@@ -32,6 +33,10 @@ export interface TransportAccess {
   term1_status: string | null;
   term1_due_date: string | null;
   term1_balance: number;
+  /** The learner's 48-hour payment notice, when one is running or has fined. */
+  payment_notice?: PaymentNoticePayload | null;
+  /** Server clock at response time, to correct the countdown for a wrong device clock. */
+  server_now?: string;
 }
 
 async function fetchTransportAccess(): Promise<TransportAccess> {
@@ -51,5 +56,11 @@ async function fetchTransportAccess(): Promise<TransportAccess> {
  * entry instead of hitting the RPC twice.
  */
 export function useTransportAccess() {
-  return useQuery({ queryKey: ['student-transport-access'], queryFn: fetchTransportAccess });
+  return useQuery({
+    queryKey: ['student-transport-access'],
+    queryFn: fetchTransportAccess,
+    refetchOnWindowFocus: true,
+    // Poll only while a countdown is running, so a payment clears the bar within a minute.
+    refetchInterval: (q) => (q.state.data?.payment_notice?.status === 'running' ? 60_000 : false),
+  });
 }

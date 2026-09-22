@@ -15,6 +15,7 @@ import StudentBottomNav from '@/components/student-bottom-nav';
 import NotificationBell from '@/components/notifications/notification-bell';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
 import BookBusFab from '@/components/booking/book-bus-fab';
+import { PaymentNoticeBar } from '@/components/student/payment-notice-bar';
 
 const getInitials = (name: string) =>
   name.split(' ').map((w) => w.charAt(0)).join('').toUpperCase().slice(0, 2);
@@ -247,6 +248,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           </div>
         </header>
 
+        <PaymentNoticeBar />
         <div className="content-body fade-in">{children}</div>
       </div>
 
