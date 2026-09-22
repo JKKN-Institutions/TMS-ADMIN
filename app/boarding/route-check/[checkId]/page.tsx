@@ -11,6 +11,7 @@ import { CountsBar } from '@/components/route-check/counts-bar';
 import { LearnerList } from '@/components/route-check/learner-list';
 import { StaffList } from '@/components/route-check/staff-list';
 import { RouteCheckScanDialog } from '@/components/route-check/scan-dialog';
+import { FinishPanel } from '@/components/route-check/finish-panel';
 import { fetchCheck, removeEntry } from '../route-check-api';
 
 type PageFilter = ScreenFilter | 'staff';
@@ -35,6 +36,7 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
   const [filter, setFilter] = useState<PageFilter>('all');
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const [finishOpen, setFinishOpen] = useState(false);
 
   const learnerGroups = useMemo(() => {
     if (!data || filter === 'staff') return [];
@@ -199,7 +201,7 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
               </button>
               <button
                 type="button"
-                onClick={() => { /* wired in Task 13 */ }}
+                onClick={() => setFinishOpen(true)}
                 className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 Finish
@@ -210,7 +212,10 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
       </div>
 
       {!submitted && (
-        <RouteCheckScanDialog checkId={checkId} routeId={route.id} open={scanOpen} onClose={() => setScanOpen(false)} />
+        <>
+          <RouteCheckScanDialog checkId={checkId} routeId={route.id} open={scanOpen} onClose={() => setScanOpen(false)} />
+          <FinishPanel checkId={checkId} counts={counts} open={finishOpen} onClose={() => setFinishOpen(false)} />
+        </>
       )}
     </div>
   );
