@@ -21,8 +21,10 @@ import { summarizeBills, type TransportBillRow } from '@/lib/fees/bills';
 import { paymentModeFilterOptions } from '@/lib/fees/payment-mode';
 import { FineDialog } from './fine-dialog';
 import { ConcessionPanel } from './concessions/concession-panel';
+import { paymentNoticeColumns } from './payment-notice-columns';
+import type { PaymentNoticeRow } from '@/app/api/admin/fees/payment-notices/route';
 
-type View = 'bills' | 'unbilled' | 'analytics' | 'fines' | 'concessions';
+type View = 'bills' | 'unbilled' | 'analytics' | 'fines' | 'concessions' | 'notices';
 
 const TYPE_FILTER: DataTableFilter = {
   columnId: 'type',
@@ -70,7 +72,7 @@ export default function BillManagementPage() {
   const isAll = selectedYear === 'all';
   // Unbilled and Transport Fee need a specific year — never stay on them for "All years".
   useEffect(() => {
-    if (isAll && (view === 'unbilled' || view === 'fines' || view === 'concessions')) setView('bills');
+    if (isAll && (view === 'unbilled' || view === 'fines' || view === 'concessions' || view === 'notices')) setView('bills');
   }, [isAll, view]);
 
   const yearOptions = useMemo(
@@ -96,6 +98,21 @@ export default function BillManagementPage() {
     queryFn: () => fetchFines(selectedYear),
     enabled: !!selectedYear && !isAll && view === 'fines',
   });
+
+  const { data: notices, isLoading: noticesLoading } = useQuery({
+    queryKey: ['payment-notices', selectedYear],
+    queryFn: async (): Promise<PaymentNoticeRow[]> => {
+      const res = await fetch(`/api/admin/fees/payment-notices?year=${encodeURIComponent(selectedYear)}`, { cache: 'no-store' });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load payment notices');
+      return json.data.rows as PaymentNoticeRow[];
+    },
+    enabled: !!selectedYear && !isAll && view === 'notices',
+    // "Time left" is computed at render; a minute-level refetch keeps the status
+    // column honest while the sweep runs every 5 minutes.
+    refetchInterval: view === 'notices' ? 60_000 : false,
+  });
+  const noticeColumns = useMemo(() => paymentNoticeColumns(), []);
 
   const billColumns = useMemo(() => getBillColumns(), []);
   const fineColumns = useMemo(() => getFineColumns(true, (row) => setCancelTarget(row)), []);
@@ -199,6 +216,9 @@ export default function BillManagementPage() {
         <ToggleBtn active={view === 'fines'} onClick={() => setView('fines')} disabled={isAll}>
           Transport Fee{fines ? ` (${fines.summary.count})` : ''}
         </ToggleBtn>
+        <ToggleBtn active={view === 'notices'} onClick={() => setView('notices')} disabled={isAll}>
+          Payment notices{notices ? ` (${notices.filter((n) => n.status === 'running').length} running)` : ''}
+        </ToggleBtn>
         <ToggleBtn active={view === 'analytics'} onClick={() => setView('analytics')}>
           Analytics
         </ToggleBtn>
@@ -224,6 +244,15 @@ export default function BillManagementPage() {
         <EmptyMsg>Select a transport year to view billing.</EmptyMsg>
       ) : view === 'concessions' ? (
         <ConcessionPanel year={selectedYear} />
+      ) : view === 'notices' ? (
+        <DataTable
+          columns={noticeColumns}
+          data={notices ?? []}
+          entityName="payment notices"
+          isLoading={noticesLoading}
+          getRowId={(r) => r.id}
+          searchPlaceholder="Search learner or roll number..."
+        />
       ) : view === 'fines' ? (
         <DataTable
           columns={fineColumns}
