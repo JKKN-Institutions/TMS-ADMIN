@@ -114,3 +114,22 @@ export async function loadEntries(svc: Svc, checkId: string): Promise<CheckPerso
   };
   return rows.map((r) => personEntryFromRow(r, names));
 }
+
+/** Evaluate + record one resolved candidate. Returns the API's 'recorded' payload. */
+export async function tickCandidate(
+  svc: Svc, check: { id: string; route_id: string; check_date: string },
+  pick: { personKind: 'learner' | 'staff'; id: string; matchedBy: MatchedBy; scannedCode: string | null },
+): Promise<{ kind: 'recorded'; entry: CheckPersonEntry; alreadyChecked: boolean; feeOwed: number | null } | null> {
+  if (pick.personKind === 'learner') {
+    const ev = await evaluateLearner(svc, pick.id, check.route_id, check.check_date);
+    if (!ev) return null;
+    const { row, alreadyChecked } = await recordEntry(svc, check.id, { kind: 'learner', learnerId: pick.id, matchedBy: pick.matchedBy, scannedCode: pick.scannedCode, ev });
+    const entry = personEntryFromRow(row, { learners: new Map([[pick.id, { name: ev.name, code: ev.code }]]), staff: new Map() });
+    return { kind: 'recorded', entry, alreadyChecked, feeOwed: ev.fee.owed };
+  }
+  const ev = await evaluateStaff(svc, pick.id, check.route_id);
+  if (!ev) return null;
+  const { row, alreadyChecked } = await recordEntry(svc, check.id, { kind: 'staff', staffId: pick.id, matchedBy: pick.matchedBy, scannedCode: pick.scannedCode, ev });
+  const entry = personEntryFromRow(row, { learners: new Map(), staff: new Map([[pick.id, { name: ev.name, code: ev.code }]]) });
+  return { kind: 'recorded', entry, alreadyChecked, feeOwed: ev.feeOwed };
+}
