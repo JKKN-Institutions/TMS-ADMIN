@@ -10,6 +10,7 @@ import { filterLearners, groupByStop, type ScreenFilter } from '@/lib/route-chec
 import { CountsBar } from '@/components/route-check/counts-bar';
 import { LearnerList } from '@/components/route-check/learner-list';
 import { StaffList } from '@/components/route-check/staff-list';
+import { RouteCheckScanDialog } from '@/components/route-check/scan-dialog';
 import { fetchCheck, removeEntry } from '../route-check-api';
 
 type PageFilter = ScreenFilter | 'staff';
@@ -33,6 +34,7 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
   });
   const [filter, setFilter] = useState<PageFilter>('all');
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const learnerGroups = useMemo(() => {
     if (!data || filter === 'staff') return [];
@@ -190,7 +192,7 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => { /* wired in Task 12 */ }}
+                onClick={() => setScanOpen(true)}
                 className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
               >
                 Scan
@@ -206,6 +208,10 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
           )}
         </div>
       </div>
+
+      {!submitted && (
+        <RouteCheckScanDialog checkId={checkId} routeId={route.id} open={scanOpen} onClose={() => setScanOpen(false)} />
+      )}
     </div>
   );
 }
