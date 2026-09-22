@@ -24,7 +24,7 @@ export function CountsBar({ counts }: { counts: CheckCounts }) {
       <div className="min-w-0 rounded-lg border border-green-200 bg-green-50 p-2 text-center dark:border-green-900/40 dark:bg-green-900/20">
         <p className="truncate text-[11px] text-green-700 dark:text-green-400">Checked ✓</p>
         <p className="text-base font-semibold text-green-800 dark:text-green-300">
-          {counts.checked}/{counts.registered}
+          {counts.checked}
         </p>
       </div>
     </div>

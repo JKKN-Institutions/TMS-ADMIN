@@ -22,6 +22,9 @@ async function scan(request: NextRequest, auth: AuthContext) {
     if (!UUID_RE.test(id)) return NextResponse.json({ error: 'Route check not found' }, { status: 404 });
     const body = (await request.json().catch(() => ({}))) as { code?: unknown; source?: unknown };
     // Fail-closed: only an explicit 'camera' counts as a camera read.
+    // Client-asserted, not a security boundary -- the fetcher always sends 'camera',
+    // so this is a contract check that refuses typed input from other callers.
+    // Real camera-only enforcement is the scanner's photoMode="fresh-only" and live-camera-only UI.
     if (body.source !== 'camera') return NextResponse.json({ error: 'Point the camera at the ID card to scan it.' }, { status: 400 });
     const raw = typeof body.code === 'string' ? body.code : '';
     if (!raw.trim()) return NextResponse.json({ error: 'Nothing was scanned' }, { status: 400 });

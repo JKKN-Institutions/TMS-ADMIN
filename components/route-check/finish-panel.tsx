@@ -50,7 +50,7 @@ export function FinishPanel({
         </DialogHeader>
 
         <div className="min-w-0 space-y-1.5 py-2">
-          <SummaryRow label={`Checked ${counts.checked} of ${counts.registered}`} />
+          <SummaryRow label={`Checked ${counts.checked} · Registered ${counts.registered}`} />
           <SummaryRow label="Unpaid" value={counts.unpaid} />
           <SummaryRow label="Without booking" value={counts.withoutBooking} />
           <SummaryRow label="Not on this bus" value={counts.notOnRoute} />

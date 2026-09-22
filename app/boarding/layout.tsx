@@ -185,7 +185,12 @@ export default function BoardingLayout({ children }: { children: React.ReactNode
             setChecker({ count, superAdmin });
             // A checker with no in-charge duty today still gets the checker-only
             // shell instead of being denied; in-duty always wins ('allowed').
-            const next = gate === 'in_duty' ? 'allowed' : count > 0 ? 'checker_only' : gateToAccess(gate);
+            // 'choose' and 'must_pay' take precedence over 'checker_only' so an
+            // eligible-but-undecided or fee-blocked in-charge still reaches
+            // /boarding/in-charge -- only a flat 'denied' upgrades to
+            // 'checker_only' when the staffer holds a checker route
+            // (spec: "in-charges who are also checkers see both").
+            const next = gate === 'in_duty' ? 'allowed' : (gate === 'denied' && count > 0) ? 'checker_only' : gateToAccess(gate);
             void saveAccess(offlineKv(), pid, istToday(), next, new Date()).catch(() => {});
             setAccess(next);
           } else {
