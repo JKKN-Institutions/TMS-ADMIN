@@ -44,8 +44,12 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
   const [checks, setChecks] = useState<SessionCheck[]>([]);
   const [, setIgnored] = useState(0);
   // Synchronous guard (state lags a render behind the next decode frame):
-  // true from the moment a code is accepted until "Scan next".
+  // true from the moment a code is accepted until "Scan next" — this also
+  // covers the whole candidates-picker interval, so the scanner stays blocked
+  // while a pick is pending. A separate ref guards re-entrancy on the picker
+  // itself (busyRef is already true throughout that window).
   const busyRef = useRef(false);
+  const pickingRef = useRef(false);
   const lastRef = useRef<{ code: string; at: number } | null>(null);
   // Bumped on close so a reply that lands after the dialog closed shows no stale verdict on reopen.
   const genRef = useRef(0);
@@ -87,8 +91,12 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
   }
 
   async function onPick(code: string, c: Candidate) {
-    if (busyRef.current) return;
-    busyRef.current = true;
+    // Note: busyRef is already true here (set by onCode when the candidates
+    // response came in, and never released while the picker is showing) —
+    // guarding on it would make every tap a no-op. pickingRef is the
+    // re-entrancy guard for the picker itself (double-tap protection).
+    if (pickingRef.current) return;
+    pickingRef.current = true;
     setBusy(true);
     const gen = genRef.current;
     try {
@@ -105,12 +113,16 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
       toast.error(message);
       if (gen === genRef.current) setVerdict({ kind: 'error', message });
     } finally {
+      pickingRef.current = false;
       setBusy(false);
     }
   }
 
   function cancelPick() {
-    // Return to scanning without recording anything.
+    // Return to scanning without recording anything. lastRef is deliberately
+    // left set: re-scanning the SAME card within SAME_CARD_MS is still
+    // suppressed (it's the card still under the lens); a different card is
+    // accepted immediately.
     setVerdict(null);
     busyRef.current = false;
   }
@@ -126,6 +138,7 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
     setVerdict(null);
     setBusy(false);
     busyRef.current = false;
+    pickingRef.current = false;
     lastRef.current = null;
     onClose();
   }
