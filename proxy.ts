@@ -51,6 +51,30 @@ const IDENTITY_HEADERS = [
   'x-user-institution',
 ];
 
+/**
+ * True when the user is an active route checker for >= 1 route. User-scoped
+ * client: the SECURITY DEFINER RPC only answers for auth.uid() itself. Fails
+ * closed (false) on error, logged like the eligibility RPC.
+ */
+async function hasCheckerRoutes(
+  supabase: { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }> },
+  userId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('tms_route_checker_route_ids', {
+    p_profile_id: userId,
+  });
+  if (error) {
+    console.error(
+      '[proxy] tms_route_checker_route_ids failed for %s: %s %s',
+      userId,
+      error.code,
+      error.message
+    );
+    return false;
+  }
+  return Array.isArray(data) && data.length > 0;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // API routes get JSON errors; pages get redirects.
@@ -205,6 +229,13 @@ export async function proxy(request: NextRequest) {
       if ((elig as { eligible?: boolean } | null)?.eligible) hasAccess = true;
     }
 
+    // Route checkers: access comes from the checker assignment itself (matched on
+    // the verified login email), not from a role — most checkers have no scan
+    // permission and are not in-charge eligible. Paid only on this deny path.
+    if (!hasAccess && area === 'boarding') {
+      if (await hasCheckerRoutes(supabase, user.id)) hasAccess = true;
+    }
+
     if (!hasAccess) {
       if (isApi) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -219,6 +250,10 @@ export async function proxy(request: NextRequest) {
         });
         if (canScan) {
           home = '/boarding/attendance';
+        } else if (await hasCheckerRoutes(supabase, user.id)) {
+          // An assigned route checker (not a scanner): land on Route Check. Checked
+          // BEFORE the in-charge fallback so a checker is never sent to the toggle.
+          home = '/boarding/route-check';
         } else {
           // Not a scanner either: this is the ONLY reliable path to the in-charge
           // toggle for a bus_required staffer who hasn't decided yet — the bare
