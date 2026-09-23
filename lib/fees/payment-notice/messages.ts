@@ -17,11 +17,20 @@ export function formatIstDateTime(iso: string): string {
   });
 }
 
-export function startMessage(noticeId: string, learnerId: string, expiresAt: string, amount: number): LearnerMessage {
+// Wording approved by the transport office (2026-09-23) — keep it verbatim.
+const START_BODY = [
+  'Dear Learner,',
+  'Your Transport Maintenance Fee is currently unpaid. A 48-hour countdown has now started.',
+  'Kindly pay the pending Transport Maintenance Fee within 48 hours. If the payment is not completed within this period, the Transport Maintenance Fee will be automatically waived off and adjusted to the Transport Fee.',
+  'Please complete the payment within the given time to avoid any issues with your transport services.',
+  'Thank you.',
+].join('\n\n');
+
+export function startMessage(noticeId: string, learnerId: string, expiresAt: string, _amount: number): LearnerMessage {
   return {
     learnerId,
-    title: 'Pay your Transport Maintenance Fee within 48 hours',
-    body: `Pay your Transport Maintenance Fee by ${formatIstDateTime(expiresAt)} or a Transport Fee of ${inr(amount)} will be added.`,
+    title: 'Transport Maintenance Fee – Payment Reminder',
+    body: START_BODY,
     idempotencyKey: `payment-notice-start:${noticeId}`,
     expiresAt,
   };
