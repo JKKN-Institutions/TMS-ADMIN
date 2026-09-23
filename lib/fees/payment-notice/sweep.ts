@@ -25,6 +25,8 @@ export interface SweepSummary {
   reminded: number;
   fined: number;
   fineSkipped: number;
+  /** Running notices closed against a maintenance-unpaid fine the learner already held (no new fine). */
+  closedAlreadyFined: number;
   errors: number;
 }
 
@@ -69,7 +71,7 @@ async function notifyLearners(svc: SupabaseClient, msgs: LearnerMessage[]): Prom
 const DEFAULT_DEPS: SweepDeps = { term1PaidLearnerIds, createFines, notify: notifyLearners, logSystemActivity };
 
 const empty = (dryRun: boolean): SweepSummary => ({
-  dryRun, opened: 0, paid: 0, cancelled: 0, reminded: 0, fined: 0, fineSkipped: 0, errors: 0,
+  dryRun, opened: 0, paid: 0, cancelled: 0, reminded: 0, fined: 0, fineSkipped: 0, closedAlreadyFined: 0, errors: 0,
 });
 
 async function loadUnpaidBills(svc: SupabaseClient, yearId: string, paid: Set<string>): Promise<UnpaidBill[]> {
@@ -114,6 +116,28 @@ async function loadFineAmounts(svc: SupabaseClient, yearId: string, personIds: s
       const amt = l.transport_stop_id ? byStop.get(l.transport_stop_id) : undefined;
       if (amt && amt > 0) out.set(l.id, amt);
     }
+  }
+  return out;
+}
+
+/**
+ * personId -> fine id for every learner who already holds this year's once-only
+ * maintenance-unpaid fine (key '<baseKey>:<personId>', whichever path raised it).
+ * Status is deliberately NOT filtered: the unique constraint on idempotency_key
+ * covers cancelled rows too, so a cancelled fine can never be re-raised and
+ * createFines would only insert-then-delete a real money row.
+ */
+async function loadAlreadyFined(svc: SupabaseClient, yearId: string, baseKey: string): Promise<Map<string, string>> {
+  const { data, error } = await svc
+    .from('tms_fee_fine')
+    .select('id, person_id, idempotency_key')
+    .eq('transport_year_id', yearId)
+    .like('idempotency_key', `${baseKey}:%`);
+  if (error) throw new Error(`Failed to load existing fines: ${error.message}`);
+  const out = new Map<string, string>();
+  for (const r of (data ?? []) as Array<{ id: string; person_id: string | null; idempotency_key: string | null }>) {
+    if (!r.person_id || r.idempotency_key !== `${baseKey}:${r.person_id}`) continue;
+    out.set(r.person_id, r.id);
   }
   return out;
 }
@@ -163,6 +187,12 @@ export async function runPaymentNoticeSweep(
   if (nErr) throw new Error(`Failed to load notices: ${nErr.message}`);
   const notices = (nrows ?? []) as NoticeRow[];
 
+  // Shared with Bus Inspection fines (lib/route-check/fines.ts): the unique
+  // idempotency key makes a second maintenance-unpaid fine for the same
+  // learner and year impossible, whichever path fires first.
+  const fineBaseKey = `maintenance-unpaid:${yearId}`;
+  const alreadyFined = await loadAlreadyFined(svc, yearId, fineBaseKey);
+
   const people = [...new Set([
     ...unpaidBills.map((b) => b.person_id),
     ...notices.filter((n) => n.status === 'running').map((n) => n.person_id),
@@ -170,7 +200,7 @@ export async function runPaymentNoticeSweep(
   const fineAmount = await loadFineAmounts(svc, yearId, people);
 
   const plan = planSweep({
-    now, cfg: { ...cfg, enabledAt: cfg.enabledAt }, paid, overridden, unpaidBills, fineAmount, notices,
+    now, cfg: { ...cfg, enabledAt: cfg.enabledAt }, paid, overridden, unpaidBills, fineAmount, notices, alreadyFined,
   });
 
   out.paid = plan.markPaid.length;
@@ -179,12 +209,26 @@ export async function runPaymentNoticeSweep(
   out.reminded = plan.remind.length;
   if (dryRun) {
     out.fined = plan.fine.length;
+    out.closedAlreadyFined = plan.closeFined.length;
     return out;
   }
 
   // 1. paid / cancelled
   await updateStatus(svc, plan.markPaid, 'paid', nowIso);
   await updateStatus(svc, plan.cancel, 'cancelled', nowIso);
+
+  // 1b. already fined (e.g. by a bus inspection): close the notice against the
+  // existing fine. No createFines, no notification — the learner was already
+  // told about that fine when it was raised.
+  for (const c of plan.closeFined) {
+    const { error } = await svc
+      .from('tms_fee_payment_notice')
+      .update({ status: 'fined', fine_id: c.fine_id, updated_at: nowIso })
+      .eq('id', c.notice_id)
+      .eq('status', 'running');
+    if (error) { console.error('[payment-notice] close-already-fined failed', c.notice_id, error.message); out.errors++; continue; }
+    out.closedAlreadyFined++;
+  }
 
   // 2. open (ignoreDuplicates: an overlapping run that already opened one is a no-op)
   const opened: Array<{ id: string; person_id: string; expires_at: string }> = [];
@@ -223,10 +267,9 @@ export async function runPaymentNoticeSweep(
   // 4. fine
   for (const f of plan.fine) {
     try {
-      // Shared with Bus Inspection fines (lib/route-check/fines.ts): the unique
-      // idempotency key makes a second maintenance-unpaid fine for the same
-      // learner and year impossible, whichever path fires first.
-      const key = `maintenance-unpaid:${yearId}`;
+      // Learners already holding the fine were routed to closeFined above;
+      // createFines' 23505 duplicate path is only a backstop for a genuine race.
+      const key = fineBaseKey;
       const res = await d.createFines(svc, {
         transportYearId: yearId,
         personIds: [f.person_id],

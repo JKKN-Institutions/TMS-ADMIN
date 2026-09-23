@@ -111,4 +111,69 @@ describe('runPaymentNoticeSweep', () => {
     expect(d.notify).not.toHaveBeenCalled();
     expect(svc.calls.some((c) => c.ops.some(([op]) => op === 'upsert' || op === 'update' || op === 'insert'))).toBe(false);
   });
+
+  it('reads existing maintenance-unpaid fines for the year with a key prefix filter', async () => {
+    const svc = base();
+    await runPaymentNoticeSweep(svc as never, { now: NOW, deps: deps() });
+    const read = svc.calls.find((c) => c.table === 'tms_fee_fine' && c.ops.some(([op]) => op === 'like'));
+    expect(read).toBeTruthy();
+    expect(read!.ops).toContainEqual(['eq', ['transport_year_id', 'Y']]);
+    expect(read!.ops).toContainEqual(['like', ['idempotency_key', 'maintenance-unpaid:Y:%']]);
+  });
+
+  it('does not open a notice for a learner already fined by an inspection', async () => {
+    const svc = base({
+      tms_fee_bill: [{ id: 'BILL', person_id: 'A', term_no: 1, created_at: '2026-07-01T00:00:00.000Z', status: 'generated' }],
+      tms_fee_fine: [{ id: 'F-INSPECTION', person_id: 'A', idempotency_key: 'maintenance-unpaid:Y:A' }],
+    });
+    const d = deps();
+    const out = await runPaymentNoticeSweep(svc as never, { now: NOW, deps: d });
+    expect(out.opened).toBe(0);
+    expect(svc.calls.some((c) => c.table === 'tms_fee_payment_notice' && c.ops.some(([op]) => op === 'upsert'))).toBe(false);
+    expect(d.notify).not.toHaveBeenCalled();
+  });
+
+  it('closes a running notice against an existing inspection fine WITHOUT calling createFines or notifying', async () => {
+    const svc = base({
+      tms_fee_payment_notice: [{
+        id: 'N', person_id: 'A', status: 'running', started_at: '2026-09-21T06:00:00.000Z',
+        expires_at: '2026-09-23T05:00:00.000Z', reminder_sent_at: '2026-09-23T00:00:00.000Z', source_bill_id: 'BILL',
+      }],
+      tms_fee_fine: [{ id: 'F-INSPECTION', person_id: 'A', idempotency_key: 'maintenance-unpaid:Y:A' }],
+    });
+    const d = deps();
+    const out = await runPaymentNoticeSweep(svc as never, { now: NOW, deps: d });
+    expect(d.createFines).not.toHaveBeenCalled();
+    expect(d.notify).not.toHaveBeenCalled();
+    expect(out.closedAlreadyFined).toBe(1);
+    expect(out.fined).toBe(0);
+    const upd = svc.calls.find((c) => c.table === 'tms_fee_payment_notice' && c.ops.some(([op, v]) =>
+      op === 'update' && (v[0] as { status?: string; fine_id?: string }).status === 'fined'
+      && (v[0] as { fine_id?: string }).fine_id === 'F-INSPECTION'));
+    expect(upd).toBeTruthy();
+    expect(upd!.ops).toContainEqual(['eq', ['id', 'N']]);
+    expect(upd!.ops).toContainEqual(['eq', ['status', 'running']]);
+  });
+
+  it('dry run counts already-fined closures but writes nothing', async () => {
+    const svc = base({
+      tms_fee_payment_notice: [{
+        id: 'N', person_id: 'A', status: 'running', started_at: '2026-09-21T06:00:00.000Z',
+        expires_at: '2026-09-23T05:00:00.000Z', reminder_sent_at: null, source_bill_id: 'BILL',
+      }],
+      tms_fee_fine: [{ id: 'F-INSPECTION', person_id: 'A', idempotency_key: 'maintenance-unpaid:Y:A' }],
+    });
+    const d = deps();
+    const out = await runPaymentNoticeSweep(svc as never, { now: NOW, deps: d, dryRun: true });
+    expect(out.closedAlreadyFined).toBe(1);
+    expect(svc.calls.some((c) => c.ops.some(([op]) => op === 'upsert' || op === 'update' || op === 'insert'))).toBe(false);
+  });
+
+  it('fails loudly when the existing-fine read errors', async () => {
+    const svc = makeFakeSupabase({
+      admin_settings: SETTINGS, tms_transport_year: [{ id: 'Y' }], tms_fee_bill: [], tms_fee_override: [],
+      tms_fee_payment_notice: [], learners_profiles: [], tms_fine_stop_rate: [], tms_fee_fine: [],
+    }, { errors: { tms_fee_fine: { message: 'boom' } } });
+    await expect(runPaymentNoticeSweep(svc as never, { now: NOW, deps: deps() })).rejects.toThrow(/boom/);
+  });
 });
