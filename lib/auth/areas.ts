@@ -9,6 +9,9 @@ export function resolveArea(pathname: string): Area {
   if (pathname === '/student' || pathname.startsWith('/student/') || pathname.startsWith('/api/student/')) return 'student';
   if (pathname === '/driver' || pathname.startsWith('/driver/') || pathname.startsWith('/api/driver/')) return 'driver';
   if (pathname === '/boarding' || pathname.startsWith('/boarding/') || pathname.startsWith('/api/boarding/')) return 'boarding';
+  // Printed bus stickers (/i/<REG>) belong to the staff app: inspectors are
+  // admitted there by their assignment, not by an admin permission.
+  if (pathname.startsWith('/i/')) return 'boarding';
   return 'admin';
 }
 

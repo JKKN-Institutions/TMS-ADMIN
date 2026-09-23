@@ -1,22 +1,6 @@
 import { CHECK_OUTCOME_META } from '@/lib/route-check/outcome-meta';
 import type { CheckLearnerRow } from '@/lib/route-check/types';
-
-function FeeChip({ row }: { row: CheckLearnerRow }) {
-  if (row.feeState === 'paid') {
-    return <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/40 dark:text-green-300">Paid</span>;
-  }
-  if (row.feeState === 'unpaid') {
-    return (
-      <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
-        Unpaid{row.feeOwed != null ? ` ₹${row.feeOwed}` : ''}
-      </span>
-    );
-  }
-  if (row.feeState === 'none') {
-    return <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">No bill</span>;
-  }
-  return <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">—</span>;
-}
+import { FeeMarkChip, BookingMarkChip } from './marks';
 
 function LearnerRow({ row }: { row: CheckLearnerRow }) {
   const outcomeLabel = row.checkOutcome ? CHECK_OUTCOME_META[row.checkOutcome].label : undefined;
@@ -45,12 +29,11 @@ function LearnerRow({ row }: { row: CheckLearnerRow }) {
             From bus {row.otherBus?.routeNumber ?? '—'}
           </span>
         )}
-        {row.booked ? (
-          <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/40 dark:text-green-300">Booked</span>
-        ) : (
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">No booking</span>
+        <BookingMarkChip mark={row.bookingMark} />
+        <FeeMarkChip mark={row.feeMark} />
+        {row.feeMark === 'unpaid' && row.feeOwed != null && (
+          <span className="shrink-0 text-xs text-red-700 dark:text-red-300">₹{row.feeOwed}</span>
         )}
-        <FeeChip row={row} />
       </span>
     </li>
   );
