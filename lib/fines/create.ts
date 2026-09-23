@@ -18,6 +18,15 @@ type Svc = SupabaseClient;
 
 const CHUNK = 150; // ~500+ ids in one .in() returns HTTP 400 from the gateway
 
+export type FineKind = 'maintenance_unpaid' | 'no_booking';
+
+const PUSH_BODY: Record<FineKind, (amount: number, reason: string, due: string) => string> = {
+  maintenance_unpaid: (a, r, d) =>
+    `A transport fee of ₹${a.toLocaleString('en-IN')} has been added to your account because the transport maintenance fee was not paid (${r}). Due ${d}.`,
+  no_booking: (a, r, d) =>
+    `A transport fee of ₹${a.toLocaleString('en-IN')} has been added to your account because you travelled without booking the bus (${r}). Due ${d}.`,
+};
+
 export interface FineCandidate {
   person_id: string;
   person_name: string;
@@ -42,6 +51,10 @@ export interface CreateFinesInput {
   actorId: string | null;
   /** person_id -> the tms_fee_bill row that was ticked, for provenance. */
   sourceBillByPerson?: Record<string, string>;
+  /** Server-resolved flat amount (e.g. from the Bus Inspection fine setting). Skips the stop sheet. */
+  fixedAmount?: number;
+  /** Chooses the learner push text. Default 'maintenance_unpaid'. */
+  kind?: FineKind;
 }
 
 export interface CreateFinesResult {
@@ -79,6 +92,12 @@ async function loadCandidates(
     if (error) throw new Error(`Failed to load learners: ${error.message}`);
     learners.push(...((data ?? []) as LearnerRow[]));
   }
+  // The test double doesn't apply .in() filtering (real Postgres does), and a
+  // caller may chunk the same underlying rows repeatedly — keep only the ids
+  // actually requested, deduped, so behaviour matches the real client either way.
+  const wanted = new Set(opts.personIds);
+  const seen = new Set<string>();
+  const filteredLearners = learners.filter((l) => wanted.has(l.id) && !seen.has(l.id) && seen.add(l.id));
 
   const { data: rates, error: rateErr } = await svc
     .from('tms_fine_stop_rate')
@@ -94,7 +113,7 @@ async function loadCandidates(
     ])
   );
 
-  const stopIds = [...new Set(learners.map((l) => l.transport_stop_id).filter(Boolean))] as string[];
+  const stopIds = [...new Set(filteredLearners.map((l) => l.transport_stop_id).filter(Boolean))] as string[];
   const stopById = new Map<string, { stop_name: string; route_id: string | null }>();
   const routeNumberById = new Map<string, string | null>();
   if (stopIds.length) {
@@ -127,7 +146,7 @@ async function loadCandidates(
     }
   }
 
-  return learners.map((l) => {
+  return filteredLearners.map((l) => {
     const res = resolveFine({ transport_stop_id: l.transport_stop_id }, rateByStop);
     const stop = l.transport_stop_id ? stopById.get(l.transport_stop_id) : undefined;
     return {
@@ -156,10 +175,17 @@ export async function previewFines(
 }
 
 export async function createFines(svc: Svc, input: CreateFinesInput): Promise<CreateFinesResult> {
-  const candidates = await loadCandidates(svc, {
+  if (input.fixedAmount !== undefined && !(Number.isInteger(input.fixedAmount) && input.fixedAmount > 0)) {
+    throw new Error('createFines: fixedAmount must be a positive whole number');
+  }
+  const loaded = await loadCandidates(svc, {
     transportYearId: input.transportYearId,
     personIds: input.personIds,
   });
+  // A fixed amount replaces the stop sheet entirely: no_stop / no_stop_rate do not apply.
+  const candidates = input.fixedAmount !== undefined
+    ? loaded.map((c) => ({ ...c, amount: input.fixedAmount as number, skip_reason: null }))
+    : loaded;
 
   // Throws MissingBillingCategoryError. Deliberately NOT caught here: writing a
   // batch of uncategorised fines is worse than raising 500 to the caller.
@@ -261,7 +287,7 @@ export async function createFines(svc: Svc, input: CreateFinesInput): Promise<Cr
         learnerId: c.person_id,
         actorId: input.actorId ?? '',
         title: 'Transport fee charged',
-        body: `A transport fee of ₹${c.amount.toLocaleString('en-IN')} has been added to your account because the transport maintenance fee was not paid (${input.reason}). Due ${input.dueDate}.`,
+        body: PUSH_BODY[input.kind ?? 'maintenance_unpaid'](c.amount, input.reason, input.dueDate),
         category: 'fees',
         url: '/student/fees',
       });
