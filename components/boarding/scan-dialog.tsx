@@ -118,13 +118,13 @@ const FEE_ICON: Record<FeeTone, string> = { paid: '✓ ', overdue: '✗ ', due: 
 function FeeBadgeView({ fees }: { fees: ScanResult['fees'] }) {
   const badge = feeBadge(fees);
   if (!badge) return null;
-  // Money owed gets a full-width red panel rather than the small pill. The
+  // Money owed is shown as red text, not a filled panel or the small pill. The
   // attendance mark is ALREADY written by the time this renders — fees never
   // block a scan — so this is the staffer's cue to tell the learner, not a
   // refusal. 'due' is red too: unpaid is unpaid, whatever the due date says.
   if (badge.tone === 'overdue' || badge.tone === 'due') {
     return (
-      <div className="rounded-md border-2 border-red-500 bg-red-50 px-3 py-2 text-red-800 dark:bg-red-950/40 dark:text-red-200">
+      <div className="text-red-700 dark:text-red-400">
         <p className="text-sm font-semibold">✗ Fees not paid</p>
         {badge.detail && <p className="mt-0.5 break-words text-xs">{badge.detail}</p>}
       </div>
