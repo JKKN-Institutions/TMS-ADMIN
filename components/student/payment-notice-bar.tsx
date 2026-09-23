@@ -32,10 +32,10 @@ export function PaymentNoticeBar({ variant = 'strip' }: { variant?: 'strip' | 'c
   const state = barState(notice, left);
   if (state === 'hidden' || !notice) return null;
 
-  const red = state === 'urgent' || state === 'processing' || state === 'fined';
-  const tone = red
-    ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200'
-    : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200';
+  // Always an alert: solid red in every state. The icon pulses once the
+  // urgent window starts so the last hours still read as more pressing.
+  const tone = 'border-red-700 bg-red-600 text-white dark:border-red-900 dark:bg-red-800';
+  const iconPulse = state === 'urgent' || state === 'processing' ? 'animate-pulse' : '';
   const Icon = state === 'fined' ? AlertTriangle : Timer;
 
   const message =
@@ -53,7 +53,7 @@ export function PaymentNoticeBar({ variant = 'strip' }: { variant?: 'strip' | 'c
     return (
       <div className={`rounded-xl border p-4 ${tone}`}>
         <div className="flex min-w-0 items-start gap-3">
-          <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+          <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${iconPulse}`} />
           <div className="min-w-0 space-y-1">
             {message ? (
               <p className="font-medium">{message}</p>
@@ -73,7 +73,7 @@ export function PaymentNoticeBar({ variant = 'strip' }: { variant?: 'strip' | 'c
   return (
     <div className={`border-b px-4 py-2 text-sm ${tone}`}>
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-1">
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className={`h-4 w-4 shrink-0 ${iconPulse}`} />
         <p className="min-w-0 flex-1">
           {message ?? (
             <>
@@ -83,7 +83,7 @@ export function PaymentNoticeBar({ variant = 'strip' }: { variant?: 'strip' | 'c
             </>
           )}
         </p>
-        <Link href="/student/fees" className="shrink-0 rounded-md bg-white/70 px-2.5 py-1 font-medium underline-offset-2 hover:underline dark:bg-black/20">
+        <Link href="/student/fees" className="inline-flex h-11 shrink-0 items-center rounded-md bg-green-600 px-4 font-semibold text-white shadow-sm ring-1 ring-white/40 transition-colors hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white md:h-7">
           {state === 'fined' ? 'View fees' : 'Pay now'}
         </Link>
       </div>
