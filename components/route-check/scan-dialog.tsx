@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { BusScanner } from '@/components/inspections/bus-scanner';
+import { BusScanner } from '@/components/scanner/bus-scanner';
 import { classifyCard } from '@/lib/route-check/card';
 import { CHECK_OUTCOME_META } from '@/lib/route-check/outcome-meta';
 import type { ScanResponse, CheckPersonEntry } from '@/lib/route-check/types';

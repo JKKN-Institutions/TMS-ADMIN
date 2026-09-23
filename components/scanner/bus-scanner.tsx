@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera } from 'lucide-react';
 import { classifyCameraError, cameraErrorMessage, shouldTryOtherCameras, pickBackCamera, isFreshCapture } from '@/lib/boarding/camera-errors';
-import { parseStickerScan } from '@/lib/inspections/sticker-code';
+import { parseStickerScan } from '@/lib/vehicles/sticker-code';
 
 const DEFAULT_FORMATS = [Html5QrcodeSupportedFormats.QR_CODE];
 const readerOptions = (formats: Html5QrcodeSupportedFormats[]) => {

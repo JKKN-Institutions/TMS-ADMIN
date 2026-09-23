@@ -3,7 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { requirePerm } from '@/lib/inspections/server';
-import { normalizeReg, parseStickerScan } from '@/lib/inspections/sticker-code';
+import { normalizeReg, parseStickerScan } from '@/lib/vehicles/sticker-code';
 
 async function resolveSticker(request: NextRequest, auth: AuthContext) {
   try {

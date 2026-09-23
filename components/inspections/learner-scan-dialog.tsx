@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { BusScanner } from '@/components/inspections/bus-scanner';
+import { BusScanner } from '@/components/scanner/bus-scanner';
 import { classifyScan } from '@/lib/boarding/scan-resolve';
 import { OUTCOME_META } from '@/lib/inspections/outcome-meta';
 import { scanLearner, type LearnerScanResult } from '@/app/(admin)/inspections/inspection-api';

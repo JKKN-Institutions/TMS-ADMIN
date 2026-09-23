@@ -1,4 +1,3 @@
-import type { AuthContext } from '@/lib/api/with-auth';
 import type { createServiceRoleClient } from '@/lib/supabase/server';
 import { parseIntervalDays } from './due';
 
@@ -6,15 +5,7 @@ type Svc = ReturnType<typeof createServiceRoleClient>;
 
 export const INSPECTION_PHOTO_BUCKET = 'tms-inspection-photos';
 
-/** True when the user holds ANY of the permissions (super admins always). */
-export async function requirePerm(auth: AuthContext, ...permissions: string[]): Promise<boolean> {
-  if (auth.isSuperAdmin) return true;
-  for (const p of permissions) {
-    const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: p });
-    if (data) return true;
-  }
-  return false;
-}
+export { requirePerm } from '@/lib/auth/require-perm';
 
 export async function loadIntervalDays(svc: Svc): Promise<number> {
   const { data } = await svc.from('admin_settings').select('settings_data').eq('setting_type', 'inspection').maybeSingle();

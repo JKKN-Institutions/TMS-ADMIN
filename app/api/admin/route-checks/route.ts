@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { requirePerm } from '@/lib/inspections/server';
+import { requirePerm } from '@/lib/auth/require-perm';
 import { DATE_RE, UUID_RE, selectIn } from '@/lib/route-check/admin';
 
 const LIMIT = 200;

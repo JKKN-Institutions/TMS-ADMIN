@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { DetailPageHeader } from '@/components/ui/detail-view';
-import { BusScanner } from '@/components/inspections/bus-scanner';
+import { BusScanner } from '@/components/scanner/bus-scanner';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { fetchDashboard, resolveSticker, startInspection, currentPosition } from '../inspection-api';

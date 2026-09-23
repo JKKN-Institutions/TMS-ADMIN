@@ -6,7 +6,7 @@
 import type { AuthContext } from '@/lib/api/with-auth';
 import type { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { requirePerm } from '@/lib/inspections/server';
+import { requirePerm } from '@/lib/auth/require-perm';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 

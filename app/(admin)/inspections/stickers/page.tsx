@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import { Printer } from 'lucide-react';
 import { DetailPageHeader } from '@/components/ui/detail-view';
-import { stickerUrl, normalizeReg, STICKER_ORIGIN } from '@/lib/inspections/sticker-code';
+import { stickerUrl, normalizeReg, STICKER_ORIGIN } from '@/lib/vehicles/sticker-code';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { fetchDashboard } from '../inspection-api';
