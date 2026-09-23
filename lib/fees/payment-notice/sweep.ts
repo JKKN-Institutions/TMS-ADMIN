@@ -223,7 +223,10 @@ export async function runPaymentNoticeSweep(
   // 4. fine
   for (const f of plan.fine) {
     try {
-      const key = `payment-notice:${f.notice_id}`;
+      // Shared with Bus Inspection fines (lib/route-check/fines.ts): the unique
+      // idempotency key makes a second maintenance-unpaid fine for the same
+      // learner and year impossible, whichever path fires first.
+      const key = `maintenance-unpaid:${yearId}`;
       const res = await d.createFines(svc, {
         transportYearId: yearId,
         personIds: [f.person_id],
