@@ -63,6 +63,8 @@ export interface CheckListRow {
   };
   personCount: number;
   issueCount: number;
+  /** People on this check with a fee or booking fine. */
+  fineCount: number;
   startedAt: string;
   submittedAt: string | null;
 }

@@ -56,7 +56,7 @@ export function ChecksTab() {
       {isError && <p className="text-sm text-red-600 dark:text-red-400">{(error as Error).message}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full min-w-[860px] text-sm">
+        <table className="w-full min-w-[940px] text-sm">
           <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
             <tr>
               <th className="px-4 py-3">Date</th>
@@ -68,20 +68,21 @@ export function ChecksTab() {
               <th className="px-4 py-3 text-right">Unpaid</th>
               <th className="px-4 py-3 text-right">Without booking</th>
               <th className="px-4 py-3 text-right">Issues</th>
+              <th className="px-4 py-3 text-right">Fines</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {isLoading &&
               Array.from({ length: 3 }, (_, i) => (
                 <tr key={i}>
-                  <td className="px-4 py-3" colSpan={9}>
+                  <td className="px-4 py-3" colSpan={10}>
                     <div className="h-4 w-full animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
                   </td>
                 </tr>
               ))}
             {!isLoading && rows.length === 0 && (
               <tr>
-                <td className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={9}>
+                <td className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={10}>
                   No checks in this range.
                 </td>
               </tr>
@@ -108,6 +109,13 @@ export function ChecksTab() {
                 <td className="whitespace-nowrap px-4 py-3 text-right text-gray-700 dark:text-gray-300">{c.counts.unpaid ?? '—'}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-gray-700 dark:text-gray-300">{c.counts.withoutBooking ?? '—'}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-gray-700 dark:text-gray-300">{c.issueCount}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-right">
+                  {c.fineCount > 0 ? (
+                    <span className="font-semibold text-red-700 dark:text-red-300">{c.fineCount}</span>
+                  ) : (
+                    <span className="text-gray-400 dark:text-gray-500">0</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
