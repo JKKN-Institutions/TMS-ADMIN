@@ -13,7 +13,6 @@ interface VehicleRow {
   id: string;
   registration_number: string;
   status: string | null;
-  route_number?: string | null;
 }
 
 async function fetchVehicles(): Promise<VehicleRow[]> {
@@ -89,7 +88,6 @@ export default function InspectionStickersPage() {
             <p className="text-xs font-semibold uppercase tracking-wide">JKKN Transport · Bus Inspection</p>
             <QRCodeSVG value={stickerUrl(STICKER_ORIGIN, v.registration_number)} size={180} level="M" marginSize={2} />
             <p className="text-2xl font-extrabold tracking-wider">{normalizeReg(v.registration_number)}</p>
-            <p className="text-xs">{v.route_number ?? ''}</p>
           </div>
         ))}
       </div>
