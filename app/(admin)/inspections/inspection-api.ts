@@ -1,85 +1,126 @@
-import type { DashboardData, InspectionDetail, InspectionOverview } from '@/lib/inspections/types';
-import type { InspectionResult, ItemResult } from '@/lib/inspections/result';
-import type { Leg, LearnerOutcome } from '@/lib/inspections/overview';
-import type { RosterRow } from '@/lib/booking/roster';
+// Client fetchers for the Bus Inspection admin pages (Inspectors / Checks / report).
+// Wraps the route-check admin APIs. Matches their REAL response shapes — see
+// app/api/admin/route-checkers/route.ts, .../people/route.ts, app/api/admin/route-checks/**
+// and app/api/admin/fines/[id]/cancel/route.ts.
+import type { CheckPersonEntry } from '@/lib/route-check/types';
 
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
-  return body as T;
+  if (!res.ok) throw new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
+  return (body as { data: T }).data;
 }
 
-export async function fetchDashboard(): Promise<DashboardData> {
-  return (await json<{ data: DashboardData }>(await fetch('/api/admin/inspections'))).data;
+export interface InspectorRow {
+  id: string;
+  checkerEmail: string;
+  loginEmail: string | null;
+  unverifiedLogin: boolean;
+  checkerName: string | null;
+  designation: string | null;
+  routeId: string;
+  routeNumber: string | null;
+  routeName: string | null;
+  routeStatus: string | null;
+  assignedAt: string;
+  notes: string | null;
 }
-export async function resolveSticker(code: string) {
-  const r = await fetch(`/api/admin/inspections/resolve-sticker?code=${encodeURIComponent(code)}`);
-  return (await json<{ data: { vehicleId: string; registration: string; status: string } }>(r)).data;
+
+export interface PersonHit {
+  source: 'staff' | 'profile';
+  name: string;
+  designation: string | null;
+  collegeEmail: string | null;
+  email: string | null;
+  staffId: string | null;
+  profileId: string | null;
+  hasLogin: boolean;
+  loginEmail: string | null;
 }
-export async function startInspection(vehicleId: string, pos: { lat: number; lng: number } | null) {
-  const r = await fetch('/api/admin/inspections/start', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ vehicleId, lat: pos?.lat ?? null, lng: pos?.lng ?? null }),
-  });
-  return (await json<{ data: { inspectionId: string; resumed: boolean } }>(r)).data;
+
+export interface CheckListRow {
+  id: string;
+  routeId: string;
+  routeNumber: string | null;
+  routeName: string | null;
+  vehicleId: string | null;
+  busRegistration: string | null;
+  checkerId: string;
+  checkerName: string | null;
+  checkerEmail: string | null;
+  checkDate: string;
+  leg: 'onward' | 'return';
+  status: 'draft' | 'submitted';
+  headcount: number | null;
+  unknownCount: number | null;
+  counts: {
+    registered: number | null;
+    booked: number | null;
+    present: number | null;
+    unpaid: number | null;
+    withoutBooking: number | null;
+    notOnRoute: number | null;
+  };
+  personCount: number;
+  issueCount: number;
+  startedAt: string;
+  submittedAt: string | null;
 }
-export async function fetchInspection(id: string): Promise<InspectionDetail> {
-  return (await json<{ data: InspectionDetail }>(await fetch(`/api/admin/inspections/${id}`))).data;
+
+export interface CheckReport {
+  id: string;
+  status: 'draft' | 'submitted';
+  checkDate: string;
+  leg: 'onward' | 'return';
+  route: { id: string; routeNumber: string | null; routeName: string | null } | null;
+  bus: { id: string; registration: string | null; model: string | null } | null;
+  checker: { id: string; name: string | null; email: string | null };
+  headcount: number | null;
+  unknownCount: number | null;
+  notes: string | null;
+  counts: {
+    registered: number | null;
+    booked: number | null;
+    present: number | null;
+    unpaid: number | null;
+    withoutBooking: number | null;
+    notOnRoute: number | null;
+  };
+  startedAt: string;
+  submittedAt: string | null;
+  people: CheckPersonEntry[];
 }
-export async function fetchOverview(id: string, leg: Leg): Promise<InspectionOverview> {
-  return (await json<{ data: InspectionOverview }>(await fetch(`/api/admin/inspections/${id}/overview?leg=${leg}`))).data;
-}
-export interface RosterData {
-  rows: RosterRow[];
-  counts: { total: number; present: number; absent: number; unmarked: number; auto: number };
-}
-/** The same roster the Attendance page and boarding staff screen read (view only here). */
-export async function fetchRoster(routeId: string, date: string, leg: Leg): Promise<RosterData> {
-  const q = new URLSearchParams({ routeId, date, direction: leg });
-  const { data } = await json<{ data: RosterData }>(await fetch(`/api/admin/attendance/roster?${q}`));
-  if (!data || !Array.isArray(data.rows) || !data.counts) throw new Error('Could not read the rider roster');
-  return { rows: data.rows, counts: data.counts };
-}
-export async function saveHeadcount(id: string, leg: Leg, counted: number | null) {
-  const r = await fetch(`/api/admin/inspections/${id}/headcount`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leg, counted }),
-  });
-  return (await json<{ data: { counted: number | null; booked: number | null; boarded: number | null } }>(r)).data;
-}
-export interface LearnerScanResult {
-  outcome: LearnerOutcome; name: string | null; roll: string | null;
-  onThisRoute: boolean; bookedToday: boolean; boardedToday: boolean; feesOk: boolean; feeLabel: string | null;
-}
-/** Verify-only JKKN ID check. Camera reads only — a typed card number is refused server-side. */
-export async function scanLearner(id: string, code: string): Promise<LearnerScanResult> {
-  const r = await fetch(`/api/admin/inspections/${id}/learner-scan`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, source: 'camera' }),
-  });
-  return (await json<{ data: LearnerScanResult }>(r)).data;
-}
-export async function saveItems(id: string, items: { id: string; result: ItemResult | null; note: string | null; photoPaths: string[] }[]) {
-  await json(await fetch(`/api/admin/inspections/${id}/items`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
-  }));
-}
-export async function submitInspection(id: string, notes: string | null) {
-  const r = await fetch(`/api/admin/inspections/${id}/submit`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes }),
-  });
-  return (await json<{ data: { result: InspectionResult } }>(r)).data;
-}
-export async function uploadPhoto(file: File): Promise<string> {
-  const fd = new FormData(); fd.append('file', file);
-  return (await json<{ path: string }>(await fetch('/api/admin/inspections/photos', { method: 'POST', body: fd }))).path;
-}
-/** Best-effort browser location; null when denied/unavailable (never throws). */
-export function currentPosition(timeoutMs = 8000): Promise<{ lat: number; lng: number } | null> {
-  return new Promise((resolve) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60_000 },
-    );
-  });
-}
+
+export const fetchInspectors = () => fetch('/api/admin/route-checkers').then((r) => json<InspectorRow[]>(r));
+
+export const searchPeople = (q: string) =>
+  fetch(`/api/admin/route-checkers/people?q=${encodeURIComponent(q)}`).then((r) => json<PersonHit[]>(r));
+
+export const assignInspector = (body: {
+  email?: string | null;
+  staffId?: string | null;
+  profileId?: string | null;
+  routeIds: string[];
+  notes?: string;
+}) =>
+  fetch('/api/admin/route-checkers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<{ created: { id: string; routeId: string; routeNumber: string | null }[]; skipped: { routeId: string; routeNumber: string | null; reason: string }[] }>(r));
+
+export const unassignInspector = (id: string) =>
+  fetch(`/api/admin/route-checkers?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).then((r) => json<unknown>(r));
+
+export const fetchChecks = (p: { from: string; to: string; routeId?: string }) =>
+  fetch(`/api/admin/route-checks?from=${p.from}&to=${p.to}${p.routeId ? `&routeId=${p.routeId}` : ''}`).then((r) =>
+    json<CheckListRow[]>(r)
+  );
+
+export const fetchCheck = (id: string) => fetch(`/api/admin/route-checks/${id}`).then((r) => json<CheckReport>(r));
+
+export const waiveFine = (fineId: string, reason: string) =>
+  fetch(`/api/admin/fines/${fineId}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  }).then((r) => json<{ id: string }>(r));

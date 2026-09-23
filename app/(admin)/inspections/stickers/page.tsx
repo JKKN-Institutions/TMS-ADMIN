@@ -8,13 +8,26 @@ import { DetailPageHeader } from '@/components/ui/detail-view';
 import { stickerUrl, normalizeReg, STICKER_ORIGIN } from '@/lib/vehicles/sticker-code';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { fetchDashboard } from '../inspection-api';
+
+interface VehicleRow {
+  id: string;
+  registration_number: string;
+  status: string | null;
+  route_number?: string | null;
+}
+
+async function fetchVehicles(): Promise<VehicleRow[]> {
+  const res = await fetch('/api/admin/vehicles');
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? 'Failed to load vehicles');
+  return (body.data ?? []) as VehicleRow[];
+}
 
 export default function InspectionStickersPage() {
   const { can, isLoading: permsLoading } = usePermissions();
-  const canManage = can(TMS_PERMISSIONS.INSPECTION_MANAGE);
+  const canManage = can(TMS_PERMISSIONS.ROUTE_CHECK_MANAGE);
 
-  const { data } = useQuery({ queryKey: ['inspections', 'dashboard'], queryFn: fetchDashboard, enabled: canManage });
+  const { data } = useQuery({ queryKey: ['vehicles-for-stickers'], queryFn: fetchVehicles, enabled: canManage });
   const [only, setOnly] = useState<string>('all');
   // Computed after mount so the server-rendered markup (which has no
   // window.location) never mismatches the client's first paint.
@@ -30,7 +43,8 @@ export default function InspectionStickersPage() {
     );
   }
 
-  const buses = (data?.buses ?? []).filter((b) => only === 'all' || b.vehicleId === only);
+  const vehicles = data ?? [];
+  const buses = vehicles.filter((v) => only === 'all' || v.id === only);
 
   return (
     <div className="space-y-6">
@@ -45,24 +59,37 @@ export default function InspectionStickersPage() {
           backHref="/inspections"
           title="Bus QR stickers"
           subtitle="Stick one inside each bus near the door. Scanning opens that bus's inspection."
-          actions={<>
-            <select value={only} onChange={(e) => setOnly(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900">
-              <option value="all">All buses</option>
-              {data?.buses.map((b) => <option key={b.vehicleId} value={b.vehicleId}>{b.registration}</option>)}
-            </select>
-            <button onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700">
-              <Printer className="h-4 w-4" /> Print
-            </button>
-          </>}
+          actions={
+            <>
+              <select
+                value={only}
+                onChange={(e) => setOnly(e.target.value)}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+              >
+                <option value="all">All buses</option>
+                {vehicles.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.registration_number}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+              >
+                <Printer className="h-4 w-4" /> Print
+              </button>
+            </>
+          }
         />
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 print:grid-cols-2">
-        {buses.map((b) => (
-          <div key={b.vehicleId} className="flex break-inside-avoid flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-400 bg-white p-5 text-black">
+        {buses.map((v) => (
+          <div key={v.id} className="flex break-inside-avoid flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-400 bg-white p-5 text-black">
             <p className="text-xs font-semibold uppercase tracking-wide">JKKN Transport · Bus Inspection</p>
-            <QRCodeSVG value={stickerUrl(STICKER_ORIGIN, b.registration)} size={180} level="M" marginSize={2} />
-            <p className="text-2xl font-extrabold tracking-wider">{normalizeReg(b.registration)}</p>
-            <p className="text-xs">{b.routeLabel ?? ''}</p>
+            <QRCodeSVG value={stickerUrl(STICKER_ORIGIN, v.registration_number)} size={180} level="M" marginSize={2} />
+            <p className="text-2xl font-extrabold tracking-wider">{normalizeReg(v.registration_number)}</p>
+            <p className="text-xs">{v.route_number ?? ''}</p>
           </div>
         ))}
       </div>

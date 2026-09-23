@@ -25,6 +25,10 @@ type PersonRow = {
   fee_state: string | null;
   notes: string | null;
   created_at: string;
+  booking_state: string | null;
+  fee_fine_id: string | null;
+  booking_fine_id: string | null;
+  fine_note: string | null;
 };
 
 // GET: one route check — header, counts, route/bus labels and every person line.
@@ -52,7 +56,7 @@ async function getReport(request: NextRequest, auth: AuthContext) {
       svc.from('profiles').select('id, full_name, email').eq('id', check.checker_id).maybeSingle(),
       svc
         .from('tms_route_check_person')
-        .select('id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at')
+        .select('id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at, booking_state, fee_fine_id, booking_fine_id, fine_note')
         .eq('check_id', id)
         .order('created_at', { ascending: true }),
     ]);
@@ -110,6 +114,10 @@ async function getReport(request: NextRequest, auth: AuthContext) {
         feeState: p.fee_state,
         notes: p.notes,
         createdAt: p.created_at,
+        bookingState: p.booking_state,
+        feeFineId: p.fee_fine_id,
+        bookingFineId: p.booking_fine_id,
+        fineNote: p.fine_note,
       };
     });
 
