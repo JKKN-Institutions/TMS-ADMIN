@@ -5,6 +5,7 @@ import { logActivity } from '@/lib/activity/log';
 import { UUID_RE } from '@/lib/route-check/admin';
 import { checkIdFromUrl, loadCheckForUser } from '@/lib/route-check/check-access';
 import { buildCheckView } from '@/lib/route-check/view';
+import { raiseCheckFines } from '@/lib/route-check/fines';
 
 /** POST — snapshot the counts and mark the draft submitted (guarded: 0 rows updated → 409). */
 async function submit(request: NextRequest, auth: AuthContext) {
@@ -28,7 +29,15 @@ async function submit(request: NextRequest, auth: AuthContext) {
       description: `Submitted route check for route ${view.route.routeNumber ?? view.route.id}: ${c.checked} checked, ${c.unpaid} unpaid, ${c.withoutBooking} without booking`,
       metadata: { routeId: view.route.id, leg: view.check.leg, date: view.check.checkDate, counts: c },
     });
-    return NextResponse.json({ success: true, data: { counts: c } });
+    // Fines run only AFTER the guarded draft→submitted update succeeded, so a
+    // double tap cannot fine twice (and the idempotency keys would dedupe anyway).
+    let fines = null;
+    try {
+      fines = await raiseCheckFines(svc, { id, route_id: load.check.route_id, check_date: load.check.check_date }, auth.userId);
+    } catch (e) {
+      console.error('route-check submit: fines failed (check stays submitted):', e);
+    }
+    return NextResponse.json({ success: true, data: { counts: c, fines } });
   } catch (e) {
     console.error('route-check submit error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

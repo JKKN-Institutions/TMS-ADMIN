@@ -1,4 +1,5 @@
 import type { CheckView, MyCheckRoute, ScanResponse, CheckLeg, CheckCounts } from '@/lib/route-check/types';
+import type { CheckFineSummary } from '@/lib/route-check/fines';
 
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
@@ -27,6 +28,6 @@ export async function pickCandidate(checkId: string, pick: { personKind: 'learne
 export async function removeEntry(checkId: string, personId: string): Promise<void> {
   await json(await fetch(`/api/boarding/route-check/${checkId}/person?personId=${encodeURIComponent(personId)}`, { method: 'DELETE' }));
 }
-export async function submitCheck(checkId: string): Promise<{ counts: CheckCounts }> {
-  return (await json<{ data: { counts: CheckCounts } }>(await post(`/api/boarding/route-check/${checkId}/submit`, {}))).data;
+export async function submitCheck(checkId: string): Promise<{ counts: CheckCounts; fines: CheckFineSummary | null }> {
+  return (await json<{ data: { counts: CheckCounts; fines: CheckFineSummary | null } }>(await post(`/api/boarding/route-check/${checkId}/submit`, {}))).data;
 }
