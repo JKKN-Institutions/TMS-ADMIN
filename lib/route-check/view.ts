@@ -6,7 +6,7 @@
  */
 import type { createServiceRoleClient } from '@/lib/supabase/server';
 import { loadRouteRosterView } from '@/lib/attendance/route-roster';
-import { checkCounts } from './counts';
+import { learnerCounts } from './filter';
 import { tickIndex, notOnRouteOf, registeredCount, entryFeeState } from './entries';
 import { loadEntries, inchargeEmailsForRoute } from './evaluate';
 import { staffBillStates } from './staff-fees';
@@ -79,7 +79,7 @@ export async function buildCheckView(svc: Svc, check: CheckRow): Promise<CheckVi
     };
   }).sort((a, b) => Number(b.isIncharge) - Number(a.isIncharge) || a.name.localeCompare(b.name));
 
-  const c = checkCounts(learners.map((l) => ({ booked: l.booked, status: l.status, feeState: l.feeState, notOnRoute: l.notOnRoute })));
+  const c = learnerCounts(learners);
   return {
     check: { id: check.id, routeId: check.route_id, status: check.status, checkDate: check.check_date, leg: check.leg, startedAt: check.started_at, submittedAt: check.submitted_at },
     route: { id: roster.route.id, routeNumber: roster.route.route_number, routeName: roster.route.route_name,
