@@ -1,15 +1,11 @@
 'use client';
 
-import { use, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
+import { use } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { DetailPageHeader } from '@/components/ui/detail-view';
-import { usePermissions } from '@/hooks/use-permissions';
-import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { FeeMarkChip, BookingMarkChip } from '@/components/route-check/marks';
 import { FINE_NOTE_LABEL, type FineNote } from '@/lib/route-check/fine-rules';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { fetchCheck, waiveFine } from '../../inspection-api';
+import { fetchCheck, type CheckFineSummary } from '../../inspection-api';
 
 const LEG_LABEL: Record<'onward' | 'return', string> = { onward: 'Morning', return: 'Evening' };
 const OUTCOME_LABEL: Record<string, string> = {
@@ -39,62 +35,28 @@ function fineNoteLabels(note: string | null): string[] {
     });
 }
 
-function WaiveDialog({ open, onOpenChange, onConfirm, pending }: {
-  open: boolean; onOpenChange: (o: boolean) => void; onConfirm: (reason: string) => void; pending: boolean;
-}) {
-  const [reason, setReason] = useState('');
+/**
+ * One fine on the report: its amount and live status. Read-only — a fine is
+ * cancelled by cancelling its bill in MyJKKN with a supporting document, never
+ * from here (the bill-cancellation guard must not be bypassed).
+ */
+function FineChip({ label, fineId, fine }: { label: string; fineId: string | null; fine: CheckFineSummary | null }) {
+  if (!fineId) return null;
+  const cancelled = fine?.status === 'cancelled';
+  const tone = cancelled
+    ? 'bg-gray-100 text-gray-500 line-through dark:bg-gray-800 dark:text-gray-400'
+    : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
+  const detail = fine ? `₹${fine.amount.toLocaleString('en-IN')} · ${fine.status}` : 'status unavailable';
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!pending) { onOpenChange(o); if (!o) setReason(''); } }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Waive this fine</DialogTitle>
-        </DialogHeader>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Reason</label>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={3}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-            placeholder="Why is this fine being waived?"
-          />
-        </div>
-        <DialogFooter>
-          <button type="button" className="btn-secondary" onClick={() => onOpenChange(false)} disabled={pending}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm(reason.trim())}
-            disabled={pending || !reason.trim()}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-          >
-            {pending ? 'Waiving…' : 'Waive fine'}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>
+      {label} · {detail}
+    </span>
   );
 }
 
 export default function CheckReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { can } = usePermissions();
-  const qc = useQueryClient();
-  const canWaive = can(TMS_PERMISSIONS.FEES_EDIT);
-  const [waiveTarget, setWaiveTarget] = useState<string | null>(null);
-
   const { data, isLoading, isError, error } = useQuery({ queryKey: ['check', id], queryFn: () => fetchCheck(id) });
-
-  const waive = useMutation({
-    mutationFn: (vars: { fineId: string; reason: string }) => waiveFine(vars.fineId, vars.reason),
-    onSuccess: () => {
-      toast.success('Fine waived');
-      qc.invalidateQueries({ queryKey: ['check', id] });
-      setWaiveTarget(null);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   if (isLoading) {
     return (
@@ -136,6 +98,10 @@ export default function CheckReportPage({ params }: { params: Promise<{ id: stri
         ))}
       </div>
 
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        To cancel a fine, cancel the bill in MyJKKN with a supporting document.
+      </p>
+
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
@@ -172,26 +138,8 @@ export default function CheckReportPage({ params }: { params: Promise<{ id: stri
                   <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{OUTCOME_LABEL[p.outcome] ?? p.outcome}</td>
                   <td className="min-w-0 px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {p.feeFineId && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
-                          Fee fine
-                          {canWaive && (
-                            <button type="button" onClick={() => setWaiveTarget(p.feeFineId)} className="ml-1 underline decoration-dotted">
-                              Waive
-                            </button>
-                          )}
-                        </span>
-                      )}
-                      {p.bookingFineId && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
-                          Booking fine
-                          {canWaive && (
-                            <button type="button" onClick={() => setWaiveTarget(p.bookingFineId)} className="ml-1 underline decoration-dotted">
-                              Waive
-                            </button>
-                          )}
-                        </span>
-                      )}
+                      <FineChip label="Fee fine" fineId={p.feeFineId} fine={p.feeFine} />
+                      <FineChip label="Booking fine" fineId={p.bookingFineId} fine={p.bookingFine} />
                       {noteLabels.map((label, i) => (
                         <span key={i} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                           {label}
@@ -205,13 +153,6 @@ export default function CheckReportPage({ params }: { params: Promise<{ id: stri
           </tbody>
         </table>
       </div>
-
-      <WaiveDialog
-        open={!!waiveTarget}
-        onOpenChange={(o) => !o && setWaiveTarget(null)}
-        pending={waive.isPending}
-        onConfirm={(reason) => waiveTarget && waive.mutate({ fineId: waiveTarget, reason })}
-      />
     </div>
   );
 }

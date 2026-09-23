@@ -1,7 +1,8 @@
 // Client fetchers for the Bus Inspection admin pages (Inspectors / Checks / report).
 // Wraps the route-check admin APIs. Matches their REAL response shapes — see
-// app/api/admin/route-checkers/route.ts, .../people/route.ts, app/api/admin/route-checks/**
-// and app/api/admin/fines/[id]/cancel/route.ts.
+// app/api/admin/route-checkers/route.ts, .../people/route.ts and app/api/admin/route-checks/**.
+// Fines are NOT waived from these pages: cancelling one means cancelling its bill
+// in MyJKKN with a supporting document (the bill-cancellation guard).
 import type { CheckPersonEntry } from '@/lib/route-check/types';
 
 async function json<T>(res: Response): Promise<T> {
@@ -66,6 +67,18 @@ export interface CheckListRow {
   submittedAt: string | null;
 }
 
+/** A fine's live state as shown on the check report. */
+export interface CheckFineSummary {
+  id: string;
+  status: string;
+  amount: number;
+}
+
+export type CheckReportPerson = CheckPersonEntry & {
+  feeFine: CheckFineSummary | null;
+  bookingFine: CheckFineSummary | null;
+};
+
 export interface CheckReport {
   id: string;
   status: 'draft' | 'submitted';
@@ -87,7 +100,7 @@ export interface CheckReport {
   };
   startedAt: string;
   submittedAt: string | null;
-  people: CheckPersonEntry[];
+  people: CheckReportPerson[];
 }
 
 export const fetchInspectors = () => fetch('/api/admin/route-checkers').then((r) => json<InspectorRow[]>(r));
@@ -117,10 +130,3 @@ export const fetchChecks = (p: { from: string; to: string; routeId?: string }) =
   );
 
 export const fetchCheck = (id: string) => fetch(`/api/admin/route-checks/${id}`).then((r) => json<CheckReport>(r));
-
-export const waiveFine = (fineId: string, reason: string) =>
-  fetch(`/api/admin/fines/${fineId}/cancel`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason }),
-  }).then((r) => json<{ id: string }>(r));
