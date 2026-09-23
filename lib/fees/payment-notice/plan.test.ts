@@ -8,7 +8,7 @@ const cfg = { enabled: true, windowHours: 48, reminderHoursBefore: 6, fineDueDay
 function input(p: Partial<PlanInput> = {}): PlanInput {
   return {
     now: NOW, cfg, paid: new Set(), overridden: new Set(), unpaidBills: [],
-    fineAmount: new Map([['A', 1200], ['B', 900]]), notices: [], ...p,
+    fineAmount: new Map([['A', 1200], ['B', 900]]), notices: [], alreadyFined: new Map(), ...p,
   };
 }
 function notice(p: Partial<NoticeRow>): NoticeRow {
@@ -85,11 +85,59 @@ describe('planSweep — running notices', () => {
     const plan = planSweep(input({
       notices: [notice({ status: 'paid' }), notice({ id: 'N2', status: 'fined', expires_at: '2026-09-01T00:00:00.000Z' })],
     }));
-    expect(plan).toEqual({ markPaid: [], cancel: [], open: [], remind: [], fine: [] });
+    expect(plan).toEqual({ markPaid: [], cancel: [], open: [], remind: [], fine: [], closeFined: [] });
   });
 
   it('sends no reminder when the learner has no fine amount', () => {
     const inside = notice({ person_id: 'Z', expires_at: '2026-09-23T11:00:00.000Z' });
     expect(planSweep(input({ notices: [inside] })).remind).toEqual([]);
+  });
+});
+
+describe('planSweep — learner already fined this year (e.g. by a bus inspection)', () => {
+  it('never opens a notice for an unpaid learner who already holds the fine', () => {
+    const plan = planSweep(input({
+      unpaidBills: [{ person_id: 'A', bill_id: 'BILL', created_at: '2026-07-01T00:00:00.000Z' }],
+      alreadyFined: new Map([['A', 'F-INSPECTION']]),
+    }));
+    expect(plan.open).toEqual([]);
+  });
+
+  it('closes a running notice against the existing fine instead of fining again', () => {
+    const plan = planSweep(input({
+      notices: [notice({ expires_at: '2026-09-23T05:00:00.000Z' })],
+      alreadyFined: new Map([['A', 'F-INSPECTION']]),
+    }));
+    expect(plan.closeFined).toEqual([{ notice_id: 'N', fine_id: 'F-INSPECTION' }]);
+    expect(plan.fine).toEqual([]);
+  });
+
+  it('closes a not-yet-expired running notice too, and sends no reminder', () => {
+    const plan = planSweep(input({
+      notices: [notice({ expires_at: '2026-09-23T11:00:00.000Z' })],
+      alreadyFined: new Map([['A', 'F-INSPECTION']]),
+    }));
+    expect(plan.closeFined).toEqual([{ notice_id: 'N', fine_id: 'F-INSPECTION' }]);
+    expect(plan.remind).toEqual([]);
+  });
+
+  it('paid still wins over already-fined', () => {
+    const plan = planSweep(input({
+      paid: new Set(['A']),
+      notices: [notice({ expires_at: '2026-09-23T05:00:00.000Z' })],
+      alreadyFined: new Map([['A', 'F-INSPECTION']]),
+    }));
+    expect(plan.markPaid).toEqual(['N']);
+    expect(plan.closeFined).toEqual([]);
+  });
+
+  it('overridden still wins over already-fined', () => {
+    const plan = planSweep(input({
+      overridden: new Set(['A']),
+      notices: [notice({})],
+      alreadyFined: new Map([['A', 'F-INSPECTION']]),
+    }));
+    expect(plan.cancel).toEqual(['N']);
+    expect(plan.closeFined).toEqual([]);
   });
 });

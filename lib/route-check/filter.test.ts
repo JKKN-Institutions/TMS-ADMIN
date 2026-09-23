@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterLearners, groupByStop } from './filter';
+import { filterLearners, groupByStop, learnerCounts } from './filter';
 import type { CheckLearnerRow } from './types';
 
 function row(overrides: Partial<CheckLearnerRow> = {}): CheckLearnerRow {
@@ -18,6 +18,8 @@ function row(overrides: Partial<CheckLearnerRow> = {}): CheckLearnerRow {
     otherBus: null,
     checked: false,
     checkOutcome: null,
+    feeMark: 'paid',
+    bookingMark: 'this_route',
     ...overrides,
   };
 }
@@ -27,12 +29,14 @@ describe('filterLearners', () => {
     row({ learnerId: 'l1', checked: true, checkOutcome: 'ok' }),
     row({ learnerId: 'l2', checked: false }),
     row({ learnerId: 'l3', feeState: 'unpaid', checked: false }),
-    row({ learnerId: 'l4', booked: false, checked: false }),
+    row({ learnerId: 'l4', booked: false, bookingMark: 'none', checked: false }),
     row({ learnerId: 'l5', notOnRoute: true, checked: false }),
+    // Amber: booked on ANOTHER bus today — not "no booking".
+    row({ learnerId: 'l6', booked: false, bookingMark: 'other_route', checked: true, checkOutcome: 'ok' }),
   ];
 
   it('checked returns only checked rows', () => {
-    expect(filterLearners(rows, 'checked').map((r) => r.learnerId)).toEqual(['l1']);
+    expect(filterLearners(rows, 'checked').map((r) => r.learnerId)).toEqual(['l1', 'l6']);
   });
 
   it('unchecked returns only unchecked rows', () => {
@@ -43,7 +47,7 @@ describe('filterLearners', () => {
     expect(filterLearners(rows, 'unpaid').map((r) => r.learnerId)).toEqual(['l3']);
   });
 
-  it('without_booking returns only unbooked rows', () => {
+  it('without_booking returns only rows with no booking at all (amber other-bus excluded)', () => {
     expect(filterLearners(rows, 'without_booking').map((r) => r.learnerId)).toEqual(['l4']);
   });
 
@@ -52,7 +56,18 @@ describe('filterLearners', () => {
   });
 
   it('all returns every row', () => {
-    expect(filterLearners(rows, 'all').map((r) => r.learnerId)).toEqual(['l1', 'l2', 'l3', 'l4', 'l5']);
+    expect(filterLearners(rows, 'all').map((r) => r.learnerId)).toEqual(['l1', 'l2', 'l3', 'l4', 'l5', 'l6']);
+  });
+});
+
+describe('learnerCounts', () => {
+  it('counts only bookingMark none as without booking; other-bus bookings count as booked', () => {
+    const c = learnerCounts([
+      row({ learnerId: 'a', booked: true, bookingMark: 'this_route' }),
+      row({ learnerId: 'b', booked: false, bookingMark: 'other_route' }),
+      row({ learnerId: 'c', booked: false, bookingMark: 'none', feeState: 'unpaid', status: 'present' }),
+    ]);
+    expect(c).toEqual({ total: 3, booked: 2, present: 1, unpaid: 1, withoutBooking: 1, notOnRoute: 0 });
   });
 });
 

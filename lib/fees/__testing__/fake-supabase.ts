@@ -26,7 +26,7 @@ export interface FakeSupabase {
 }
 
 const CHAINABLE = [
-  'select', 'eq', 'neq', 'in', 'is', 'not', 'order', 'limit', 'gte', 'lte',
+  'select', 'eq', 'neq', 'in', 'is', 'not', 'order', 'limit', 'gte', 'lte', 'like',
 ] as const;
 
 export function makeFakeSupabase(

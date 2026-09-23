@@ -3,11 +3,12 @@ import type { CheckOutcome } from './outcome';
 import type { FeeState } from '@/lib/boarding/fee-roster';
 import type { OtherBus } from '@/lib/booking/roster';
 import type { Candidate } from './resolve';
+import type { BookingMark, FeeMark } from './marks';
 
 export type CheckLeg = 'onward' | 'return';
 export type CheckStatus = 'draft' | 'submitted';
 export type PersonKind = 'learner' | 'staff' | 'manual' | 'unknown';
-export type EntryFeeState = FeeState | 'exempt';
+export type EntryFeeState = FeeState | 'exempt' | 'override';
 export type MatchedBy = 'jkkn_id' | 'uuid' | 'roll_number' | 'register_number' | 'staff_id' | 'manual';
 
 /** One recorded line of a check (a tick, a manual entry or an unknown card). */
@@ -27,6 +28,10 @@ export interface CheckPersonEntry {
   scannedCode: string | null;
   notes: string | null;
   createdAt: string;
+  bookingState: BookingMark | null;
+  feeFineId: string | null;
+  bookingFineId: string | null;
+  fineNote: string | null;
 }
 
 export interface CheckHeader {
@@ -57,6 +62,8 @@ export interface CheckLearnerRow {
   /** Ticked in THIS check (a tms_route_check_person row exists). */
   checked: boolean;
   checkOutcome: CheckOutcome | null;
+  feeMark: FeeMark;
+  bookingMark: BookingMark;
 }
 
 export interface CheckStaffRow {

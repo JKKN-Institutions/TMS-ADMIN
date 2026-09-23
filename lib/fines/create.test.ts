@@ -138,3 +138,24 @@ describe('createFines', () => {
     expect(inserts).toHaveLength(0);
   });
 });
+
+describe('createFines with fixedAmount', () => {
+  it('charges the fixed amount even for a learner with no stop', async () => {
+    const svc = makeFakeSupabase(baseData());
+    const out = await createFines(svc as never, input({ personIds: ['p2'], fixedAmount: 300 }));
+    expect(out.created).toBe(1);
+    expect(out.totalAmount).toBe(300);
+    expect(out.skipped).toEqual([]);
+    const ins = svc.calls.find((c) => c.table === 'tms_fee_fine' && c.ops.some(([op]) => op === 'insert'));
+    const insertArgs = ins!.ops.find(([op]) => op === 'insert')![1] as unknown[];
+    const payload = insertArgs[0] as Array<Record<string, unknown>>;
+    const row = payload[0];
+    expect(row.fine_amount).toBe(300);
+    expect(row.stop_id).toBeNull();
+  });
+
+  it('refuses a non-positive fixed amount', async () => {
+    const svc = makeFakeSupabase(baseData());
+    await expect(createFines(svc as never, input({ fixedAmount: 0 }))).rejects.toThrow(/fixedAmount/);
+  });
+});

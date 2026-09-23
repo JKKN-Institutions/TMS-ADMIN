@@ -3,12 +3,14 @@
  */
 import type { CheckOutcome } from './outcome';
 import type { CheckPersonEntry, EntryFeeState, MatchedBy, PersonKind } from './types';
+import type { BookingMark } from './marks';
 
 export interface PersonDbRow {
   id: string; check_id: string; person_kind: PersonKind; learner_id: string | null; staff_id: string | null;
   manual_type: string | null; manual_name: string | null; matched_by: MatchedBy | null; scanned_code: string | null;
   outcome: CheckOutcome; on_route: boolean | null; booked: boolean | null; fee_state: EntryFeeState | null;
   notes: string | null; created_at: string;
+  booking_state: BookingMark | null; fee_fine_id: string | null; booking_fine_id: string | null; fine_note: string | null;
 }
 
 export interface NameBook {
@@ -32,6 +34,8 @@ export function personEntryFromRow(row: PersonDbRow, names: NameBook): CheckPers
     id: row.id, kind: row.person_kind, learnerId: row.learner_id, staffId: row.staff_id, name, code,
     outcome: row.outcome, onRoute: row.on_route, booked: row.booked, feeState: row.fee_state,
     matchedBy: row.matched_by, scannedCode: row.scanned_code, notes: row.notes, createdAt: row.created_at,
+    bookingState: row.booking_state ?? null, feeFineId: row.fee_fine_id ?? null,
+    bookingFineId: row.booking_fine_id ?? null, fineNote: row.fine_note ?? null,
   };
 }
 

@@ -6,11 +6,13 @@
  */
 import type { createServiceRoleClient } from '@/lib/supabase/server';
 import { loadRouteRosterView } from '@/lib/attendance/route-roster';
-import { checkCounts } from './counts';
+import { learnerCounts } from './filter';
 import { tickIndex, notOnRouteOf, registeredCount, entryFeeState } from './entries';
 import { loadEntries, inchargeEmailsForRoute } from './evaluate';
 import { staffBillStates } from './staff-fees';
 import { mapLimit, normEmail, staffByEmail, staffName } from './admin';
+import { loadLearnerFeeFacts, loadBookingRoutes } from './fee-facts';
+import { bookingMark, countableFeeState } from './marks';
 import type { CheckRow } from './check-access';
 import type { CheckView, CheckLearnerRow, CheckStaffRow } from './types';
 
@@ -36,11 +38,21 @@ export async function buildCheckView(svc: Svc, check: CheckRow): Promise<CheckVi
   if (vehicleQ.error) throw new Error(`buildCheckView: vehicle read failed: ${vehicleQ.error.message}`);
   const ticks = tickIndex(entries);
 
+  const learnerIds = roster.rows.map((r) => r.learner_id);
+  const [{ facts }, bookingRoutes] = await Promise.all([
+    loadLearnerFeeFacts(svc, learnerIds),
+    loadBookingRoutes(svc, learnerIds, check.check_date),
+  ]);
+
   const learners: CheckLearnerRow[] = roster.rows.map((r) => {
     const fee = r.fee ?? { state: 'unknown' as const, owed: null };
     return {
       learnerId: r.learner_id, name: r.name, roll: r.roll, stopId: r.stop_id, stopName: r.stop_name, stopTime: r.stop_time,
-      status: r.status, booked: r.booked, feeState: fee.state, feeOwed: fee.owed,
+      status: r.status, booked: r.booked,
+      feeState: countableFeeState(facts.get(r.learner_id)?.mark ?? 'unknown'),
+      feeMark: facts.get(r.learner_id)?.mark ?? 'unknown',
+      bookingMark: bookingMark(bookingRoutes.get(r.learner_id) ?? [], check.route_id),
+      feeOwed: fee.owed,
       notOnRoute: notOnRouteOf(r), otherBus: r.other_bus ?? null,
       checked: ticks.learners.has(r.learner_id), checkOutcome: ticks.learners.get(r.learner_id) ?? null,
     };
@@ -67,7 +79,7 @@ export async function buildCheckView(svc: Svc, check: CheckRow): Promise<CheckVi
     };
   }).sort((a, b) => Number(b.isIncharge) - Number(a.isIncharge) || a.name.localeCompare(b.name));
 
-  const c = checkCounts(learners.map((l) => ({ booked: l.booked, status: l.status, feeState: l.feeState, notOnRoute: l.notOnRoute })));
+  const c = learnerCounts(learners);
   return {
     check: { id: check.id, routeId: check.route_id, status: check.status, checkDate: check.check_date, leg: check.leg, startedAt: check.started_at, submittedAt: check.submitted_at },
     route: { id: roster.route.id, routeNumber: roster.route.route_number, routeName: roster.route.route_name,

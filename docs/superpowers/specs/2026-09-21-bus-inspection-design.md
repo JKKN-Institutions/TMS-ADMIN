@@ -1,3 +1,5 @@
+> Superseded by docs/superpowers/specs/2026-09-23-bus-inspection-learner-check-design.md (2026-09-23).
+
 # Bus Inspection (Transport Head checking) — Design
 
 **Date:** 2026-09-21 · **Status:** Approved in brainstorming, awaiting spec review

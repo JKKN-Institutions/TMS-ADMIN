@@ -15,6 +15,12 @@ import { allocateWaterfall } from './instalments';
 // a silently EMPTY set — here that would lock every learner out. Chunk + throw.
 const IN_CHUNK = 150;
 
+function chunkIds(ids: string[], size = 150): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
 /** A bill's instalment schedule plus how much has been paid against the bill. */
 export interface Term1Instalments {
   paid: number;
@@ -67,22 +73,32 @@ type LedgerRow = {
 export async function term1PaidLearnerIds(
   svc: SupabaseClient,
   transportYearId: string,
+  personIds?: string[],
 ): Promise<Set<string>> {
   const out = new Set<string>();
   if (!transportYearId) return out;
 
-  const { data: ledger, error } = await svc
-    .from('tms_fee_bill')
-    .select('person_id, status, billing_student_bill_id, term_no')
-    .eq('transport_year_id', transportYearId)
-    .eq('person_type', 'learner');
-    // No term_no filter: a merged bill is term 1 and a legacy learner's term-1
-    // row is term 1, but filtering here would silently drop a learner whose
-    // ledger grain changes mid-year. Judge on the bill instead.
-  if (error) {
-    if ((error as { code?: string }).code === '42P01') return out; // table not created yet
-    throw error;
+  const ledgerRows: LedgerRow[] = [];
+  const scopes = personIds ? chunkIds([...new Set(personIds)]) : [null];
+  for (const ids of scopes) {
+    if (ids && ids.length === 0) continue;
+    let q = svc
+      .from('tms_fee_bill')
+      .select('person_id, status, billing_student_bill_id, term_no')
+      .eq('transport_year_id', transportYearId)
+      .eq('person_type', 'learner');
+      // No term_no filter: a merged bill is term 1 and a legacy learner's term-1
+      // row is term 1, but filtering here would silently drop a learner whose
+      // ledger grain changes mid-year. Judge on the bill instead.
+    if (ids) q = q.in('person_id', ids);
+    const { data, error } = await q;
+    if (error) {
+      if ((error as { code?: string }).code === '42P01') return out; // table not created yet
+      throw error;
+    }
+    ledgerRows.push(...((data ?? []) as LedgerRow[]));
   }
+  const ledger = ledgerRows;
 
   // A learner may have more than one ledger row for the year (legacy per-term
   // rows, or two applicable fee structures both writing term_no = 1). Only

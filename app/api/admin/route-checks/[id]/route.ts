@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { requirePerm } from '@/lib/inspections/server';
+import { requirePerm } from '@/lib/auth/require-perm';
 import { UUID_RE, selectIn, staffName } from '@/lib/route-check/admin';
 
 function idFrom(request: NextRequest) {
@@ -25,6 +25,10 @@ type PersonRow = {
   fee_state: string | null;
   notes: string | null;
   created_at: string;
+  booking_state: string | null;
+  fee_fine_id: string | null;
+  booking_fine_id: string | null;
+  fine_note: string | null;
 };
 
 // GET: one route check — header, counts, route/bus labels and every person line.
@@ -52,7 +56,7 @@ async function getReport(request: NextRequest, auth: AuthContext) {
       svc.from('profiles').select('id, full_name, email').eq('id', check.checker_id).maybeSingle(),
       svc
         .from('tms_route_check_person')
-        .select('id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at')
+        .select('id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at, booking_state, fee_fine_id, booking_fine_id, fine_note')
         .eq('check_id', id)
         .order('created_at', { ascending: true }),
     ]);
@@ -64,7 +68,7 @@ async function getReport(request: NextRequest, auth: AuthContext) {
     }
     const persons = (personsQ.data ?? []) as PersonRow[];
 
-    const [learners, staff] = await Promise.all([
+    const [learners, staff, fines] = await Promise.all([
       selectIn<{ id: string; first_name: string | null; last_name: string | null; roll_number: string | null; register_number: string | null }>(
         svc, 'learners_profiles', 'id, first_name, last_name, roll_number, register_number', 'id',
         persons.map((p) => p.learner_id ?? '')
@@ -73,9 +77,19 @@ async function getReport(request: NextRequest, auth: AuthContext) {
         svc, 'staff', 'id, first_name, last_name, staff_id, designation', 'id',
         persons.map((p) => p.staff_id ?? '')
       ),
+      // The fine's live state, so the report shows whether it still stands.
+      // Fines are never waived from here: cancelling one means cancelling its
+      // bill in MyJKKN (fn_cancel_student_bill, which needs a supporting
+      // document) — the bill-cancellation guard must never be bypassed.
+      selectIn<{ id: string; status: string; fine_amount: number | string }>(
+        svc, 'tms_fee_fine', 'id, status, fine_amount', 'id',
+        persons.flatMap((p) => [p.fee_fine_id ?? '', p.booking_fine_id ?? ''])
+      ),
     ]);
     const learnerById = new Map(learners.map((l) => [l.id, l]));
     const staffById = new Map(staff.map((s) => [s.id, s]));
+    const fineById = new Map(fines.map((f) => [f.id, { id: f.id, status: f.status, amount: Number(f.fine_amount) }]));
+    const fineOf = (fid: string | null) => (fid ? fineById.get(fid) ?? null : null);
 
     const people = persons.map((p) => {
       let name: string | null = null;
@@ -100,6 +114,7 @@ async function getReport(request: NextRequest, auth: AuthContext) {
         staffId: p.staff_id,
         name,
         identifier,
+        code: identifier,
         designation,
         manualType: p.manual_type,
         matchedBy: p.matched_by,
@@ -110,6 +125,12 @@ async function getReport(request: NextRequest, auth: AuthContext) {
         feeState: p.fee_state,
         notes: p.notes,
         createdAt: p.created_at,
+        bookingState: p.booking_state,
+        feeFineId: p.fee_fine_id,
+        bookingFineId: p.booking_fine_id,
+        fineNote: p.fine_note,
+        feeFine: fineOf(p.fee_fine_id),
+        bookingFine: fineOf(p.booking_fine_id),
       };
     });
 

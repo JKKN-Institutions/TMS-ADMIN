@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { requirePerm } from '@/lib/inspections/server';
+import { requirePerm } from '@/lib/auth/require-perm';
 import { DATE_RE, UUID_RE, selectIn } from '@/lib/route-check/admin';
 
 const LIMIT = 200;
@@ -76,8 +76,10 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
       selectIn<{ id: string; full_name: string | null; email: string | null }>(
         svc, 'profiles', 'id, full_name, email', 'id', checks.map((c) => c.checker_id)
       ),
-      selectIn<{ check_id: string; outcome: string }>(
-        svc, 'tms_route_check_person', 'check_id, outcome', 'check_id', checks.map((c) => c.id)
+      // One chunked, error-checked read of every person line of the listed
+      // checks — also yields each check's fine count (no per-check queries).
+      selectIn<{ check_id: string; outcome: string; fee_fine_id: string | null; booking_fine_id: string | null }>(
+        svc, 'tms_route_check_person', 'check_id, outcome, fee_fine_id, booking_fine_id', 'check_id', checks.map((c) => c.id)
       ),
     ]);
     const routeById = new Map(routes.map((r) => [r.id, r]));
@@ -85,9 +87,12 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
     const profileById = new Map(profiles.map((p) => [p.id, p]));
     const personCount = new Map<string, number>();
     const issueCount = new Map<string, number>();
+    const fineCount = new Map<string, number>();
     for (const p of persons) {
       personCount.set(p.check_id, (personCount.get(p.check_id) ?? 0) + 1);
       if (p.outcome !== 'ok') issueCount.set(p.check_id, (issueCount.get(p.check_id) ?? 0) + 1);
+      // People fined on this check (a person with both fines counts once).
+      if (p.fee_fine_id || p.booking_fine_id) fineCount.set(p.check_id, (fineCount.get(p.check_id) ?? 0) + 1);
     }
 
     const rows = checks.map((c) => {
@@ -118,6 +123,7 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
         },
         personCount: personCount.get(c.id) ?? 0,
         issueCount: issueCount.get(c.id) ?? 0,
+        fineCount: fineCount.get(c.id) ?? 0,
         startedAt: c.started_at,
         submittedAt: c.submitted_at,
       };

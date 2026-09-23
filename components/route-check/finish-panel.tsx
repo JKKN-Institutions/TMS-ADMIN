@@ -25,8 +25,19 @@ export function FinishPanel({
     if (submitting) return;
     setSubmitting(true);
     try {
-      await submitCheck(checkId);
-      toast.success('Check submitted');
+      const res = await submitCheck(checkId);
+      const f = res.fines;
+      if (f === null) {
+        // The check itself submitted fine — only the fining step failed or
+        // threw. Distinguish this from "fines off" / "no fines needed", which
+        // both come back as a normal { enabled: false | true } summary.
+        toast.error('Check submitted, but automatic fines could not be processed — tell the Transport Head');
+      } else if (f.enabled) {
+        toast.success(`Check submitted · ${f.raised} fine${f.raised === 1 ? '' : 's'} raised` +
+          (f.alreadyFined ? ` · ${f.alreadyFined} already fined` : '') + (f.errors ? ` · ${f.errors} failed` : ''));
+      } else {
+        toast.success('Check submitted');
+      }
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['route-check', checkId], exact: true }),
         qc.invalidateQueries({ queryKey: ['route-check', 'my-routes'] }),

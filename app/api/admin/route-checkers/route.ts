@@ -3,7 +3,7 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
-import { requirePerm } from '@/lib/inspections/server';
+import { requirePerm } from '@/lib/auth/require-perm';
 import { UUID_RE, describeCheckerEmails, resolveLoginEmail, selectIn } from '@/lib/route-check/admin';
 
 const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 });

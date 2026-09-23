@@ -5,13 +5,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { BusScanner } from '@/components/inspections/bus-scanner';
+import { BusScanner } from '@/components/scanner/bus-scanner';
 import { classifyCard } from '@/lib/route-check/card';
 import { CHECK_OUTCOME_META } from '@/lib/route-check/outcome-meta';
 import type { ScanResponse, CheckPersonEntry } from '@/lib/route-check/types';
 import type { Candidate } from '@/lib/route-check/resolve';
+import type { FeeMark } from '@/lib/route-check/marks';
 import { scanCode, pickCandidate } from '@/app/boarding/route-check/route-check-api';
 import { CandidatePicker } from './candidate-picker';
+import { FeeMarkChip, BookingMarkChip } from './marks';
 
 /** Camera reads only: a JKKN ID card number, a legacy UUID, or an id_code barcode — null rejects the read. */
 const parseCard = (raw: string): string | null => {
@@ -21,15 +23,6 @@ const parseCard = (raw: string): string | null => {
 
 /** The camera fires ~12 decodes/s; the same card is not re-submitted within this window. */
 const SAME_CARD_MS = 4000;
-const yn = (b: boolean | null) => (b == null ? '—' : b ? 'yes' : 'no');
-
-const FEE_LABEL: Record<NonNullable<CheckPersonEntry['feeState']>, (owed: number | null) => string> = {
-  paid: () => 'Paid',
-  unpaid: (owed) => `Unpaid${owed != null ? ` ₹${owed}` : ''}`,
-  none: () => 'No bill',
-  unknown: () => '—',
-  exempt: () => 'Exempt',
-};
 
 type Verdict =
   | { kind: 'recorded'; code: string; r: Extract<ScanResponse, { kind: 'recorded' }> }
@@ -217,7 +210,6 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
 function VerdictCard({ code, r }: { code: string; r: Extract<ScanResponse, { kind: 'recorded' }> }) {
   const { entry, alreadyChecked, feeOwed } = r;
   const meta = CHECK_OUTCOME_META[entry.outcome];
-  const feeText = entry.feeState ? FEE_LABEL[entry.feeState](feeOwed) : '—';
   return (
     <div className={`space-y-1 rounded-xl border p-4 ${meta.card}`}>
       <p className="text-lg font-bold">{meta.icon} {meta.label}</p>
@@ -227,10 +219,17 @@ function VerdictCard({ code, r }: { code: string; r: Extract<ScanResponse, { kin
         <>
           <p className="text-sm font-semibold">{alreadyChecked ? 'Already ticked' : '✓ Ticked'}</p>
           <p className="min-w-0 truncate font-medium">{entry.name ?? 'Name not recorded'}{entry.code ? ` · ${entry.code}` : ''}</p>
-          <p className="text-sm">
-            {entry.kind === 'learner' ? `Booked today: ${yn(entry.booked)} · ` : ''}
-            Fee: {feeText} · {entry.onRoute ? 'On this bus' : 'Not on this bus'}
-          </p>
+          <p className="text-sm">{entry.onRoute ? 'On this bus' : 'Not on this bus'}</p>
+          {entry.kind === 'learner' && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <FeeMarkChip mark={entry.feeState === 'exempt' ? 'exempt' : (entry.feeState as FeeMark | null)} size="lg" />
+              <BookingMarkChip mark={entry.bookingState} size="lg" />
+            </div>
+          )}
+          {entry.kind === 'staff' && <div className="mt-2"><FeeMarkChip mark={entry.feeState === 'exempt' ? 'exempt' : (entry.feeState as FeeMark | null)} size="lg" /></div>}
+          {entry.feeState === 'unpaid' && feeOwed != null && (
+            <p className="text-sm text-red-700 dark:text-red-300">Owes ₹{feeOwed}</p>
+          )}
         </>
       )}
     </div>
