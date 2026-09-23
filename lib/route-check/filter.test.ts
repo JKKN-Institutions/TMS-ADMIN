@@ -18,6 +18,8 @@ function row(overrides: Partial<CheckLearnerRow> = {}): CheckLearnerRow {
     otherBus: null,
     checked: false,
     checkOutcome: null,
+    feeMark: 'paid',
+    bookingMark: 'this_route',
     ...overrides,
   };
 }

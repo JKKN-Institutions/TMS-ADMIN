@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { makeFakeSupabase } from '@/lib/fees/__testing__/fake-supabase';
 import { raiseCheckFines, type FineDeps } from './fines';
+import type { LearnerFeeFactsRow } from './fee-facts';
 
 const CHECK = { id: 'C', route_id: 'R1', check_date: '2026-09-23' };
 const ON = [{ settings_data: { enabled: true, enabled_at: '2026-09-22T00:00:00.000Z', unpaid_amount: 500, no_booking_amount: 200, fine_due_days: 7 } }];
@@ -24,7 +25,7 @@ function svcWith(settings: unknown[]) {
  * "createFines just raised one" (the default mock populates the set itself),
  * which the module's I1 pre-check / I2a batch-then-read-back design requires.
  */
-function deps(over: Partial<FineDeps> & { seedExistingKeys?: string[] } = {}) {
+function deps(over: Partial<FineDeps> & { seedExistingKeys?: string[] } = {}): Partial<FineDeps> {
   const { seedExistingKeys, ...rest } = over;
   const existingKeys = new Set<string>(seedExistingKeys ?? []);
   let fineSeq = 0;
@@ -40,16 +41,22 @@ function deps(over: Partial<FineDeps> & { seedExistingKeys?: string[] } = {}) {
     return map;
   });
 
+  const defaultLoadLearnerFeeFacts: FineDeps['loadLearnerFeeFacts'] = vi.fn(async () => ({
+    yearId: 'Y',
+    facts: new Map<string, LearnerFeeFactsRow>([['L1', { mark: 'unpaid', term1DueDate: '2026-07-31', runningNoticeExpiresAt: null, hasBill: true }]]),
+  }));
+
+  const defaultLoadBookingRoutes: FineDeps['loadBookingRoutes'] = vi.fn(async () => new Map<string, string[]>());
+  const defaultLoadExceptionDates: FineDeps['loadExceptionDates'] = vi.fn(async () => new Set<string>());
+  const defaultLogSystemActivity: FineDeps['logSystemActivity'] = vi.fn(async () => {});
+
   return {
     now: () => new Date('2026-09-23T04:00:00.000Z'),
-    loadLearnerFeeFacts: vi.fn(async () => ({
-      yearId: 'Y',
-      facts: new Map([['L1', { mark: 'unpaid', term1DueDate: '2026-07-31', runningNoticeExpiresAt: null, hasBill: true }]]),
-    })),
-    loadBookingRoutes: vi.fn(async () => new Map<string, string[]>()),
-    loadExceptionDates: vi.fn(async () => new Set<string>()),
+    loadLearnerFeeFacts: defaultLoadLearnerFeeFacts,
+    loadBookingRoutes: defaultLoadBookingRoutes,
+    loadExceptionDates: defaultLoadExceptionDates,
     createFines: defaultCreateFines,
-    logSystemActivity: vi.fn(async () => {}),
+    logSystemActivity: defaultLogSystemActivity,
     readFineIdsByKeys: defaultReadFineIdsByKeys,
     ...rest,
   };
@@ -80,7 +87,7 @@ describe('raiseCheckFines', () => {
   it('does not fine a learner whose fee is paid, and skips a booking on another bus', async () => {
     const d = deps({
       loadBookingRoutes: vi.fn(async () => new Map([['L1', ['R9']]])),
-      loadLearnerFeeFacts: vi.fn(async () => ({ yearId: 'Y', facts: new Map([['L1', { mark: 'paid', term1DueDate: null, runningNoticeExpiresAt: null, hasBill: true }]]) })),
+      loadLearnerFeeFacts: vi.fn(async () => ({ yearId: 'Y', facts: new Map<string, LearnerFeeFactsRow>([['L1', { mark: 'paid', term1DueDate: null, runningNoticeExpiresAt: null, hasBill: true }]]) })),
     });
     const out = await raiseCheckFines(svcWith(ON) as never, CHECK, 'actor', d);
     expect(d.createFines).not.toHaveBeenCalled();

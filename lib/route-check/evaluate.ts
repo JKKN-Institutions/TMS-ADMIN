@@ -83,7 +83,7 @@ export type NewEntry =
   | { kind: 'unknown'; scannedCode: string };
 
 export async function recordEntry(svc: Svc, checkId: string, entry: NewEntry): Promise<{ row: PersonDbRow; alreadyChecked: boolean }> {
-  const insert =
+  const insert: Record<string, unknown> =
     entry.kind === 'learner'
       ? { check_id: checkId, person_kind: 'learner', learner_id: entry.learnerId, matched_by: entry.matchedBy, scanned_code: entry.scannedCode,
           outcome: entry.ev.outcome, on_route: entry.ev.onRoute, booked: entry.ev.booked, fee_state: entry.ev.feeMark, booking_state: entry.ev.bookingMark }

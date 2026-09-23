@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { BusScanner } from '@/components/scanner/bus-scanner';
 import { classifyCard } from '@/lib/route-check/card';
 import { CHECK_OUTCOME_META } from '@/lib/route-check/outcome-meta';
-import type { ScanResponse } from '@/lib/route-check/types';
+import type { ScanResponse, CheckPersonEntry } from '@/lib/route-check/types';
 import type { Candidate } from '@/lib/route-check/resolve';
 import type { FeeMark } from '@/lib/route-check/marks';
 import { scanCode, pickCandidate } from '@/app/boarding/route-check/route-check-api';
