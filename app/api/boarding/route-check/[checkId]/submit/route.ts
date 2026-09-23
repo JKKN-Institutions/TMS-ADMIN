@@ -36,6 +36,19 @@ async function submit(request: NextRequest, auth: AuthContext) {
       fines = await raiseCheckFines(svc, { id, route_id: load.check.route_id, check_date: load.check.check_date }, auth.userId);
     } catch (e) {
       console.error('route-check submit: fines failed (check stays submitted):', e);
+      // Best-effort visibility for whoever reviews this check later: stamp the
+      // tick rows that never got a fine_note (fines.ts writes its own note per
+      // row on every path it reaches; a row still null means it was never
+      // reached at all). Failure here is logged, never thrown — the check
+      // itself is already submitted and must stay that way.
+      try {
+        const { error: stampErr } = await svc.from('tms_route_check_person')
+          .update({ fine_note: 'error' })
+          .eq('check_id', id).eq('person_kind', 'learner').is('fine_note', null);
+        if (stampErr) console.error('route-check submit: fine_note error-stamp failed:', stampErr.message);
+      } catch (stampE) {
+        console.error('route-check submit: fine_note error-stamp threw:', stampE);
+      }
     }
     return NextResponse.json({ success: true, data: { counts: c, fines } });
   } catch (e) {
