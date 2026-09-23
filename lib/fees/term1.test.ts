@@ -220,3 +220,35 @@ describe('term1PaidLearnerIds', () => {
     expect(ids.has('L7')).toBe(false);
   });
 });
+
+describe('term1PaidLearnerIds — scoped to personIds', () => {
+  it('filters the ledger query to the given learners (deduplicated)', async () => {
+    const svc = makeFakeSupabase({ tms_fee_bill: [], billing_bill_instalments: [], billing_student_bills: [] });
+    await term1PaidLearnerIds(svc as never, 'ty1', ['L1', 'L2', 'L1']);
+    const ledger = svc.calls.filter((c) => c.table === 'tms_fee_bill');
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].ops).toContainEqual(['in', ['person_id', ['L1', 'L2']]]);
+    expect(ledger[0].ops).toContainEqual(['eq', ['transport_year_id', 'ty1']]);
+  });
+
+  it('chunks a large person list at 150 ids per ledger query', async () => {
+    const svc = makeFakeSupabase({ tms_fee_bill: [], billing_bill_instalments: [], billing_student_bills: [] });
+    const ids = Array.from({ length: 151 }, (_, i) => `L${i}`);
+    await term1PaidLearnerIds(svc as never, 'ty1', ids);
+    const ledger = svc.calls.filter((c) => c.table === 'tms_fee_bill');
+    expect(ledger).toHaveLength(2);
+    const sizes = ledger.map((c) => (c.ops.find(([op]) => op === 'in')![1][1] as string[]).length);
+    expect(sizes).toEqual([150, 1]);
+  });
+
+  it('returns an empty set without querying when personIds is empty', async () => {
+    const svc = makeFakeSupabase({
+      tms_fee_bill: [{ person_id: 'L1', status: 'generated', billing_student_bill_id: 'b1', term_no: 1 }],
+      billing_student_bills: [{ id: 'b1', status: 'paid', final_amount: 100, balance_amount: 0 }],
+      billing_bill_instalments: [],
+    });
+    const ids = await term1PaidLearnerIds(svc as never, 'ty1', []);
+    expect(ids.size).toBe(0);
+    expect(svc.calls).toHaveLength(0);
+  });
+});
