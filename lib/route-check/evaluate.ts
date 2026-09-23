@@ -10,41 +10,45 @@ import { learnerCheckOutcome, staffCheckOutcome, type CheckOutcome } from './out
 import { staffBillStates } from './staff-fees';
 import { entryFeeState, personEntryFromRow, type PersonDbRow } from './entries';
 import { normEmail, selectIn, staffName } from './admin';
+import { bookingMark, type BookingMark, type FeeMark } from './marks';
+import { loadLearnerFeeFacts } from './fee-facts';
 import type { CheckPersonEntry, EntryFeeState, MatchedBy } from './types';
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
 export interface LearnerEvaluation {
   learnerId: string; name: string; code: string | null; onRoute: boolean; booked: boolean; fee: RosterFee; outcome: CheckOutcome;
+  feeMark: FeeMark; bookingMark: BookingMark;
 }
 export interface StaffEvaluation {
   staffId: string; name: string; code: string | null; onRoute: boolean; isIncharge: boolean;
   feeState: EntryFeeState; feeOwed: number | null; outcome: CheckOutcome;
 }
 
-const PERSON_COLS = 'id, check_id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at';
+const PERSON_COLS = 'id, check_id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at, booking_state, fee_fine_id, booking_fine_id, fine_note';
 
 export async function evaluateLearner(svc: Svc, learnerId: string, routeId: string, date: string): Promise<LearnerEvaluation | null> {
-  const [learnerQ, bookingQ, fees] = await Promise.all([
+  const [learnerQ, bookingQ, fees, factsRes] = await Promise.all([
     svc.from('learners_profiles').select('id, first_name, last_name, roll_number, register_number, transport_route_id').eq('id', learnerId).maybeSingle(),
     svc.from('tms_booking').select('route_id').eq('learner_id', learnerId).eq('travel_date', date),
     // Display-only and fail-soft: a failed fee read is 'unknown', never 'paid'.
     loadRosterFees(svc, [learnerId]),
+    loadLearnerFeeFacts(svc, [learnerId]),
   ]);
   if (learnerQ.error) throw new Error(`evaluateLearner: learner read failed: ${learnerQ.error.message}`);
   if (bookingQ.error) throw new Error(`evaluateLearner: booking read failed: ${bookingQ.error.message}`);
   const l = learnerQ.data as { first_name: string | null; last_name: string | null; roll_number: string | null; register_number: string | null; transport_route_id: string | null } | null;
   if (!l) return null;
   const bookings = (bookingQ.data ?? []) as { route_id: string }[];
-  const booked = bookings.length > 0;
-  const onRoute = l.transport_route_id === routeId || bookings.some((b) => b.route_id === routeId);
+  const bMark = bookingMark(bookings.map((b) => b.route_id), routeId);
+  const booked = bMark !== 'none';
+  const onRoute = l.transport_route_id === routeId || bMark === 'this_route';
   const fee = fees.get(learnerId) ?? { ...UNKNOWN_FEE };
+  const fMark = factsRes.facts.get(learnerId)?.mark ?? 'unknown';
   return {
-    learnerId,
-    name: staffName(l),
-    code: l.roll_number ?? l.register_number ?? null,
-    onRoute, booked, fee,
-    outcome: learnerCheckOutcome({ known: true, onRoute, booked, feeUnpaid: fee.state === 'unpaid' }),
+    learnerId, name: staffName(l), code: l.roll_number ?? l.register_number ?? null,
+    onRoute, booked, fee, feeMark: fMark, bookingMark: bMark,
+    outcome: learnerCheckOutcome({ known: true, onRoute, booked, feeUnpaid: fMark === 'unpaid' }),
   };
 }
 
@@ -82,7 +86,7 @@ export async function recordEntry(svc: Svc, checkId: string, entry: NewEntry): P
   const insert =
     entry.kind === 'learner'
       ? { check_id: checkId, person_kind: 'learner', learner_id: entry.learnerId, matched_by: entry.matchedBy, scanned_code: entry.scannedCode,
-          outcome: entry.ev.outcome, on_route: entry.ev.onRoute, booked: entry.ev.booked, fee_state: entry.ev.fee.state }
+          outcome: entry.ev.outcome, on_route: entry.ev.onRoute, booked: entry.ev.booked, fee_state: entry.ev.feeMark, booking_state: entry.ev.bookingMark }
       : entry.kind === 'staff'
         ? { check_id: checkId, person_kind: 'staff', staff_id: entry.staffId, matched_by: entry.matchedBy, scanned_code: entry.scannedCode,
             outcome: entry.ev.outcome, on_route: entry.ev.onRoute, booked: null, fee_state: entry.ev.feeState }

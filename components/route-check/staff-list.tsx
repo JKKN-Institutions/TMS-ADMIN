@@ -5,7 +5,7 @@ function StaffFeeChip({ row }: { row: CheckStaffRow }) {
   if (row.isIncharge || row.feeState === 'exempt') {
     return <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">Exempt</span>;
   }
-  if (row.feeState === 'paid') {
+  if (row.feeState === 'paid' || row.feeState === 'override') {
     return <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/40 dark:text-green-300">Paid</span>;
   }
   if (row.feeState === 'unpaid') {

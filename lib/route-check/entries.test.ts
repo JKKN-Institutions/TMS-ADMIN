@@ -6,6 +6,7 @@ const row = (over: Partial<PersonDbRow>): PersonDbRow => ({
   id: 'p1', check_id: 'c1', person_kind: 'learner', learner_id: 'L1', staff_id: null,
   manual_type: null, manual_name: null, matched_by: 'jkkn_id', scanned_code: '123456-7',
   outcome: 'ok', on_route: true, booked: true, fee_state: 'paid', notes: null, created_at: '2026-09-22T01:00:00Z',
+  booking_state: null, fee_fine_id: null, booking_fine_id: null, fine_note: null,
   ...over,
 });
 const names = {
@@ -35,7 +36,8 @@ describe('personEntryFromRow', () => {
 describe('tickIndex', () => {
   const e = (over: Partial<CheckPersonEntry>): CheckPersonEntry => ({
     id: 'x', kind: 'learner', learnerId: null, staffId: null, name: null, code: null, outcome: 'ok',
-    onRoute: null, booked: null, feeState: null, matchedBy: null, scannedCode: null, notes: null, createdAt: '', ...over,
+    onRoute: null, booked: null, feeState: null, matchedBy: null, scannedCode: null, notes: null, createdAt: '',
+    bookingState: null, feeFineId: null, bookingFineId: null, fineNote: null, ...over,
   });
   it('maps learner and staff ids to their outcome; unknown/manual are skipped', () => {
     const t = tickIndex([e({ learnerId: 'L1', outcome: 'ok' }), e({ kind: 'staff', staffId: 'S1', outcome: 'fee_unpaid' }), e({ kind: 'unknown', outcome: 'unknown_card' })]);
@@ -51,6 +53,17 @@ describe('notOnRouteOf / registeredCount', () => {
   });
   it('registered excludes "from" rows', () => {
     expect(registeredCount([{}, { other_bus: { kind: 'from' } }, { other_bus: null }])).toBe(2);
+  });
+});
+
+describe('personEntryFromRow — booking state and fine links', () => {
+  it('maps booking state and fine links', () => {
+    const e = personEntryFromRow({
+      id: 'x', check_id: 'c', person_kind: 'learner', learner_id: 'L', staff_id: null, manual_type: null, manual_name: null,
+      matched_by: 'jkkn_id', scanned_code: '1', outcome: 'ok', on_route: true, booked: true, fee_state: 'override',
+      notes: null, created_at: '2026-09-23T00:00:00Z', booking_state: 'other_route', fee_fine_id: null, booking_fine_id: 'F', fine_note: 'raised',
+    }, { learners: new Map([['L', { name: 'A', code: 'R1' }]]), staff: new Map() });
+    expect(e).toMatchObject({ bookingState: 'other_route', bookingFineId: 'F', fineNote: 'raised', feeState: 'override' });
   });
 });
 

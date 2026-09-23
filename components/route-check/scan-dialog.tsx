@@ -29,6 +29,7 @@ const FEE_LABEL: Record<NonNullable<CheckPersonEntry['feeState']>, (owed: number
   none: () => 'No bill',
   unknown: () => '—',
   exempt: () => 'Exempt',
+  override: () => 'Paid',
 };
 
 type Verdict =
