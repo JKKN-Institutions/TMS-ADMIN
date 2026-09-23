@@ -8,12 +8,12 @@ insert into public.tms_inspection_backup_20260923 (source, row_data)
   union all select 'tms_inspection_learner_check', to_jsonb(lc) from public.tms_inspection_learner_check lc
   union all select 'tms_inspection_issue', to_jsonb(s) from public.tms_inspection_issue s;
 revoke all on public.tms_inspection_backup_20260923 from anon, authenticated;
+alter table public.tms_inspection_backup_20260923 enable row level security;
 
 drop table if exists public.tms_inspection_learner_check, public.tms_inspection_issue,
   public.tms_inspection_item, public.tms_inspection, public.tms_inspection_checklist_item cascade;
 
-delete from storage.objects where bucket_id = 'tms-inspection-photos';
-delete from storage.buckets where id = 'tms-inspection-photos';
+-- Bucket tms-inspection-photos (0 objects) is removed via the Storage API/dashboard, not SQL (protect_*_delete triggers).
 
 update public.custom_roles
   set permissions = permissions - 'tms.inspection.view' - 'tms.inspection.conduct' - 'tms.inspection.manage'
