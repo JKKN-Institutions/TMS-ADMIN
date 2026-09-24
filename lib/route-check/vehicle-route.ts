@@ -26,3 +26,16 @@ export async function vehicleByReg(svc: Svc, reg: string): Promise<{ id: string;
   const hit = rows.find((v) => normalizeReg(v.registration_number ?? '') === want);
   return hit ? { id: hit.id, registration_number: hit.registration_number ?? want } : null;
 }
+
+/**
+ * The route's bus id if that tms_vehicle row still exists, else null. Some
+ * routes carry a stale vehicle_id (the bus row was removed); storing it on a
+ * new check violates tms_route_check.vehicle_id's foreign key and blocks the
+ * inspection. Throws on a read error so a real bus is never silently dropped.
+ */
+export async function liveVehicleId(svc: Svc, vehicleId: string | null): Promise<string | null> {
+  if (!vehicleId) return null;
+  const { data, error } = await svc.from('tms_vehicle').select('id').eq('id', vehicleId).limit(1);
+  if (error) throw new Error(`liveVehicleId: ${error.message}`);
+  return (data as { id: string }[] | null)?.length ? vehicleId : null;
+}

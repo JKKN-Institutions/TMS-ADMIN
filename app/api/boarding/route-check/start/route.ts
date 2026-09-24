@@ -5,6 +5,7 @@ import { logActivity } from '@/lib/activity/log';
 import { istToday } from '@/lib/booking/window';
 import { canCheckRoute } from '@/lib/route-check/access';
 import { UUID_RE } from '@/lib/route-check/admin';
+import { liveVehicleId } from '@/lib/route-check/vehicle-route';
 
 /**
  * POST { routeId, leg } — create or resume TODAY's draft check for this
@@ -37,8 +38,15 @@ async function start(request: NextRequest, auth: AuthContext) {
     const existing = await findDraft();
     if (existing) return NextResponse.json({ success: true, data: { checkId: existing, resumed: true } });
 
+    // A route can point at a bus row that no longer exists; storing that id
+    // would break the check's vehicle_id foreign key and block the inspection.
+    // Start the check without a bus instead (the report shows "No bus").
+    const vehicleId = await liveVehicleId(svc, route.vehicle_id ?? null);
+    if (route.vehicle_id && !vehicleId) {
+      console.warn('route-check start: route %s points at missing vehicle %s; starting without a bus', routeId, route.vehicle_id);
+    }
     const { data: created, error: cErr } = await svc.from('tms_route_check')
-      .insert({ route_id: routeId, vehicle_id: route.vehicle_id ?? null, checker_id: auth.userId, check_date: date, leg, status: 'draft' })
+      .insert({ route_id: routeId, vehicle_id: vehicleId, checker_id: auth.userId, check_date: date, leg, status: 'draft' })
       .select('id').single();
     if (cErr) {
       if (cErr.code === '23505') {
