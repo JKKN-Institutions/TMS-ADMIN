@@ -66,8 +66,9 @@ function FineChip({ label, rule, fineNote, fineId, fine }: {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Back to the Checks tab with the date range the report was opened from. */
-function backHrefFrom(sp: { from?: string; to?: string }): string {
+/** Back to the tab (Checks, with its date range, or Start inspection) the report was opened from. */
+function backHrefFrom(sp: { from?: string; to?: string; tab?: string }): string {
+  if (sp.tab === 'start') return '/inspections?tab=start';
   const qs = new URLSearchParams({ tab: 'checks' });
   if (sp.from && DATE_RE.test(sp.from)) qs.set('from', sp.from);
   if (sp.to && DATE_RE.test(sp.to)) qs.set('to', sp.to);
@@ -98,7 +99,7 @@ export default function CheckReportPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; tab?: string }>;
 }) {
   const { id } = use(params);
   const backHref = backHrefFrom(use(searchParams));

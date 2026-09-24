@@ -5,8 +5,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { DetailPageHeader } from '@/components/ui/detail-view';
 import { InspectorsTab } from './inspectors-tab';
 import { ChecksTab, checksRange } from './checks-tab';
+import { StartTab } from './start-tab';
 
-type Tab = 'inspectors' | 'checks';
+type Tab = 'inspectors' | 'checks' | 'start';
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'inspectors', label: 'Inspectors' },
+  { key: 'checks', label: 'Checks' },
+  { key: 'start', label: 'Start inspection' },
+];
 
 // The tab and the Checks date range live in the URL, so opening a check report
 // and coming back (browser Back or the report's Back link) lands on the same
@@ -14,7 +20,8 @@ type Tab = 'inspectors' | 'checks';
 function BusInspectionContent() {
   const router = useRouter();
   const sp = useSearchParams();
-  const tab: Tab = sp.get('tab') === 'checks' ? 'checks' : 'inspectors';
+  const raw = sp.get('tab');
+  const tab: Tab = raw === 'checks' || raw === 'start' ? raw : 'inspectors';
   const range = checksRange(sp);
 
   const setParams = useCallback(
@@ -35,28 +42,28 @@ function BusInspectionContent() {
       <DetailPageHeader
         crumbs={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Bus Inspection' }]}
         title="Bus Inspection"
-        subtitle="Assign inspectors to routes and review their learner checks and fines."
+        subtitle="Assign inspectors, review their checks and fines, or start an inspection yourself."
       />
       {/* No "Bus stickers" button: stickers are not in use (2026-09-24). The
           /inspections/stickers page and printed /i/<REG> links still work. */}
       <div className="flex flex-wrap gap-2 border-b dark:border-gray-800">
-        {(['inspectors', 'checks'] as Tab[]).map((t) => (
+        {TABS.map((t) => (
           <button
-            key={t}
-            onClick={() => setParams({ tab: t === 'inspectors' ? null : t })}
+            key={t.key}
+            onClick={() => setParams({ tab: t.key === 'inspectors' ? null : t.key })}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
-              tab === t ? 'border-green-600 text-green-700 dark:text-green-400' : 'border-transparent text-gray-500 dark:text-gray-400'
+              tab === t.key ? 'border-green-600 text-green-700 dark:text-green-400' : 'border-transparent text-gray-500 dark:text-gray-400'
             }`}
           >
-            {t === 'inspectors' ? 'Inspectors' : 'Checks'}
+            {t.label}
           </button>
         ))}
       </div>
-      {tab === 'inspectors' ? (
-        <InspectorsTab />
-      ) : (
+      {tab === 'inspectors' && <InspectorsTab />}
+      {tab === 'checks' && (
         <ChecksTab from={range.from} to={range.to} onRangeChange={(r) => setParams({ tab: 'checks', ...r })} />
       )}
+      {tab === 'start' && <StartTab />}
     </div>
   );
 }
