@@ -1,7 +1,7 @@
 import { CHECK_OUTCOME_META } from '@/lib/route-check/outcome-meta';
 import type { CheckStaffRow } from '@/lib/route-check/types';
 
-function StaffFeeChip({ row }: { row: CheckStaffRow }) {
+export function StaffFeeChip({ row }: { row: CheckStaffRow }) {
   if (row.isIncharge || row.feeState === 'exempt') {
     return <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">Exempt</span>;
   }
