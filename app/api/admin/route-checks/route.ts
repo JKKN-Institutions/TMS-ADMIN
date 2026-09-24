@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { requirePerm } from '@/lib/auth/require-perm';
 import { DATE_RE, UUID_RE, selectIn } from '@/lib/route-check/admin';
+import { scannedCounts, type ScannedPersonLite } from '@/lib/route-check/counts';
 
 const LIMIT = 200;
 
@@ -77,22 +78,19 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
         svc, 'profiles', 'id, full_name, email', 'id', checks.map((c) => c.checker_id)
       ),
       // One chunked, error-checked read of every person line of the listed
-      // checks — also yields each check's fine count (no per-check queries).
-      selectIn<{ check_id: string; outcome: string; fee_fine_id: string | null; booking_fine_id: string | null }>(
-        svc, 'tms_route_check_person', 'check_id, outcome, fee_fine_id, booking_fine_id', 'check_id', checks.map((c) => c.id)
+      // checks — yields each check's "on this bus" counts (no per-check queries).
+      selectIn<{ check_id: string; person_kind: ScannedPersonLite['kind']; outcome: string; fee_state: string | null; booking_state: string | null; fine_note: string | null }>(
+        svc, 'tms_route_check_person', 'check_id, person_kind, outcome, fee_state, booking_state, fine_note', 'check_id', checks.map((c) => c.id)
       ),
     ]);
     const routeById = new Map(routes.map((r) => [r.id, r]));
     const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
     const profileById = new Map(profiles.map((p) => [p.id, p]));
-    const personCount = new Map<string, number>();
-    const issueCount = new Map<string, number>();
-    const fineCount = new Map<string, number>();
+    const personsByCheck = new Map<string, ScannedPersonLite[]>();
     for (const p of persons) {
-      personCount.set(p.check_id, (personCount.get(p.check_id) ?? 0) + 1);
-      if (p.outcome !== 'ok') issueCount.set(p.check_id, (issueCount.get(p.check_id) ?? 0) + 1);
-      // People fined on this check (a person with both fines counts once).
-      if (p.fee_fine_id || p.booking_fine_id) fineCount.set(p.check_id, (fineCount.get(p.check_id) ?? 0) + 1);
+      const list = personsByCheck.get(p.check_id) ?? [];
+      list.push({ kind: p.person_kind, outcome: p.outcome, feeState: p.fee_state, bookingState: p.booking_state, fineNote: p.fine_note });
+      personsByCheck.set(p.check_id, list);
     }
 
     const rows = checks.map((c) => {
@@ -121,14 +119,14 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
           withoutBooking: c.without_booking,
           notOnRoute: c.not_on_route,
         },
-        personCount: personCount.get(c.id) ?? 0,
-        issueCount: issueCount.get(c.id) ?? 0,
-        fineCount: fineCount.get(c.id) ?? 0,
+        // The people the inspector scanned. `counts` above is the whole-route
+        // snapshot taken at submit — most of those riders may not have travelled.
+        scanned: scannedCounts(personsByCheck.get(c.id) ?? []),
         startedAt: c.started_at,
         submittedAt: c.submitted_at,
       };
     });
-    return NextResponse.json({ success: true, data: rows, count: rows.length, limit: LIMIT });
+    return NextResponse.json({ success: true, data: rows, count: rows.length, limit: LIMIT, truncated: checks.length === LIMIT });
   } catch (e) {
     console.error('route-checks list error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

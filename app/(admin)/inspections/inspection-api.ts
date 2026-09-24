@@ -61,10 +61,16 @@ export interface CheckListRow {
     withoutBooking: number | null;
     notOnRoute: number | null;
   };
-  personCount: number;
-  issueCount: number;
-  /** People on this check with a fee or booking fine. */
-  fineCount: number;
+  /** Among the people SCANNED on this check (not the whole route). */
+  scanned: {
+    checked: number;
+    unpaid: number;
+    noBooking: number;
+    notOnRoute: number;
+    unknownCards: number;
+    /** People this check fined — earlier fines it merely found are not counted. */
+    finesRaised: number;
+  };
   startedAt: string;
   submittedAt: string | null;
 }
@@ -126,9 +132,12 @@ export const assignInspector = (body: {
 export const unassignInspector = (id: string) =>
   fetch(`/api/admin/route-checkers?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).then((r) => json<unknown>(r));
 
-export const fetchChecks = (p: { from: string; to: string; routeId?: string }) =>
-  fetch(`/api/admin/route-checks?from=${p.from}&to=${p.to}${p.routeId ? `&routeId=${p.routeId}` : ''}`).then((r) =>
-    json<CheckListRow[]>(r)
-  );
+export const fetchChecks = async (p: { from: string; to: string; routeId?: string }) => {
+  const res = await fetch(`/api/admin/route-checks?from=${p.from}&to=${p.to}${p.routeId ? `&routeId=${p.routeId}` : ''}`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
+  const b = body as { data: CheckListRow[]; truncated?: boolean; limit?: number };
+  return { rows: b.data ?? [], truncated: !!b.truncated, limit: b.limit ?? 200 };
+};
 
 export const fetchCheck = (id: string) => fetch(`/api/admin/route-checks/${id}`).then((r) => json<CheckReport>(r));

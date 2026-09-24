@@ -6,10 +6,11 @@ import { ShieldAlert, Save, Loader2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { RouteCheckFineConfig } from '@/lib/route-check/fine-config';
 import { validateRouteCheckFineInput } from '@/lib/route-check/fine-config';
+import type { FeeDryRun } from '@/lib/route-check/fine-dry-run';
 
 interface RouteCheckFinesData {
   config: RouteCheckFineConfig;
-  dryRun: { unpaidPastDue: number; alreadyFinedThisYear: number };
+  dryRun: FeeDryRun;
 }
 
 async function fetchRouteCheckFines(): Promise<RouteCheckFinesData> {
@@ -42,7 +43,7 @@ export function RouteCheckFineSettings() {
     return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-green-600" /></div>;
   }
 
-  const dryRun = data?.dryRun ?? { unpaidPastDue: 0, alreadyFinedThisYear: 0 };
+  const dryRun = data?.dryRun ?? { unpaidPastDue: 0, inNoticeWindow: 0, alreadyFinedThisYear: 0, unreadable: 0 };
 
   const save = async (enabled: boolean) => {
     const invalid = validateRouteCheckFineInput(cfg);
@@ -124,9 +125,16 @@ export function RouteCheckFineSettings() {
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
-        If a check ran today: <strong className="text-gray-900 dark:text-gray-100">{dryRun.unpaidPastDue}</strong> unpaid
-        learners are past their due date; <strong className="text-gray-900 dark:text-gray-100">{dryRun.alreadyFinedThisYear}</strong>{' '}
+        If a check ran today: <strong className="text-gray-900 dark:text-gray-100">{dryRun.unpaidPastDue}</strong> learners
+        would be fined for an unpaid fee if an inspector scanned them;{' '}
+        <strong className="text-gray-900 dark:text-gray-100">{dryRun.inNoticeWindow}</strong> more are unpaid but still inside their
+        48-hour payment window; <strong className="text-gray-900 dark:text-gray-100">{dryRun.alreadyFinedThisYear}</strong>{' '}
         already have a maintenance fine this year (they will not be fined again).
+        {dryRun.unreadable > 0 && (
+          <span className="mt-1 block text-amber-700 dark:text-amber-300">
+            {dryRun.unreadable} learners&apos; fee status could not be read, so these numbers may be too low.
+          </span>
+        )}
       </div>
 
       <ul className="list-disc space-y-1 pl-5 text-sm text-gray-600 dark:text-gray-400">

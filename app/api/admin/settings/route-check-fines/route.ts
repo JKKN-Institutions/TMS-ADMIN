@@ -4,8 +4,8 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
 import { requirePerm } from '@/lib/auth/require-perm';
-import { term1PaidLearnerIds } from '@/lib/fees/term1';
-import { currentTransportYearId } from '@/lib/route-check/fee-facts';
+import { currentTransportYearId, loadLearnerFeeFacts } from '@/lib/route-check/fee-facts';
+import { summariseFeeDryRun, type FeeDryRun } from '@/lib/route-check/fine-dry-run';
 import { istToday } from '@/lib/booking/window';
 import {
   ROUTE_CHECK_FINE_SETTING_TYPE, loadRouteCheckFineConfig, toStoredRouteCheckFineConfig, validateRouteCheckFineInput,
@@ -14,24 +14,25 @@ import {
 
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
-/** Learners the unpaid rule could fine today (not Term-1 paid, bill past due, no override), and how many are already fined this year. */
-async function dryRun(svc: Svc) {
+/**
+ * "If a check ran today": how many learners the unpaid rule WOULD fine if an
+ * inspector scanned them. Runs the same fee facts + decideFeeFine as submit
+ * (earliest-term due date, running 48h window, override), and treats any
+ * existing maintenance-unpaid fine this year (any status) as already fined —
+ * exactly what submit's pre-check does.
+ */
+async function dryRun(svc: Svc): Promise<FeeDryRun> {
   const yearId = await currentTransportYearId(svc);
-  if (!yearId) return { unpaidPastDue: 0, alreadyFinedThisYear: 0 };
-  const today = istToday();
-  const [paid, bills, ovr, fined] = await Promise.all([
-    term1PaidLearnerIds(svc, yearId),
-    svc.from('tms_fee_bill').select('person_id, due_date, status').eq('transport_year_id', yearId).eq('person_type', 'learner').eq('status', 'generated'),
-    svc.from('tms_fee_override').select('person_id').eq('transport_year_id', yearId),
-    svc.from('tms_fee_fine').select('person_id').eq('transport_year_id', yearId).eq('status', 'generated').like('idempotency_key', 'maintenance-unpaid:%'),
+  if (!yearId) return { unpaidPastDue: 0, inNoticeWindow: 0, alreadyFinedThisYear: 0, unreadable: 0 };
+  const [bills, fined] = await Promise.all([
+    svc.from('tms_fee_bill').select('person_id').eq('transport_year_id', yearId).eq('person_type', 'learner').eq('status', 'generated'),
+    svc.from('tms_fee_fine').select('person_id').eq('transport_year_id', yearId).like('idempotency_key', `maintenance-unpaid:${yearId}:%`),
   ]);
-  if (bills.error || ovr.error || fined.error) throw new Error('dry run read failed');
-  const overridden = new Set((ovr.data ?? []).map((r) => (r as { person_id: string }).person_id));
-  const eligible = new Set<string>();
-  for (const b of (bills.data ?? []) as { person_id: string; due_date: string | null }[]) {
-    if (!paid.has(b.person_id) && !overridden.has(b.person_id) && b.due_date && b.due_date < today) eligible.add(b.person_id);
-  }
-  return { unpaidPastDue: eligible.size, alreadyFinedThisYear: new Set((fined.data ?? []).map((r) => (r as { person_id: string }).person_id)).size };
+  if (bills.error || fined.error) throw new Error('dry run read failed');
+  const ids = [...new Set((bills.data ?? []).map((r) => (r as { person_id: string }).person_id))];
+  const { facts } = await loadLearnerFeeFacts(svc, ids);
+  const finedIds = new Set((fined.data ?? []).map((r) => (r as { person_id: string }).person_id));
+  return summariseFeeDryRun(facts, finedIds, { today: istToday(), now: new Date() });
 }
 
 async function getConfig(auth: AuthContext) {

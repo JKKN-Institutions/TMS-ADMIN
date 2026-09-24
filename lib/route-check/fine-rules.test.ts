@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideFeeFine, decideBookingFine, isServiceDay } from './fine-rules';
+import { decideFeeFine, decideBookingFine, isServiceDay, ruleNote, finesRaisedByNote } from './fine-rules';
 
 const NOW = new Date('2026-09-23T04:00:00.000Z');
 const ctx = { checkDate: '2026-09-23', now: NOW };
@@ -35,5 +35,33 @@ describe('isServiceDay', () => {
     expect(isServiceDay('2026-09-27', new Set())).toBe(false); // Sunday
     expect(isServiceDay('2026-09-23', new Set(['2026-09-23']))).toBe(false);
     expect(isServiceDay('2026-09-23', new Set())).toBe(true);
+  });
+});
+
+describe('ruleNote', () => {
+  it('reads each rule out of a combined note', () => {
+    expect(ruleNote('fee:raised booking:booked', 'fee')).toBe('raised');
+    expect(ruleNote('fee:raised booking:booked', 'booking')).toBe('booked');
+  });
+  it('applies a whole-check note (no rule prefix) to both rules', () => {
+    expect(ruleNote('fines_off', 'fee')).toBe('fines_off');
+    expect(ruleNote('error', 'booking')).toBe('error');
+  });
+  it('is null when there is no note', () => {
+    expect(ruleNote(null, 'fee')).toBeNull();
+    expect(ruleNote('', 'booking')).toBeNull();
+  });
+});
+
+describe('finesRaisedByNote', () => {
+  it('counts only fines THIS check raised, never earlier ones it found', () => {
+    expect(finesRaisedByNote('fee:raised booking:raised')).toBe(2);
+    expect(finesRaisedByNote('fee:already_fined booking:raised')).toBe(1);
+    expect(finesRaisedByNote('fee:already_fined booking:booked')).toBe(0);
+  });
+  it('is 0 for fines-off, errors and missing notes', () => {
+    expect(finesRaisedByNote('fines_off')).toBe(0);
+    expect(finesRaisedByNote('error')).toBe(0);
+    expect(finesRaisedByNote(null)).toBe(0);
   });
 });

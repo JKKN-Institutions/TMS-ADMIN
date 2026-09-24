@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { makeFakeSupabase } from '@/lib/fees/__testing__/fake-supabase';
-import { raiseCheckFines, type FineDeps } from './fines';
+import { raiseCheckFines, previewCheckFines, type FineDeps } from './fines';
 import type { LearnerFeeFactsRow } from './fee-facts';
 
 const CHECK = { id: 'C', route_id: 'R1', check_date: '2026-09-23' };
@@ -165,5 +165,58 @@ describe('raiseCheckFines', () => {
     for (const call of (d.createFines as ReturnType<typeof vi.fn>).mock.calls) {
       expect(call[1].personIds).not.toContain('S1');
     }
+  });
+});
+
+// The Submit dialog's "what will this do" line. It must describe exactly what
+// raiseCheckFines would do right now — and never write anything itself.
+describe('previewCheckFines', () => {
+  const writes = (svc: ReturnType<typeof svcWith>) =>
+    svc.calls.flatMap((c) => c.ops.map(([op]) => op)).filter((op) => ['insert', 'update', 'upsert', 'delete'].includes(op));
+
+  it('reports fines off without stamping any note (read-only)', async () => {
+    const svc = svcWith([]);
+    const d = deps();
+    const out = await previewCheckFines(svc as never, CHECK, d);
+    expect(out).toEqual({
+      enabled: false, unpaidAmount: 0, noBookingAmount: 0,
+      fee: { willRaise: 0, alreadyFined: 0 }, booking: { willRaise: 0, alreadyFined: 0 },
+    });
+    expect(writes(svc)).toEqual([]);
+    expect(d.readFineIdsByKeys).not.toHaveBeenCalled();
+  });
+
+  it('counts the fines submit would raise, with the configured amounts, and writes nothing', async () => {
+    const svc = svcWith(ON);
+    const d = deps();
+    const out = await previewCheckFines(svc as never, CHECK, d);
+    expect(out).toEqual({
+      enabled: true, unpaidAmount: 500, noBookingAmount: 200,
+      fee: { willRaise: 1, alreadyFined: 0 }, booking: { willRaise: 1, alreadyFined: 0 },
+    });
+    expect(d.createFines).not.toHaveBeenCalled();
+    expect(d.logSystemActivity).not.toHaveBeenCalled();
+    expect(writes(svc)).toEqual([]);
+  });
+
+  it('moves a learner who already holds the key into alreadyFined, not willRaise', async () => {
+    const d = deps({ seedExistingKeys: ['maintenance-unpaid:Y:L1'] });
+    const out = await previewCheckFines(svcWith(ON) as never, CHECK, d);
+    expect(out.fee).toEqual({ willRaise: 0, alreadyFined: 1 });
+    expect(out.booking).toEqual({ willRaise: 1, alreadyFined: 0 });
+  });
+
+  it('agrees with the same skip rules as submit (booked elsewhere, paid)', async () => {
+    const d = deps({
+      loadBookingRoutes: vi.fn(async () => new Map([['L1', ['R9']]])),
+      loadLearnerFeeFacts: vi.fn(async () => ({ yearId: 'Y', facts: new Map<string, LearnerFeeFactsRow>([['L1', { mark: 'paid', term1DueDate: null, runningNoticeExpiresAt: null, hasBill: true }]]) })),
+    });
+    const out = await previewCheckFines(svcWith(ON) as never, CHECK, d);
+    expect(out.fee.willRaise + out.booking.willRaise).toBe(0);
+  });
+
+  it('throws when the already-fined read fails (the dialog shows "preview unavailable", never a wrong 0)', async () => {
+    const d = deps({ readFineIdsByKeys: vi.fn(async () => { throw new Error('read failed'); }) });
+    await expect(previewCheckFines(svcWith(ON) as never, CHECK, d)).rejects.toThrow('read failed');
   });
 });

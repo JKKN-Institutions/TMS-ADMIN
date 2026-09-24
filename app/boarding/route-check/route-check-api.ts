@@ -1,5 +1,5 @@
 import type { CheckView, MyCheckRoute, ScanResponse, CheckLeg, CheckCounts } from '@/lib/route-check/types';
-import type { CheckFineSummary } from '@/lib/route-check/fines';
+import type { CheckFineSummary, CheckFinePreview } from '@/lib/route-check/fines';
 
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
@@ -30,4 +30,8 @@ export async function removeEntry(checkId: string, personId: string): Promise<vo
 }
 export async function submitCheck(checkId: string): Promise<{ counts: CheckCounts; fines: CheckFineSummary | null }> {
   return (await json<{ data: { counts: CheckCounts; fines: CheckFineSummary | null } }>(await post(`/api/boarding/route-check/${checkId}/submit`, {}))).data;
+}
+/** What submitting would fine right now. Advisory: submit re-decides from fresh facts. */
+export async function fetchFinePreview(checkId: string): Promise<CheckFinePreview> {
+  return (await json<{ data: CheckFinePreview }>(await fetch(`/api/boarding/route-check/${checkId}/fine-preview`, { cache: 'no-store' }))).data;
 }

@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { CheckCounts } from '@/lib/route-check/types';
-import { submitCheck } from '@/app/boarding/route-check/route-check-api';
+import type { CheckFinePreview } from '@/lib/route-check/fines';
+import { fetchFinePreview, submitCheck } from '@/app/boarding/route-check/route-check-api';
 
 export function FinishPanel({
   checkId,
@@ -20,6 +21,16 @@ export function FinishPanel({
 }) {
   const qc = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
+  // Re-read every time the dialog opens: ticks change between opens.
+  const preview = useQuery({
+    queryKey: ['route-check', checkId, 'fine-preview'],
+    queryFn: () => fetchFinePreview(checkId),
+    enabled: open,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+  const willRaise = preview.data?.enabled ? preview.data.fee.willRaise + preview.data.booking.willRaise : 0;
 
   async function handleSubmit() {
     if (submitting) return;
@@ -67,6 +78,8 @@ export function FinishPanel({
           <SummaryRow label="Not on this bus" value={counts.notOnRoute} />
         </div>
 
+        <FinePreviewBox loading={preview.isLoading} failed={preview.isError} data={preview.data} />
+
         <div className="flex gap-2 pt-2">
           <button
             type="button"
@@ -74,7 +87,7 @@ export function FinishPanel({
             disabled={submitting}
             className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-green-700 dark:hover:bg-green-600"
           >
-            {submitting ? 'Submitting…' : 'Submit check'}
+            {submitting ? 'Submitting…' : willRaise > 0 ? `Submit · raise ${willRaise} fine${willRaise === 1 ? '' : 's'}` : 'Submit check'}
           </button>
           <button
             type="button"
@@ -95,6 +108,47 @@ function SummaryRow({ label, value }: { label: string; value?: number }) {
     <div className="flex min-w-0 items-center justify-between gap-2 text-sm">
       <span className="min-w-0 truncate text-gray-600 dark:text-gray-400">{label}</span>
       {value !== undefined && <span className="shrink-0 font-semibold text-gray-900 dark:text-gray-100">{value}</span>}
+    </div>
+  );
+}
+
+const rupees = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+
+/**
+ * What submitting will charge, shown BEFORE the tap: submit cannot be undone and
+ * a fine can only be cancelled in MyJKKN with a supporting document.
+ */
+function FinePreviewBox({ loading, failed, data }: { loading: boolean; failed: boolean; data: CheckFinePreview | undefined }) {
+  const box = 'min-w-0 rounded-lg border px-3 py-2 text-sm';
+  if (loading) {
+    return <p className={`${box} border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400`}>Working out fines…</p>;
+  }
+  if (failed || !data) {
+    return (
+      <p className={`${box} border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300`}>
+        Could not work out the fines. They are still decided when you submit.
+      </p>
+    );
+  }
+  if (!data.enabled) {
+    return <p className={`${box} border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400`}>Automatic fines are off. Submitting raises no fines.</p>;
+  }
+  const { fee, booking } = data;
+  const already = fee.alreadyFined + booking.alreadyFined;
+  if (fee.willRaise + booking.willRaise === 0) {
+    return (
+      <p className={`${box} border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400`}>
+        No new fines.{already > 0 && ` ${already} already fined earlier (not charged again).`}
+      </p>
+    );
+  }
+  return (
+    <div className={`${box} space-y-1 border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300`}>
+      <p className="font-semibold">Submitting will raise:</p>
+      {fee.willRaise > 0 && <p>{fee.willRaise} × {rupees(data.unpaidAmount)} unpaid fee fine</p>}
+      {booking.willRaise > 0 && <p>{booking.willRaise} × {rupees(data.noBookingAmount)} no-booking fine</p>}
+      {already > 0 && <p className="text-xs">{already} already fined earlier (not charged again).</p>}
+      <p className="text-xs">Fines cannot be undone here.</p>
     </div>
   );
 }

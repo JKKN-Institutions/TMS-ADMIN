@@ -71,22 +71,117 @@ type RuleName = 'fee' | 'booking';
 type RuleStatus = 'skip' | 'already_fined' | 'pending' | 'raised' | 'error';
 interface RuleState { note: FineNote; fineId: string | null; status: RuleStatus }
 
+type CheckRef = { id: string; route_id: string; check_date: string };
+
+/** The check's learner ticks. Staff / unknown rows never reach the fine rules. */
+async function loadLearnerTicks(svc: SupabaseClient, checkId: string): Promise<{ id: string; learner_id: string }[]> {
+  const { data: rows, error } = await svc.from('tms_route_check_person')
+    .select('id, learner_id').eq('check_id', checkId).eq('person_kind', 'learner');
+  if (error) throw new Error(`raiseCheckFines: ticks read failed: ${error.message}`);
+  // The query filter isn't enforced by every caller's test double, so guard here
+  // too — a staff/unknown row must never reach createFines.
+  return ((rows ?? []) as { id: string; learner_id: string | null }[])
+    .filter((t): t is { id: string; learner_id: string } => !!t.learner_id);
+}
+
+/**
+ * Re-read every fact and run the pure rules for each learner. Shared by submit
+ * (raiseCheckFines) and the Submit-dialog preview, so the two cannot disagree.
+ * Read-only.
+ */
+async function decideTicks(svc: SupabaseClient, check: CheckRef, learnerIds: string[], d: FineDeps) {
+  const [{ yearId, facts }, bookings, exceptions] = await Promise.all([
+    d.loadLearnerFeeFacts(svc, learnerIds),
+    d.loadBookingRoutes(svc, learnerIds, check.check_date),
+    d.loadExceptionDates(svc, check.route_id, check.check_date),
+  ]);
+  const serviceDay = isServiceDay(check.check_date, exceptions);
+  const now = d.now();
+
+  const feeState = new Map<string, RuleState>();
+  const bookingState = new Map<string, RuleState>();
+  const skipped: CheckFineSummary['skipped'] = [];
+
+  for (const lid of learnerIds) {
+    const fee: FineDecision = yearId
+      ? decideFeeFine(facts.get(lid) ?? { mark: 'unknown', term1DueDate: null, runningNoticeExpiresAt: null }, { checkDate: check.check_date, now })
+      : { raise: false, note: 'no_current_year' };
+    const booking: FineDecision = yearId
+      ? decideBookingFine(bookingMark(bookings.get(lid) ?? [], check.route_id), { serviceDay })
+      : { raise: false, note: 'no_current_year' };
+
+    if (!fee.raise) {
+      feeState.set(lid, { note: fee.note, fineId: null, status: 'skip' });
+      skipped.push({ personId: lid, rule: 'fee', note: fee.note });
+    } else {
+      feeState.set(lid, { note: 'raised', fineId: null, status: 'pending' });
+    }
+
+    if (!booking.raise) {
+      bookingState.set(lid, { note: booking.note, fineId: null, status: 'skip' });
+      skipped.push({ personId: lid, rule: 'booking', note: booking.note });
+    } else {
+      bookingState.set(lid, { note: 'raised', fineId: null, status: 'pending' });
+    }
+  }
+
+  return {
+    yearId, feeState, bookingState, skipped,
+    feeBaseKey: yearId ? `maintenance-unpaid:${yearId}` : '',
+    bookingBaseKey: `no-booking:${check.check_date}`,
+  };
+}
+
+export interface CheckFinePreview {
+  enabled: boolean;
+  unpaidAmount: number;
+  noBookingAmount: number;
+  fee: { willRaise: number; alreadyFined: number };
+  booking: { willRaise: number; alreadyFined: number };
+}
+
+/**
+ * What submitting this check would fine RIGHT NOW, without writing anything —
+ * for the Submit dialog. Submit re-decides from fresh facts, so this is a
+ * preview, not a promise. Throws on a read failure rather than returning a
+ * misleading 0.
+ */
+export async function previewCheckFines(svc: SupabaseClient, check: CheckRef, deps: Partial<FineDeps> = {}): Promise<CheckFinePreview> {
+  const d: FineDeps = { ...DEFAULT_DEPS, ...deps };
+  const cfg = await loadRouteCheckFineConfig(svc);
+  const out: CheckFinePreview = {
+    enabled: cfg.enabled, unpaidAmount: cfg.unpaidAmount, noBookingAmount: cfg.noBookingAmount,
+    fee: { willRaise: 0, alreadyFined: 0 }, booking: { willRaise: 0, alreadyFined: 0 },
+  };
+  if (!cfg.enabled) return out;
+  const ticks = await loadLearnerTicks(svc, check.id);
+  if (ticks.length === 0) return out;
+
+  const dec = await decideTicks(svc, check, ticks.map((t) => t.learner_id), d);
+  const tally = async (state: Map<string, RuleState>, baseKey: string, into: { willRaise: number; alreadyFined: number }) => {
+    const pending = [...state.entries()].filter(([, s]) => s.status === 'pending').map(([lid]) => lid);
+    if (pending.length === 0) return;
+    const existing = await d.readFineIdsByKeys(svc, pending.map((lid) => `${baseKey}:${lid}`));
+    for (const lid of pending) {
+      if (existing.has(`${baseKey}:${lid}`)) into.alreadyFined += 1;
+      else into.willRaise += 1;
+    }
+  };
+  await tally(dec.feeState, dec.feeBaseKey, out.fee);
+  await tally(dec.bookingState, dec.bookingBaseKey, out.booking);
+  return out;
+}
+
 export async function raiseCheckFines(
   svc: SupabaseClient,
-  check: { id: string; route_id: string; check_date: string },
+  check: CheckRef,
   actorId: string,
   deps: Partial<FineDeps> = {},
 ): Promise<CheckFineSummary> {
   const d: FineDeps = { ...DEFAULT_DEPS, ...deps };
   const out: CheckFineSummary = { enabled: false, raised: 0, alreadyFined: 0, skipped: [], errors: 0 };
 
-  const { data: rows, error } = await svc.from('tms_route_check_person')
-    .select('id, learner_id').eq('check_id', check.id).eq('person_kind', 'learner');
-  if (error) throw new Error(`raiseCheckFines: ticks read failed: ${error.message}`);
-  // The query filter isn't enforced by every caller's test double, so guard here
-  // too — a staff/unknown row must never reach createFines.
-  const ticks = ((rows ?? []) as { id: string; learner_id: string | null }[])
-    .filter((t): t is { id: string; learner_id: string } => !!t.learner_id);
+  const ticks = await loadLearnerTicks(svc, check.id);
   if (ticks.length === 0) return out;
 
   const cfg = await loadRouteCheckFineConfig(svc);
@@ -98,45 +193,10 @@ export async function raiseCheckFines(
   }
   out.enabled = true;
 
-  const ids = ticks.map((t) => t.learner_id);
-  const [{ yearId, facts }, bookings, exceptions] = await Promise.all([
-    d.loadLearnerFeeFacts(svc, ids),
-    d.loadBookingRoutes(svc, ids, check.check_date),
-    d.loadExceptionDates(svc, check.route_id, check.check_date),
-  ]);
-  const serviceDay = isServiceDay(check.check_date, exceptions);
-  const now = d.now();
   const dueDate = addDays(check.check_date, cfg.fineDueDays);
-
-  const feeState = new Map<string, RuleState>();
-  const bookingState = new Map<string, RuleState>();
-
-  for (const t of ticks) {
-    const lid = t.learner_id;
-    const fee: FineDecision = yearId
-      ? decideFeeFine(facts.get(lid) ?? { mark: 'unknown', term1DueDate: null, runningNoticeExpiresAt: null }, { checkDate: check.check_date, now })
-      : { raise: false, note: 'no_current_year' };
-    const booking: FineDecision = yearId
-      ? decideBookingFine(bookingMark(bookings.get(lid) ?? [], check.route_id), { serviceDay })
-      : { raise: false, note: 'no_current_year' };
-
-    if (!fee.raise) {
-      feeState.set(lid, { note: fee.note, fineId: null, status: 'skip' });
-      out.skipped.push({ personId: lid, rule: 'fee', note: fee.note });
-    } else {
-      feeState.set(lid, { note: 'raised', fineId: null, status: 'pending' });
-    }
-
-    if (!booking.raise) {
-      bookingState.set(lid, { note: booking.note, fineId: null, status: 'skip' });
-      out.skipped.push({ personId: lid, rule: 'booking', note: booking.note });
-    } else {
-      bookingState.set(lid, { note: 'raised', fineId: null, status: 'pending' });
-    }
-  }
-
-  const feeBaseKey = yearId ? `maintenance-unpaid:${yearId}` : '';
-  const bookingBaseKey = `no-booking:${check.check_date}`;
+  const { yearId, feeState, bookingState, skipped, feeBaseKey, bookingBaseKey } =
+    await decideTicks(svc, check, ticks.map((t) => t.learner_id), d);
+  out.skipped.push(...skipped);
 
   await processRule({
     svc, check, actorId, dueDate, d, out,

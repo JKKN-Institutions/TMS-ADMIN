@@ -55,3 +55,28 @@ export const FINE_NOTE_LABEL: Record<FineNote, string> = {
   raised: 'Fine raised',
   error: 'Fine failed — see logs',
 };
+
+export type FineRule = 'fee' | 'booking';
+
+/**
+ * One rule's note out of a stored `fine_note`: 'fee:<note> booking:<note>', or a
+ * single whole-check word ('fines_off' / 'error') that applies to both rules.
+ */
+export function ruleNote(fineNote: string | null, rule: FineRule): FineNote | null {
+  const parts = (fineNote ?? '').split(/\s+/).filter(Boolean);
+  for (const part of parts) {
+    const idx = part.indexOf(':');
+    if (idx < 0) return part as FineNote;
+    if (part.slice(0, idx) === rule) return part.slice(idx + 1) as FineNote;
+  }
+  return null;
+}
+
+/**
+ * Fines THIS check raised for one person (0–2). A fine the check merely found
+ * ('already_fined': an earlier check or the 48h sweep raised it) is not counted,
+ * even though its id is stored on the row so the report can show it.
+ */
+export function finesRaisedByNote(fineNote: string | null): number {
+  return (['fee', 'booking'] as const).filter((r) => ruleNote(fineNote, r) === 'raised').length;
+}

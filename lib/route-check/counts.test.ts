@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkCounts, matchesFilter, type CheckRowLite } from './counts';
+import { checkCounts, matchesFilter, scannedCounts, type CheckRowLite, type ScannedPersonLite } from './counts';
 
 const rows: CheckRowLite[] = [
   { booked: true, status: 'present', feeState: 'paid', notOnRoute: false },
@@ -36,5 +36,41 @@ describe('matchesFilter', () => {
   });
   it('not_on_route matches only flagged rows', () => {
     expect(rows.map((r) => matchesFilter(r, 'not_on_route'))).toEqual([false, false, false, true]);
+  });
+});
+
+describe('scannedCounts', () => {
+  const p = (o: Partial<ScannedPersonLite>): ScannedPersonLite => ({
+    kind: 'learner', outcome: 'ok', feeState: 'paid', bookingState: 'this_route', fineNote: null, ...o,
+  });
+
+  it('counts only the people scanned on this check', () => {
+    expect(scannedCounts([
+      p({}),
+      p({ feeState: 'unpaid', outcome: 'fee_unpaid' }),
+      p({ bookingState: 'none', outcome: 'no_booking' }),
+      p({ bookingState: 'other_route', outcome: 'not_on_route' }),
+      p({ kind: 'staff', feeState: 'unpaid', bookingState: null, outcome: 'fee_unpaid' }),
+    ])).toEqual({ checked: 5, unpaid: 2, noBooking: 1, notOnRoute: 1, unknownCards: 0, finesRaised: 0 });
+  });
+
+  it('keeps unknown cards out of "checked" but reports them', () => {
+    expect(scannedCounts([
+      p({}),
+      p({ kind: 'unknown', outcome: 'unknown_card', feeState: null, bookingState: null }),
+    ])).toMatchObject({ checked: 1, unknownCards: 1 });
+  });
+
+  it('staff never count as "no booking" (they do not book)', () => {
+    expect(scannedCounts([p({ kind: 'staff', bookingState: null })]).noBooking).toBe(0);
+  });
+
+  it('counts people fined BY this check, not people who already had a fine', () => {
+    expect(scannedCounts([
+      p({ fineNote: 'fee:raised booking:raised' }),
+      p({ fineNote: 'fee:already_fined booking:booked' }),
+      p({ fineNote: 'fee:already_fined booking:raised' }),
+      p({ fineNote: 'fines_off' }),
+    ]).finesRaised).toBe(2);
   });
 });
