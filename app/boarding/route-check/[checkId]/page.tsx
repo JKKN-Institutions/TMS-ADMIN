@@ -3,7 +3,7 @@
 import { use, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ScanLine } from 'lucide-react';
 import { LEG_NAME } from '@/lib/boarding/attendance-window';
 import { CHECK_OUTCOME_META } from '@/lib/route-check/outcome-meta';
 import { filterLearners, groupByStop, type ScreenFilter } from '@/lib/route-check/filter';
@@ -151,8 +151,34 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
       </button>
     );
 
+  const submittedNote = (
+    <p className="rounded-lg bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-800 dark:bg-green-900/20 dark:text-green-300">
+      Submitted at {check.submittedAt ? new Date(check.submittedAt).toLocaleString('en-IN') : '—'}
+    </p>
+  );
+  const scanButton = (cls: string) => (
+    <button
+      type="button"
+      onClick={() => setScanOpen(true)}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 ${cls}`}
+    >
+      <ScanLine className="h-4 w-4" />
+      Scan
+    </button>
+  );
+  const finishButton = (cls: string) => (
+    <button
+      type="button"
+      onClick={() => setFinishOpen(true)}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${cls}`}
+    >
+      <CheckCircle2 className="h-4 w-4" />
+      Finish
+    </button>
+  );
+
   return (
-    <div className={`${PAGE} space-y-4 p-4 pb-28 lg:p-6 lg:pb-28`}>
+    <div className={`${PAGE} space-y-4 p-4 pb-28 md:pb-6 lg:p-6`}>
       {/* Check details */}
       <section className={`${CARD} p-4`}>
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -188,6 +214,23 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
       )}
 
       <CountsBar counts={counts} />
+
+      {/* Tablet / desktop: actions sit right above the table. */}
+      <div className="hidden md:block">
+        {submitted ? (
+          submittedNote
+        ) : (
+          <div className={`${CARD} flex items-center justify-between gap-3 px-4 py-3`}>
+            <p className="min-w-0 text-sm text-gray-600 dark:text-gray-400">
+              Scan each rider&apos;s ID card, then tap <span className="font-semibold text-gray-900 dark:text-gray-100">Finish</span> to submit the check.
+            </p>
+            <div className="flex shrink-0 gap-2">
+              {scanButton('min-w-[140px]')}
+              {finishButton('min-w-[140px]')}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Riders / staff */}
       <section className={CARD}>
@@ -293,28 +336,13 @@ export default function RouteCheckPage({ params }: { params: Promise<{ checkId: 
         )}
       </section>
 
-      <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur lg:bottom-4 dark:border-gray-800 dark:bg-gray-950/95">
+      {/* Phone: pinned to the bottom so Scan stays in thumb reach while scrolling a long list. */}
+      <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 border-t border-gray-200 bg-white/95 p-3 backdrop-blur md:hidden dark:border-gray-800 dark:bg-gray-950/95">
         <div className="mx-auto max-w-lg">
-          {submitted ? (
-            <p className="rounded-lg bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-800 dark:bg-green-900/20 dark:text-green-300">
-              Submitted at {check.submittedAt ? new Date(check.submittedAt).toLocaleString('en-IN') : '—'}
-            </p>
-          ) : (
+          {submitted ? submittedNote : (
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setScanOpen(true)}
-                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600"
-              >
-                Scan
-              </button>
-              <button
-                type="button"
-                onClick={() => setFinishOpen(true)}
-                className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-              >
-                Finish
-              </button>
+              {scanButton('flex-1')}
+              {finishButton('flex-1')}
             </div>
           )}
         </div>
