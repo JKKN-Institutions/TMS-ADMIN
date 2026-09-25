@@ -14,6 +14,7 @@ import { LearnerTable } from '@/components/route-check/learner-table';
 import { StaffList } from '@/components/route-check/staff-list';
 import { StaffTable } from '@/components/route-check/staff-table';
 import { RouteCheckScanDialog } from '@/components/route-check/scan-dialog';
+import { primeSpeech } from '@/lib/boarding/announce';
 import { FinishPanel } from '@/components/route-check/finish-panel';
 import { fetchCheck, removeEntry } from '@/app/boarding/route-check/route-check-api';
 
@@ -166,7 +167,11 @@ export function RouteCheckScreen({ checkId, embedded = false }: { checkId: strin
   const scanButton = (cls: string) => (
     <button
       type="button"
-      onClick={() => setScanOpen(true)}
+      onClick={() => {
+        // iPhones only speak after a tap: unlock the scan voice now, from the tap.
+        primeSpeech();
+        setScanOpen(true);
+      }}
       className={`inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 ${cls}`}
     >
       <ScanLine className="h-4 w-4" />

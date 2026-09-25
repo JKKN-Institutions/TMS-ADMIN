@@ -1,8 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Volume2, VolumeX } from 'lucide-react';
+import { isVoiceMuted, primeSpeech, setVoiceMuted, speak } from '@/lib/boarding/announce';
+import { checkAnnouncement, CHECK_ERROR_PHRASE } from '@/lib/route-check/announce';
 import { Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BusScanner } from '@/components/scanner/bus-scanner';
@@ -46,6 +49,18 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
   const lastRef = useRef<{ code: string; at: number } | null>(null);
   // Bumped on close so a reply that lands after the dialog closed shows no stale verdict on reopen.
   const genRef = useRef(0);
+  // Scan voice. The mute choice is shared with the boarding scanner (one
+  // setting per phone) and read when the dialog opens.
+  const [voiceMuted, setVoiceMutedState] = useState(false);
+  useEffect(() => {
+    if (open) setVoiceMutedState(isVoiceMuted());
+  }, [open]);
+  function toggleVoice() {
+    const next = !voiceMuted;
+    setVoiceMuted(next);
+    setVoiceMutedState(next);
+    if (!next) primeSpeech();
+  }
 
   function recordChecked(entry: CheckPersonEntry, alreadyChecked: boolean) {
     setChecks((prev) => [{ at: Date.now(), code: entry.code ?? entry.scannedCode ?? '', entry, alreadyChecked }, ...prev]);
@@ -69,7 +84,10 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
     try {
       const res = await scanCode(checkId, code);
       if (res.kind === 'recorded') {
-        if (gen === genRef.current) setVerdict({ kind: 'recorded', code, r: res });
+        if (gen === genRef.current) {
+          setVerdict({ kind: 'recorded', code, r: res });
+          speak(checkAnnouncement({ name: res.entry.name, outcome: res.entry.outcome, alreadyChecked: res.alreadyChecked }));
+        }
         recordChecked(res.entry, res.alreadyChecked);
       } else {
         if (gen === genRef.current) setVerdict({ kind: 'candidates', code: res.code, candidates: res.candidates });
@@ -77,7 +95,10 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
     } catch (e) {
       const message = (e as Error).message || 'Could not check the card';
       toast.error(message);
-      if (gen === genRef.current) setVerdict({ kind: 'error', message });
+      if (gen === genRef.current) {
+        setVerdict({ kind: 'error', message });
+        speak(CHECK_ERROR_PHRASE);
+      }
     } finally {
       setBusy(false);
     }
@@ -95,7 +116,10 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
     try {
       const res = await pickCandidate(checkId, { personKind: c.personKind, id: c.id, matchedBy: c.matchedBy, scannedCode: code });
       if (res.kind === 'recorded') {
-        if (gen === genRef.current) setVerdict({ kind: 'recorded', code, r: res });
+        if (gen === genRef.current) {
+          setVerdict({ kind: 'recorded', code, r: res });
+          speak(checkAnnouncement({ name: res.entry.name, outcome: res.entry.outcome, alreadyChecked: res.alreadyChecked }));
+        }
         recordChecked(res.entry, res.alreadyChecked);
       } else {
         // Shouldn't happen (a specific person was chosen), but stay on the picker's data if it does.
@@ -104,7 +128,10 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
     } catch (e) {
       const message = (e as Error).message || 'Could not check the card';
       toast.error(message);
-      if (gen === genRef.current) setVerdict({ kind: 'error', message });
+      if (gen === genRef.current) {
+        setVerdict({ kind: 'error', message });
+        speak(CHECK_ERROR_PHRASE);
+      }
     } finally {
       pickingRef.current = false;
       setBusy(false);
@@ -140,7 +167,19 @@ export function RouteCheckScanDialog({ checkId, routeId, open, onClose }: { chec
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(); }}>
       <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] max-w-md overflow-y-auto rounded-xl p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Scan ID card</DialogTitle>
+          <div className="flex items-center justify-between gap-2 pr-8">
+            <DialogTitle>Scan ID card</DialogTitle>
+            <button
+              type="button"
+              onClick={toggleVoice}
+              aria-pressed={voiceMuted}
+              aria-label={voiceMuted ? 'Turn the voice on' : 'Mute the voice'}
+              title={voiceMuted ? 'Voice off — tap to hear scans again' : 'Voice on — tap to mute'}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              {voiceMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </button>
+          </div>
           <DialogDescription>Ticks this route check — never marks boarding attendance.</DialogDescription>
         </DialogHeader>
 
