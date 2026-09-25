@@ -78,8 +78,11 @@ export default function EnrollmentRequestsPage() {
     },
   });
 
-  const learners = data?.learners ?? [];
-  const routes = data?.routes ?? [];
+  // Memoised so the empty fallback keeps ONE identity while loading: DataTable
+  // re-runs its filtered-rows effect whenever `data` changes, and that effect
+  // sets state here — a fresh [] each render looped until React gave up.
+  const learners = useMemo(() => data?.learners ?? [], [data]);
+  const routes = useMemo(() => data?.routes ?? [], [data]);
 
   const openEdit = (l: LearnerPassenger) => {
     setEditing(l);
