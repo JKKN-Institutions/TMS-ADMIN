@@ -68,6 +68,19 @@ const inr = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN', { maximu
  * legacy transport_fee column only when no billed terms exist.
  */
 function feeSummary(access: TransportAccess | undefined, fallbackFee: number | null) {
+  // Maintenance fee waived into a raised Transport Fee: its Rs 0 "paid" terms
+  // would read as all-clear, so the tile reports the Transport Fee instead.
+  if (access?.maintenance_waived) {
+    const owed = Number(access.transport_fee_balance ?? 0);
+    return {
+      label: 'Transport fee',
+      value: inr(owed),
+      badge: owed > 0
+        ? { text: 'Due', cls: 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-400' }
+        : { text: 'Paid', cls: 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-400' },
+    };
+  }
+
   const terms = access?.terms ?? [];
   const hasTerms = terms.length > 0;
 
@@ -86,7 +99,7 @@ function feeSummary(access: TransportAccess | undefined, fallbackFee: number | n
     }
   }
 
-  return { value, badge };
+  return { label: 'Maintenance fee', value, badge };
 }
 
 export default function StudentDashboardPage() {
@@ -152,7 +165,7 @@ export default function StudentDashboardPage() {
         />
         <StatCard
           icon={CreditCard}
-          label="Maintenance fee"
+          label={fee.label}
           value={fee.value}
           tone="bg-gradient-to-br from-orange-500 to-amber-600"
           badge={

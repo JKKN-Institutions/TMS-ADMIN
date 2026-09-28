@@ -24,6 +24,9 @@ interface Access {
   term1_status: string | null;
   term1_due_date: string | null;
   term1_balance: number;
+  /** A Transport Fee was raised and the maintenance fee waived into it. */
+  maintenance_waived?: boolean;
+  transport_fee_balance?: number;
 }
 
 type TransportFeeStatus = 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'cancelled' | 'unknown';
@@ -128,7 +131,10 @@ export default function StudentFeesPage() {
     );
   }
 
-  const hasTerms = data.terms.length > 0;
+  // Once the Transport Fee is raised the maintenance fee is waived into it (its
+  // bills repriced to Rs 0), so every maintenance element below is hidden.
+  const waived = !!data.maintenance_waived;
+  const hasTerms = data.terms.length > 0 && !waived;
   // Maintenance outstanding comes from the terms, so it stays in step with the
   // table below rather than being a second, separately-derived number.
   const maintenanceOutstanding = data.terms.reduce((s, t) => s + Math.max(0, Number(t.balance || 0)), 0);
@@ -166,7 +172,8 @@ export default function StudentFeesPage() {
       </div>
 
       {/* The two charges, side by side, so the difference is obvious at a glance. */}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className={`grid gap-3 ${waived ? '' : 'sm:grid-cols-2'}`}>
+        {!waived && (
         <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
           <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
             Transport Maintenance Fee
@@ -176,6 +183,7 @@ export default function StudentFeesPage() {
             {maintenanceOutstanding > 0 ? 'Still to pay' : 'Fully paid'}
           </p>
         </div>
+        )}
         <div
           className={`rounded-xl border p-4 ${
             tf.outstanding > 0
@@ -218,6 +226,13 @@ export default function StudentFeesPage() {
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-950/30">
         <div className="flex items-start gap-3">
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          {waived ? (
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              Your <strong>Transport Maintenance Fee</strong> was not paid by the due date, so it has
+              been waived off and adjusted to the <strong>Transport Fee</strong>. Pay the Transport Fee
+              to restore bus booking and the rest of the portal.
+            </p>
+          ) : (
           <p className="text-sm text-amber-900 dark:text-amber-200">
             The college collects the <strong>Transport Maintenance Fee</strong>. If you do not pay it
             by the due date, a <strong>Transport Fee</strong> is charged to your account
@@ -230,6 +245,7 @@ export default function StudentFeesPage() {
               </>
             ) : null}
           </p>
+          )}
         </div>
       </div>
 
@@ -240,7 +256,12 @@ export default function StudentFeesPage() {
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
             <div>
               <p className="font-semibold text-red-800 dark:text-red-300">Portal access restricted</p>
-              {data.reason === 'term1_unpaid' ? (
+              {data.reason === 'transport_fee_unpaid' ? (
+                <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
+                  Your <strong>Transport Fee</strong> of <strong>{inr(data.transport_fee_balance ?? tf.outstanding)}</strong>{' '}
+                  is not paid. Pay it to unlock bus booking and the rest of the portal.
+                </p>
+              ) : data.reason === 'term1_unpaid' ? (
                 <p className="mt-1 text-sm text-red-700 dark:text-red-300/90">
                   Your <strong>first term</strong> transport maintenance fee of <strong>{inr(data.term1_balance)}</strong>
                   {data.term1_due_date ? <> (due {fmtDate(data.term1_due_date)})</> : null} is not fully paid.
@@ -267,7 +288,7 @@ export default function StudentFeesPage() {
         <div className="rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-500/30 dark:bg-green-950/30">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-            <p className="text-sm font-medium text-green-800 dark:text-green-300">You&apos;re up to date on your transport maintenance fee.</p>
+            <p className="text-sm font-medium text-green-800 dark:text-green-300">{waived ? "You're up to date on your Transport Fee." : "You're up to date on your transport maintenance fee."}</p>
           </div>
         </div>
       ) : (
@@ -282,7 +303,7 @@ export default function StudentFeesPage() {
       {/* Only meaningful for stop_wise structures — flat/tiered fees don't depend
           on the boarding stop at all, so this must never render for them (see
           review I5). */}
-      {transport?.stop_wise && transport?.stop_name && (
+      {!waived && transport?.stop_wise && transport?.stop_name && (
         <div className="mb-4 rounded-lg border bg-muted/40 p-4 dark:bg-muted/20">
           <p className="text-sm text-muted-foreground">Your maintenance fee is based on your boarding stop</p>
           <p className="mt-1 font-medium">

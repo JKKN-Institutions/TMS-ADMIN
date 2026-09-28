@@ -71,6 +71,13 @@ export function feeBadge(fees: LearnerFeeStatus | null | undefined): FeeBadge | 
   if (fees === undefined) return null;
   if (fees === null) return UNAVAILABLE;
 
+  // Maintenance fee waived into a raised, unpaid Transport Fee. Its terms are
+  // Rs 0 "paid", so without this branch the verdict/terms disagreement below
+  // would fall through to "unavailable".
+  if (fees.reason === 'transport_fee_unpaid') {
+    return { tone: 'overdue', label: 'Transport Fee not paid', detail: null };
+  }
+
   if (fees.terms.length === 0) {
     if (fees.reason === 'term1_not_billed' || fees.reason === 'no_bills') {
       return { tone: 'none', label: 'No maintenance fee bill yet', detail: null };

@@ -33,6 +33,13 @@ export interface TransportAccess {
   term1_status: string | null;
   term1_due_date: string | null;
   term1_balance: number;
+  /**
+   * True once a Transport Fee was raised and the maintenance fee was waived
+   * into it (its bills repriced to Rs 0). The maintenance fee is then hidden.
+   */
+  maintenance_waived?: boolean;
+  /** Unpaid Transport Fee balance; only computed when maintenance_waived. */
+  transport_fee_balance?: number;
   /** The learner's 48-hour payment notice, when one is running or has fined. */
   payment_notice?: PaymentNoticePayload | null;
   /** Server clock at response time, to correct the countdown for a wrong device clock. */

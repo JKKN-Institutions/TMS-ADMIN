@@ -24,6 +24,14 @@ describe('feeBadge', () => {
     });
   });
 
+  it('says Transport Fee not paid when the maintenance fee was waived into an unpaid Transport Fee', () => {
+    const b = feeBadge(fees({
+      allowed: false, reason: 'transport_fee_unpaid',
+      terms: [term({ amount: 0, balance: 0 })],
+    }));
+    expect(b).toEqual({ tone: 'overdue', label: 'Transport Fee not paid', detail: null });
+  });
+
   it('says paid when every billed term is paid', () => {
     expect(feeBadge(fees())).toEqual({ tone: 'paid', label: 'Maintenance fee paid', detail: null });
   });
