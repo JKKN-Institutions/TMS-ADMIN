@@ -6,7 +6,8 @@
  * previous IST month unless `?month=YYYY-MM` is given. Idempotent: an applied
  * row is final, so repeated nights only refresh previews.
  *
- * `?dryRun=1` forces preview: rows are written, no bill is touched.
+ * Any `?dryRun=` value other than `0` or `false` (e.g. 1, true, yes) forces
+ * preview: rows are written, no bill is touched.
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -24,7 +25,8 @@ export async function GET(request: NextRequest) {
   if (month !== undefined && !isMonth(month)) {
     return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
   }
-  const forcePreview = request.nextUrl.searchParams.get('dryRun') === '1';
+  const dryRunParam = request.nextUrl.searchParams.get('dryRun');
+  const forcePreview = dryRunParam !== null && dryRunParam !== '0' && dryRunParam !== 'false';
   try {
     const summary = await runInchargeBillReview(createServiceRoleClient(), { month, forcePreview });
     return NextResponse.json({ success: true, data: summary });

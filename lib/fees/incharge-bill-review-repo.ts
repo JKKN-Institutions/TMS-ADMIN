@@ -239,7 +239,7 @@ export async function runInchargeBillReview(svc: SupabaseClient, opts: RunOption
       await logSystemActivity({
         module: 'fees',
         action: 'cancel',
-        entityType: 'tms_fee_bill',
+        entityType: 'staff',
         entityId: p.s.id,
         entityLabel: name,
         description: `In-charge bill auto-cancelled for ${monthLabel(month)}: ${p.reason}`,

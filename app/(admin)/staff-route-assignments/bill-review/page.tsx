@@ -10,7 +10,8 @@ import UniversalStatCard from '@/components/universal-stat-card';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { istToday } from '@/lib/booking/window';
-import { previousMonth, monthLabel, type ReviewConfig, type ReviewMode } from '@/lib/fees/incharge-bill-review';
+import { previousMonth, monthLabel, monthBounds, type ReviewConfig, type ReviewMode } from '@/lib/fees/incharge-bill-review';
+import type { RunSummary } from '@/lib/fees/incharge-bill-review-repo';
 import type { ReviewRowDto } from '@/app/api/admin/incharge-bill-review/route';
 import { getReviewColumns } from './columns';
 
@@ -59,6 +60,7 @@ export default function InchargeBillReviewPage() {
   const [excDay, setExcDay] = useState('');
   const [excReason, setExcReason] = useState('');
   const [confirmApply, setConfirmApply] = useState(false);
+  const [confirmAuto, setConfirmAuto] = useState(false);
 
   const { data, isLoading, isError } = useQuery({ queryKey: ['incharge-bill-review', month], queryFn: () => fetchReview(month) });
   const config = draft ?? data?.config ?? null;
@@ -73,11 +75,36 @@ export default function InchargeBillReviewPage() {
     cancelled: rows.reduce((s, r) => s + (r.applied ? r.cancelled_amount : 0), 0),
   }), [rows]);
 
-  async function act(fn: () => Promise<unknown>, ok: string) {
+  const monthEnded = monthBounds(month).last < istToday();
+
+  async function act(fn: () => Promise<string | void>, ok: string) {
     setBusy(true);
-    try { await fn(); toast.success(ok); await refresh(); }
+    try {
+      const message = await fn();
+      // A caller may return its own message (built from the server's summary); otherwise the fixed one.
+      // A returned empty string means the caller already showed its own toast.
+      if (message !== '') toast.success(message || ok);
+      await refresh();
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
     finally { setBusy(false); }
+  }
+
+  async function runReview(preview: boolean): Promise<string> {
+    const json = await send('/api/admin/incharge-bill-review/run', 'POST', { month, preview });
+    const summary = json.data as RunSummary;
+    if (preview) return `Preview: ${summary.passed} pass, ${summary.failed} fail, ${summary.notEnoughDays} not enough days.`;
+    const amount = summary.cancelledAmount.toLocaleString('en-IN');
+    if (summary.mode !== 'auto') { toast.error('Nothing was applied: this month ran as a preview.'); return ''; }
+    if (summary.errors.length) {
+      toast.error(`Cancelled ${summary.cancelledPeople} bill(s) (Rs ${amount}); ${summary.errors.length} failed — see the Bill column.`);
+      return '';
+    }
+    return `Cancelled ${summary.cancelledPeople} bill(s), Rs ${amount}.`;
+  }
+
+  async function saveSettings() {
+    await act(async () => { await send('/api/admin/incharge-bill-review/settings', 'PUT', config); setDraft(null); }, 'Settings saved');
   }
 
   return (
@@ -123,7 +150,7 @@ export default function InchargeBillReviewPage() {
             </div>
             <button
               disabled={busy || !draft}
-              onClick={() => act(async () => { await send('/api/admin/incharge-bill-review/settings', 'PUT', config); setDraft(null); }, 'Settings saved')}
+              onClick={() => (config.mode === 'auto' && data?.config.mode !== 'auto' ? setConfirmAuto(true) : saveSettings())}
               className="mt-3 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
             >Save</button>
           </section>
@@ -155,11 +182,11 @@ export default function InchargeBillReviewPage() {
 
       {canEdit && (
         <div className="flex flex-wrap gap-2">
-          <button disabled={busy} onClick={() => act(() => send('/api/admin/incharge-bill-review/run', 'POST', { month, preview: true }), 'Preview updated')}
+          <button disabled={busy} onClick={() => act(() => runReview(true), 'Preview updated')}
             className="inline-flex items-center gap-2 rounded-lg border border-green-600 px-3 py-2 text-sm font-medium text-green-700 disabled:opacity-50 dark:text-green-400">
             <Play className="h-4 w-4" /> Run preview for {monthLabel(month)}
           </button>
-          {data?.config.mode === 'auto' && (
+          {data?.config.mode === 'auto' && monthEnded && (
             <button disabled={busy} onClick={() => setConfirmApply(true)}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
               Apply now (cancels passing bills)
@@ -176,7 +203,18 @@ export default function InchargeBillReviewPage() {
         title={`Cancel passing bills for ${monthLabel(month)}?`}
         description="Every in-charge who passed this month will have their outstanding staff transport bill cancelled and will be notified. A cancelled bill cannot be billed again this year. This cannot be undone."
         confirmLabel="Yes, cancel their bills"
-        onConfirm={() => act(async () => { await send('/api/admin/incharge-bill-review/run', 'POST', { month, preview: false }); setConfirmApply(false); }, 'Review applied')}
+        onConfirm={() => act(async () => { const m = await runReview(false); setConfirmApply(false); return m; }, 'Review applied')}
+      />
+
+      <ConfirmDialog
+        open={confirmAuto}
+        onOpenChange={setConfirmAuto}
+        danger
+        loading={busy}
+        title="Switch to Auto?"
+        description="From the next nightly run (03:00 IST), in-charges who passed the last completed month will have their staff transport bill cancelled automatically and be notified. Cancelled bills cannot be billed again this year."
+        confirmLabel="Switch to Auto"
+        onConfirm={async () => { await saveSettings(); setConfirmAuto(false); }}
       />
 
       {isError && (
