@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, Clock, IndianRupee, Play } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -57,8 +58,9 @@ export default function InchargeBillReviewPage() {
   const [draft, setDraft] = useState<ReviewConfig | null>(null);
   const [excDay, setExcDay] = useState('');
   const [excReason, setExcReason] = useState('');
+  const [confirmApply, setConfirmApply] = useState(false);
 
-  const { data, isLoading } = useQuery({ queryKey: ['incharge-bill-review', month], queryFn: () => fetchReview(month) });
+  const { data, isLoading, isError } = useQuery({ queryKey: ['incharge-bill-review', month], queryFn: () => fetchReview(month) });
   const config = draft ?? data?.config ?? null;
   const rows = data?.rows ?? [];
   const columns = useMemo(() => getReviewColumns(), []);
@@ -87,7 +89,7 @@ export default function InchargeBillReviewPage() {
             A bus in-charge&apos;s staff transport bill is cancelled when, for a full month, their bus was scanned every service day and they marked on at least {data?.config.minPersonalPct ?? 75}% of those days.
           </p>
         </div>
-        <select value={month} onChange={(e) => setMonth(e.target.value)} className="h-[38px] shrink-0 rounded-lg border px-3 text-sm dark:bg-gray-900">
+        <select aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-[38px] shrink-0 rounded-lg border px-3 text-sm dark:bg-gray-900">
           {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
         </select>
       </div>
@@ -139,8 +141,8 @@ export default function InchargeBillReviewPage() {
               {(data?.excused ?? []).length === 0 && <li className="text-gray-500">None this month.</li>}
             </ul>
             <div className="flex flex-wrap gap-2">
-              <input type="date" value={excDay} onChange={(e) => setExcDay(e.target.value)} className="rounded border px-2 py-1 text-sm dark:bg-gray-900" />
-              <input placeholder="Reason" value={excReason} onChange={(e) => setExcReason(e.target.value)} className="min-w-0 flex-1 rounded border px-2 py-1 text-sm dark:bg-gray-900" />
+              <input type="date" aria-label="Excused date" value={excDay} onChange={(e) => setExcDay(e.target.value)} className="rounded border px-2 py-1 text-sm dark:bg-gray-900" />
+              <input aria-label="Reason" placeholder="Reason" value={excReason} onChange={(e) => setExcReason(e.target.value)} className="min-w-0 flex-1 rounded border px-2 py-1 text-sm dark:bg-gray-900" />
               <button
                 disabled={busy || !excDay || !excReason.trim()}
                 onClick={() => act(async () => { await send('/api/admin/incharge-bill-review/excused-days', 'POST', { day: excDay, reason: excReason }); setExcDay(''); setExcReason(''); }, 'Excused day added')}
@@ -158,12 +160,27 @@ export default function InchargeBillReviewPage() {
             <Play className="h-4 w-4" /> Run preview for {monthLabel(month)}
           </button>
           {data?.config.mode === 'auto' && (
-            <button disabled={busy} onClick={() => act(() => send('/api/admin/incharge-bill-review/run', 'POST', { month, preview: false }), 'Review applied')}
+            <button disabled={busy} onClick={() => setConfirmApply(true)}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
               Apply now (cancels passing bills)
             </button>
           )}
         </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmApply}
+        onOpenChange={setConfirmApply}
+        danger
+        loading={busy}
+        title={`Cancel passing bills for ${monthLabel(month)}?`}
+        description="Every in-charge who passed this month will have their outstanding staff transport bill cancelled and will be notified. A cancelled bill cannot be billed again this year. This cannot be undone."
+        confirmLabel="Yes, cancel their bills"
+        onConfirm={() => act(async () => { await send('/api/admin/incharge-bill-review/run', 'POST', { month, preview: false }); setConfirmApply(false); }, 'Review applied')}
+      />
+
+      {isError && (
+        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">Could not load the bill review. You may not have permission, or the server failed — try again.</p>
       )}
 
       <DataTable
