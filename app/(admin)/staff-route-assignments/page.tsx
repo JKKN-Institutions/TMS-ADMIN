@@ -3,12 +3,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, UserCheck, Route as RouteIcon, Users } from 'lucide-react';
+import { Plus, UserCheck, Route as RouteIcon, Users, Receipt } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
 import UniversalStatCard from '@/components/universal-stat-card';
 import { getAssignmentColumns, type AssignmentRow } from './columns';
 import { AssignmentDeleteDialog } from './assignment-delete-dialog';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 async function fetchAssignments(): Promise<AssignmentRow[]> {
   const res = await fetch('/api/admin/staff-route-assignments');
@@ -40,6 +42,8 @@ const StaffRouteAssignmentsPage = () => {
 
   const userRole = user?.role;
   const canManage = ['super_admin', 'transport_manager'].includes(userRole);
+  const { can } = usePermissions();
+  const canSeeBillReview = can(TMS_PERMISSIONS.FEES_VIEW);
 
   // Remove opens the styled confirm dialog; the dialog performs the DELETE.
   const columns = useMemo(
@@ -59,20 +63,32 @@ const StaffRouteAssignmentsPage = () => {
           <h1 className="text-2xl font-bold text-gray-900">Staff Route Assignments</h1>
           <p className="text-gray-600">Assign staff members to routes for monitoring and management</p>
         </div>
-        {canManage && (
+        {(canManage || canSeeBillReview) && (
           <div className="flex shrink-0 flex-wrap gap-2">
-            <button
-              onClick={() => router.push('/staff-route-assignments/bulk-assign')}
-              className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg border border-green-600 px-3 text-sm font-medium text-green-700 transition-colors hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-500/10"
-            >
-              <Users className="h-4 w-4" /> Bulk Assign
-            </button>
-            <button
-              onClick={() => router.push('/staff-route-assignments/assign')}
-              className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-            >
-              <Plus className="h-4 w-4" /> Assign Route
-            </button>
+            {canSeeBillReview && (
+              <button
+                onClick={() => router.push('/staff-route-assignments/bill-review')}
+                className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <Receipt className="h-4 w-4" /> Bill review
+              </button>
+            )}
+            {canManage && (
+              <>
+                <button
+                  onClick={() => router.push('/staff-route-assignments/bulk-assign')}
+                  className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg border border-green-600 px-3 text-sm font-medium text-green-700 transition-colors hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-500/10"
+                >
+                  <Users className="h-4 w-4" /> Bulk Assign
+                </button>
+                <button
+                  onClick={() => router.push('/staff-route-assignments/assign')}
+                  className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+                >
+                  <Plus className="h-4 w-4" /> Assign Route
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
