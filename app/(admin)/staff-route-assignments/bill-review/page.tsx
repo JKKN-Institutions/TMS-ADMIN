@@ -83,7 +83,8 @@ export default function InchargeBillReviewPage() {
       const message = await fn();
       // A caller may return its own message (built from the server's summary); otherwise the fixed one.
       // A returned empty string means the caller already showed its own toast.
-      if (message !== '') toast.success(message || ok);
+      // Only a string is a message: send() resolves to parsed JSON, which must never reach toast.
+      if (message !== '') toast.success(typeof message === 'string' && message ? message : ok);
       await refresh();
     }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Failed'); }
