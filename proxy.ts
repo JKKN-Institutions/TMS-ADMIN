@@ -24,6 +24,9 @@ const PUBLIC_PATHS = new Set([
   // quoted string anywhere in this file, not even in a comment.
   '/api/cron/auto-generate-bills',
   '/api/cron/fee-payment-notices',
+  // Monthly in-charge bill review. Cancels a staff bill only in Auto mode and
+  // only for a COMPLETED month (see lib/fees/incharge-bill-review.ts).
+  '/api/cron/incharge-bill-review',
   // Recomputes in-charge share ownership only — moves no money, removes no
   // role. Safety net for the recompute hooks on the assignment/enrollment
   // APIs.

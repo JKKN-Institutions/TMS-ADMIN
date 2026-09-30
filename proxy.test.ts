@@ -11,6 +11,10 @@ describe('proxy cron allowlist', () => {
     expect(SRC).toContain("'/api/cron/auto-generate-bills'");
   });
 
+  it('allowlists the in-charge bill review cron endpoint', () => {
+    expect(SRC).toContain("'/api/cron/incharge-bill-review'");
+  });
+
   it('no longer allowlists the retired enforcement crons', () => {
     // Attendance enforcement was removed 2026-08-27. The routes are gone, so
     // leaving their paths here would hold an un-gated hole open for whatever
