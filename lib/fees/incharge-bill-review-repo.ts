@@ -4,13 +4,14 @@
  * The rule itself is pure and lives in ./incharge-bill-review.ts.
  *
  * Failure policy: any READ error aborts the whole run (a failed read must never
- * look like "no marks"). A failure while APPLYING one person's cancel is
- * recorded on that person's row and the run continues with the others.
+ * look like "no marks"). Applying one person is ONE atomic SQL call
+ * (tms_incharge_apply_bill_cancel: cancel bills + mark the row applied); applied
+ * rows are additionally guarded against rewrites by a DB trigger. A failure while
+ * applying one person is recorded on that person's row and the run continues.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { selectByIds } from '@/lib/supabase/chunked';
 import { istToday, addDays } from '@/lib/booking/window';
-import { cancelStaffBills } from '@/lib/fees/cancel-staff-bill';
 import { notifyProfile } from '@/lib/notifications/notify';
 import { logSystemActivity } from '@/lib/activity/log';
 import {
@@ -81,7 +82,7 @@ export async function runInchargeBillReview(svc: SupabaseClient, opts: RunOption
     notEnoughDays: 0, alreadyApplied: 0, cancelledPeople: 0, cancelledAmount: 0, errors: [],
   };
 
-  const mode = effectiveMode(config.mode, !!opts.forcePreview, last < today);
+  let mode = effectiveMode(config.mode, !!opts.forcePreview, last < today);
   if (!mode) return { ...summary, skipped: 'off' };
   summary.mode = mode;
 
@@ -89,10 +90,15 @@ export async function runInchargeBillReview(svc: SupabaseClient, opts: RunOption
   if (to < first) return { ...summary, skipped: 'no_days' };
 
   const { data: years, error: yErr } = await svc
-    .from('tms_transport_year').select('id, name').eq('is_current', true).limit(1);
+    .from('tms_transport_year').select('id, name, start_date, end_date').eq('is_current', true).limit(1);
   if (yErr) fail('transport year', yErr);
-  const year = (years ?? [])[0] as { id: string; name: string } | undefined;
+  const year = (years ?? [])[0] as { id: string; name: string; start_date: string; end_date: string } | undefined;
   if (!year) return { ...summary, skipped: 'no_current_year' };
+  // Never cancel current-year bills on attendance from outside the current transport year.
+  if (mode === 'auto' && (first < year.start_date || last > year.end_date)) {
+    mode = 'preview';
+    summary.mode = 'preview';
+  }
 
   const { data: billData, error: bErr } = await svc
     .from('tms_fee_bill')
@@ -207,20 +213,15 @@ export async function runInchargeBillReview(svc: SupabaseClient, opts: RunOption
 
   for (const p of passes) {
     try {
-      const { cancelled } = await cancelStaffBills(svc, { personId: p.s.id, transportYearId: year.id });
-      const amount = cancelled > 0 ? sumAmounts(p.bills) : 0;
-      const { error: upErr } = await svc
-        .from('tms_incharge_bill_review')
-        .update({
-          applied: true,
-          applied_at: new Date().toISOString(),
-          bill_action: cancelled > 0 ? 'cancelled' : 'none',
-          cancelled_amount: amount,
-        })
-        .eq('person_id', p.s.id)
-        .eq('month', first);
-      if (upErr) throw new Error(upErr.message);
-      if (cancelled === 0) continue;
+      const { data: res, error: rpcErr } = await svc.rpc('tms_incharge_apply_bill_cancel', {
+        p_person_id: p.s.id,
+        p_month: first,
+        p_transport_year_id: year.id,
+      });
+      if (rpcErr) throw new Error(rpcErr.message);
+      const r = res as { status: string; cancelled: number; amount: unknown; bill_ids: string[] };
+      const amount = Number(r.amount);
+      if (r.status !== 'applied' || r.cancelled === 0) continue;
 
       summary.cancelledPeople++;
       summary.cancelledAmount += amount;
@@ -242,12 +243,14 @@ export async function runInchargeBillReview(svc: SupabaseClient, opts: RunOption
         entityId: p.s.id,
         entityLabel: name,
         description: `In-charge bill auto-cancelled for ${monthLabel(month)}: ${p.reason}`,
-        metadata: { month, billIds: p.bills.map((b) => b.id), amount },
+        metadata: { month, billIds: r.bill_ids, amount },
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       summary.errors.push({ personId: p.s.id, message });
-      await svc.from('tms_incharge_bill_review').update({ error: message }).eq('person_id', p.s.id).eq('month', first);
+      try {
+        await svc.from('tms_incharge_bill_review').update({ error: message }).eq('person_id', p.s.id).eq('month', first);
+      } catch { /* already in summary.errors */ }
     }
   }
 
