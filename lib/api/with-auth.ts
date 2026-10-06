@@ -42,33 +42,44 @@ type AuthenticatedHandler = (
  */
 export function withAuth(handler: AuthenticatedHandler) {
   return async (request: NextRequest) => {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
+    const auth = authFromRequest(request);
+    if (!auth) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    return handler(request, auth);
+  };
+}
 
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll();
-          },
-          setAll() {
-            // API responses don't refresh session cookies.
-          },
+/**
+ * The AuthContext withAuth would pass, or null when the proxy did not stamp an
+ * identity. For handlers withAuth cannot wrap — dynamic `[id]` routes, whose
+ * `(request, { params })` signature is incompatible with it.
+ */
+export function authFromRequest(request: NextRequest): AuthContext | null {
+  const userId = request.headers.get('x-user-id');
+  if (!userId) return null;
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
         },
-      }
-    );
+        setAll() {
+          // API responses don't refresh session cookies.
+        },
+      },
+    }
+  );
 
-    return handler(request, {
-      userId,
-      email: request.headers.get('x-user-email') || null,
-      userRole: request.headers.get('x-user-role') ?? '',
-      isSuperAdmin: request.headers.get('x-user-super') === '1',
-      institutionId: request.headers.get('x-user-institution') || null,
-      supabase,
-    });
+  return {
+    userId,
+    email: request.headers.get('x-user-email') || null,
+    userRole: request.headers.get('x-user-role') ?? '',
+    isSuperAdmin: request.headers.get('x-user-super') === '1',
+    institutionId: request.headers.get('x-user-institution') || null,
+    supabase,
   };
 }

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { denyUnlessPerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { createClient } from '@supabase/supabase-js';
 import { logActivityFromHeaders } from '@/lib/activity/log';
 
@@ -9,10 +11,9 @@ import { logActivityFromHeaders } from '@/lib/activity/log';
  * PUT    → update the user-editable fields only (device_id + telemetry excluded)
  * DELETE → remove the device (replaces the old fake local-state delete)
  *
- * Matches the existing GPS route style (service-role client, no withAuth). The
- * proxy authenticates every /api request; granular permission is enforced in the
- * UI (canManage / canDelete). Hardening these to withAuth + a permission check is
- * a noted follow-up, consistent with the wider service-role-route auth gap.
+ * Service-role client; the proxy authenticates every /api request and PUT/DELETE
+ * additionally require tms.vehicles.edit (denyUnlessPerm). The UI's canManage /
+ * canDelete come from a localStorage role and are cosmetic only.
  */
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,6 +44,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.VEHICLES_EDIT);
+  if (denied) return denied;
   try {
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Device id is required' }, { status: 400 });
@@ -90,7 +93,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.VEHICLES_EDIT);
+  if (denied) return denied;
   try {
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Device id is required' }, { status: 400 });
@@ -101,7 +106,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
       console.error('GPS device delete error:', error);
       return NextResponse.json({ error: 'Failed to delete GPS device' }, { status: 500 });
     }
-    await logActivityFromHeaders(_request, {
+    await logActivityFromHeaders(request, {
       module: 'gps-devices',
       action: 'delete',
       entityType: 'gps_devices',

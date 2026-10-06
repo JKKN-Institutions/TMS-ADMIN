@@ -288,12 +288,20 @@ export function useLiveTracking(routeId: string | null, tripId: string | null) {
     if (state.status === 'permission_denied') void teardown(true);
   }, [state.status, teardown]);
 
-  // Stop + notify the server if the page unmounts while a session is actually running.
+  // The trip is gone (ended, or expired server-side): release GPS locally. The server
+  // already closed it, so there is nothing to tell it.
+  useEffect(() => {
+    if (!tripId && startedRef.current) void stop(false);
+  }, [tripId, stop]);
+
+  // Leaving the page releases GPS locally but does NOT end the trip — navigating to
+  // Passengers mid-route must not close it. Returning resumes capture on the same trip;
+  // a driver who never returns is closed by tms_expire_stale_trips (no fix in 30 min).
   useEffect(() => {
     return () => {
-      if (startedRef.current) void stop(true);
+      if (startedRef.current) void teardown(false);
     };
-  }, [stop]);
+  }, [teardown]);
 
   return {
     status: state.status as TrackingStatus,

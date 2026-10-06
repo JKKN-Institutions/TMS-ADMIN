@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { denyUnlessPerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { smsGPSService } from '@/lib/gps-services/sms-gps-tracking';
 import { tcpGPSService } from '@/lib/gps-services/tcp-gps-tracking';
 
 // POST - Direct GPS tracking operations
 export async function POST(request: NextRequest) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.VEHICLES_EDIT);
+  if (denied) return denied;
   try {
     const { action, deviceId, phoneNumber, serverIP } = await request.json();
 

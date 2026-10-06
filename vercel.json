@@ -3,10 +3,6 @@
   "regions": ["bom1"],
   "crons": [
     {
-      "path": "/api/cron/incharge-attendance",
-      "schedule": "30 15 * * *"
-    },
-    {
       "path": "/api/cron/booking-reminders",
       "schedule": "30 11 * * *"
     }

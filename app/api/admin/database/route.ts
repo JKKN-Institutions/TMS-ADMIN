@@ -10,7 +10,13 @@ if (!supabaseUrl || !supabaseServiceKey) {
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// RETIRED 2026-10-06 — Executed arbitrary SQL with the service-role key and no auth check.
+// Disabled rather than deleted (legacy routes are kept on purpose); nothing calls it.
+const retired = () =>
+  NextResponse.json({ error: 'This endpoint has been retired' }, { status: 410 });
+
 export async function POST(request: NextRequest) {
+  return retired();
   try {
     const body = await request.json();
     const { query, params } = body;

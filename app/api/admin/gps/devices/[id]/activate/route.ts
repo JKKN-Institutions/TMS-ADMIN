@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { denyUnlessPerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { createClient } from '@supabase/supabase-js';
 import { logActivityFromHeaders } from '@/lib/activity/log';
 
@@ -12,6 +14,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.VEHICLES_EDIT);
+  if (denied) return denied;
   try {
     const { id } = await params;
 

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { logActivity } from '@/lib/activity/log';
+import { requirePerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 
 async function getRoutes() {
@@ -103,6 +105,9 @@ async function postRoute(request: NextRequest, auth: AuthContext) {
     }
 
     if (action === 'addRoute') {
+      if (!(await requirePerm(auth, TMS_PERMISSIONS.ROUTES_CREATE))) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
       return await addRoute(request, routeData, stops, auth);
     }
 
@@ -232,6 +237,9 @@ async function addRoute(request: NextRequest, routeData: any, stops: any[], auth
 }
 
 async function putRoute(request: NextRequest, auth: AuthContext) {
+  if (!(await requirePerm(auth, TMS_PERMISSIONS.ROUTES_EDIT))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
   try {
     const { routeId, routeData } = await request.json();
 

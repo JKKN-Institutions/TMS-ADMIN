@@ -128,7 +128,7 @@ export default function DriverLocationPage() {
   // the two can only disagree if the picker changed after the trip started.
   const activeRouteId = trip?.route_id ?? selectedRouteId;
 
-  const { status, banner, network, onDuty, fix, lastSentAt, unsentCount, start, stop } =
+  const { status, banner, network, onDuty, fix, lastSentAt, unsentCount, start } =
     useLiveTracking(activeRouteId, tripId);
 
   const [busy, setBusy] = useState(false);
@@ -164,14 +164,22 @@ export default function DriverLocationPage() {
     setBusy(true);
     setTripError(null);
     try {
-      await stop(true); // release GPS + tell the server, before closing the trip
-      await fetch(`/api/driver/trips/${tripId}/end`, {
+      // Close the trip FIRST so /end records its final position. GPS is released by
+      // the hook once the refetch shows no trip; stopping it here instead would let
+      // the auto-start effect below restart capture while tripId is still set.
+      const res = await fetch(`/api/driver/trips/${tripId}/end`, {
         method: 'POST',
         credentials: 'same-origin',
       });
+      // 404 = already ended or expired — the outcome the driver wanted.
+      if (!res.ok && res.status !== 404) {
+        const j = (await res.json().catch(() => null)) as { error?: string } | null;
+        setTripError(j?.error ?? 'Could not end the trip. Please try again.');
+        return;
+      }
       await refetchTrip();
     } catch {
-      setTripError('Could not end the trip cleanly. It will expire automatically.');
+      setTripError('Network problem. Check your connection and try again.');
     } finally {
       setBusy(false);
     }

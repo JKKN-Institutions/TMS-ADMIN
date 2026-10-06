@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // GET endpoint for student grievance tracking
+// RETIRED 2026-10-06 — Trusted a caller-supplied studentId with the service-role client and no auth check; reads tables dropped in the tms_ migration.
+// Disabled rather than deleted (legacy routes are kept on purpose); nothing calls it.
+const retired = () =>
+  NextResponse.json({ error: 'This endpoint has been retired' }, { status: 410 });
+
 export async function GET(request: Request) {
+  return retired();
   try {
     const { searchParams } = new URL(request.url);
     const studentId = searchParams.get('studentId');
@@ -287,6 +293,7 @@ export async function GET(request: Request) {
 
 // POST endpoint for student communications/feedback
 export async function POST(request: Request) {
+  return retired();
   try {
     const body = await request.json();
     const { studentId, grievanceId, type, message, rating } = body;

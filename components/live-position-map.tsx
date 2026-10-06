@@ -42,6 +42,12 @@ interface LivePositionMapProps {
 // Glide slightly under the 5s reader poll so the marker settles just before the next fix.
 const GLIDE_MS = 4500;
 
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+/** Labels and stop names are free text from the DB and Leaflet renders popup HTML raw. */
+function esc(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
+}
+
 // Bus marker: SVG arrow-in-circle we rotate to the heading; plain dot when unknown.
 function busIcon(heading: number | null | undefined): L.DivIcon {
   const rot = heading == null || Number.isNaN(heading) ? null : heading;
@@ -117,7 +123,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     street.addTo(map);
     L.control.layers({ Street: street, Satellite: satellite }, {}, { position: 'topright' }).addTo(map);
     const marker = L.marker([latitude, longitude], { icon: busIcon(heading) }).addTo(map);
-    if (label) marker.bindPopup(label);
+    if (label) marker.bindPopup(esc(label));
     mapRef.current = map;
     markerRef.current = marker;
     return () => {
@@ -142,7 +148,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     if (!map || !marker) return;
     const target: LatLng = { lat: latitude, lng: longitude };
     marker.setIcon(busIcon(heading));
-    if (label) marker.bindPopup(label);
+    if (label) marker.bindPopup(esc(label));
 
     if (accuracyM != null && accuracyM > 0) {
       if (!accuracyRef.current) {
@@ -192,7 +198,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       const pos: [number, number] = [destination.lat, destination.lng];
       if (!campusRef.current) {
         campusRef.current = L.marker(pos, { icon: campusIcon() }).addTo(map);
-        campusRef.current.bindPopup(destination.label ?? 'Campus');
+        campusRef.current.bindPopup(esc(destination.label ?? 'Campus'));
       } else {
         campusRef.current.setLatLng(pos);
       }
@@ -230,10 +236,9 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       const line: [number, number][] = [];
       for (const s of stops) {
         line.push([s.lat, s.lng]);
-        // TODO (stops phase): stop names are free-text — escape before bindPopup (Leaflet renders raw HTML).
         L.circleMarker([s.lat, s.lng], {
           radius: 5, color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.9, weight: 2,
-        }).bindPopup(s.name).addTo(group);
+        }).bindPopup(esc(s.name)).addTo(group);
       }
       if (line.length > 1) {
         L.polyline(line, { color: '#7c3aed', weight: 3, opacity: 0.5, dashArray: '6 6' }).addTo(group);

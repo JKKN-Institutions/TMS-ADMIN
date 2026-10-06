@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { denyUnlessPerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { createClient } from '@supabase/supabase-js';
 import { logActivityFromHeaders } from '@/lib/activity/log';
 
@@ -50,6 +52,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ routeId: string }> }
 ) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.ROUTES_EDIT);
+  if (denied) return denied;
   try {
     console.log('=== POST POSSIBLE STOPS CALLED ===');
     const { routeId } = await params;
@@ -317,6 +321,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ routeId: string }> }
 ) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.ROUTES_EDIT);
+  if (denied) return denied;
   try {
     const { routeId } = await params;
     const { searchParams } = new URL(request.url);

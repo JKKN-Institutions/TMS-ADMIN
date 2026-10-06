@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { denyUnlessPerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { mercydaService } from '@/lib/gps-services/mercyda-tracking';
 
 // POST - Test MERCYDA connection
 export async function POST(request: NextRequest) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.VEHICLES_EDIT);
+  if (denied) return denied;
   try {
     const { action } = await request.json();
 

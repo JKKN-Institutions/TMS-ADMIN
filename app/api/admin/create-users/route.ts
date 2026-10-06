@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // Temporary endpoint to create missing admin users
+// RETIRED 2026-10-06 — Unauthenticated seeding endpoint for the dropped admin_users table.
+// Disabled rather than deleted (legacy routes are kept on purpose); nothing calls it.
+const retired = () =>
+  NextResponse.json({ error: 'This endpoint has been retired' }, { status: 410 });
+
 export async function POST() {
+  return retired();
   try {
     const adminUsers = [
       {

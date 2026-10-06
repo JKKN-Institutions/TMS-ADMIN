@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { denyUnlessPerm } from '@/lib/auth/require-perm';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { createClient } from '@supabase/supabase-js';
 import { logActivityFromHeaders } from '@/lib/activity/log';
 
@@ -40,6 +42,8 @@ export async function GET() {
 
 // POST - Create new GPS device
 export async function POST(request: NextRequest) {
+  const denied = await denyUnlessPerm(request, TMS_PERMISSIONS.VEHICLES_EDIT);
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { device_id, device_name, device_model, sim_number, imei, notes } = body;
