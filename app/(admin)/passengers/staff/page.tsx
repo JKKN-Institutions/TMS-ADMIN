@@ -1,16 +1,23 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Users } from 'lucide-react';
+import { ChevronDown, Download, FileSpreadsheet, FileText, Trash2, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { StaffPassenger } from '@/lib/passengers/types';
 import { DataTable } from '@/components/ui/data-table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getStaffColumns } from './columns';
+import { exportStaff, type StaffExportFormat } from './staff-export';
 
 // "Delete" = remove from transport. The staff row itself lives in MyJKKN's HR
 // directory and is never deleted (see lib/passengers/remove-staff.ts).
@@ -73,10 +80,38 @@ function options(values: (string | null)[]): { label: string; value: string }[] 
 
 export default function StaffPassengersPage() {
   const router = useRouter();
-  const { data: staff = [], isLoading, isError, error, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['passenger-staff'],
     queryFn: fetchStaff,
   });
+  // Stable reference: DataTable's onFilteredRowsChange effect depends on `data`,
+  // so an inline `?? []` would re-fire it on every render while loading.
+  const staff = useMemo(() => data ?? [], [data]);
+
+  // Rows left after search/filters — a ref (not state) so recording them never re-renders.
+  const filteredRef = useRef<StaffPassenger[] | null>(null);
+  const onFilteredRowsChange = useCallback((rows: StaffPassenger[], isFiltered: boolean) => {
+    filteredRef.current = isFiltered ? rows : null;
+  }, []);
+  const [exporting, setExporting] = useState(false);
+
+  // Exports the selection if any, else whatever the search/filters currently show.
+  const runExport = async (selectedRows: StaffPassenger[], format: StaffExportFormat) => {
+    const rows = selectedRows.length ? selectedRows : (filteredRef.current ?? staff);
+    if (rows.length === 0) {
+      toast.error('No staff to export');
+      return;
+    }
+    setExporting(true);
+    try {
+      await exportStaff(rows, format);
+      toast.success(`Exported ${rows.length} staff as ${format === 'pdf' ? 'PDF' : 'Excel'}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const queryClient = useQueryClient();
   const { can, isSuperAdmin } = usePermissions();
@@ -203,17 +238,38 @@ export default function StaffPassengersPage() {
           getRowId={(s) => s.id}
           searchPlaceholder="Search name, staff ID, email..."
           filters={filters}
-          toolbarActions={({ selectedRows, resetSelection }) =>
-            canRemove && selectedRows.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setRemoveTarget({ rows: selectedRows, reset: resetSelection })}
-                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
-              >
-                <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
-              </button>
-            ) : null
-          }
+          onFilteredRowsChange={onFilteredRowsChange}
+          toolbarActions={({ selectedRows, resetSelection }) => (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={exporting || isLoading}
+                  className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <Download className="h-4 w-4" />
+                  {exporting ? 'Exporting…' : selectedRows.length ? `Export (${selectedRows.length})` : 'Export'}
+                  <ChevronDown className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => runExport(selectedRows, 'xlsx')}>
+                    <FileSpreadsheet className="text-gray-500" /> Export as Excel (.xlsx)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => runExport(selectedRows, 'pdf')}>
+                    <FileText className="text-gray-500" /> Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {canRemove && selectedRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setRemoveTarget({ rows: selectedRows, reset: resetSelection })}
+                  className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
+                </button>
+              )}
+            </>
+          )}
         />
       )}
 
