@@ -3,12 +3,14 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { isBugReporterConfigured, listBugReportsFor } from '@/lib/bug-reports/client';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-import { syncReporterChunk } from '@/lib/bug-reports/sync';
+import { refreshIndexedStatuses, syncReporterChunk } from '@/lib/bug-reports/sync';
 
 /**
  * Backfill / re-sync tms_bug_report_index from the Bug Reporter platform.
  *
  *   POST { offset?, limit? } -> one chunk; repeat until nextOffset is null
+ *   POST { scope: 'indexed' } -> refresh the status of every already-indexed
+ *                                report in one call (see refreshIndexedStatuses)
  *
  * WHY CHUNKED
  * The platform can only answer "reports by THIS one address", so recovering
@@ -44,11 +46,27 @@ async function handlePost(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({ error: 'Bug Reporter is not configured' }, { status: 503 });
   }
 
-  const body = (await request.json().catch(() => ({}))) as { offset?: number; limit?: number };
+  const body = (await request.json().catch(() => ({}))) as {
+    offset?: number;
+    limit?: number;
+    scope?: string;
+  };
+  const svc = createServiceRoleClient();
+
+  // Status refresh: re-ask only the addresses already in the index, so reports
+  // triaged on the platform stop showing their stale submit-time status. One
+  // request, no chunking — it's ~70 lookups, not 6k.
+  if (body.scope === 'indexed') {
+    const result = await refreshIndexedStatuses(svc, (email) => listBugReportsFor(email));
+    if (result.writeError) {
+      console.error('bug-reports status refresh failed:', result.writeError);
+      return NextResponse.json({ error: 'Failed to refresh report statuses' }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, ...result, nextOffset: null });
+  }
+
   const offset = Math.max(0, Math.floor(Number(body.offset) || 0));
   const limit = Math.min(MAX_CHUNK, Math.max(1, Math.floor(Number(body.limit) || DEFAULT_CHUNK)));
-
-  const svc = createServiceRoleClient();
 
   // Total candidate count drives the caller's progress display.
   const { count, error: countError } = await svc

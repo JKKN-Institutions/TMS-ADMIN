@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info, KanbanSquare, RefreshCw, Table2 } from 'lucide-react';
@@ -127,6 +127,19 @@ async function runSync(onProgress: (scanned: number, total: number, found: numbe
   return { scanned, found, errors };
 }
 
+/** Refresh every indexed report's status from the platform; returns how many changed. */
+async function refreshStatuses(): Promise<number> {
+  const res = await fetch('/api/admin/bug-reports/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ scope: 'indexed' }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { statusChanges?: number; error?: string };
+  if (!res.ok) throw new Error(json.error || 'Status refresh failed');
+  return json.statusChanges ?? 0;
+}
+
 export default function BugReportsPage() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -157,6 +170,28 @@ export default function BugReportsPage() {
   };
 
   const { data, isLoading, error } = useQuery({ queryKey: ['admin-bug-reports'], queryFn: fetchList });
+
+  // Statuses in the list are a local snapshot; the platform pushes nothing when a
+  // report is closed there. Re-check the indexed reports each time the console
+  // opens (a few seconds, ~70 lookups) and reload the list only if one changed.
+  // The ref keeps React StrictMode's double-mount from firing it twice.
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshStarted = useRef(false);
+  useEffect(() => {
+    if (refreshStarted.current) return;
+    refreshStarted.current = true;
+    setRefreshing(true);
+    refreshStatuses()
+      .then(async (changed) => {
+        if (changed > 0) {
+          await qc.invalidateQueries({ queryKey: ['admin-bug-reports'] });
+          toast.success(`Updated ${changed} report status${changed === 1 ? '' : 'es'} from the platform`);
+        }
+      })
+      // Best-effort: the list still renders from the index if the platform is down.
+      .catch((e) => console.error('bug-reports status refresh failed:', e))
+      .finally(() => setRefreshing(false));
+  }, [qc]);
   const list = useMemo(() => data?.rows ?? [], [data]);
   const configured = data?.configured ?? true;
 
@@ -194,6 +229,12 @@ export default function BugReportsPage() {
           )
         }
       />
+      {refreshing && (
+        <p className="-mt-4 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          Checking the platform for status changes…
+        </p>
+      )}
 
       {/* The reporter platform can only answer "reports by ONE address", so this
           list is assembled locally: new reports are captured as they're submitted

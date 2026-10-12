@@ -56,6 +56,75 @@ export async function syncReporterChunk(
 
   // Keyed by platform id so a report echoed under two addresses is stored once —
   // otherwise the upsert would fight itself within a single batch.
+  const { rows, reporters, errors } = await collectReports(emails, fetchFor, concurrency);
+  if (!rows.length) {
+    return { scanned: emails.length, reporters, found: 0, upserted: 0, errors };
+  }
+
+  const writeError = await writeRows(svc, rows);
+  if (writeError) {
+    return { scanned: emails.length, reporters, found: rows.length, upserted: 0, errors, writeError };
+  }
+
+  return { scanned: emails.length, reporters, found: rows.length, upserted: rows.length, errors };
+}
+
+export interface StatusRefreshResult extends SyncChunkResult {
+  /** Indexed reports whose status differs from what the platform now says. */
+  statusChanges: number;
+}
+
+/**
+ * Pull the platform's CURRENT status for every report already in the index.
+ *
+ * The index only stores a snapshot of status from submit time, and the platform
+ * pushes nothing when a report is triaged — so without this, a report closed on
+ * the platform stays "open" here until someone opens its detail page or runs the
+ * full 6k-address sweep (found 2026-10-12: 18 of 96 closed on the platform were
+ * still open here). The full sweep asks about every profile to DISCOVER reports;
+ * this asks only the ~70 addresses that already have one, so it's cheap enough
+ * to run every time the console opens.
+ */
+export async function refreshIndexedStatuses(
+  svc: SupabaseClient,
+  fetchFor: (email: string) => Promise<unknown>,
+  concurrency = 8
+): Promise<StatusRefreshResult> {
+  const { data, error } = await svc
+    .from('tms_bug_report_index')
+    .select('id, status, reporter_email');
+  if (error) {
+    return {
+      scanned: 0, reporters: 0, found: 0, upserted: 0, errors: 0, statusChanges: 0,
+      writeError: `${error.code ?? ''} ${error.message ?? ''}`.trim(),
+    };
+  }
+
+  const indexed = (data ?? []) as { id: string; status: string; reporter_email: string }[];
+  const before = new Map(indexed.map((r) => [r.id, r.status]));
+  const emails = [...new Set(indexed.map((r) => r.reporter_email).filter(Boolean))];
+
+  const { rows, reporters, errors } = await collectReports(emails, fetchFor, concurrency);
+  const statusChanges = countStatusChanges(before, rows);
+  const base = { scanned: emails.length, reporters, found: rows.length, errors, statusChanges };
+  if (!rows.length) return { ...base, upserted: 0 };
+
+  const writeError = await writeRows(svc, rows);
+  if (writeError) return { ...base, upserted: 0, statusChanges: 0, writeError };
+  return { ...base, upserted: rows.length };
+}
+
+/** How many already-indexed reports came back with a different status. New reports don't count. */
+export function countStatusChanges(before: Map<string, string>, rows: BugIndexRow[]): number {
+  return rows.filter((r) => before.has(r.id) && before.get(r.id) !== r.status).length;
+}
+
+/** Ask the platform about each address, `concurrency` at a time. */
+async function collectReports(
+  emails: string[],
+  fetchFor: (email: string) => Promise<unknown>,
+  concurrency: number
+): Promise<{ rows: BugIndexRow[]; reporters: number; errors: number }> {
   const byId = new Map<string, BugIndexRow>();
   let reporters = 0;
   let errors = 0;
@@ -76,26 +145,16 @@ export async function syncReporterChunk(
     })
   );
 
-  const rows = [...byId.values()];
-  if (!rows.length) {
-    return { scanned: emails.length, reporters, found: 0, upserted: 0, errors };
-  }
+  return { rows: [...byId.values()], reporters, errors };
+}
 
-  // One batched write per chunk rather than per report.
+/** One batched upsert. Returns an error string, or null on success. */
+async function writeRows(svc: SupabaseClient, rows: BugIndexRow[]): Promise<string | null> {
+  // updated_at only defaults on INSERT, so stamp it here or a refreshed row keeps
+  // its original write time and looks like it was never re-synced.
+  const now = new Date().toISOString();
   const { error } = await svc
     .from('tms_bug_report_index')
-    .upsert(rows, { onConflict: 'id' });
-
-  if (error) {
-    return {
-      scanned: emails.length,
-      reporters,
-      found: rows.length,
-      upserted: 0,
-      errors,
-      writeError: `${error.code ?? ''} ${error.message ?? ''}`.trim(),
-    };
-  }
-
-  return { scanned: emails.length, reporters, found: rows.length, upserted: rows.length, errors };
+    .upsert(rows.map((r) => ({ ...r, updated_at: now })), { onConflict: 'id' });
+  return error ? `${error.code ?? ''} ${error.message ?? ''}`.trim() : null;
 }
