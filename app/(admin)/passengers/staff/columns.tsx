@@ -6,6 +6,8 @@ import { Eye, MoreHorizontal, Trash2 } from 'lucide-react';
 import type { StaffPassenger } from '@/lib/passengers/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
+import { PhoneLink } from '@/components/ui/display-bits';
+import { titleCase } from '@/lib/format/display';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +65,7 @@ export function getStaffColumns(
     },
     {
       accessorKey: 'name',
+      meta: { label: 'Name' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
       cell: ({ row }) => {
         const s = row.original;
@@ -73,7 +76,7 @@ export function getStaffColumns(
             </div>
             <div className="min-w-0">
               <p className="truncate font-medium text-gray-900 group-hover:text-green-600 group-hover:underline">
-                {s.name}
+                {titleCase(s.name)}
               </p>
               {s.designation ? <p className="truncate text-xs text-gray-500">{s.designation}</p> : null}
             </div>
@@ -83,21 +86,25 @@ export function getStaffColumns(
     },
     {
       accessorKey: 'staffId',
+      meta: { label: 'Staff ID' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Staff ID" />,
       cell: ({ row }) => row.original.staffId || '—',
     },
     {
       accessorKey: 'email',
+      meta: { label: 'Institution email' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Institution Email" />,
       cell: ({ row }) => <span className="text-gray-600">{row.original.email || '—'}</span>,
     },
     {
       accessorKey: 'phone',
+      meta: { label: 'Phone' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Phone" />,
-      cell: ({ row }) => row.original.phone || '—',
+      cell: ({ row }) => <PhoneLink phone={row.original.phone} />,
     },
     {
       id: 'institution',
+      meta: { label: 'Institution' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Institution" />,
       accessorFn: (s) => s.institutionName ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -105,6 +112,7 @@ export function getStaffColumns(
     },
     {
       id: 'department',
+      meta: { label: 'Department' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Department" />,
       accessorFn: (s) => s.departmentName ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -112,6 +120,7 @@ export function getStaffColumns(
     },
     {
       id: 'activeStatus',
+      meta: { label: 'Status' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (s) => (s.isActive ? 'active' : 'inactive'),
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -119,18 +128,21 @@ export function getStaffColumns(
     },
     {
       id: 'route',
+      meta: { label: 'Route' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
       accessorFn: (s) => s.routeLabel ?? '',
       cell: ({ row }) => row.original.routeLabel || '—',
     },
     {
       id: 'stop',
+      meta: { label: 'Boarding stop' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Boarding Stop" />,
       accessorFn: (s) => s.stopLabel ?? '',
       cell: ({ row }) => row.original.stopLabel || '—',
     },
     {
       id: 'assigned',
+      meta: { label: 'Assignment' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Assignment" />,
       accessorFn: (s) => (s.assigned ? 'assigned' : 'unassigned'),
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -151,7 +163,7 @@ export function getStaffColumns(
               <DropdownMenuTrigger asChild>
                 <button
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
-                  aria-label={`Actions for ${s.name}`}
+                  aria-label={`Actions for ${titleCase(s.name)}`}
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </button>

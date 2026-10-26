@@ -60,6 +60,7 @@ export interface DriverOps {
 export interface DriverRouteRef {
   id: string;
   label: string; // "20 · CHENNAMPATTI"
+  bus?: string | null; // registration number of the route's bus, null if none / missing
 }
 
 export interface DriverListItem {

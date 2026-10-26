@@ -7,6 +7,9 @@ import { ChevronDown, Download, FileSpreadsheet, FileText, Trash2, Users } from 
 import toast from 'react-hot-toast';
 import type { StaffPassenger } from '@/lib/passengers/types';
 import { DataTable } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
+import { titleCase } from '@/lib/format/display';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -35,7 +38,7 @@ async function removeFromTransport(ids: string[]) {
 
 const REMOVE_DESCRIPTION =
   'They will be taken off transport: removed from this list and their route, and they lose TMS access. ' +
-  'Their MyJKKN staff record is NOT deleted — turn "bus required" back on in MyJKKN to re-add them.';
+  'Their staff record itself is kept — mark them as needing the bus again in MyJKKN to re-add them.';
 
 async function fetchStaff(): Promise<StaffPassenger[]> {
   // `cache: 'no-store'` keeps a brand-new dynamic route from being served a
@@ -87,6 +90,7 @@ export default function StaffPassengersPage() {
   // Stable reference: DataTable's onFilteredRowsChange effect depends on `data`,
   // so an inline `?? []` would re-fire it on every render while loading.
   const staff = useMemo(() => data ?? [], [data]);
+  const cf = useCardFilters();
 
   // Rows left after search/filters — a ref (not state) so recording them never re-renders.
   const filteredRef = useRef<StaffPassenger[] | null>(null);
@@ -151,29 +155,17 @@ export default function StaffPassengersPage() {
     [router, canRemove]
   );
 
+  // The list only holds active staff, so an "Active" card would always equal
+  // the total — the cards show what needs doing instead.
   const total = staff.length;
   const assigned = staff.filter((s) => s.assigned).length;
   const unassigned = total - assigned;
-  const activeCount = staff.filter((s) => s.isActive).length;
-  const stats = [
-    { label: 'Bus-Required Staff', value: total },
-    { label: 'Route Assigned', value: assigned },
-    { label: 'Unassigned', value: unassigned },
-    { label: 'Active', value: activeCount },
-  ];
+  const institutions = new Set(staff.map((s) => s.institutionName).filter(Boolean)).size;
 
   const filters = useMemo(
     () => [
       { columnId: 'institution', title: 'Institution', options: options(staff.map((s) => s.institutionName)) },
       { columnId: 'department', title: 'Department', options: options(staff.map((s) => s.departmentName)) },
-      {
-        columnId: 'activeStatus',
-        title: 'Status',
-        options: [
-          { label: 'Active', value: 'active' },
-          { label: 'Inactive', value: 'inactive' },
-        ],
-      },
       {
         columnId: 'assigned',
         title: 'Assignment',
@@ -188,21 +180,20 @@ export default function StaffPassengersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Staff</h1>
-          <p className="text-gray-600">Staff who require transport (bus_required), from MyJKKN</p>
-        </div>
-      </div>
+      <PageHeader description="Staff who travel on the college bus, with their route and boarding stop." />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="text-sm text-gray-500">{s.label}</p>
-            <p className="text-2xl font-bold text-gray-900">{s.value}</p>
-          </div>
-        ))}
-      </div>
+      <SummaryCards>
+        <SummaryCard label="All staff" value={total} {...cf.allCard()} />
+        <SummaryCard label="Route assigned" value={assigned} tone="good" {...cf.card('assigned', 'assigned')} />
+        <SummaryCard
+          label="Unassigned"
+          value={unassigned}
+          tone={unassigned ? 'warn' : 'neutral'}
+          title="Need a route — assign from Staff Assignments"
+          {...cf.card('assigned', 'unassigned')}
+        />
+        <SummaryCard label="Institutions" value={institutions} />
+      </SummaryCards>
 
       {isError ? (
         <div className="py-16 text-center">
@@ -223,9 +214,9 @@ export default function StaffPassengersPage() {
       ) : !isLoading && total === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
           <Users className="mx-auto mb-3 h-10 w-10 text-gray-400" />
-          <p className="font-medium text-gray-700">No bus-required staff yet</p>
+          <p className="font-medium text-gray-700">No staff use the bus yet</p>
           <p className="mt-1 text-sm text-gray-500">
-            Staff will appear here once they are marked as requiring transport in MyJKKN.
+            Staff appear here once their MyJKKN record says they need the bus.
           </p>
         </div>
       ) : (
@@ -238,7 +229,10 @@ export default function StaffPassengersPage() {
           getRowId={(s) => s.id}
           searchPlaceholder="Search name, staff ID, email..."
           filters={filters}
+          columnFilters={cf.filters}
+          onColumnFiltersChange={cf.setFilters}
           onFilteredRowsChange={onFilteredRowsChange}
+          initialColumnVisibility={{ department: false, activeStatus: false }}
           toolbarActions={({ selectedRows, resetSelection }) => (
             <>
               <DropdownMenu>
@@ -278,7 +272,7 @@ export default function StaffPassengersPage() {
         onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null); }}
         title={
           removeTarget?.rows.length === 1
-            ? `Remove ${removeTarget.rows[0].name} from transport?`
+            ? `Remove ${titleCase(removeTarget.rows[0].name)} from transport?`
             : `Remove ${removeTarget?.rows.length ?? 0} staff from transport?`
         }
         description={REMOVE_DESCRIPTION}

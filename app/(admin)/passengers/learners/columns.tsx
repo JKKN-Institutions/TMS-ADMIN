@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Eye, MoreHorizontal } from 'lucide-react';
+import { Bus, Eye, MoreHorizontal, Pencil } from 'lucide-react';
 import type { LearnerPassenger } from '@/lib/passengers/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
@@ -13,6 +13,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { PhoneLink } from '@/components/ui/display-bits';
+import { titleCase } from '@/lib/format/display';
 
 function LifecycleBadge({ status }: { status: string }) {
   // Greenish for the "live" states, neutral otherwise. Dark-mode aware.
@@ -40,7 +42,9 @@ function AssignedBadge({ assigned }: { assigned: boolean }) {
 }
 
 export function getLearnerColumns(
-  onView: (l: LearnerPassenger) => void
+  onView: (l: LearnerPassenger) => void,
+  /** Opens the Assign route dialog; omitted when the user can't allocate. */
+  onAssign?: (l: LearnerPassenger) => void
 ): ColumnDef<LearnerPassenger>[] {
   return [
     {
@@ -61,6 +65,7 @@ export function getLearnerColumns(
     },
     {
       accessorKey: 'name',
+      meta: { label: 'Name' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
       cell: ({ row }) => {
         const l = row.original;
@@ -71,7 +76,7 @@ export function getLearnerColumns(
             </div>
             <div className="min-w-0">
               <p className="truncate font-medium text-gray-900 group-hover:text-green-600 group-hover:underline">
-                {l.name}
+                {titleCase(l.name)}
               </p>
               {l.email ? <p className="truncate text-xs text-gray-500">{l.email}</p> : null}
             </div>
@@ -81,17 +86,20 @@ export function getLearnerColumns(
     },
     {
       id: 'identifier',
+      meta: { label: 'Roll / Reg no.' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Roll / Reg No." />,
       accessorFn: (l) => l.rollNumber ?? l.registerNumber ?? '',
       cell: ({ row }) => row.original.rollNumber ?? row.original.registerNumber ?? '—',
     },
     {
       accessorKey: 'mobile',
+      meta: { label: 'Mobile' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Mobile" />,
-      cell: ({ row }) => row.original.mobile || '—',
+      cell: ({ row }) => <PhoneLink phone={row.original.mobile} />,
     },
     {
       id: 'institution',
+      meta: { label: 'Institution' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Institution" />,
       accessorFn: (l) => l.institutionName ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -99,6 +107,7 @@ export function getLearnerColumns(
     },
     {
       id: 'department',
+      meta: { label: 'Department' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Department" />,
       accessorFn: (l) => l.departmentName ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -106,6 +115,7 @@ export function getLearnerColumns(
     },
     {
       id: 'lifecycle',
+      meta: { label: 'Status' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (l) => l.lifecycleStatus ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -113,18 +123,21 @@ export function getLearnerColumns(
     },
     {
       id: 'route',
+      meta: { label: 'Route' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
       accessorFn: (l) => l.routeLabel ?? '',
       cell: ({ row }) => row.original.routeLabel || '—',
     },
     {
       id: 'stop',
+      meta: { label: 'Boarding stop' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Boarding Stop" />,
       accessorFn: (l) => l.stopLabel ?? '',
       cell: ({ row }) => row.original.stopLabel || '—',
     },
     {
       id: 'assigned',
+      meta: { label: 'Assignment' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Assignment" />,
       accessorFn: (l) => (l.assigned ? 'assigned' : 'unassigned'),
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
@@ -134,18 +147,28 @@ export function getLearnerColumns(
       id: 'actions',
       enableHiding: false,
       enableSorting: false,
-      size: 80,
+      size: 170,
       header: () => <div className="text-right font-medium text-gray-500">Action</div>,
       cell: ({ row }) => {
         const l = row.original;
         const open = (fn: (l: LearnerPassenger) => void) => setTimeout(() => fn(l), 0);
         return (
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-1">
+            {/* The common job — giving an unassigned learner a bus — is one click. */}
+            {onAssign && !l.assigned && (
+              <button
+                type="button"
+                onClick={() => onAssign(l)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-green-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-green-700"
+              >
+                <Bus className="h-3.5 w-3.5" /> Assign route
+              </button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
-                  aria-label={`Actions for ${l.name}`}
+                  aria-label={`Actions for ${titleCase(l.name)}`}
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </button>
@@ -153,8 +176,14 @@ export function getLearnerColumns(
               <DropdownMenuContent align="end" className="min-w-[10rem]">
                 <DropdownMenuLabel>Action</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => open(onView)}>
-                  <Eye className="text-gray-500" /> View
+                  <Eye className="text-gray-500" /> View learner
                 </DropdownMenuItem>
+                {onAssign && (
+                  <DropdownMenuItem onSelect={() => open(onAssign)}>
+                    {l.assigned ? <Pencil className="text-gray-500" /> : <Bus className="text-gray-500" />}
+                    {l.assigned ? 'Change route' : 'Assign route'}
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

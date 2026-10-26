@@ -152,9 +152,9 @@ const EnhancedQuickActions: React.FC<EnhancedQuickActionsProps> = ({
     },
     {
       id: 'enrollment-requests',
-      title: 'Enrollment Requests',
-      description: 'Process applications',
-      href: '/enrollment-requests',
+      title: 'Unassigned Learners',
+      description: 'Assign a route',
+      href: '/passengers/learners?assignment=unassigned',
       icon: FileText,
       color: 'text-pink-700',
       bgColor: 'bg-gradient-to-br from-pink-100 to-pink-200',

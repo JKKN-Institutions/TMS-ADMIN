@@ -8,6 +8,8 @@ import { ChevronDown, Download, FileJson, FileSpreadsheet, FileText, Plus, Trash
 import type { DriverListItem } from '@/types';
 import { usePermissions } from '@/hooks/use-permissions';
 import { DataTable } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getDriverColumns } from './columns';
+import { getDriverColumns, isOnDuty, licenseState } from './columns';
 import { DriverDeleteDialog } from './driver-delete-dialog';
 import { DriverBulkDeleteDialog } from './driver-bulk-delete-dialog';
 import { DriverImportDialog } from './driver-import-dialog';
@@ -40,6 +42,7 @@ export default function DriversPage() {
   const [bulkState, setBulkState] = useState<{ rows: DriverListItem[]; reset: () => void } | null>(null);
 
   const { data: drivers = [], isLoading, isError } = useQuery({ queryKey: ['drivers'], queryFn: fetchDrivers });
+  const cf = useCardFilters();
 
   // View/Edit are now in-module pages (no popups). Delete stays a confirm dialog.
   const columns = useMemo(
@@ -53,42 +56,48 @@ export default function DriversPage() {
     [canManage, router]
   );
 
+  // Cards name problems to act on; each one filters the table below.
   const total = drivers.length;
-  const active = drivers.filter((d) => d.isActive).length;
-  const onDuty = drivers.filter((d) => d.ops?.driverStatus === 'active').length;
-  const withLicense = drivers.filter((d) => !!d.ops?.licenseNumber).length;
-  const stats = [
-    { label: 'Total Drivers', value: total },
-    { label: 'Active (Staff)', value: active },
-    { label: 'On Duty', value: onDuty },
-    { label: 'License On File', value: withLicense },
-  ];
+  const onDuty = drivers.filter(isOnDuty).length;
+  const noLicense = drivers.filter((d) => licenseState(d) === 'missing').length;
+  const licenseDue = drivers.filter((d) => ['expired', 'soon'].includes(licenseState(d))).length;
+  const noRoute = drivers.filter((d) => d.routes.length === 0).length;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Drivers</h1>
-          <p className="text-gray-600">Driver-role staff from MyJKKN, with TMS operational details</p>
-        </div>
-        {canManage && (
-          <Link
-            href="/drivers/new"
-            className="inline-flex h-[38px] shrink-0 items-center gap-2 self-start rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-          >
-            <Plus className="h-4 w-4" /> Create Driver
-          </Link>
-        )}
-      </div>
+      <PageHeader
+        description="Bus drivers, their licences, routes and whether they are on duty right now."
+        actions={
+          canManage && (
+            <Link
+              href="/drivers/new"
+              className="inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+            >
+              <Plus className="h-4 w-4" /> Create Driver
+            </Link>
+          )
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="text-sm text-gray-500">{s.label}</p>
-            <p className="text-2xl font-bold text-gray-900">{s.value}</p>
-          </div>
-        ))}
-      </div>
+      <SummaryCards>
+        <SummaryCard label="All drivers" value={total} {...cf.allCard()} />
+        <SummaryCard
+          label="On duty now"
+          value={onDuty}
+          tone={onDuty ? 'good' : 'neutral'}
+          title="Drivers sharing their location right now"
+          {...cf.card('duty', 'on')}
+        />
+        <SummaryCard label="License missing" value={noLicense} tone={noLicense ? 'danger' : 'neutral'} {...cf.card('license', 'missing')} />
+        <SummaryCard
+          label="License expired / due"
+          value={licenseDue}
+          tone={licenseDue ? 'warn' : 'neutral'}
+          title="Expired, or expiring within 60 days"
+          {...cf.card('license', 'attention')}
+        />
+        <SummaryCard label="No route" value={noRoute} tone={noRoute ? 'warn' : 'neutral'} {...cf.card('route', 'none')} />
+      </SummaryCards>
 
       {isError ? (
         <div className="py-16 text-center">
@@ -104,8 +113,19 @@ export default function DriversPage() {
           enableRowSelection={canManage}
           getRowId={(d) => d.id}
           searchPlaceholder="Search name, email, phone..."
+          columnFilters={cf.filters}
+          onColumnFiltersChange={cf.setFilters}
+          initialColumnVisibility={{ email: false, experienceYears: false, employmentType: false, dateOfJoining: false }}
           filters={[
-            { columnId: 'activeStatus', title: 'Status', options: [
+            { columnId: 'duty', title: 'Duty', options: [
+              { label: 'On duty', value: 'on' }, { label: 'Off duty', value: 'off' },
+            ] },
+            { columnId: 'license', title: 'License', options: [
+              { label: 'Missing', value: 'missing' }, { label: 'Expired', value: 'expired' },
+              { label: 'Expiring in 60 days', value: 'soon' }, { label: 'No expiry date', value: 'no_expiry' },
+              { label: 'Valid', value: 'ok' },
+            ] },
+            { columnId: 'activeStatus', title: 'Staff status', options: [
               { label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' },
             ] },
             { columnId: 'employmentType', title: 'Employment', options: [

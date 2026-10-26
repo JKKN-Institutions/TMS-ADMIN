@@ -11,7 +11,6 @@ import {
   Settings,
   Bus,
   UserCheck,
-  FileText,
   Navigation,
   Smartphone,
   Zap,
@@ -67,7 +66,8 @@ export const allNavigation: NavItem[] = [
   { name: 'Route Optimization', href: '/route-optimization', icon: Zap, permission: TMS_PERMISSIONS.ROUTES_EDIT, group: 'transport' },
   { name: 'Staff Assignments', href: '/staff-route-assignments', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
   { name: 'Transport Years', href: '/transport-years', icon: CalendarRange, permission: TMS_PERMISSIONS.TRANSPORT_YEARS_VIEW, group: 'transport' },
-  { name: 'Enrollments', href: '/enrollment-requests', icon: FileText, permission: TMS_PERMISSIONS.ENROLLMENT_MANAGE, group: 'services' },
+  // 'Enrollments' (/enrollment-requests) merged into Learners — assign a route
+  // from any learner row; the old URL redirects to the unassigned view.
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },
   // Two distinct charges live under /fees: the recurring MAINTENANCE fee the
   // institution collects, and the TRANSPORT FEE charged when it goes unpaid.

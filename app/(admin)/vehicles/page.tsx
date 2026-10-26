@@ -1,15 +1,16 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Plus, Car, CheckCircle, Wrench, AlertTriangle, Trash2, Upload, Download } from 'lucide-react';
+import { Plus, Trash2, Upload, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
-import UniversalStatCard from '@/components/universal-stat-card';
-import { createVehicleStats } from '@/lib/stat-utils';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import LiveGPSTrackingModal from '@/components/live-gps-tracking-modal';
-import { getVehicleColumns, type VehicleRow } from './columns';
+import { docsState, getVehicleColumns, type VehicleRow } from './columns';
 import { VehicleImportDialog } from './vehicle-import-dialog';
 import { exportVehicles } from './vehicle-export';
 
@@ -27,6 +28,13 @@ const VehiclesPage = () => {
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [trackingVehicle, setTrackingVehicle] = useState<any>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ rows: VehicleRow[]; reset?: () => void } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [filteredRows, setFilteredRows] = useState<VehicleRow[] | null>(null);
+  const onFilteredRowsChange = useCallback((rows: VehicleRow[], isFiltered: boolean) => {
+    setFilteredRows(isFiltered ? rows : null);
+  }, []);
+  const cf = useCardFilters();
 
   useEffect(() => {
     const userData = localStorage.getItem('adminUser');
@@ -47,28 +55,27 @@ const VehiclesPage = () => {
     if (isError) toast.error('Failed to load vehicles');
   }, [isError]);
 
-  const handleDeleteVehicle = async (vehicle: VehicleRow) => {
-    if (!confirm(`Are you sure you want to delete vehicle ${vehicle.registration_number}?`)) return;
+  // Single and bulk delete share one confirmation dialog (was window.confirm).
+  const handleDeleteVehicle = (vehicle: VehicleRow) => setDeleteTarget({ rows: [vehicle] });
+  const handleBulkDeleteVehicles = (rows: VehicleRow[], reset: () => void) => setDeleteTarget({ rows, reset });
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { rows, reset } = deleteTarget;
+    setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/vehicles?id=${vehicle.id}`, { method: 'DELETE' });
-      const result = await res.json();
-      if (!res.ok || !result.success) throw new Error(result.error || 'Failed to delete vehicle');
-      toast.success('Vehicle deleted');
-      await refetch();
+      const results = await Promise.all(
+        rows.map((r) => fetch(`/api/admin/vehicles?id=${r.id}`, { method: 'DELETE' }).then((res) => res.ok))
+      );
+      const failed = results.filter((ok) => !ok).length;
+      if (failed) toast.error(`${failed} of ${rows.length} vehicle(s) could not be deleted`);
+      else toast.success(rows.length === 1 ? 'Vehicle deleted' : `Deleted ${rows.length} vehicles`);
+      reset?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete vehicle');
-    }
-  };
-
-  const handleBulkDeleteVehicles = async (rows: VehicleRow[], reset: () => void) => {
-    if (!confirm(`Delete ${rows.length} vehicle(s)?\n\nThis cannot be undone.`)) return;
-    try {
-      await Promise.all(rows.map((r) => fetch(`/api/admin/vehicles?id=${r.id}`, { method: 'DELETE' })));
-      toast.success(`Deleted ${rows.length} vehicle(s)`);
-      reset();
-      await refetch();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete selected vehicles');
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
       await refetch();
     }
   };
@@ -117,68 +124,56 @@ const VehiclesPage = () => {
     [canManage, canDelete, router]
   );
 
-  // Stats
+  // Cards name what needs attention; each filters the table.
   const totalVehicles = vehicles.length;
   const activeVehicles = vehicles.filter((v) => v.status === 'active').length;
-  const maintenanceVehicles = vehicles.filter((v) => v.status === 'maintenance').length;
-  const maintenanceDue = vehicles.filter(
-    (v) => v.next_maintenance && new Date(v.next_maintenance) <= new Date()
-  ).length;
+  const inMaintenance = vehicles.filter((v) => v.status === 'maintenance').length;
+  const docsExpired = vehicles.filter((v) => docsState(v) === 'expired').length;
+  const docsSoon = vehicles.filter((v) => docsState(v) === 'soon').length;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Vehicles Management</h1>
-          <p className="text-gray-600">Manage vehicle fleet and maintenance</p>
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={() => exportVehicles(vehicles)}
-              disabled={vehicles.length === 0}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
-            >
-              <Download className="h-4 w-4" /> Export
-            </button>
-            <button
-              onClick={() => setIsImportOpen(true)}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-            >
-              <Upload className="h-4 w-4" /> Import
-            </button>
-            <button
-              onClick={() => router.push('/vehicles/new')}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-            >
-              <Plus className="h-4 w-4" /> Add Vehicle
-            </button>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        description="The fleet, its documents and service status."
+        actions={
+          canManage && (
+            <>
+              <button
+                onClick={() => setIsImportOpen(true)}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              >
+                <Upload className="h-4 w-4" /> Import
+              </button>
+              <button
+                onClick={() => router.push('/vehicles/new')}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+              >
+                <Plus className="h-4 w-4" /> Add Vehicle
+              </button>
+            </>
+          )
+        }
+      />
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
-        {createVehicleStats({
-          totalVehicles,
-          activeVehicles,
-          maintenanceVehicles,
-          outOfService: maintenanceDue,
-        }).map((stat, index) => (
-          <UniversalStatCard
-            key={stat.title}
-            title={stat.title}
-            value={stat.value}
-            subtitle={stat.subtitle}
-            icon={index === 0 ? Car : index === 1 ? CheckCircle : index === 2 ? Wrench : AlertTriangle}
-            trend={stat.trend}
-            color={stat.color}
-            variant="default"
-            loading={loading}
-            delay={index}
-          />
-        ))}
-      </div>
+      <SummaryCards>
+        <SummaryCard label="All vehicles" value={totalVehicles} {...cf.allCard()} />
+        <SummaryCard label="Active" value={activeVehicles} tone="good" {...cf.card('status', 'active')} />
+        <SummaryCard label="In maintenance" value={inMaintenance} tone={inMaintenance ? 'warn' : 'neutral'} {...cf.card('status', 'maintenance')} />
+        <SummaryCard
+          label="Documents expired"
+          value={docsExpired}
+          tone={docsExpired ? 'danger' : 'neutral'}
+          title="Insurance, fitness, permit, pollution or road tax past its expiry date"
+          {...cf.card('documents', 'expired')}
+        />
+        <SummaryCard
+          label="Due in 60 days"
+          value={docsSoon}
+          tone={docsSoon ? 'warn' : 'neutral'}
+          title="A document expires within the next 60 days"
+          {...cf.card('documents', 'soon')}
+        />
+      </SummaryCards>
 
       {/* Data table */}
       <DataTable
@@ -189,7 +184,23 @@ const VehiclesPage = () => {
         searchPlaceholder="Search registration #, model..."
         enableRowSelection={canManage}
         getRowId={(v) => v.id}
+        columnFilters={cf.filters}
+        onColumnFiltersChange={cf.setFilters}
+        onFilteredRowsChange={onFilteredRowsChange}
+        // Next Maintenance is empty for the whole fleet today; the two expiry
+        // columns are summarised by Documents. All stay in the Columns menu.
+        initialColumnVisibility={{ next_maintenance: false, insurance_expiry: false, fitness_expiry: false, mileage: false }}
         filters={[
+          {
+            columnId: 'documents',
+            title: 'Documents',
+            options: [
+              { label: 'Expired', value: 'expired' },
+              { label: 'Due in 60 days', value: 'soon' },
+              { label: 'Not on file', value: 'missing' },
+              { label: 'All valid', value: 'ok' },
+            ],
+          },
           {
             columnId: 'status',
             title: 'Status',
@@ -222,17 +233,40 @@ const VehiclesPage = () => {
             ],
           },
         ]}
-        toolbarActions={({ selectedRows, resetSelection }) =>
-          canDelete && selectedRows.length > 0 ? (
+        toolbarActions={({ selectedRows, resetSelection }) => (
+          <>
+            {/* Exports the selection, else what the filters show, else the fleet.
+                Same columns as the import template, so it round-trips. */}
             <button
               type="button"
-              onClick={() => handleBulkDeleteVehicles(selectedRows, resetSelection)}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              onClick={() => exportVehicles(selectedRows.length ? selectedRows : filteredRows ?? vehicles)}
+              disabled={vehicles.length === 0}
+              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
             >
-              <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
+              <Download className="h-4 w-4" /> {selectedRows.length ? `Export (${selectedRows.length})` : 'Export'}
             </button>
-          ) : null
-        }
+            {canDelete && selectedRows.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleBulkDeleteVehicles(selectedRows, resetSelection)}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              >
+                <Trash2 className="h-4 w-4" /> Delete Selected ({selectedRows.length})
+              </button>
+            )}
+          </>
+        )}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && !deleting && setDeleteTarget(null)}
+        title={deleteTarget?.rows.length === 1 ? `Delete vehicle ${deleteTarget.rows[0].registration_number}?` : `Delete ${deleteTarget?.rows.length ?? 0} vehicles?`}
+        description="This cannot be undone. Routes that use these vehicles will show no bus."
+        confirmLabel="Delete"
+        danger
+        loading={deleting}
+        onConfirm={confirmDelete}
       />
 
       {/* Bulk upload dialog (creates new vehicles + updates existing, by reg number) */}

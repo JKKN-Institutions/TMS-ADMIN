@@ -36,13 +36,50 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
   return !!data;
 }
 
-async function handleGet(_request: NextRequest, auth: AuthContext) {
+// Active routes with their active stops, in stop order — the allocation targets.
+async function loadRouteOptions(svc: ReturnType<typeof createServiceRoleClient>) {
+  const routesRes = await svc
+    .from('tms_route')
+    .select('id, route_number, route_name')
+    .eq('status', 'active')
+    .order('route_number', { ascending: true });
+  const routes = (routesRes.data ?? []) as RouteRow[];
+  const routeIds = routes.map((r) => r.id);
+  const stopsRes = routeIds.length
+    ? await svc
+        .from('tms_route_stop')
+        .select('id, route_id, stop_name, sequence_order')
+        .in('route_id', routeIds)
+        .eq('is_active', true)
+        .order('sequence_order', { ascending: true })
+    : { data: [] as StopRow[] };
+  const stops = (stopsRes.data ?? []) as StopRow[];
+  const stopsByRoute = new Map<string, { id: string; name: string }[]>();
+  for (const s of stops) {
+    const arr = stopsByRoute.get(s.route_id) ?? [];
+    arr.push({ id: s.id, name: s.stop_name });
+    stopsByRoute.set(s.route_id, arr);
+  }
+  return routes.map((r) => ({
+    id: r.id,
+    label: `${r.route_number} · ${r.route_name}`,
+    stops: stopsByRoute.get(r.id) ?? [],
+  }));
+}
+
+async function handleGet(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ENROLLMENT_VIEW))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const svc = createServiceRoleClient();
+
+    // ?routesOnly=1 — just the route/stop options, for the Assign route dialog
+    // on the Learners page (which already has its own learner list).
+    if (request.nextUrl.searchParams.get('routesOnly') === '1') {
+      return NextResponse.json({ success: true, data: { learners: [], routes: await loadRouteOptions(svc) } });
+    }
 
     // Bus-required AND currently-active learners only. Enrollment allocates
     // transport for active learners; admission-pipeline prospects (reserved,
@@ -75,33 +112,7 @@ async function handleGet(_request: NextRequest, auth: AuthContext) {
     });
     const learners = rows.map((r) => mapLearner(r, refs));
 
-    const routesRes = await svc
-      .from('tms_route')
-      .select('id, route_number, route_name')
-      .eq('status', 'active')
-      .order('route_number', { ascending: true });
-    const routes = (routesRes.data ?? []) as RouteRow[];
-    const routeIds = routes.map((r) => r.id);
-    const stopsRes = routeIds.length
-      ? await svc
-          .from('tms_route_stop')
-          .select('id, route_id, stop_name, sequence_order')
-          .in('route_id', routeIds)
-          .eq('is_active', true)
-          .order('sequence_order', { ascending: true })
-      : { data: [] as StopRow[] };
-    const stops = (stopsRes.data ?? []) as StopRow[];
-    const stopsByRoute = new Map<string, { id: string; name: string }[]>();
-    for (const s of stops) {
-      const arr = stopsByRoute.get(s.route_id) ?? [];
-      arr.push({ id: s.id, name: s.stop_name });
-      stopsByRoute.set(s.route_id, arr);
-    }
-    const routeOptions = routes.map((r) => ({
-      id: r.id,
-      label: `${r.route_number} · ${r.route_name}`,
-      stops: stopsByRoute.get(r.id) ?? [],
-    }));
+    const routeOptions = await loadRouteOptions(svc);
 
     return NextResponse.json({
       success: true,
