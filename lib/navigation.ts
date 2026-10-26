@@ -118,3 +118,19 @@ export const derivePageTitle = (path: string): string => {
   if (!seg) return 'Dashboard';
   return seg.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
+
+// Breadcrumb for the top header: the sidebar group the current page lives in
+// plus its nav name, e.g. { group: 'Transport', name: 'Vehicles' }. Pages own
+// the single big title; the header only says where you are.
+export const derivePageCrumb = (path: string): { group: string | null; name: string; href: string | null } => {
+  const match = allNavigation
+    .flatMap((item) => [
+      { name: item.name, href: item.href, group: item.group },
+      ...(item.subItems ?? []).map((s) => ({ name: s.name, href: s.href, group: item.group })),
+    ])
+    .filter((i) => path === i.href || path.startsWith(i.href + '/'))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  if (!match) return { group: null, name: derivePageTitle(path), href: null };
+  const g = GROUP_TITLES[match.group];
+  return { group: g.charAt(0) + g.slice(1).toLowerCase(), name: match.name, href: match.href };
+};

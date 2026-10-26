@@ -9,14 +9,19 @@ import {
   Monitor,
   LogOut,
   Check,
+  Bug,
+  ChevronRight,
 } from 'lucide-react';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/providers/auth-provider';
 import { useTheme, type Theme } from '@/components/theme-provider';
 import NotificationBell from '@/components/notifications/notification-bell';
+import { isBugReporterAvailable, openBugReporter } from '@/components/bug-reporter/open-bug-reporter';
 
 interface AdminHeaderProps {
-  title: string;
+  /** Where the current page sits: sidebar group + nav name (see derivePageCrumb). */
+  crumb: { group: string | null; name: string; href: string | null };
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -148,6 +153,17 @@ function ProfileMenu() {
             </div>
 
             <div className="border-t border-gray-100 p-2 dark:border-gray-800">
+              {isBugReporterAvailable() && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setOpen(false); openBugReporter(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                >
+                  <Bug className="w-4 h-4" />
+                  Report a bug
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -165,7 +181,7 @@ function ProfileMenu() {
   );
 }
 
-export default function AdminHeader({ title, collapsed, onToggleCollapse }: AdminHeaderProps) {
+export default function AdminHeader({ crumb, collapsed, onToggleCollapse }: AdminHeaderProps) {
   return (
     <header className="app-header">
       <div className="flex items-center gap-2 min-w-0">
@@ -175,15 +191,28 @@ export default function AdminHeader({ title, collapsed, onToggleCollapse }: Admi
           onClick={onToggleCollapse}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 hidden lg:flex dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800"
+          className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 hidden min-[1025px]:flex dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800"
         >
           {collapsed ? <PanelLeft className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
         </button>
 
-        {/* Current module / page name (updates on navigation) */}
-        <h1 className="text-base sm:text-lg font-semibold text-gray-900 truncate dark:text-white">
-          {title}
-        </h1>
+        {/* Breadcrumb only — each page renders the one big title itself, so the
+            name no longer appears twice ("Vehicles" here + "Vehicles Management"). */}
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+          {crumb.group && (
+            <>
+              <span className="hidden shrink-0 text-gray-500 sm:inline dark:text-gray-400">{crumb.group}</span>
+              <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-gray-400 sm:inline" />
+            </>
+          )}
+          {crumb.href ? (
+            <Link href={crumb.href} className="truncate font-semibold text-gray-900 hover:underline dark:text-white">
+              {crumb.name}
+            </Link>
+          ) : (
+            <span className="truncate font-semibold text-gray-900 dark:text-white">{crumb.name}</span>
+          )}
+        </nav>
       </div>
 
       <div className="flex items-center gap-1 sm:gap-2">

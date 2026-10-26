@@ -812,6 +812,34 @@ html {
   }
 }
 
+/* Admin, 900–1024px (laptop / half-screen windows): show the sidebar as the
+   72px icon rail instead of the phone bottom bar, whose "More" sheet had to
+   hold every page. Scoped to .admin-shell so the student/driver/boarding
+   shells keep their hamburger drawer. Full-width sidebar returns at 1025px. */
+@media (min-width: 900px) and (max-width: 1024px) {
+  .admin-shell .sidebar-modern {
+    display: flex;
+    width: 72px;
+  }
+  .admin-shell .sidebar-modern .sidebar-header { padding: 1.25rem 0.75rem; }
+  .admin-shell .sidebar-modern .sidebar-header > div { justify-content: center; }
+  .admin-shell .sidebar-modern .sidebar-header h1,
+  .admin-shell .sidebar-modern .sidebar-header p,
+  .admin-shell .sidebar-modern .sidebar-search,
+  .admin-shell .sidebar-modern .sidebar-section-title,
+  .admin-shell .sidebar-modern .sidebar-nav-item span,
+  .admin-shell .sidebar-modern .user-details,
+  .admin-shell .sidebar-modern .sidebar-label {
+    display: none;
+  }
+  .admin-shell .sidebar-modern .sidebar-nav-item { justify-content: center; padding: 0.625rem; }
+  .admin-shell .sidebar-modern .sidebar-nav-item .icon { margin-right: 0; }
+  .admin-shell .sidebar-modern .sidebar-user .btn-secondary { justify-content: center; }
+  .admin-shell .main-content { margin-left: 72px; }
+  .admin-shell .app-header { left: 72px; }
+  .admin-shell .content-body { padding-bottom: 1.5rem; }
+}
+
 /* Phones: trade the 24px desktop gutter for a 16px one so cards, timelines and
    tables have ~16px more room before they start to overflow on a 320px screen. */
 @media (max-width: 640px) {
@@ -856,12 +884,20 @@ html {
   height: 1.25rem !important;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 899px) {
   /* Sit just above the top edge of the ~3rem bottom nav (+ its safe-area pad)
      instead of on top of it. `right` is left to the SDK. */
   .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
     bottom: calc(4rem + env(safe-area-inset-bottom)) !important;
   }
+}
+
+/* Admin portal: the floating button sat over the last table column and the
+   pagination on every page. It is hidden here and opened from "Report a bug" in
+   the profile menu instead (components/bug-reporter/open-bug-reporter.ts clicks
+   the hidden button). Other portals keep the floating button. */
+.admin-shell .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
+  display: none !important;
 }
 
 /* Animations - subtle */

@@ -2,18 +2,32 @@
 
 import * as React from 'react';
 import {
-  type ColumnDef, type ColumnFiltersState, type RowSelectionState, type SortingState, type VisibilityState,
+  type ColumnDef, type ColumnFiltersState, type OnChangeFn, type Row, type RowData, type RowSelectionState,
+  type SortingState, type VisibilityState,
   flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable,
 } from '@tanstack/react-table';
 import {
-  Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Database, Loader2, Search, Settings2, SlidersHorizontal, X,
+  Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Columns3, ListFilter, Loader2,
+  Search, Settings2, X,
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuLabel,
-  DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+
+declare module '@tanstack/react-table' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface ColumnMeta<TData extends RowData, TValue> {
+    /** Readable column name for the card view and the Columns menu (headers are often components). */
+    label?: string;
+    /** Leave this column out of the narrow-screen card view. */
+    hideInCard?: boolean;
+  }
+}
 
 export interface DataTableFilter {
   columnId: string;
@@ -60,7 +74,22 @@ interface DataTableProps<TData, TValue> {
    * in the column-visibility menu. Defaults to everything visible.
    */
   initialColumnVisibility?: VisibilityState;
+  /** Column filters applied on first render (e.g. grievances default to open). */
+  initialColumnFilters?: ColumnFiltersState;
+  /**
+   * Controlled column filters. Pass together with onColumnFiltersChange when
+   * something outside the table — a summary card — needs to set a filter.
+   */
+  columnFilters?: ColumnFiltersState;
+  onColumnFiltersChange?: (filters: ColumnFiltersState) => void;
+  /** Keep the first data column (and the checkbox) visible while scrolling sideways. Default on. */
+  pinFirstColumn?: boolean;
+  /** Below 900px render each row as a card instead of a cut-off table. Default on. */
+  mobileCards?: boolean;
 }
+
+const PAGE_SIZES = [25, 50, 100];
+const UTILITY_COLUMNS = new Set(['select', 'actions']);
 
 // "licenseNumber" -> "License Number" for the column-visibility menu.
 function prettifyColumnId(id: string) {
@@ -74,17 +103,25 @@ function prettifyColumnId(id: string) {
 }
 
 export function DataTable<TData, TValue>({
-  columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 10,
+  columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 25,
   entityName = 'rows', isLoading = false, enableRowSelection = false, canSelectRow, getRowId, toolbarActions,
-  onFilteredRowsChange, initialColumnVisibility,
+  onFilteredRowsChange, initialColumnVisibility, initialColumnFilters, columnFilters: controlledFilters,
+  onColumnFiltersChange, pinFirstColumn = true, mobileCards = true,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+  const [innerFilters, setInnerFilters] = React.useState<ColumnFiltersState>(initialColumnFilters ?? []);
+  const columnFilters = controlledFilters ?? innerFilters;
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
     initialColumnVisibility ?? {}
   );
   const [globalFilter, setGlobalFilter] = React.useState('');
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
+
+  const setColumnFilters: OnChangeFn<ColumnFiltersState> = (updater) => {
+    const next = typeof updater === 'function' ? updater(columnFilters) : updater;
+    if (!controlledFilters) setInnerFilters(next);
+    onColumnFiltersChange?.(next);
+  };
 
   const table = useReactTable({
     data, columns,
@@ -107,7 +144,7 @@ export function DataTable<TData, TValue>({
 
   const totalRows = data.length;
   const filteredCount = table.getFilteredRowModel().rows.length;
-  const pageRowCount = table.getRowModel().rows.length;
+  const pageRows = table.getRowModel().rows;
   const { pageIndex, pageSize: currentPageSize } = table.getState().pagination;
   const pageCount = table.getPageCount() || 1;
   const selectedCount = table.getFilteredSelectedRowModel().rows.length;
@@ -124,10 +161,39 @@ export function DataTable<TData, TValue>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, columnFilters, globalFilter, isFiltered, onFilteredRowsChange]);
 
-  const seenSoFar = Math.min((pageIndex + 1) * currentPageSize, filteredCount);
-  const percentOfTotal = filteredCount > 0 ? Math.round((seenSoFar / filteredCount) * 100) : 0;
+  const firstShown = filteredCount === 0 ? 0 : pageIndex * currentPageSize + 1;
+  const lastShown = Math.min((pageIndex + 1) * currentPageSize, filteredCount);
   const hideableColumns = table.getAllColumns().filter((c) => c.getCanHide());
   const hasHiddenColumns = hideableColumns.some((c) => !c.getIsVisible());
+  const columnLabel = (id: string) => table.getColumn(id)?.columnDef.meta?.label ?? prettifyColumnId(id);
+
+  // Pinned columns: the checkbox (if any) plus the first real data column.
+  // Offsets are measured from the declared sizes so the second sticky column
+  // starts exactly where the checkbox column ends.
+  const visibleLeaf = table.getVisibleLeafColumns();
+  const pinned = new Map<string, number>();
+  if (pinFirstColumn) {
+    let left = 0;
+    for (const col of visibleLeaf) {
+      pinned.set(col.id, left);
+      if (col.id !== 'select') break;
+      left += col.getSize();
+    }
+  }
+  const pinClass = (id: string, header = false) => {
+    if (!pinned.has(id)) return undefined;
+    const last = [...pinned.keys()].pop() === id;
+    return cn(
+      'sticky z-[1]',
+      header ? 'bg-gray-50' : 'bg-white group-hover:bg-gray-50 group-data-[state=selected]:bg-green-50 dark:group-data-[state=selected]:bg-green-500/10',
+      last && 'shadow-[inset_-1px_0_0_rgb(229_231_235)] dark:shadow-[inset_-1px_0_0_rgb(55_65_81)]',
+    );
+  };
+  const pinStyle = (id: string, width?: number): React.CSSProperties | undefined => {
+    const left = pinned.get(id);
+    if (left === undefined) return width ? { width } : undefined;
+    return { left, ...(width ? { width } : {}) };
+  };
 
   const resetSelection = () => table.resetRowSelection();
   const resetFilters = () => {
@@ -135,56 +201,31 @@ export function DataTable<TData, TValue>({
     table.resetColumnFilters();
   };
 
-  return (
-    <div className="space-y-4">
-      {/* Summary bar */}
-      <div className="rounded-xl border border-gray-200 bg-white p-3 text-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <span className="flex items-center gap-2 text-gray-600">
-              <Database className="h-4 w-4 text-gray-400" />
-              Showing <span className="font-medium text-gray-900">{pageRowCount}</span> of{' '}
-              <span className="font-bold text-green-600">{filteredCount.toLocaleString()}</span> {entityName}
-              {filteredCount !== totalRows ? <span className="text-gray-400">(of {totalRows.toLocaleString()})</span> : null}
-            </span>
-            <span className="text-gray-500">Page <span className="font-medium text-gray-700">{pageIndex + 1}</span> of {pageCount}</span>
-            <span
-              className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-              title="How far through the matching rows this page reaches"
-            >
-              {percentOfTotal}% viewed
-            </span>
-            {selectedCount > 0 && (
-              <span className="font-medium text-green-600">Selected: {selectedCount.toLocaleString()}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-3 text-xs">
-            {isFiltered && <span className="rounded-md bg-green-50 px-2 py-1 text-green-600 dark:bg-green-500/15 dark:text-green-300">Filtered</span>}
-            {isLoading && <Loader2 className="h-4 w-4 animate-spin text-green-600" />}
-          </div>
-        </div>
-      </div>
+  // One chip per active column filter, labelled from the filter definition when
+  // the page declared one, otherwise from the column itself (summary cards can
+  // filter on columns that have no dropdown).
+  const chips = columnFilters.map((f) => {
+    const def = filters.find((d) => d.columnId === f.id);
+    const raw = String(f.value);
+    const valueLabel = def?.options.find((o) => o.value === raw)?.label ?? raw;
+    return { id: f.id, label: def?.title ?? columnLabel(f.id), valueLabel };
+  });
 
+  const tableCls = mobileCards ? 'hidden min-[900px]:block' : '';
+
+  return (
+    // Own provider: the table is also used by portals whose layouts have none.
+    <TooltipProvider delayDuration={300}>
+    <div className="space-y-3">
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           {globalSearch && (
             // NEVER `flex-1` here. `flex-1` is `flex: 1 1 0%` -- a ZERO basis -- so the
             // search claims no space of its own and is left with whatever its siblings
-            // decline, while every FilterSelect claims its content width up front.
-            // Being the only growable item made it the only STARVABLE one. Measured
-            // usable text width (box minus the 40px `pl-10!` gutter and 12px right pad),
-            // against the ~215px a 34-char placeholder needs (measured when each
-            // FilterSelect reserved a flat 160px; they are content-sized with a
-            // 120px floor now, which only widens the margin below):
-            //   320px -> 84    360px -> -44    390px -> -14    414px -> 10    640px -> 96
-            // Negative means the padding alone overflowed the box. Worst at 360-390px,
-            // and NOT monotonic -- widening the screen let a second filter join the row
-            // and squeezed it further, which is why it looked broken at "all views".
-            // basis-full gives it the whole line below sm (filters wrap beneath);
-            // basis-56 keeps a 224px floor above sm so wrapping, not crushing, absorbs
-            // any shortfall once the action buttons share the row. max-w-xs still caps
-            // it on wide screens. Same widths after: 252 / 292 / 322 / 346 / 264.
+            // decline. basis-full gives it the whole line below sm; basis-56 keeps a
+            // 224px floor above sm so wrapping, not crushing, absorbs any shortfall.
+            // max-w-xs still caps it on wide screens.
             <div className="relative min-w-0 basis-full sm:basis-56 sm:grow sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
@@ -195,44 +236,59 @@ export function DataTable<TData, TValue>({
               />
             </div>
           )}
-          {filters.map((f) => (
+          {/* A single filter stays a plain dropdown; two or more collapse into one
+              "Filters" button so the toolbar never wraps onto a second line. */}
+          {filters.length === 1 && (
             <FilterSelect
-              key={f.columnId}
-              title={f.title}
-              value={(table.getColumn(f.columnId)?.getFilterValue() as string) ?? ''}
-              options={f.options}
-              onChange={(v) => table.getColumn(f.columnId)?.setFilterValue(v)}
+              title={filters[0].title}
+              value={(table.getColumn(filters[0].columnId)?.getFilterValue() as string) ?? ''}
+              options={filters[0].options}
+              onChange={(v) => table.getColumn(filters[0].columnId)?.setFilterValue(v)}
             />
-          ))}
-          {isFiltered && (
-            <button onClick={resetFilters} className="inline-flex h-[38px] shrink-0 items-center gap-1 rounded-lg px-2 text-sm text-gray-600 hover:bg-gray-100">
-              Reset <X className="h-4 w-4" />
-            </button>
           )}
+          {filters.length > 1 && (
+            <FiltersMenu
+              filters={filters}
+              activeCount={columnFilters.length}
+              getValue={(id) => (table.getColumn(id)?.getFilterValue() as string) ?? ''}
+              setValue={(id, v) => table.getColumn(id)?.setFilterValue(v)}
+            />
+          )}
+          {isLoading && <Loader2 className="h-4 w-4 animate-spin text-green-600" aria-label="Loading" />}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           {toolbarActions?.({ selectedRows: table.getFilteredSelectedRowModel().rows.map((r) => r.original), resetSelection })}
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
-              <SlidersHorizontal className="h-4 w-4" /> View
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
+                  <Columns3 className="h-4 w-4" /> Columns
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Show or hide columns</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto">
+              <DropdownMenuLabel>Show columns</DropdownMenuLabel>
               {hideableColumns.map((column) => (
                 <DropdownMenuCheckboxItem key={column.id} checked={column.getIsVisible()} onCheckedChange={(v) => column.toggleVisibility(!!v)}>
-                  {prettifyColumnId(column.id)}
+                  {columnLabel(column.id)}
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
-            <DropdownMenuTrigger
-              className="inline-flex h-[38px] items-center justify-center rounded-lg border border-gray-300 px-2.5 text-gray-700 transition-colors hover:bg-gray-50"
-              aria-label="Table settings"
-            >
-              <Settings2 className="h-4 w-4" />
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger
+                  className="inline-flex h-[38px] items-center justify-center rounded-lg border border-gray-300 px-2.5 text-gray-700 transition-colors hover:bg-gray-50"
+                  aria-label="Table settings"
+                >
+                  <Settings2 className="h-4 w-4" />
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Table settings</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Table settings</DropdownMenuLabel>
               {enableRowSelection && (
@@ -251,14 +307,42 @@ export function DataTable<TData, TValue>({
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      {/* Active filter chips */}
+      {chips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {chips.map((c) => (
+            <span
+              key={c.id}
+              className="inline-flex items-center gap-1 rounded-full border border-green-600/30 bg-green-50 py-0.5 pl-3 pr-1 text-xs text-gray-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-gray-200"
+            >
+              {c.label}: <span className="font-semibold text-green-700 dark:text-green-400">{c.valueLabel}</span>
+              <button
+                onClick={() => table.getColumn(c.id)?.setFilterValue(undefined)}
+                className="ml-0.5 rounded-full p-0.5 hover:bg-green-100 dark:hover:bg-green-500/20"
+                aria-label={`Remove ${c.label} filter`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          ))}
+          <button onClick={resetFilters} className="text-xs font-medium text-gray-500 hover:text-gray-800 hover:underline">
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {/* Table (900px and up, or always when cards are off) */}
+      <div className={cn('overflow-x-auto rounded-xl border border-gray-200 bg-white', tableCls)}>
         <Table>
           <TableHeader className="bg-gray-50">
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id} className="hover:bg-gray-50">
                 {hg.headers.map((header) => (
-                  <TableHead key={header.id} style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }}>
+                  <TableHead
+                    key={header.id}
+                    className={pinClass(header.column.id, true)}
+                    style={pinStyle(header.column.id, header.getSize() !== 150 ? header.getSize() : undefined)}
+                  >
                     {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                   </TableHead>
                 ))}
@@ -267,34 +351,58 @@ export function DataTable<TData, TValue>({
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              Array.from({ length: pageSize }).map((_, i) => (
+              Array.from({ length: Math.min(currentPageSize, 10) }).map((_, i) => (
                 <TableRow key={`sk-${i}`}>
-                  {table.getAllLeafColumns().map((col) => (
+                  {table.getVisibleLeafColumns().map((col) => (
                     <TableCell key={col.id}><Skeleton className="h-6 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
-            ) : table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} data-state={row.getIsSelected() ? 'selected' : undefined} className="data-[state=selected]:bg-green-50 dark:data-[state=selected]:bg-green-500/10">
+            ) : pageRows.length ? (
+              pageRows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  data-state={row.getIsSelected() ? 'selected' : undefined}
+                  className="group data-[state=selected]:bg-green-50 dark:data-[state=selected]:bg-green-500/10"
+                >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                    <TableCell key={cell.id} className={pinClass(cell.column.id)} style={pinStyle(cell.column.id)}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
                   ))}
                 </TableRow>
               ))
             ) : (
-              <TableRow><TableCell colSpan={columns.length} className="h-24 text-center text-gray-500">No results.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={visibleLeaf.length || columns.length} className="h-24 text-center text-gray-500">No results.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
       </div>
 
-      {/* Pagination */}
-      <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-        <div className="flex-1 text-sm text-gray-500">
-          {enableRowSelection ? `${selectedCount} of ${filteredCount} row(s) selected.` : `${filteredCount} row(s).`}
+      {/* Card list (below 900px) */}
+      {mobileCards && (
+        <div className="space-y-2 min-[900px]:hidden">
+          {isLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <Skeleton key={`skc-${i}`} className="h-28 w-full rounded-xl" />)
+          ) : pageRows.length ? (
+            pageRows.map((row) => <RowCard key={row.id} row={row} columnLabel={columnLabel} />)
+          ) : (
+            <div className="rounded-xl border border-gray-200 bg-white py-10 text-center text-sm text-gray-500">No results.</div>
+          )}
         </div>
-        <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
+      )}
+
+      {/* Count + pagination */}
+      <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
+        <div className="flex-1 text-sm text-gray-600">
+          Showing <span className="font-medium text-gray-900">{firstShown.toLocaleString()}–{lastShown.toLocaleString()}</span> of{' '}
+          <span className="font-medium text-gray-900">{filteredCount.toLocaleString()}</span> {entityName}
+          {filteredCount !== totalRows && <span className="text-gray-400"> (filtered from {totalRows.toLocaleString()})</span>}
+          {enableRowSelection && selectedCount > 0 && (
+            <span className="ml-2 font-medium text-green-700 dark:text-green-400">· {selectedCount.toLocaleString()} selected</span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <span className="whitespace-nowrap">Rows per page</span>
             <PageSizeSelect value={currentPageSize} onChange={(s) => table.setPageSize(s)} />
@@ -309,6 +417,92 @@ export function DataTable<TData, TValue>({
         </div>
       </div>
     </div>
+    </TooltipProvider>
+  );
+}
+
+// One row as a card for narrow screens: checkbox and the first column on top,
+// the row's actions menu top-right, every other visible column as label/value.
+function RowCard<TData>({ row, columnLabel }: { row: Row<TData>; columnLabel: (id: string) => string }) {
+  const cells = row.getVisibleCells();
+  const select = cells.find((c) => c.column.id === 'select');
+  const actions = cells.find((c) => c.column.id === 'actions');
+  const rest = cells.filter((c) => !UTILITY_COLUMNS.has(c.column.id) && !c.column.columnDef.meta?.hideInCard);
+  const [primary, ...details] = rest;
+  return (
+    <div
+      data-state={row.getIsSelected() ? 'selected' : undefined}
+      className="rounded-xl border border-gray-200 bg-white p-3 text-sm data-[state=selected]:border-green-600/40 data-[state=selected]:bg-green-50 dark:data-[state=selected]:bg-green-500/10"
+    >
+      <div className="flex items-start gap-3">
+        {select && <div className="pt-0.5">{flexRender(select.column.columnDef.cell, select.getContext())}</div>}
+        <div className="min-w-0 flex-1">{primary && flexRender(primary.column.columnDef.cell, primary.getContext())}</div>
+        {actions && <div className="shrink-0">{flexRender(actions.column.columnDef.cell, actions.getContext())}</div>}
+      </div>
+      {details.length > 0 && (
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+          {details.map((cell) => (
+            <div key={cell.id} className="min-w-0">
+              <dt className="text-xs text-gray-500">{columnLabel(cell.column.id)}</dt>
+              <dd className="truncate text-gray-800 dark:text-gray-200">{flexRender(cell.column.columnDef.cell, cell.getContext())}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+// Every filter behind one button; each filter is a submenu of its options.
+function FiltersMenu({
+  filters, activeCount, getValue, setValue,
+}: {
+  filters: DataTableFilter[];
+  activeCount: number;
+  getValue: (columnId: string) => string;
+  setValue: (columnId: string, v: string | undefined) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(
+          'inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors',
+          activeCount > 0
+            ? 'border-green-600/40 bg-green-50 text-gray-900 hover:bg-green-100 dark:border-green-500/40 dark:bg-green-500/10 dark:text-gray-100'
+            : 'border-gray-300 text-gray-700 hover:bg-gray-50',
+        )}
+      >
+        <ListFilter className="h-4 w-4" /> Filters
+        {activeCount > 0 && (
+          <span className="rounded-full bg-green-600 px-1.5 text-xs font-semibold text-white">{activeCount}</span>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[13rem]">
+        {filters.map((f) => {
+          const value = getValue(f.columnId);
+          const selected = f.options.find((o) => o.value === value);
+          return (
+            <DropdownMenuSub key={f.columnId}>
+              <DropdownMenuSubTrigger>
+                <span className="truncate">{f.title}</span>
+                {selected && <span className="ml-2 max-w-[7rem] truncate text-xs font-semibold text-green-700 dark:text-green-400">{selected.label}</span>}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto">
+                <DropdownMenuItem onSelect={() => setValue(f.columnId, undefined)}>
+                  <Check className={value ? 'opacity-0' : 'opacity-100'} /> All
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {f.options.map((o) => (
+                  <DropdownMenuItem key={o.value} onSelect={() => setValue(f.columnId, o.value)}>
+                    <Check className={value === o.value ? 'opacity-100' : 'opacity-0'} /> {o.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -383,13 +577,14 @@ export function FilterSelect({
 
 // Styled rows-per-page selector (replaces a native <select>).
 function PageSizeSelect({ value, onChange }: { value: number; onChange: (s: number) => void }) {
+  const sizes = PAGE_SIZES.includes(value) ? PAGE_SIZES : [...PAGE_SIZES, value].sort((a, b) => a - b);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="inline-flex h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-50">
         {value} <ChevronDown className="h-4 w-4 text-gray-400" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[5rem]">
-        {[10, 20, 30, 50, 100].map((s) => (
+        {sizes.map((s) => (
           <DropdownMenuItem key={s} onSelect={() => onChange(s)}>
             <Check className={value === s ? 'opacity-100' : 'opacity-0'} /> {s}
           </DropdownMenuItem>

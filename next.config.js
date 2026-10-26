@@ -7,6 +7,10 @@ const nextConfig = {
   output: 'standalone',
   compress: true,
 
+  // The dev-only "N" badge sat bottom-left over the first table column in
+  // local review. Build/runtime errors still open the error overlay.
+  devIndicators: false,
+
   // Strip console.* from the production client bundle (keep error/warn for real
   // diagnostics). Removes dozens of debug logs from shipped JS — smaller bundles,
   // no leaked internals. Dev keeps every log.

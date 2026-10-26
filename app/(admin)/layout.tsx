@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
-import { allNavigation, GROUP_TITLES, derivePageTitle, type NavItem } from '@/lib/navigation';
+import { allNavigation, GROUP_TITLES, derivePageCrumb, type NavItem } from '@/lib/navigation';
 
 // Navigation config (allNavigation, GROUP_TITLES, derivePageTitle) now lives in
 // lib/navigation.ts and is shared with the mobile bottom nav (components/bottom-nav).
@@ -84,9 +84,12 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  const pageTitle = derivePageTitle(pathname);
+  const pageCrumb = derivePageCrumb(pathname);
 
   return (
+    // .admin-shell scopes the "hide the floating bug button" rule to the admin
+    // portal; display:contents keeps it out of layout.
+    <div className="admin-shell contents">
     <BugReporterWrapper>
     <ErrorBoundary>
       <TooltipProvider delayDuration={0}>
@@ -207,7 +210,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
         <div className={`main-content ${collapsed ? 'sidebar-collapsed' : ''}`}>
           <AdminHeader
-            title={pageTitle}
+            crumb={pageCrumb}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
           />
@@ -215,7 +218,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           <div className="content-body fade-in">{children}</div>
         </div>
 
-        {/* Mobile-only bottom navigation (replaces the sidebar on < lg). */}
+        {/* Bottom navigation below 900px, where the sidebar is hidden. */}
         <BottomNav />
       </div>
 
@@ -251,6 +254,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       </TooltipProvider>
     </ErrorBoundary>
     </BugReporterWrapper>
+    </div>
   );
 };
 

@@ -18,7 +18,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 const PRIMARY_HREFS = ['/dashboard', '/routes', '/vehicles', '/drivers', '/schedules', '/passengers/learners', '/grievances', '/analytics'];
 
 /**
- * Mobile-only bottom navigation (lg:hidden). Replaces the slide-in sidebar on
+ * Mobile-only bottom navigation (hidden from 900px, where the sidebar rail shows). Replaces the slide-in sidebar on
  * small screens: 4 permission-filtered quick items + a "More" bottom sheet that
  * lists every visible destination grouped into a 3-column icon grid.
  *
@@ -41,7 +41,7 @@ export default function BottomNav() {
   // Loading skeleton (non-super-admins wait on the merged-permissions RPC).
   if (isLoading && !isSuperAdmin) {
     return (
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden dark:border-gray-800 dark:bg-gray-900">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] min-[900px]:hidden dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-stretch justify-around">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex flex-1 flex-col items-center gap-1.5 py-2.5">
@@ -73,7 +73,8 @@ export default function BottomNav() {
 
   const grouped = NAV_GROUP_ORDER.map((group) => ({
     group,
-    items: visible.filter((i) => i.group === group),
+    // The four bar shortcuts are already one tap away — the sheet lists the rest.
+    items: visible.filter((i) => i.group === group && !primary.includes(i)),
   })).filter((g) => g.items.length > 0);
 
   // "More" is highlighted when the current page isn't one of the primary shortcuts.
@@ -85,7 +86,7 @@ export default function BottomNav() {
           (replaces framer-motion's AnimatePresence so the lib stays out of the
           layout's shared first-load JS). */}
       <div
-        className={`fixed inset-0 z-50 lg:hidden transition-opacity duration-200 ${
+        className={`fixed inset-0 z-50 min-[900px]:hidden transition-opacity duration-200 ${
           moreOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
         aria-hidden={!moreOpen}
@@ -99,7 +100,7 @@ export default function BottomNav() {
           }`}
         >
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-gray-800">
-                <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">All Menus</h2>
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">More pages</h2>
                 <button
                   type="button"
                   onClick={() => setMoreOpen(false)}
@@ -143,7 +144,7 @@ export default function BottomNav() {
         </div>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden dark:border-gray-800 dark:bg-gray-900">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] min-[900px]:hidden dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-stretch justify-around">
           {primary.map((item) => {
             const active = isActive(item.href);

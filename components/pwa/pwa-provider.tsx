@@ -3,6 +3,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, RefreshCw, X } from 'lucide-react';
 
+// Install-banner dismissal is remembered per browser. Before this it lived in
+// React state only, so the ~45px bar came back on every page load and new tab.
+const INSTALL_DISMISSED_KEY = 'tms-pwa-install-dismissed';
+
+function readInstallDismissed(): boolean {
+  try {
+    return localStorage.getItem(INSTALL_DISMISSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: string }>;
@@ -26,6 +38,15 @@ export default function PwaProvider() {
   const [updateReady, setUpdateReady] = useState(false);
   const [dismissedInstall, setDismissedInstall] = useState(false);
   const bannerRef = useRef<HTMLDivElement>(null);
+
+  const dismissInstall = () => {
+    setDismissedInstall(true);
+    try {
+      localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+    } catch {
+      /* storage blocked — dismissal lasts for this page only */
+    }
+  };
 
   useEffect(() => {
     // 1. Register the unified service worker after load (never blocks first paint).
@@ -114,6 +135,7 @@ export default function PwaProvider() {
       (navigator as Navigator & { standalone?: boolean }).standalone === true ||
       window.matchMedia('(display-mode: standalone)').matches;
     if (isIos && !standalone) setIosHint(true);
+    if (readInstallDismissed()) setDismissedInstall(true);
 
     // 4. Hide install UI once the app is installed.
     const onInstalled = () => {
@@ -201,7 +223,7 @@ export default function PwaProvider() {
             <button
               type="button"
               aria-label="Dismiss install"
-              onClick={() => setDismissedInstall(true)}
+              onClick={dismissInstall}
               className="rounded-full p-1 hover:bg-white/20"
             >
               <X className="h-4 w-4" />
@@ -219,7 +241,7 @@ export default function PwaProvider() {
           <button
             type="button"
             aria-label="Dismiss"
-            onClick={() => setDismissedInstall(true)}
+            onClick={dismissInstall}
             className="rounded-full p-1 hover:bg-white/20"
           >
             <X className="h-3.5 w-3.5" />
