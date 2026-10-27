@@ -73,9 +73,35 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
       console.error('route-optimization: runs query failed', runsErr);
     }
 
+    // Coordinates of every stop a suggested move touches, for the suggestions
+    // map. Stops without coordinates are simply absent (not geocoded yet).
+    const stopIds = new Set<string>();
+    for (const sug of analysis.suggestions) {
+      for (const r of sug.relocations) {
+        if (r.fromStopId) stopIds.add(r.fromStopId);
+        if (r.toStopId) stopIds.add(r.toStopId);
+      }
+    }
+    const stopPoints: Record<string, { lat: number; lng: number; name: string | null }> = {};
+    const ids = [...stopIds];
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data: pts, error: ptsErr } = await supabase
+        .from('tms_route_stop')
+        .select('id, stop_name, latitude, longitude')
+        .in('id', ids.slice(i, i + 150));
+      if (ptsErr) {
+        console.error('route-optimization: stop coordinates query failed', ptsErr);
+        break;
+      }
+      for (const p of (pts ?? []) as { id: string; stop_name: string | null; latitude: number | null; longitude: number | null }[]) {
+        if (p.latitude != null && p.longitude != null) stopPoints[p.id] = { lat: p.latitude, lng: p.longitude, name: p.stop_name };
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: analysis,
+      stopPoints,
       appliedRuns: appliedRuns ?? [],
       horizon: planning ? 'planning' : 'daily',
       range: planning ? { from, to } : null,

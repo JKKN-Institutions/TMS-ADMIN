@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
-import { allNavigation, GROUP_TITLES, derivePageCrumb, type NavItem } from '@/lib/navigation';
+import { allNavigation, GROUP_TITLES, canSeeNavItem, derivePageCrumb, type NavItem } from '@/lib/navigation';
 
 // Navigation config (allNavigation, GROUP_TITLES, derivePageTitle) now lives in
 // lib/navigation.ts and is shared with the mobile bottom nav (components/bottom-nav).
@@ -52,7 +52,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   }, [loading, user, router]);
 
   const navigation = allNavigation
-    .filter((item) => isSuperAdmin || can(item.permission))
+    .filter((item) => isSuperAdmin || canSeeNavItem(item, can))
     .map((item) => ({
       ...item,
       current: pathname === item.href || pathname.startsWith(item.href + '/'),

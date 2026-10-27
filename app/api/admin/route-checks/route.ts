@@ -67,7 +67,7 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
     }
     const checks = (data ?? []) as CheckRow[];
 
-    const [routes, vehicles, profiles, persons] = await Promise.all([
+    const [routes, vehicles, profiles, persons, checkerStaff] = await Promise.all([
       selectIn<{ id: string; route_number: string | null; route_name: string | null }>(
         svc, 'tms_route', 'id, route_number, route_name', 'id', checks.map((c) => c.route_id)
       ),
@@ -82,7 +82,15 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
       selectIn<{ check_id: string; person_kind: ScannedPersonLite['kind']; outcome: string; fee_state: string | null; booking_state: string | null; fine_note: string | null }>(
         svc, 'tms_route_check_person', 'check_id, person_kind, outcome, fee_state, booking_state, fine_note', 'check_id', checks.map((c) => c.id)
       ),
+      // Staff name for each inspector. profiles.full_name can hold a login
+      // handle ("mathivananm"); the staff record has the real first/last name.
+      selectIn<{ profile_id: string; first_name: string | null; last_name: string | null }>(
+        svc, 'staff', 'profile_id, first_name, last_name', 'profile_id', checks.map((c) => c.checker_id)
+      ),
     ]);
+    const staffNameByProfile = new Map(
+      checkerStaff.map((st) => [st.profile_id, `${st.first_name ?? ''} ${st.last_name ?? ''}`.trim()])
+    );
     const routeById = new Map(routes.map((r) => [r.id, r]));
     const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
     const profileById = new Map(profiles.map((p) => [p.id, p]));
@@ -104,7 +112,7 @@ async function listChecks(request: NextRequest, auth: AuthContext) {
         vehicleId: c.vehicle_id,
         busRegistration: c.vehicle_id ? vehicleById.get(c.vehicle_id)?.registration_number ?? null : null,
         checkerId: c.checker_id,
-        checkerName: checker?.full_name ?? null,
+        checkerName: staffNameByProfile.get(c.checker_id) || checker?.full_name || null,
         checkerEmail: checker?.email ?? null,
         checkDate: c.check_date,
         leg: c.leg,

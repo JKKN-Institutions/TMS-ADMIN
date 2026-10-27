@@ -25,4 +25,10 @@ describe('derivePageTitle', () => {
     expect(fees?.subItems?.map((s) => s.href)).toContain('/fees/fine-rates');
     expect(NAV_TITLE_LOOKUP.some((i) => i.href === '/fees/fine-rates')).toBe(true);
   });
+
+  it('keeps the merged tracking pages named in the header', () => {
+    expect(derivePageTitle('/tracking-devices')).toBe('Tracking Devices');
+    expect(derivePageTitle('/gps-devices/abc/edit')).toBe('GPS Devices');
+    expect(derivePageTitle('/driver-mobiles/new')).toBe('Tracking Mobiles');
+  });
 });

@@ -12,7 +12,6 @@ import {
   Bus,
   UserCheck,
   Navigation,
-  Smartphone,
   Zap,
   ClipboardCheck,
   GraduationCap,
@@ -44,7 +43,15 @@ export interface NavItem {
   permission: string;
   group: NavGroup;
   subItems?: { name: string; href: string; icon: ComponentType<{ className?: string }> }[];
+  /** Visible if the user holds ANY of these (defaults to [permission]). */
+  anyPermission?: string[];
+  /** Extra paths that belong to this page, for the header title/breadcrumb only (not shown in the sidebar). */
+  aliases?: { name: string; href: string }[];
 }
+
+/** Sidebar / bottom-bar visibility for one nav item. */
+export const canSeeNavItem = (item: NavItem, can: (permission: string) => boolean) =>
+  (item.anyPermission ?? [item.permission]).some((p) => can(p));
 
 export const allNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, permission: TMS_PERMISSIONS.DASHBOARD_VIEW, group: 'overview' },
@@ -56,8 +63,19 @@ export const allNavigation: NavItem[] = [
   { name: 'Drivers', href: '/drivers', icon: UserCheck, permission: TMS_PERMISSIONS.DRIVERS_VIEW, group: 'transport' },
   { name: 'Vehicles', href: '/vehicles', icon: Car, permission: TMS_PERMISSIONS.VEHICLES_VIEW, group: 'transport' },
   { name: 'Bus Inspection', href: '/inspections', icon: ShieldCheck, permission: TMS_PERMISSIONS.ROUTE_CHECK_MANAGE, group: 'transport' },
-  { name: 'GPS Devices', href: '/gps-devices', icon: Navigation, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
-  { name: 'Tracking Mobiles', href: '/driver-mobiles', icon: Smartphone, permission: TMS_PERMISSIONS.DRIVER_MOBILES_VIEW, group: 'transport' },
+  // GPS devices + driver phones: one page, two tabs (each gated by its own permission).
+  {
+    name: 'Tracking Devices',
+    href: '/tracking-devices',
+    icon: Navigation,
+    permission: TMS_PERMISSIONS.TRACKING_VIEW,
+    anyPermission: [TMS_PERMISSIONS.TRACKING_VIEW, TMS_PERMISSIONS.DRIVER_MOBILES_VIEW],
+    group: 'transport',
+    aliases: [
+      { name: 'GPS Devices', href: '/gps-devices' },
+      { name: 'Tracking Mobiles', href: '/driver-mobiles' },
+    ],
+  },
   { name: 'Track All', href: '/track-all', icon: Bus, permission: TMS_PERMISSIONS.TRACKING_VIEW, group: 'transport' },
   { name: 'Routes', href: '/routes', icon: Route, permission: TMS_PERMISSIONS.ROUTES_VIEW, group: 'transport' },
   { name: 'Schedules', href: '/schedules', icon: Calendar, permission: TMS_PERMISSIONS.SCHEDULES_VIEW, group: 'transport' },
@@ -105,6 +123,7 @@ export const NAV_GROUP_ORDER: NavGroup[] = ['overview', 'passengers', 'transport
 export const NAV_TITLE_LOOKUP: { name: string; href: string }[] = allNavigation.flatMap((item) => [
   { name: item.name, href: item.href },
   ...(item.subItems ?? []).map((s) => ({ name: s.name, href: s.href })),
+  ...(item.aliases ?? []),
 ]);
 
 // Resolve the page title from the current path: prefer the longest matching
@@ -127,6 +146,7 @@ export const derivePageCrumb = (path: string): { group: string | null; name: str
     .flatMap((item) => [
       { name: item.name, href: item.href, group: item.group },
       ...(item.subItems ?? []).map((s) => ({ name: s.name, href: s.href, group: item.group })),
+      ...(item.aliases ?? []).map((a) => ({ name: a.name, href: a.href, group: item.group })),
     ])
     .filter((i) => path === i.href || path.startsWith(i.href + '/'))
     .sort((a, b) => b.href.length - a.href.length)[0];

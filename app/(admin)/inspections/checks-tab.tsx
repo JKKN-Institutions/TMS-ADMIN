@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { titleCase } from '@/lib/format/display';
 import { useQuery } from '@tanstack/react-query';
 import { istToday } from '@/lib/booking/window';
 import { fetchChecks } from './inspection-api';
@@ -127,7 +128,7 @@ export function ChecksTab({
                   {c.busRegistration ? ` · ${c.busRegistration}` : ''}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-gray-700 dark:text-gray-300">{LEG_LABEL[c.leg]}</td>
-                <td className="min-w-0 px-4 py-3 text-gray-700 dark:text-gray-300">{c.checkerName ?? c.checkerEmail ?? '—'}</td>
+                <td className="min-w-0 px-4 py-3 text-gray-700 dark:text-gray-300">{c.checkerName ? titleCase(c.checkerName) : c.checkerEmail ?? '—'}</td>
                 <td className="whitespace-nowrap px-4 py-3">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_BADGE[c.status]}`}>
                     {c.status === 'submitted' ? 'Submitted' : 'Draft'}

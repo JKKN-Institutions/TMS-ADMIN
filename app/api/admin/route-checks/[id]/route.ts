@@ -48,7 +48,7 @@ async function getReport(request: NextRequest, auth: AuthContext) {
     }
     if (!check) return NextResponse.json({ error: 'Route check not found' }, { status: 404 });
 
-    const [routeQ, vehicleQ, checkerQ, personsQ] = await Promise.all([
+    const [routeQ, vehicleQ, checkerQ, personsQ, checkerStaffQ] = await Promise.all([
       svc.from('tms_route').select('id, route_number, route_name').eq('id', check.route_id).maybeSingle(),
       check.vehicle_id
         ? svc.from('tms_vehicle').select('id, registration_number, model').eq('id', check.vehicle_id).maybeSingle()
@@ -59,7 +59,11 @@ async function getReport(request: NextRequest, auth: AuthContext) {
         .select('id, person_kind, learner_id, staff_id, manual_type, manual_name, matched_by, scanned_code, outcome, on_route, booked, fee_state, notes, created_at, booking_state, fee_fine_id, booking_fine_id, fine_note')
         .eq('check_id', id)
         .order('created_at', { ascending: true }),
+      // Real name from the staff record (profiles.full_name may be a login handle).
+      svc.from('staff').select('first_name, last_name').eq('profile_id', check.checker_id).limit(1),
     ]);
+    const checkerStaff = (checkerStaffQ.data ?? [])[0] as { first_name: string | null; last_name: string | null } | undefined;
+    const checkerStaffName = checkerStaff ? `${checkerStaff.first_name ?? ''} ${checkerStaff.last_name ?? ''}`.trim() : '';
     for (const [label, q] of [['route', routeQ], ['vehicle', vehicleQ], ['checker', checkerQ], ['persons', personsQ]] as const) {
       if (q.error) {
         console.error(`route-check report ${label} error:`, q.error);
@@ -146,7 +150,7 @@ async function getReport(request: NextRequest, auth: AuthContext) {
         leg: check.leg,
         route: route ? { id: route.id, routeNumber: route.route_number, routeName: route.route_name } : null,
         bus: vehicle ? { id: vehicle.id, registration: vehicle.registration_number, model: vehicle.model } : null,
-        checker: { id: check.checker_id, name: checker?.full_name ?? null, email: checker?.email ?? null },
+        checker: { id: check.checker_id, name: checkerStaffName || checker?.full_name || null, email: checker?.email ?? null },
         headcount: check.headcount,
         unknownCount: check.unknown_count,
         notes: check.notes,

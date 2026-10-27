@@ -6,19 +6,23 @@ import toast from 'react-hot-toast';
 import { UserPlus } from 'lucide-react';
 import { fetchInspectors, unassignInspector } from './inspection-api';
 import { AssignDialog } from './assign-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { titleCase } from '@/lib/format/display';
 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
 export function InspectorsTab() {
   const qc = useQueryClient();
   const [assignOpen, setAssignOpen] = useState(false);
+  const [removing, setRemoving] = useState<{ id: string; name: string; route: string } | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({ queryKey: ['inspectors'], queryFn: fetchInspectors });
 
   const unassign = useMutation({
     mutationFn: (id: string) => unassignInspector(id),
     onSuccess: () => {
-      toast.success('Checker removed from route');
+      toast.success('Inspector removed from route');
+      setRemoving(null);
       qc.invalidateQueries({ queryKey: ['inspectors'] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -69,7 +73,7 @@ export function InspectorsTab() {
             {data?.map((row) => (
               <tr key={row.id}>
                 <td className="min-w-0 px-4 py-3">
-                  <p className="truncate font-medium text-gray-900 dark:text-gray-100">{row.checkerName ?? row.checkerEmail}</p>
+                  <p className="truncate font-medium text-gray-900 dark:text-gray-100">{row.checkerName ? titleCase(row.checkerName) : row.checkerEmail}</p>
                   {row.designation && <p className="truncate text-xs text-gray-500 dark:text-gray-400">{row.designation}</p>}
                 </td>
                 <td className="min-w-0 px-4 py-3">
@@ -89,7 +93,13 @@ export function InspectorsTab() {
                 <td className="min-w-0 max-w-[220px] truncate px-4 py-3 text-gray-500 dark:text-gray-400">{row.notes ?? '—'}</td>
                 <td className="px-4 py-3 text-right">
                   <button
-                    onClick={() => unassign.mutate(row.id)}
+                    onClick={() =>
+                      setRemoving({
+                        id: row.id,
+                        name: row.checkerName ? titleCase(row.checkerName) : row.checkerEmail,
+                        route: `${row.routeNumber ?? '—'}${row.routeName ? ` · ${row.routeName}` : ''}`,
+                      })
+                    }
                     disabled={unassign.isPending}
                     className="text-sm font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
                   >
@@ -103,6 +113,16 @@ export function InspectorsTab() {
       </div>
 
       <AssignDialog open={assignOpen} onOpenChange={setAssignOpen} />
+      <ConfirmDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && !unassign.isPending && setRemoving(null)}
+        title={`Unassign ${removing?.name ?? ''}?`}
+        description={`They will stop inspecting route ${removing?.route ?? ''}. Their past inspections are kept.`}
+        confirmLabel="Unassign"
+        danger
+        loading={unassign.isPending}
+        onConfirm={() => removing && unassign.mutate(removing.id)}
+      />
     </div>
   );
 }

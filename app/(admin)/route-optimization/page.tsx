@@ -24,6 +24,16 @@ import {
   Gauge,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import dynamic from 'next/dynamic';
+import { PageHeader } from '@/components/ui/page-header';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import type { StopPoints } from './consolidation-map';
+
+// Leaflet touches window at import, so the map loads client-side only.
+const ConsolidationMap = dynamic(() => import('./consolidation-map'), {
+  ssr: false,
+  loading: () => <div className="h-80 animate-pulse rounded-xl bg-gray-100" />,
+});
 import type {
   ConsolidationClass,
   ConsolidationSuggestion,
@@ -312,6 +322,10 @@ export default function RouteOptimizationPage() {
   const [geocoding, setGeocoding] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [stopPoints, setStopPoints] = useState<StopPoints>({});
+  const [geocodeConfirm, setGeocodeConfirm] = useState(false);
+  const [undoConfirm, setUndoConfirm] = useState<AppliedRun | null>(null);
+  const [showMap, setShowMap] = useState(true);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -329,6 +343,7 @@ export default function RouteOptimizationPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to analyze');
       setAnalysis(json.data as OptimizationAnalysis);
+      setStopPoints((json.stopPoints as StopPoints) ?? {});
       setAppliedRuns((json.appliedRuns as AppliedRun[]) ?? []);
       setPeak((json.peak as { date: string; totalBookings: number; daysWithBookings: number } | null) ?? null);
     } catch (e) {
@@ -486,13 +501,13 @@ export default function RouteOptimizationPage() {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Geocoding failed');
         total += json.result.geocoded;
-        setGeoMsg(`Geocoded ${total}, ${json.result.remaining} remaining…`);
+        setGeoMsg(`Located ${total} stop(s), ${json.result.remaining} to go…`);
         if (json.result.remaining === 0 || json.result.geocoded === 0) break;
       }
-      setGeoMsg(`Done — ${total} stop(s) geocoded. Re-analyze to use proximity matching.`);
-      toast.success(`Geocoded ${total} stop(s)`);
+      setGeoMsg(`Done — ${total} stop(s) located on the map. Analyze again to use nearby-stop matching.`);
+      toast.success(`Located ${total} stop(s)`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Geocoding failed');
+      toast.error(e instanceof Error ? e.message : 'Finding stop locations failed');
       setGeoMsg(null);
     } finally {
       setGeocoding(false);
@@ -524,30 +539,21 @@ export default function RouteOptimizationPage() {
   const s = analysis?.summary;
 
   return (
-    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <span className="shrink-0 rounded-xl bg-green-50 p-2 text-green-600 dark:bg-green-500/15 dark:text-green-300">
-            <Zap className="h-6 w-6" />
-          </span>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">Route Optimization</h1>
-            <p className="mt-1 text-sm text-gray-600">
-              Analyze daily bookings to find under-used buses whose passengers can be consolidated
-              onto routes that already serve their boarding stops — then apply (and undo) the moves.
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setGuideOpen(true)}
-          aria-label="How route optimization works"
-          className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
-        >
-          <HelpCircle className="h-4 w-4 text-green-600" />
-          <span className="hidden sm:inline">How it works</span>
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        description="Finds buses that are mostly empty on a day and suggests moving their passengers onto other buses that already stop at the same place. Every change can be undone."
+        actions={
+          <button
+            type="button"
+            onClick={() => setGuideOpen(true)}
+            aria-label="How route optimization works"
+            className="inline-flex h-[38px] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+          >
+            <HelpCircle className="h-4 w-4 text-green-600" />
+            How it works
+          </button>
+        }
+      />
 
       {/* Controls */}
       <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
@@ -619,13 +625,13 @@ export default function RouteOptimizationPage() {
           </button>
           <button
             type="button"
-            onClick={runGeocode}
+            onClick={() => setGeocodeConfirm(true)}
             disabled={geocoding}
-            title="Fill in stop coordinates so transfers can also match nearby stops"
+            title="Look up the map position of stops that don't have one yet, so passengers can also be matched to a nearby stop and moves can be shown on the map"
             className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
           >
             {geocoding ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
-            {geocoding ? 'Geocoding…' : 'Geocode stops'}
+            {geocoding ? 'Finding locations…' : 'Find stop locations'}
           </button>
           {geoMsg && <span className="text-xs text-gray-500">{geoMsg}</span>}
         </div>
@@ -731,7 +737,7 @@ export default function RouteOptimizationPage() {
                           {run.status === 'applied' && (
                             <button
                               type="button"
-                              onClick={() => undoRun(run.id)}
+                              onClick={() => setUndoConfirm(run)}
                               disabled={rollingBack === run.id}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
                             >
@@ -857,6 +863,19 @@ export default function RouteOptimizationPage() {
               <h2 className="text-lg font-semibold text-gray-900">Consolidation suggestions</h2>
               <span className="text-sm text-gray-500">Select routes to consolidate, then apply</span>
             </div>
+            {analysis.suggestions.some((sug) => sug.relocations.some((r) => r.feasible)) && (
+              <div className="rounded-xl border border-gray-200 bg-white p-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMap((v) => !v)}
+                  className="mb-2 inline-flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-gray-900"
+                  aria-expanded={showMap}
+                >
+                  <MapPin className="h-4 w-4 text-green-600" /> {showMap ? 'Hide map' : 'Show suggested moves on a map'}
+                </button>
+                {showMap && <ConsolidationMap suggestions={analysis.suggestions} stopPoints={stopPoints} />}
+              </div>
+            )}
             {analysis.suggestions.length === 0 ? (
               <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-500">
                 No under-used routes for this date — every active bus is healthy.
@@ -1171,6 +1190,34 @@ export default function RouteOptimizationPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={geocodeConfirm}
+        onOpenChange={setGeocodeConfirm}
+        title="Find stop locations?"
+        description="Looks up the map position of every bus stop that doesn't have one yet, using its name, and saves it. This affects all routes, takes a minute or two, and can't be undone automatically."
+        confirmLabel="Find locations"
+        onConfirm={() => {
+          setGeocodeConfirm(false);
+          runGeocode();
+        }}
+      />
+      <ConfirmDialog
+        open={!!undoConfirm}
+        onOpenChange={(o) => !o && !rollingBack && setUndoConfirm(null)}
+        title="Undo this optimization?"
+        description={
+          undoConfirm
+            ? `Moves ${undoConfirm.total_moves} passenger(s) back to their original buses${undoConfirm.routes_cancelled ? ` and restores ${undoConfirm.routes_cancelled} cancelled bus(es)` : ''}.`
+            : undefined
+        }
+        confirmLabel="Undo"
+        danger
+        loading={!!rollingBack}
+        onConfirm={async () => {
+          if (undoConfirm) await undoRun(undoConfirm.id);
+          setUndoConfirm(null);
+        }}
+      />
     </div>
   );
 }

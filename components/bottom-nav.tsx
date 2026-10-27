@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { MoreHorizontal, X } from 'lucide-react';
 import {
   allNavigation,
+  canSeeNavItem,
   GROUP_TITLES,
   NAV_GROUP_ORDER,
   type NavItem,
@@ -54,7 +55,7 @@ export default function BottomNav() {
     );
   }
 
-  const visible = allNavigation.filter((i) => isSuperAdmin || can(i.permission));
+  const visible = allNavigation.filter((i) => isSuperAdmin || canSeeNavItem(i, can));
   const byHref = new Map(visible.map((i) => [i.href, i]));
 
   // Build the primary 4: priority hrefs first, then fill from remaining visible.
