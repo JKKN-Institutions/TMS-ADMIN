@@ -2,10 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, CalendarClock, ListChecks } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
-import UniversalStatCard from '@/components/universal-stat-card';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
 import { ACTION_OPTIONS, MODULE_OPTIONS, getActivityColumns, type ActivityRow } from './columns';
 import { ActivityDetailsDialog } from './activity-details-dialog';
 
@@ -14,8 +14,14 @@ interface ActivityLogData {
   stats: { total: number; today: number; week: number };
 }
 
-async function fetchActivityLog(): Promise<ActivityLogData> {
-  const response = await fetch('/api/admin/activity-log');
+// Module/action filters run on the SERVER. Filtering client-side only searched
+// the newest 500 rows — which are all boarding scans — so picking e.g. Drivers
+// showed nothing even though older driver entries exist.
+async function fetchActivityLog(moduleFilter: string, actionFilter: string): Promise<ActivityLogData> {
+  const qs = new URLSearchParams();
+  if (moduleFilter) qs.set('module', moduleFilter);
+  if (actionFilter) qs.set('action', actionFilter);
+  const response = await fetch(`/api/admin/activity-log${qs.size ? `?${qs}` : ''}`);
   const data = await response.json();
   if (!data.success) throw new Error(data.error || 'Failed to load activity log');
   return { entries: data.data || [], stats: data.stats || { total: 0, today: 0, week: 0 } };
@@ -24,9 +30,13 @@ async function fetchActivityLog(): Promise<ActivityLogData> {
 const ActivityLogPage = () => {
   const [viewing, setViewing] = useState<ActivityRow | null>(null);
 
-  const { data, isLoading: loading, isError } = useQuery({
-    queryKey: ['activity-log'],
-    queryFn: fetchActivityLog,
+  const cf = useCardFilters();
+  const moduleFilter = String(cf.filters.find((f) => f.id === 'module')?.value ?? '');
+  const actionFilter = String(cf.filters.find((f) => f.id === 'action')?.value ?? '');
+  const { data, isLoading: loading, isFetching, isError } = useQuery({
+    queryKey: ['activity-log', moduleFilter, actionFilter],
+    queryFn: () => fetchActivityLog(moduleFilter, actionFilter),
+    placeholderData: (prev) => prev,
   });
   const entries = data?.entries ?? [];
   const stats = data?.stats ?? { total: 0, today: 0, week: 0 };
@@ -39,47 +49,21 @@ const ActivityLogPage = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Activity Log</h1>
-        <p className="text-gray-600 dark:text-gray-400">Audit trail of admin actions across all TMS modules</p>
-      </div>
+      <PageHeader description="Who changed what, and when, across the transport system." />
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <UniversalStatCard
-          title="Today"
-          value={stats.today}
-          subtitle="Actions since midnight"
-          icon={Activity}
-          color="green"
-          loading={loading}
-          delay={0}
-        />
-        <UniversalStatCard
-          title="Last 7 Days"
-          value={stats.week}
-          subtitle="Actions this week"
-          icon={CalendarClock}
-          color="blue"
-          loading={loading}
-          delay={1}
-        />
-        <UniversalStatCard
-          title="All Time"
-          value={stats.total}
-          subtitle="Total recorded actions"
-          icon={ListChecks}
-          color="purple"
-          loading={loading}
-          delay={2}
-        />
-      </div>
+      <SummaryCards>
+        <SummaryCard label="Today" value={stats.today.toLocaleString()} hint="Actions since midnight" />
+        <SummaryCard label="Last 7 days" value={stats.week.toLocaleString()} />
+        <SummaryCard label="All time" value={stats.total.toLocaleString()} />
+      </SummaryCards>
 
       <DataTable
         columns={columns}
         data={entries}
         entityName="entries"
-        isLoading={loading}
-        pageSize={20}
+        isLoading={loading || isFetching}
+        columnFilters={cf.filters}
+        onColumnFiltersChange={cf.setFilters}
         searchPlaceholder="Search actor, entity, description…"
         filters={[
           { columnId: 'module', title: 'Module', options: MODULE_OPTIONS },

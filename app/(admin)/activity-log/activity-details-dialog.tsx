@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { entityDisplay, entityName } from '@/lib/activity/entity-names';
 import {
   Dialog,
   DialogContent,
@@ -8,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { ActivityRow } from './columns';
+import { moduleLabel, type ActivityRow } from './columns';
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -33,8 +34,8 @@ export function ActivityDetailsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="capitalize">
-            {entry.action} · {entry.module.replace(/-/g, ' ')}
+          <DialogTitle>
+            <span className="capitalize">{entry.action}</span> · {moduleLabel(entry.module)}
           </DialogTitle>
           <DialogDescription>{entry.description ?? 'Activity entry details'}</DialogDescription>
         </DialogHeader>
@@ -44,14 +45,14 @@ export function ActivityDetailsDialog({
           <Field label="Actor" value={entry.actor_email ?? 'System'} />
           <Field label="Role" value={entry.actor_role} />
           <Field label="IP Address" value={entry.ip_address} />
-          <Field label="Entity" value={entry.entity_label} />
+          <Field label="Record" value={entityDisplay(entry) || null} />
           <Field
-            label="Entity Ref"
+            label="Record type"
             value={
               entry.entity_type ? (
-                <span className="font-mono text-xs">
-                  {entry.entity_type}
-                  {entry.entity_id ? ` · ${entry.entity_id}` : ''}
+                <span>
+                  {entityName(entry.entity_type)}
+                  {entry.entity_id ? <span className="block font-mono text-xs text-gray-500">{entry.entity_id}</span> : null}
                 </span>
               ) : null
             }

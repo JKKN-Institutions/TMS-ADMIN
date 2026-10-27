@@ -68,6 +68,10 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
     const from = isDate(url.searchParams.get('from')) ? (url.searchParams.get('from') as string) : addDays(today, -90);
     const to = isDate(url.searchParams.get('to')) ? (url.searchParams.get('to') as string) : today;
     const soon = addDays(today, 30); // "expiring soon" horizon for fleet compliance
+    // The same-length window immediately before [from, to], for "vs previous period".
+    const spanDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1);
+    const prevTo = addDays(from, -1);
+    const prevFrom = addDays(from, -spanDays);
 
     const svc = createServiceRoleClient();
 
@@ -123,6 +127,11 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       svc.from('learners_profiles').select('*', { count: 'exact', head: true }).eq('lifecycle_status', 'active'),
       svc.from('staff').select('*', { count: 'exact', head: true }).eq('role_key', 'driver'),
     ]);
+    const prevBookingsRes = await svc
+      .from('tms_booking')
+      .select('*', { count: 'exact', head: true })
+      .gte('travel_date', prevFrom)
+      .lte('travel_date', prevTo);
 
     // A dropped/missing table should degrade to empty, never 500 the whole page.
     const bail = [billsRes, bookingsRes, routesRes, vehiclesRes, grievancesRes].find(
@@ -147,6 +156,12 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
     const statusAgg: Record<string, { count: number; amount: number }> = {};
     const trend: Record<string, { billed: number; collected: number }> = {};
 
+    // In-window totals for the period comparison: billed by the day the bill
+    // was raised, collected by the day it was paid (fallback: raised).
+    const period = { billed: 0, collected: 0 };
+    const previous = { billed: 0, collected: 0 };
+    const inWin = (d: string | null, a: string, b: string) => !!d && d.slice(0, 10) >= a && d.slice(0, 10) <= b;
+
     for (const b of bills) {
       const s = b.status ?? 'unknown';
       const final = num(b.final_amount);
@@ -160,6 +175,14 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
         collected += paid;
         outstanding += balance;
         if (balance > 0 && isDate(b.due_date) && b.due_date! < today) overdueAmount += balance;
+
+        if (inWin(b.created_at, from, to)) period.billed += final;
+        if (inWin(b.created_at, prevFrom, prevTo)) previous.billed += final;
+        if (paid > 0) {
+          const paidOn = b.payment_date ?? b.created_at;
+          if (inWin(paidOn, from, to)) period.collected += paid;
+          if (inWin(paidOn, prevFrom, prevTo)) previous.collected += paid;
+        }
 
         // Billed bucketed by created_at; collected by payment_date (fallback created_at).
         const bMonth = monthKey(b.created_at);
@@ -239,6 +262,16 @@ async function getAnalytics(request: NextRequest, auth: AuthContext) {
       success: true,
       data: {
         range: { from, to },
+        // Range-scoped figures for this window and the same-length window before it.
+        comparison: {
+          previousRange: { from: prevFrom, to: prevTo },
+          current: { billed: Math.round(period.billed), collected: Math.round(period.collected), bookings: bookings.length },
+          previous: {
+            billed: Math.round(previous.billed),
+            collected: Math.round(previous.collected),
+            bookings: prevBookingsRes.count ?? 0,
+          },
+        },
         kpis: {
           billed: Math.round(billed),
           collected: Math.round(collected),

@@ -12,6 +12,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { PageHeader } from '@/components/ui/page-header';
+import { istToday, addDays } from '@/lib/booking/window';
 import {
   BarChart,
   Bar,
@@ -55,8 +57,10 @@ interface Kpis {
   activeRoutes: number; totalRoutes: number; activeVehicles: number; totalVehicles: number;
   drivers: number; openGrievances: number; bookingsInRange: number;
 }
+interface PeriodFigures { billed: number; collected: number; bookings: number }
 interface Analytics {
   range: { from: string; to: string };
+  comparison?: { previousRange: { from: string; to: string }; current: PeriodFigures; previous: PeriodFigures };
   kpis: Kpis;
   collectionStatus: { status: string; count: number; amount: number }[];
   revenueTrend: { month: string; billed: number; collected: number }[];
@@ -232,6 +236,43 @@ function CollectionProgressChart({ collected, outstanding }: { collected: number
   return { chart, legend, table };
 }
 
+// ── Period comparison ────────────────────────────────────────────────────────
+function Delta({ now, before }: { now: number; before: number }) {
+  if (before === 0) {
+    return <span className="text-xs text-muted-foreground">{now === 0 ? 'no change' : 'new this period'}</span>;
+  }
+  const pct = Math.round(((now - before) / before) * 100);
+  const up = pct > 0;
+  const flat = pct === 0;
+  return (
+    <span className={`text-xs font-medium ${flat ? 'text-muted-foreground' : up ? 'text-[var(--viz-good)]' : 'text-[var(--viz-critical)]'}`}>
+      {flat ? '–' : up ? '▲' : '▼'} {Math.abs(pct)}% vs previous
+    </span>
+  );
+}
+
+function PeriodComparison({ c }: { c: NonNullable<Analytics['comparison']> }) {
+  const items = [
+    { label: 'Billed this period', now: c.current.billed, before: c.previous.billed, fmt: inrCompact },
+    { label: 'Collected this period', now: c.current.collected, before: c.previous.collected, fmt: inrCompact },
+    { label: 'Bookings this period', now: c.current.bookings, before: c.previous.bookings, fmt: num },
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {items.map((i) => (
+        <div key={i.label} className="rounded-xl border border-border bg-card px-4 py-3">
+          <p className="text-xs text-muted-foreground">{i.label}</p>
+          <p className="mt-0.5 text-xl font-semibold tracking-tight text-foreground">{i.fmt(i.now)}</p>
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+            <Delta now={i.now} before={i.before} />
+            <span className="text-[11px] text-muted-foreground">({i.fmt(i.before)} in {c.previousRange.from} → {c.previousRange.to})</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Filter row (date range presets) ──────────────────────────────────────────
 const RANGES = [
   { id: '7d', label: 'Last 7 days', days: 7 },
@@ -250,10 +291,9 @@ function AnalyticsPage() {
   const fetchData = useCallback(async (days: number, isRefresh: boolean) => {
     isRefresh ? setRefreshing(true) : setLoading(true);
     try {
-      const to = new Date();
-      const from = new Date();
-      from.setDate(to.getDate() - days);
-      const qs = `from=${from.toISOString().slice(0, 10)}&to=${to.toISOString().slice(0, 10)}`;
+      // IST calendar dates (the browser's clock gave the wrong day near midnight).
+      const to = istToday();
+      const qs = `from=${addDays(to, -days)}&to=${to}`;
       const res = await fetch(`/api/admin/analytics?${qs}`);
       const json = await res.json();
       if (res.ok && json.success) setData(json.data as Analytics);
@@ -305,32 +345,33 @@ function AnalyticsPage() {
     <div className="viz-scope space-y-6">
       <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
 
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-foreground">Transport Analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Live figures from the transport fees, routes, fleet and bookings tables.
-          </p>
-        </div>
-        <button
-          onClick={() => fetchData(RANGES.find((x) => x.id === rangeId)!.days, true)}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 self-start rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        description="Fees, riders, fleet and bookings over the chosen period. Route, bus and driver counts are as of today."
+        actions={
+          <button
+            onClick={() => fetchData(RANGES.find((x) => x.id === rangeId)!.days, true)}
+            disabled={refreshing}
+            className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        }
+      />
 
-      {/* One filter row above everything it scopes */}
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs font-medium text-muted-foreground">Booking &amp; billing window</span>
+      {/* Pinned under the fixed app header (4rem + any install banner) so the
+          period stays visible while scrolling through the charts. */}
+      <div
+        className="sticky z-10 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/95 px-3 py-2 backdrop-blur"
+        style={{ top: 'calc(4rem + var(--pwa-banner-h, 0px) + 0.5rem)' }}
+      >
+        <span className="text-xs font-medium text-muted-foreground">Period</span>
         <div className="flex flex-wrap gap-1 rounded-lg border border-border p-1">
           {RANGES.map((r) => (
             <button
               key={r.id}
               onClick={() => setRangeId(r.id)}
+              aria-pressed={rangeId === r.id}
               className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
                 rangeId === r.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
               }`}
@@ -339,8 +380,12 @@ function AnalyticsPage() {
             </button>
           ))}
         </div>
-        <span className="text-xs text-muted-foreground">Inventory counts are current.</span>
+        <span className="text-xs text-muted-foreground">
+          {data.range.from} → {data.range.to}
+        </span>
       </div>
+
+      {data.comparison && <PeriodComparison c={data.comparison} />}
 
       {/* Tabs */}
       <div className="border-b border-border">

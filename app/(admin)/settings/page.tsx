@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { PageHeader } from '@/components/ui/page-header';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
@@ -393,38 +394,60 @@ const SettingsPage = () => {
     }
   };
 
+  // Keep the tab in the URL so a refresh or shared link opens the same tab.
+  const selectTab = (id: string) => {
+    setActiveTab(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', id);
+    window.history.replaceState(null, '', url.toString());
+  };
+  const current = tabs.find((t) => t.id === activeTab) ?? tabs[0];
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-4 lg:p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-          <p className="text-gray-600 mt-1">Manage your system preferences and configurations</p>
-        </div>
+    <div className="space-y-6">
+      <PageHeader description="Booking, attendance, fee-notice, inspection-fine, notification and security settings." />
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="border-b border-gray-200">
-            <nav className="flex space-x-8 px-6 py-4 overflow-x-auto">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 px-3 py-2 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-green-50 text-green-600 border-b-2 border-green-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  <span>{tab.name}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
+      {/* Eight tabs no longer fit in one row (the strip scrolled sideways and
+          cut "Notifications" off). Wide screens get a vertical list; phones a
+          dropdown. */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-start">
+        <nav aria-label="Settings sections" className="hidden w-52 shrink-0 rounded-xl border border-gray-200 bg-white p-1.5 md:block">
+          {tabs.map((tab) => {
+            const on = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => selectTab(tab.id)}
+                aria-current={on ? 'page' : undefined}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                  on
+                    ? 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300'
+                }`}
+              >
+                <tab.icon className="h-4 w-4 shrink-0" />
+                {tab.name}
+              </button>
+            );
+          })}
+        </nav>
 
-          <div className="p-6">
-            {renderTabContent()}
-          </div>
-        </div>
+        <label className="md:hidden">
+          <span className="sr-only">Settings section</span>
+          <select
+            value={current.id}
+            onChange={(e) => selectTab(e.target.value)}
+            className="input h-[38px] w-full"
+          >
+            {tabs.map((tab) => (
+              <option key={tab.id} value={tab.id}>{tab.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <section className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white p-4 sm:p-6">
+          {renderTabContent()}
+        </section>
       </div>
     </div>
   );

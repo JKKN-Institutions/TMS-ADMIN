@@ -186,7 +186,13 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  /* `clip`, not `hidden`: with html also hiding overflow, `hidden` here made
+     body its own (never-scrolling) scroll container, which silently disabled
+     every position:sticky in the app (pinned date bars, sticky table parts).
+     `clip` trims sideways overflow the same way without that side effect.
+     Browsers without `clip` keep the `hidden` fallback. */
   overflow-x: hidden;
+  overflow-x: clip;
   letter-spacing: var(--tracking-normal);
 }
 

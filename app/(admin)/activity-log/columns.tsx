@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { entityDisplay, entityName } from '@/lib/activity/entity-names';
 
 // Row shape from /api/admin/activity-log (tms_activity_log).
 export interface ActivityRow {
@@ -49,6 +50,8 @@ const ACTION_BADGE: Record<string, string> = {
   approve: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400',
   reject: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400',
   apply: 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-400',
+  notify: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400',
+  cancel: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400',
 };
 
 const MODULE_LABEL: Record<string, string> = {
@@ -69,8 +72,14 @@ const MODULE_LABEL: Record<string, string> = {
   'driver-mobiles': 'Tracking Mobiles',
   'transport-vacate': 'Transport Vacate',
   'fee-concessions': 'Fee Concessions',
-  'inspections': 'Bus Inspection',
+  // Current code logs inspections under 'route-checks'; 'inspections' holds
+  // a few older rows. Both read as Bus Inspection.
+  'route-checks': 'Bus Inspection',
+  'inspections': 'Bus Inspection (older)',
 };
+
+/** Readable module name for badges and the details dialog. */
+export const moduleLabel = (m: string) => MODULE_LABEL[m] ?? m.replace(/-/g, ' ');
 
 // Filter dropdown options for the DataTable — derived from the maps above so
 // the page can't drift out of sync with what the badges/labels support.
@@ -123,7 +132,7 @@ export function getActivityColumns(
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
       cell: ({ row }) => (
         <span className="inline-flex rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-500/15 dark:text-gray-300">
-          {MODULE_LABEL[row.original.module] ?? row.original.module}
+          {moduleLabel(row.original.module)}
         </span>
       ),
     },
@@ -143,18 +152,22 @@ export function getActivityColumns(
       ),
     },
     {
+      // Readable record name. Rows written without a label still show what kind
+      // of record it was ("Transport Fee #1a2b3c4d") instead of a raw table name.
       id: 'entity',
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Entity" />,
-      accessorFn: (r) => `${r.entity_label ?? ''} ${r.entity_type ?? ''}`.trim(),
+      meta: { label: 'Record' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Record" />,
+      accessorFn: (r) => `${entityDisplay(r)} ${entityName(r.entity_type)}`.trim(),
       cell: ({ row }) => {
         const r = row.original;
-        if (!r.entity_label && !r.entity_type) return <span className="text-gray-400">—</span>;
+        const display = entityDisplay(r);
+        if (!display) return <span className="text-gray-400">—</span>;
         return (
           <span className="min-w-0">
-            <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-              {r.entity_label ?? '—'}
-            </span>
-            <span className="block font-mono text-xs text-gray-500">{r.entity_type ?? ''}</span>
+            <span className="block max-w-[220px] truncate text-sm font-medium text-gray-900 dark:text-gray-100">{display}</span>
+            {r.entity_label && r.entity_type && (
+              <span className="block text-xs text-gray-500">{entityName(r.entity_type)}</span>
+            )}
           </span>
         );
       },
