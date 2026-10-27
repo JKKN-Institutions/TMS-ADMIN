@@ -487,7 +487,6 @@ export default function BoardingAttendancePage() {
         entityName="students"
         isLoading={isLoading}
         searchPlaceholder="Search learner, roll #..."
-        pageSize={20}
         filters={filters}
         enableRowSelection
         getRowId={(r) => r.learner_id}

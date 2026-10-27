@@ -270,7 +270,6 @@ export default function BoardingRosterPage({ params }: { params: Promise<{ route
           entityName="students"
           isLoading={loading}
           searchPlaceholder="Search learner, roll #..."
-          pageSize={20}
           filters={[
             { columnId: 'onward', title: 'Onward', options: statusOptions },
           ]}

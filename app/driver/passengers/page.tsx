@@ -121,7 +121,6 @@ export default function DriverPassengersPage() {
         getRowId={(p) => `${p.type}:${p.id}`}
         searchPlaceholder="Search name, roll/staff no, stop…"
         filters={filters}
-        pageSize={15}
         toolbarActions={({ selectedRows, resetSelection }) => {
           if (selectedRows.length === 0) return null;
           const nums = selectedRows.map((p) => p.mobile).filter((m): m is string => !!m);
