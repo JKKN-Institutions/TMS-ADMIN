@@ -27,7 +27,19 @@ import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
 import { PageHeader } from '@/components/ui/page-header';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { DataTable } from '@/components/ui/data-table';
 import type { StopPoints } from './consolidation-map';
+import {
+  Badge,
+  getAppliedRunColumns,
+  getRelocationColumns,
+  inr,
+  MoveTargetsContext,
+  ROUTE_CLASS_FILTER,
+  ROUTE_OCCUPANCY_COLUMNS,
+  type AppliedRun,
+  type RouteOption,
+} from './columns';
 
 // Leaflet touches window at import, so the map loads client-side only.
 const ConsolidationMap = dynamic(() => import('./consolidation-map'), {
@@ -40,36 +52,10 @@ import type {
   MergeSuggestion,
   OptimizationAnalysis,
   RightsizeSuggestion,
-  RouteClassification,
 } from '@/lib/route-optimization/types';
-
-interface AppliedRun {
-  id: string;
-  travel_date: string;
-  threshold_percent: number;
-  total_moves: number;
-  routes_cancelled: number;
-  estimated_savings: number;
-  status: 'applied' | 'rolled_back';
-  mode: 'today_booking' | 'permanent';
-  created_at: string;
-  rolled_back_at: string | null;
-}
 
 const inputCls =
   'h-[38px] rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500';
-
-const routeClassBadge: Record<RouteClassification, { label: string; cls: string }> = {
-  empty: { label: 'Empty', cls: 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200' },
-  under_utilized: {
-    label: 'Under-utilized',
-    cls: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
-  },
-  healthy: {
-    label: 'Healthy',
-    cls: 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300',
-  },
-};
 
 const consolidationBadge: Record<ConsolidationClass, { label: string; cls: string }> = {
   cancel_empty: {
@@ -90,9 +76,6 @@ const consolidationBadge: Record<ConsolidationClass, { label: string; cls: strin
   },
 };
 
-function inr(n: number): string {
-  return `₹${Math.round(n).toLocaleString('en-IN')}`;
-}
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -100,14 +83,6 @@ function addDaysIso(iso: string, days: number): string {
   const d = new Date(iso + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
-}
-function fmtTime(d: string): string {
-  return new Date(d).toLocaleString(undefined, {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 /** A suggestion can be applied if it actually moves or frees a bus. */
 function isApplicable(s: ConsolidationSuggestion): boolean {
@@ -133,14 +108,6 @@ function StatCard({
       </div>
       <p className="mt-1 text-2xl font-bold text-gray-900">{value}</p>
     </div>
-  );
-}
-
-function Badge({ label, cls }: { label: string; cls: string }) {
-  return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
-      {label}
-    </span>
   );
 }
 
@@ -188,7 +155,7 @@ function SuggestionRow({
   s: ConsolidationSuggestion;
   selected: boolean;
   onToggle: (routeId: string) => void;
-  routeOptions: { id: string; label: string; spare: number }[];
+  routeOptions: RouteOption[];
   targets: Record<string, string>;
   onTarget: (learnerId: string, routeId: string) => void;
 }) {
@@ -196,6 +163,7 @@ function SuggestionRow({
   const badge = consolidationBadge[s.classification];
   const hasRelocations = s.relocations.length > 0;
   const applicable = isApplicable(s);
+  const moveColumns = useMemo(() => getRelocationColumns(s.routeId, routeOptions), [s.routeId, routeOptions]);
 
   return (
     <div
@@ -251,47 +219,16 @@ function SuggestionRow({
 
       {open && hasRelocations && (
         <div className="border-t border-gray-100 p-4">
-          <div className="overflow-hidden rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Learner</th>
-                  <th className="px-3 py-2 font-medium">Boarding stop</th>
-                  <th className="px-3 py-2 font-medium">Moves to</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {s.relocations.map((r) => (
-                  <tr key={r.learnerId}>
-                    <td className="px-3 py-2 text-gray-900">
-                      {r.learnerName}
-                      {r.learnerRoll && <span className="ml-1 text-gray-500">({r.learnerRoll})</span>}
-                    </td>
-                    <td className="px-3 py-2 text-gray-600">{r.boardingStop || '—'}</td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={targets[r.learnerId] ?? ''}
-                        onChange={(e) => onTarget(r.learnerId, e.target.value)}
-                        className="h-8 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-900"
-                      >
-                        <option value="">— pick a bus —</option>
-                        {routeOptions
-                          .filter((o) => o.id !== s.routeId)
-                          .map((o) => (
-                            <option key={o.id} value={o.id} disabled={o.spare <= 0 && o.id !== (r.feasible ? r.targetRouteId : '')}>
-                              {o.label} ({o.spare} free){r.feasible && o.id === r.targetRouteId ? ' · suggested' : ''}
-                            </option>
-                          ))}
-                      </select>
-                      {targets[r.learnerId] && !r.feasible && (
-                        <span className="mt-1 block text-xs text-amber-600 dark:text-amber-400">manual override</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <MoveTargetsContext.Provider value={{ targets, onTarget }}>
+            <DataTable
+              columns={moveColumns}
+              data={s.relocations}
+              compact
+              pinFirstColumn={false}
+              entityName="moves"
+              getRowId={(r) => r.learnerId}
+            />
+          </MoveTargetsContext.Provider>
         </div>
       )}
     </div>
@@ -536,6 +473,9 @@ export default function RouteOptimizationPage() {
     [runAnalysis]
   );
 
+  // Undo only opens the confirmation below; the rollback runs from there.
+  const appliedRunColumns = useMemo(() => getAppliedRunColumns(setUndoConfirm, rollingBack), [rollingBack]);
+
   const s = analysis?.summary;
 
   return (
@@ -695,66 +635,13 @@ export default function RouteOptimizationPage() {
               <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
                 <History className="h-5 w-5 text-gray-400" /> Applied runs for {analysis.date}
               </h2>
-              <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-                <table className="w-full min-w-[680px] text-sm">
-                  <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-                    <tr>
-                      <th className="px-4 py-2.5 font-medium">Applied</th>
-                      <th className="px-4 py-2.5 font-medium">Mode</th>
-                      <th className="px-4 py-2.5 font-medium">Moves</th>
-                      <th className="px-4 py-2.5 font-medium">Buses freed</th>
-                      <th className="px-4 py-2.5 font-medium">Est. savings</th>
-                      <th className="px-4 py-2.5 font-medium">Status</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {appliedRuns.map((run) => (
-                      <tr key={run.id}>
-                        <td className="px-4 py-2.5 text-gray-600">{fmtTime(run.created_at)}</td>
-                        <td className="px-4 py-2.5">
-                          {run.mode === 'permanent' ? (
-                            <Badge label="Permanent" cls="bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300" />
-                          ) : (
-                            <Badge label="Today" cls="bg-gray-100 text-gray-700 dark:bg-gray-500/15 dark:text-gray-300" />
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-900">{run.total_moves}</td>
-                        <td className="px-4 py-2.5 text-gray-900">
-                          {run.mode === 'permanent' ? <span className="text-gray-400">—</span> : run.routes_cancelled}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-900">
-                          {run.mode === 'permanent' ? <span className="text-gray-400">—</span> : inr(run.estimated_savings)}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {run.status === 'applied' ? (
-                            <Badge label="Applied" cls="bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300" />
-                          ) : (
-                            <Badge label="Rolled back" cls="bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-200" />
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          {run.status === 'applied' && (
-                            <button
-                              type="button"
-                              onClick={() => setUndoConfirm(run)}
-                              disabled={rollingBack === run.id}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
-                            >
-                              {rollingBack === run.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Undo2 className="h-3.5 w-3.5" />
-                              )}
-                              Undo
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={appliedRunColumns}
+                data={appliedRuns}
+                entityName="runs"
+                searchPlaceholder="Search runs..."
+                getRowId={(run) => run.id}
+              />
             </section>
           )}
 
@@ -902,54 +789,14 @@ export default function RouteOptimizationPage() {
           {/* Occupancy table */}
           <section className="space-y-3">
             <h2 className="text-lg font-semibold text-gray-900">Route occupancy</h2>
-            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-              <table className="w-full min-w-[560px] text-sm">
-                <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="px-4 py-2.5 font-medium">Route</th>
-                    <th className="px-4 py-2.5 font-medium">Booked / capacity</th>
-                    <th className="px-4 py-2.5 font-medium">Utilization</th>
-                    <th className="px-4 py-2.5 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {analysis.routes.map((r) => {
-                    const b = routeClassBadge[r.classification];
-                    return (
-                      <tr key={r.routeId}>
-                        <td className="px-4 py-2.5 text-gray-900">
-                          {r.routeName}
-                          {r.routeNumber && <span className="ml-1 text-gray-500">#{r.routeNumber}</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-600">
-                          {r.currentPassengers} / {r.capacity}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-24 overflow-hidden rounded-full bg-gray-100">
-                              <div
-                                className={`h-full rounded-full ${
-                                  r.classification === 'healthy'
-                                    ? 'bg-green-500'
-                                    : r.classification === 'under_utilized'
-                                      ? 'bg-amber-500'
-                                      : 'bg-gray-300'
-                                }`}
-                                style={{ width: `${Math.min(100, r.utilizationPercent)}%` }}
-                              />
-                            </div>
-                            <span className="text-gray-600">{r.utilizationPercent}%</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <Badge label={b.label} cls={b.cls} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={ROUTE_OCCUPANCY_COLUMNS}
+              data={analysis.routes}
+              entityName="routes"
+              searchPlaceholder="Search route..."
+              filters={[ROUTE_CLASS_FILTER]}
+              getRowId={(r) => r.routeId}
+            />
           </section>
         </div>
       )}

@@ -3,7 +3,65 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, ExternalLink, Loader2, ShieldCheck, Users } from 'lucide-react';
+import type { ColumnDef } from '@tanstack/react-table';
+import { DataTable } from '@/components/ui/data-table';
+import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import { ACTIVITY_SAMPLE_LIMIT, formatCount, type SystemInfo } from '@/lib/settings/system-info';
+
+type RecentEntry = SystemInfo['security']['recent'][number];
+
+const RECENT_COLUMNS: ColumnDef<RecentEntry>[] = [
+  {
+    id: 'actor',
+    accessorFn: (e) => e.actorEmail ?? '',
+    meta: { label: 'Actor' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Actor" />,
+    cell: ({ row }) => (
+      <div>
+        <div className="font-medium text-gray-900">{row.original.actorEmail ?? 'Unknown'}</div>
+        {row.original.actorRole && <div className="text-xs text-gray-500">{row.original.actorRole}</div>}
+      </div>
+    ),
+  },
+  {
+    id: 'module_action',
+    accessorFn: (e) => [e.module, e.action].filter(Boolean).join(' · '),
+    meta: { label: 'Module / action' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Module / action" />,
+    cell: ({ row }) => {
+      const e = row.original;
+      return (
+        <div className="text-gray-700">
+          <div>{[e.module, e.action].filter(Boolean).join(' · ') || '—'}</div>
+          {e.description && (
+            <div className="max-w-md truncate text-xs text-gray-500" title={e.description}>
+              {e.description}
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    id: 'ip',
+    accessorFn: (e) => e.ipAddress ?? '',
+    meta: { label: 'IP address' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="IP address" />,
+    cell: ({ row }) => <span className="text-gray-700">{row.original.ipAddress ?? '—'}</span>,
+  },
+  {
+    id: 'when',
+    // ISO timestamps sort correctly as strings.
+    accessorFn: (e) => e.createdAt ?? '',
+    meta: { label: 'When' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="When" />,
+    cell: ({ row }) => (
+      <span className="text-gray-500">
+        {row.original.createdAt ? new Date(row.original.createdAt).toLocaleString() : '—'}
+      </span>
+    ),
+  },
+];
 
 /**
  * Security tab. This app does not own authentication — sessions, 2FA,
@@ -121,39 +179,16 @@ export function SecuritySettings() {
             ) : data.security.recent.length === 0 ? (
               <div className="px-5 py-6 text-center text-sm text-gray-500">No admin activity in the last 7 days.</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-100 text-sm">
-                  <thead>
-                    <tr className="text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-                      <th className="px-5 py-2">Actor</th>
-                      <th className="px-5 py-2">Module / action</th>
-                      <th className="px-5 py-2">IP address</th>
-                      <th className="px-5 py-2">When</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {data.security.recent.map((entry, i) => (
-                      <tr key={i}>
-                        <td className="px-5 py-2.5">
-                          <div className="font-medium text-gray-900">{entry.actorEmail ?? 'Unknown'}</div>
-                          {entry.actorRole && <div className="text-xs text-gray-500">{entry.actorRole}</div>}
-                        </td>
-                        <td className="px-5 py-2.5 text-gray-700">
-                          <div>{[entry.module, entry.action].filter(Boolean).join(' · ') || '—'}</div>
-                          {entry.description && (
-                            <div className="max-w-md truncate text-xs text-gray-500" title={entry.description}>
-                              {entry.description}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-2.5 text-gray-700">{entry.ipAddress ?? '—'}</td>
-                        <td className="px-5 py-2.5 text-gray-500">
-                          {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="p-4">
+                <DataTable
+                  columns={RECENT_COLUMNS}
+                  data={data.security.recent}
+                  // The API sends at most 10 rows, so no toolbar: the full,
+                  // searchable list is the activity log linked above.
+                  compact
+                  getRowId={(_, i) => String(i)}
+                  entityName="actions"
+                />
               </div>
             )}
           </div>

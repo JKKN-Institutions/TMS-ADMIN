@@ -1,67 +1,18 @@
 'use client';
 
-import { use } from 'react';
+import { use, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DetailPageHeader } from '@/components/ui/detail-view';
-import { FeeMarkChip, BookingMarkChip } from '@/components/route-check/marks';
-import { FINE_NOTE_LABEL, ruleNote, type FineNote, type FineRule } from '@/lib/route-check/fine-rules';
+import { DataTable } from '@/components/ui/data-table';
 import { scannedCounts } from '@/lib/route-check/counts';
-import { fetchCheck, type CheckFineSummary } from '../../inspection-api';
+import { fetchCheck } from '../../inspection-api';
+import { getCheckPeopleColumns, OUTCOME_LABEL } from './columns';
 
 const LEG_LABEL: Record<'onward' | 'return', string> = { onward: 'Morning', return: 'Evening' };
-const OUTCOME_LABEL: Record<string, string> = {
-  ok: 'OK',
-  not_on_route: 'Not on this route',
-  no_booking: 'No booking',
-  fee_unpaid: 'Fee unpaid',
-  unknown_card: 'Unknown card',
-  manual: 'Manual entry',
-};
 
 function fmtDateTime(d: string | null): string {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-/** fine_note is space-separated `<rule>:<note>` parts, or the single word 'fines_off' / 'error'. */
-function fineNoteLabels(note: string | null): string[] {
-  if (!note) return [];
-  return note
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => {
-      const idx = part.indexOf(':');
-      const key = idx >= 0 ? part.slice(idx + 1) : part;
-      return FINE_NOTE_LABEL[key as FineNote] ?? part;
-    });
-}
-
-/**
- * One fine on the report: its amount and live status. Read-only — a fine is
- * cancelled by cancelling its bill in MyJKKN with a supporting document, never
- * from here (the bill-cancellation guard must not be bypassed).
- *
- * A row can carry a fine this check did NOT raise: when the learner was already
- * fined (an earlier check, or the 48h sweep for the fee rule) the existing fine's
- * id is stored for reference. That one is shown muted as "earlier".
- */
-function FineChip({ label, rule, fineNote, fineId, fine }: {
-  label: string; rule: FineRule; fineNote: string | null; fineId: string | null; fine: CheckFineSummary | null;
-}) {
-  if (!fineId) return null;
-  const raisedHere = ruleNote(fineNote, rule) === 'raised';
-  const cancelled = fine?.status === 'cancelled';
-  const tone = cancelled
-    ? 'bg-gray-100 text-gray-500 line-through dark:bg-gray-800 dark:text-gray-400'
-    : raisedHere
-      ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-      : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
-  const detail = fine ? `₹${fine.amount.toLocaleString('en-IN')} · ${fine.status}` : 'status unavailable';
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>
-      {raisedHere ? label : `Earlier ${label.toLowerCase()}`} · {detail}
-    </span>
-  );
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -104,6 +55,15 @@ export default function CheckReportPage({
   const { id } = use(params);
   const backHref = backHrefFrom(use(searchParams));
   const { data, isLoading, isError, error } = useQuery({ queryKey: ['check', id], queryFn: () => fetchCheck(id) });
+  const people = useMemo(() => data?.people ?? [], [data]);
+  const columns = useMemo(() => getCheckPeopleColumns(), []);
+  // Outcome filter lists only the outcomes this check actually recorded.
+  const outcomeOptions = useMemo(() => {
+    const seen = new Set(people.map((p) => p.outcome as string));
+    return Object.entries(OUTCOME_LABEL)
+      .filter(([value]) => seen.has(value))
+      .map(([value, label]) => ({ label, value }));
+  }, [people]);
 
   if (isLoading) {
     return (
@@ -163,57 +123,15 @@ export default function CheckReportPage({
         To cancel a fine, cancel the bill in MyJKKN with a supporting document.
       </p>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full min-w-[760px] text-sm">
-          <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
-            <tr>
-              <th className="px-4 py-3">Person</th>
-              <th className="px-4 py-3">Fee</th>
-              <th className="px-4 py-3">Booking</th>
-              <th className="px-4 py-3">Outcome</th>
-              <th className="px-4 py-3">Fines</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {data.people.length === 0 && (
-              <tr>
-                <td className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={5}>
-                  No people recorded on this check.
-                </td>
-              </tr>
-            )}
-            {data.people.map((p) => {
-              const noteLabels = fineNoteLabels(p.fineNote);
-              return (
-                <tr key={p.id}>
-                  <td className="min-w-0 px-4 py-3">
-                    <p className="truncate font-medium text-gray-900 dark:text-gray-100">{p.name ?? '—'}</p>
-                    {p.code && <p className="truncate text-xs text-gray-500 dark:text-gray-400">{p.code}</p>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <FeeMarkChip mark={p.feeState} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <BookingMarkChip mark={p.bookingState} />
-                  </td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{OUTCOME_LABEL[p.outcome] ?? p.outcome}</td>
-                  <td className="min-w-0 px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <FineChip label="Fee fine" rule="fee" fineNote={p.fineNote} fineId={p.feeFineId} fine={p.feeFine} />
-                      <FineChip label="Booking fine" rule="booking" fineNote={p.fineNote} fineId={p.bookingFineId} fine={p.bookingFine} />
-                      {noteLabels.map((label, i) => (
-                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                          {label}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={people}
+        entityName="people"
+        getRowId={(p) => p.id}
+        searchPlaceholder="Search name or roll number..."
+        emptyMessage="No people recorded on this check."
+        filters={outcomeOptions.length > 1 ? [{ columnId: 'outcome', title: 'Outcome', options: outcomeOptions }] : []}
+      />
     </div>
   );
 }

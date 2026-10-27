@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
 import { DataTable } from '@/components/ui/data-table';
 import { getCoverageColumns } from './coverage-columns';
+import { getTermColumns, getStopTermColumns } from './term-columns';
 import { exportCoverage } from './coverage-export';
 import { StopRatesCard } from './stop-rates-card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -16,10 +17,11 @@ import {
   type GeneratePreview, type CoverageResult,
 } from '../fee-api';
 import { feeStatusBadge, audienceBadge, inr } from '../columns';
-import { DEFAULT_LIFECYCLE_STATUSES } from '@/lib/fees/types';
+import { DEFAULT_LIFECYCLE_STATUSES, type FeeStructureStopTerm, type FeeStructureTerm } from '@/lib/fees/types';
 
-const fmtDate = (d?: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+// Stable empty fallbacks so a missing schedule doesn't hand DataTable a new array every render.
+const NO_TERMS: FeeStructureTerm[] = [];
+const NO_STOP_TERMS: FeeStructureStopTerm[] = [];
 
 export default function FeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -66,6 +68,8 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
     enabled: !!fee,
   });
   const coverageColumns = useMemo(() => getCoverageColumns(), []);
+  const termColumns = useMemo(() => getTermColumns(), []);
+  const stopTermColumns = useMemo(() => getStopTermColumns(), []);
   // Institution filter options derived from the rows actually present.
   const institutionFilterOptions = useMemo(() => {
     const names = new Set<string>();
@@ -272,28 +276,15 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
                     Year{b.study_years.length === 1 ? '' : 's'} {b.study_years.join(', ')} · {inr(b.total_amount)}
                   </span>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-                        <th className="py-2 pr-4">#</th>
-                        <th className="py-2 pr-4">Term</th>
-                        <th className="py-2 pr-4">Amount</th>
-                        <th className="py-2 pr-4">Due date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(b.terms ?? []).map((t) => (
-                        <tr key={t.term_no} className="border-b border-gray-100 dark:border-gray-800">
-                          <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
-                          <td className="py-2 pr-4 font-medium text-gray-900 dark:text-gray-100">{t.term_label || `Term ${t.term_no}`}</td>
-                          <td className="py-2 pr-4">{inr(t.amount)}</td>
-                          <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTable
+                  columns={termColumns}
+                  data={b.terms ?? NO_TERMS}
+                  entityName="terms"
+                  getRowId={(t) => String(t.term_no)}
+                  compact
+                  pinFirstColumn={false}
+                  emptyMessage="No terms."
+                />
               </div>
             ))}
           </div>
@@ -304,53 +295,27 @@ export default function FeeDetailPage({ params }: { params: Promise<{ id: string
             The fee amount varies by boarding stop (see Stop rates below). This is the shared
             percentage split applied to every stop&rsquo;s annual rate.
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-                  <th className="py-2 pr-4">#</th>
-                  <th className="py-2 pr-4">Term</th>
-                  <th className="py-2 pr-4">Due date</th>
-                  <th className="py-2 pr-4">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(fee.stop_terms ?? []).map((t) => (
-                  <tr key={t.term_no} className="border-b border-gray-100 dark:border-gray-800">
-                    <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
-                    <td className="py-2 pr-4 font-medium text-gray-900 dark:text-gray-100">{t.term_label || `Term ${t.term_no}`}</td>
-                    <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
-                    <td className="py-2 pr-4">{Number(t.share_percent)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={stopTermColumns}
+            data={fee.stop_terms ?? NO_STOP_TERMS}
+            entityName="instalments"
+            getRowId={(t) => String(t.term_no)}
+            compact
+            pinFirstColumn={false}
+            emptyMessage="No instalments."
+          />
         </SectionCard>
       ) : (
         <SectionCard title="Terms">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-                  <th className="py-2 pr-4">#</th>
-                  <th className="py-2 pr-4">Term</th>
-                  <th className="py-2 pr-4">Amount</th>
-                  <th className="py-2 pr-4">Due date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(fee.terms ?? []).map((t) => (
-                  <tr key={t.term_no} className="border-b border-gray-100">
-                    <td className="py-2 pr-4 text-gray-500">{t.term_no}</td>
-                    <td className="py-2 pr-4 font-medium text-gray-900">{t.term_label || `Term ${t.term_no}`}</td>
-                    <td className="py-2 pr-4">{inr(t.amount)}</td>
-                    <td className="py-2 pr-4">{fmtDate(t.due_date)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={termColumns}
+            data={fee.terms ?? NO_TERMS}
+            entityName="terms"
+            getRowId={(t) => String(t.term_no)}
+            compact
+            pinFirstColumn={false}
+            emptyMessage="No terms."
+          />
         </SectionCard>
       )}
 

@@ -8,7 +8,7 @@
  * nobody marked. Future dates show no marking at all -- the server refuses them.
  */
 
-import React, { use, useState } from 'react';
+import React, { use, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,7 +16,9 @@ import { ArrowLeft, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { DataTable } from '@/components/ui/data-table';
 import type { RosterRow } from '@/lib/booking/roster';
+import { getRosterColumns, STATUS_LABEL, type MarkChoice } from './columns';
 
 interface AdminRosterResponse {
   date: string;
@@ -46,26 +48,10 @@ interface MarkResponse {
   dropped: number;
 }
 
-type MarkChoice = 'present' | 'absent';
-
-const STATUS_CLASS: Record<RosterRow['status'], string> = {
-  present: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
-  absent: 'bg-red-500/15 text-red-700 dark:text-red-400',
-  unmarked: 'bg-muted text-muted-foreground',
-};
-
-/** Worded exactly as the staff screen (app/boarding/attendance/columns.tsx). */
-const OTHER_BUS_TEXT: Record<NonNullable<RosterRow['other_bus']>['kind'], string> = {
-  booked: 'Booked on bus',
-  boarded: 'Boarded bus',
-  from: 'From bus',
-};
-
-const STATUS_LABEL: Record<RosterRow['status'], string> = {
-  present: 'Present',
-  absent: 'Absent',
-  unmarked: 'Unmarked',
-};
+const STATUS_OPTIONS = (Object.keys(STATUS_LABEL) as RosterRow['status'][]).map((s) => ({
+  label: STATUS_LABEL[s],
+  value: s,
+}));
 
 export default function AttendanceDayPage({
   params,
@@ -184,6 +170,15 @@ export default function AttendanceDayPage({
     }
   }
 
+  // `mark` is a fresh closure each render; what it closes over that can change
+  // is the route/date/leg (a ?direction= change keeps this page mounted), so
+  // those stand in for it in the deps.
+  const columns = useMemo(
+    () => getRosterColumns({ showMark: canMark && !isFuture, onMark: mark, busyId, bulkBusy }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canMark, isFuture, busyId, bulkBusy, routeId, date, direction],
+  );
+
   return (
     <div className="space-y-4 p-4 md:p-6">
       <Link href="/attendance" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
@@ -276,69 +271,17 @@ export default function AttendanceDayPage({
       )}
 
       {data && !isError && (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Learner</th>
-                <th className="px-3 py-2">Roll</th>
-                <th className="px-3 py-2">Stop</th>
-                <th className="px-3 py-2">Ticket</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Marked by</th>
-                {canMark && !isFuture && <th className="px-3 py-2">Mark</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((r) => (
-                <tr key={r.learner_id} className="border-t border-border">
-                  <td className="px-3 py-2">{r.name}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.roll ?? '—'}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.stop_name}</td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {r.is_walk_up ? 'Rode without ticket' : r.booked ? 'Booked' : 'No ticket'}
-                    {/* Another bus is involved today. "Boarded bus N" is why a
-                        back-dated mark from this page is refused: that day's row
-                        belongs to bus N and must be corrected from its page. */}
-                    {r.other_bus && (
-                      <span className="block text-xs text-muted-foreground">
-                        {OTHER_BUS_TEXT[r.other_bus.kind]} {r.other_bus.routeNumber ?? '?'}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_CLASS[r.status]}`}>
-                      {STATUS_LABEL[r.status]}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {r.method === 'auto' ? 'Auto-absent job' : r.marked_by_name ?? '—'}
-                  </td>
-                  {canMark && !isFuture && (
-                    <td className="whitespace-nowrap px-3 py-2">
-                      <button
-                        type="button"
-                        disabled={busyId === r.learner_id || bulkBusy}
-                        onClick={() => mark(r, 'present')}
-                        className="rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
-                      >
-                        Present
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busyId === r.learner_id || bulkBusy}
-                        onClick={() => mark(r, 'absent')}
-                        className="ml-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
-                      >
-                        Absent
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={data.rows}
+          getRowId={(r) => r.learner_id}
+          entityName="learners"
+          // A whole bus on one page, as the plain table showed it.
+          pageSize={100}
+          searchPlaceholder="Search learner, roll, stop…"
+          filters={[{ columnId: 'status', title: 'Status', options: STATUS_OPTIONS }]}
+          emptyMessage="No learners on this roster."
+        />
       )}
     </div>
   );

@@ -5,8 +5,11 @@
 // validated kit. The .viz-scope palette (design-system parameters) lives here;
 // recharts marks stay in each consumer, so this file pulls in NO recharts.
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import type { ColumnDef, SortingFn } from '@tanstack/react-table';
 import { Table as TableIcon, BarChart3, Download, type LucideIcon } from 'lucide-react';
+import { DataTable } from '@/components/ui/data-table';
+import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 
 // ── Chart palette (validated) — scoped so it swaps with the app's .dark class ────
 export const VIZ_CSS = `
@@ -229,28 +232,53 @@ export function ChartCard({
   );
 }
 
-// Accessible data table used by every ChartCard's table view. (Was `DataTable`.)
-export function VizTable({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
-  return (
-    <table className="w-full text-sm tabular-nums">
-      <thead>
-        <tr className="border-b border-border text-left text-xs text-muted-foreground">
-          {head.map((h, i) => (
-            <th key={h} className={`py-2 pr-4 font-medium ${i > 0 ? 'text-right' : ''}`}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, ri) => (
-          <tr key={ri} className="border-b border-border/60 last:border-0">
-            {r.map((c, ci) => (
-              <td key={ci} className={`py-2 pr-4 ${ci === 0 ? 'text-foreground' : 'text-right text-muted-foreground'}`}>{c}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+// Callers hand VizTable pre-formatted cells ("1,234", "₹2.50L", "12.5%"), so a
+// plain string sort would put "9" after "10,000". Read the number back out of
+// anything that looks like one; everything else (labels, dates) sorts as text.
+type VizRow = (string | number)[];
+const COMPACT_SCALE: Record<string, number> = { K: 1e3, L: 1e5, Cr: 1e7 };
+function vizNumber(v: string | number | undefined): number | null {
+  if (typeof v === 'number') return v;
+  const m = /^\s*₹?\s*(-?[\d,]*\.?\d+)\s*(%|K|L|Cr)?\s*$/.exec(v ?? '');
+  if (!m) return null;
+  return parseFloat(m[1].replace(/,/g, '')) * (COMPACT_SCALE[m[2] ?? ''] ?? 1);
+}
+const vizSort: SortingFn<VizRow> = (a, b, id) => {
+  const x = a.getValue<string | number>(id);
+  const y = b.getValue<string | number>(id);
+  const nx = vizNumber(x);
+  const ny = vizNumber(y);
+  if (nx !== null && ny !== null) return nx - ny;
+  return String(x ?? '').localeCompare(String(y ?? ''), undefined, { numeric: true });
+};
+
+// Accessible data table used by every ChartCard's table view, on the shared
+// DataTable engine: sortable headers and the phone card view, no toolbar.
+export function VizTable({ head, rows }: { head: string[]; rows: VizRow[] }) {
+  const columns = useMemo<ColumnDef<VizRow>[]>(
+    () =>
+      head.map((h, i) => ({
+        id: `c${i}`,
+        accessorFn: (r) => r[i],
+        sortingFn: vizSort,
+        meta: { label: h },
+        header: ({ column }) => (
+          <div className={i > 0 ? 'flex justify-end' : undefined}>
+            <DataTableColumnHeader column={column} title={h} />
+          </div>
+        ),
+        cell: ({ row }) => (
+          <span className={i === 0 ? 'text-foreground' : 'block text-right tabular-nums text-muted-foreground'}>
+            {row.original[i]}
+          </span>
+        ),
+      })),
+    // Callers pass `head` as an inline literal, so key on its contents: a new
+    // column set every render would remount every cell.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [head.join('\u0000')]
   );
+  return <DataTable columns={columns} data={rows} compact />;
 }
 
 // Theme-aware tooltip — value leads, label follows.

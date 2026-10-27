@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { ColumnDef } from '@tanstack/react-table';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { CalendarDays, Ban, Users, Plus, Trash2, RefreshCw, ChevronRight } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { DataTable } from '@/components/ui/data-table';
+import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import { formatDate } from '@/lib/format/display';
 
 type Tab = 'calendar' | 'windows' | 'manifest';
@@ -58,14 +61,19 @@ const input = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark
 
 
 /* ---- Shared: dated rows, upcoming first, past collapsed ---- */
+// Shared empty list, so a still-loading query hands DatedTable the same array
+// every render instead of a fresh `[]`.
+const NO_ROWS: never[] = [];
+
 // Both lists used to be plain text lines in date order, so this term's
 // upcoming holidays sat under every past one. Upcoming rows now come first in
 // a table; past rows fold away. Deletes confirm first.
 function DatedTable<T extends { id: string }>({
-  rows, dateOf, columns, onDelete, deleting, describe, empty,
+  rows, dateKey, columns, onDelete, deleting, describe, empty,
 }: {
   rows: T[];
-  dateOf: (r: T) => string;
+  /** The row's YYYY-MM-DD (or ISO timestamp) field. */
+  dateKey: keyof T & string;
   columns: { header: string; cell: (r: T) => React.ReactNode }[];
   onDelete: (r: T) => Promise<unknown>;
   deleting: boolean;
@@ -74,46 +82,65 @@ function DatedTable<T extends { id: string }>({
 }) {
   const today = istToday();
   const [pending, setPending] = useState<T | null>(null);
-  const upcoming = rows.filter((r) => dateOf(r).slice(0, 10) >= today).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
-  const past = rows.filter((r) => dateOf(r).slice(0, 10) < today).sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
+  const dateOf = (r: T) => String(r[dateKey]).slice(0, 10);
+  // Pre-sorted: the table has no default sort, so this order is what shows.
+  const { upcoming, past } = useMemo(() => {
+    const day = (r: T) => String(r[dateKey]);
+    return {
+      upcoming: rows.filter((r) => day(r).slice(0, 10) >= today).sort((a, b) => day(a).localeCompare(day(b))),
+      past: rows.filter((r) => day(r).slice(0, 10) < today).sort((a, b) => day(b).localeCompare(day(a))),
+    };
+  }, [rows, dateKey, today]);
+
+  // Callers pass `columns` inline, so this rebuilds each render; harmless with
+  // no onFilteredRowsChange, and it keeps every caller's cells current.
+  const tableColumns: ColumnDef<T>[] = [
+    {
+      id: 'date',
+      accessorFn: dateOf,
+      meta: { label: 'Date' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Date" />,
+      cell: ({ row }) => {
+        const d = dateOf(row.original);
+        const weekday = new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' });
+        return (
+          <span className="whitespace-nowrap font-medium text-gray-900 dark:text-gray-100">
+            {formatDate(d)} <span className="text-xs font-normal text-gray-500">{weekday}</span>
+          </span>
+        );
+      },
+    },
+    ...columns.map<ColumnDef<T>>((c) => ({
+      id: c.header,
+      enableSorting: false,
+      meta: { label: c.header },
+      header: c.header,
+      cell: ({ row }) => c.cell(row.original),
+    })),
+    {
+      id: 'actions',
+      enableSorting: false,
+      enableHiding: false,
+      size: 60,
+      header: () => <span className="sr-only">Delete</span>,
+      cell: ({ row }) => (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setPending(row.original)}
+            aria-label={`Delete ${describe(row.original)}`}
+            title="Delete"
+            className="rounded-md p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   const table = (list: T[]) => (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 dark:border-gray-800">
-            <th className="py-2 pr-3 font-medium">Date</th>
-            {columns.map((c) => <th key={c.header} className="py-2 pr-3 font-medium">{c.header}</th>)}
-            <th className="py-2 text-right font-medium"><span className="sr-only">Delete</span></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-          {list.map((r) => {
-            const d = dateOf(r).slice(0, 10);
-            const weekday = new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' });
-            return (
-              <tr key={r.id}>
-                <td className="whitespace-nowrap py-2 pr-3 font-medium text-gray-900 dark:text-gray-100">
-                  {formatDate(d)} <span className="text-xs font-normal text-gray-500">{weekday}</span>
-                </td>
-                {columns.map((c) => <td key={c.header} className="py-2 pr-3">{c.cell(r)}</td>)}
-                <td className="py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => setPending(r)}
-                    aria-label={`Delete ${describe(r)}`}
-                    title="Delete"
-                    className="rounded-md p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <DataTable columns={tableColumns} data={list} compact getRowId={(r) => r.id} entityName="dates" />
   );
 
   return (
@@ -125,9 +152,9 @@ function DatedTable<T extends { id: string }>({
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upcoming ({upcoming.length})</h3>
           {upcoming.length ? table(upcoming) : <p className="text-sm text-gray-500">Nothing upcoming.</p>}
           {past.length > 0 && (
-            <details className="group">
+            <details className="group/past">
               <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400">
-                <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" /> Past ({past.length})
+                <ChevronRight className="h-4 w-4 transition-transform group-open/past:rotate-90" /> Past ({past.length})
               </summary>
               <div className="mt-2 opacity-80">{table(past)}</div>
             </details>
@@ -214,8 +241,8 @@ function ServiceCalendarTab() {
         </button>
       </div>
       <DatedTable
-        rows={data ?? []}
-        dateOf={(r) => r.exception_date}
+        rows={data ?? NO_ROWS}
+        dateKey="exception_date"
         empty="No holidays or no-service days added."
         describe={(r) => `${r.kind === 'holiday' ? 'holiday' : 'no-service day'} on ${formatDate(r.exception_date)}`}
         deleting={del.isPending}
@@ -289,8 +316,8 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
       </div>
       {routeId && (
         <DatedTable
-          rows={data ?? []}
-          dateOf={(w) => w.travel_date}
+          rows={data ?? NO_ROWS}
+          dateKey="travel_date"
           empty="No changes for this route — the normal booking deadline applies."
           describe={(w) => `booking window on ${formatDate(w.travel_date)}`}
           deleting={del.isPending}

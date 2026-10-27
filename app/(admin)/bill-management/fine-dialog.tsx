@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import type { ColumnDef } from '@tanstack/react-table';
 import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
+import { DataTable } from '@/components/ui/data-table';
+import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import { FINE_SKIP_LABEL } from '@/lib/fines/resolve';
 import { priceableStops, draftsToRates } from '@/lib/fines/rate-drafts';
 import type { TransportBillRow } from '@/lib/fees/bills';
 import { inr } from './columns';
-import { previewFines, createFines, saveFineRates } from './fines-api';
+import { previewFines, createFines, saveFineRates, type FineCandidate } from './fines-api';
 
 /** Default due date: 15 days out. A charge dated in the past is born overdue. */
 function defaultDueDate(): string {
@@ -16,6 +19,90 @@ function defaultDueDate(): string {
   d.setDate(d.getDate() + 15);
   return d.toISOString().slice(0, 10);
 }
+
+// The rate inputs read their drafts from context, not from the column defs:
+// columns rebuilt per keystroke would remount the cell and drop the input's focus.
+const RateDraftContext = createContext<{
+  rateDrafts: Record<string, string>;
+  setRateDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  unpricedStopIds: Set<string>;
+}>({ rateDrafts: {}, setRateDrafts: () => {}, unpricedStopIds: new Set() });
+
+function FeeCell({ c }: { c: FineCandidate }) {
+  const { rateDrafts, setRateDrafts, unpricedStopIds } = useContext(RateDraftContext);
+  if (c.amount !== null) {
+    return <span className="font-medium text-gray-900 dark:text-gray-100">{inr(c.amount)}</span>;
+  }
+  if (c.stop_id && unpricedStopIds.has(c.stop_id)) {
+    // Unpriced stop: price it here and it lands in the sheet.
+    return (
+      <input
+        type="number"
+        min="1"
+        step="0.01"
+        inputMode="decimal"
+        value={rateDrafts[c.stop_id] ?? ''}
+        onChange={(e) => setRateDrafts((d) => ({ ...d, [c.stop_id as string]: e.target.value }))}
+        placeholder="Set fee ₹"
+        aria-label={`Transport fee amount for ${c.stop_name ?? 'this stop'}`}
+        className="h-8 w-28 rounded-lg border border-amber-300 bg-amber-50 px-2 text-right text-sm text-gray-900 placeholder:text-amber-700/60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-gray-100 dark:placeholder:text-amber-300/60"
+      />
+    );
+  }
+  return (
+    <span className="text-amber-700 dark:text-amber-400">
+      {c.skip_reason ? FINE_SKIP_LABEL[c.skip_reason] : 'Cannot be charged'}
+    </span>
+  );
+}
+
+const PREVIEW_COLUMNS: ColumnDef<FineCandidate>[] = [
+  {
+    id: 'learner',
+    meta: { label: 'Learner' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Learner" />,
+    accessorFn: (c) => `${c.person_name} ${c.code ?? ''}`.trim(),
+    cell: ({ row }) => (
+      <span className="text-gray-900 dark:text-gray-100">
+        {row.original.person_name}
+        {row.original.code ? <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">{row.original.code}</span> : null}
+      </span>
+    ),
+  },
+  {
+    id: 'route',
+    meta: { label: 'Route' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
+    accessorFn: (c) => c.route_number ?? '',
+    size: 90,
+    cell: ({ row }) => <span className="whitespace-nowrap text-gray-600 dark:text-gray-300">{row.original.route_number ?? '—'}</span>,
+  },
+  {
+    id: 'stop',
+    meta: { label: 'Stop' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Stop" />,
+    accessorFn: (c) => c.stop_name ?? '',
+    cell: ({ row }) => <span className="text-gray-600 dark:text-gray-300">{row.original.stop_name ?? '—'}</span>,
+  },
+  {
+    id: 'amount',
+    meta: { label: 'Transport fee' },
+    header: ({ column }) => (
+      <div className="flex justify-end">
+        <DataTableColumnHeader column={column} title="Transport fee" />
+      </div>
+    ),
+    // Unpriced rows sort to the bottom.
+    accessorFn: (c) => c.amount ?? -1,
+    enableGlobalFilter: false,
+    size: 150,
+    cell: ({ row }) => (
+      <div className="text-right">
+        <FeeCell c={row.original} />
+      </div>
+    ),
+  },
+];
 
 export function FineDialog({
   open,
@@ -76,17 +163,22 @@ export function FineDialog({
     enabled: open && personIds.length > 0,
   });
 
+  const candidates = useMemo(() => data?.candidates ?? [], [data]);
   const chargeable = useMemo(
-    () => (data?.candidates ?? []).filter((c) => c.amount !== null),
-    [data]
+    () => candidates.filter((c) => c.amount !== null),
+    [candidates]
   );
 
   // Stops the operator can price without leaving the dialog, and the set of
   // stop ids that get an input rendered against them.
-  const unpricedStops = useMemo(() => priceableStops(data?.candidates ?? []), [data]);
+  const unpricedStops = useMemo(() => priceableStops(candidates), [candidates]);
   const unpricedStopIds = useMemo(
     () => new Set(unpricedStops.map((s) => s.stop_id)),
     [unpricedStops]
+  );
+  const rateDraftCtx = useMemo(
+    () => ({ rateDrafts, setRateDrafts, unpricedStopIds }),
+    [rateDrafts, unpricedStopIds]
   );
   const filledDrafts = useMemo(
     () => Object.values(rateDrafts).filter((v) => v.trim() !== '').length,
@@ -192,68 +284,29 @@ export function FineDialog({
           Notify each learner in the app
         </label>
 
-        <div className="mt-4 max-h-72 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
+        <div className="mt-4">
           {isLoading ? (
-            <div className="flex h-24 items-center justify-center">
+            <div className="flex h-24 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700">
               <Loader2 className="h-5 w-5 animate-spin text-green-600" />
             </div>
           ) : isError ? (
-            <p className="p-3 text-sm text-red-600 dark:text-red-400">
+            <p className="rounded-lg border border-gray-200 p-3 text-sm text-red-600 dark:border-gray-700 dark:text-red-400">
               Couldn&apos;t price the selection.
             </p>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                <tr>
-                  <th className="px-3 py-2">Learner</th>
-                  <th className="px-3 py-2">Route</th>
-                  <th className="px-3 py-2">Stop</th>
-                  <th className="px-3 py-2 text-right">Transport fee</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.candidates ?? []).map((c) => (
-                  <tr key={c.person_id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
-                      {c.person_name}
-                      {c.code ? (
-                        <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">{c.code}</span>
-                      ) : null}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300">
-                      {c.route_number ?? '—'}
-                    </td>
-                    <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{c.stop_name ?? '—'}</td>
-                    <td className="px-3 py-2 text-right">
-                      {c.amount !== null ? (
-                        <span className="font-medium text-gray-900 dark:text-gray-100">
-                          {inr(c.amount)}
-                        </span>
-                      ) : c.stop_id && unpricedStopIds.has(c.stop_id) ? (
-                        // Unpriced stop: price it here and it lands in the sheet.
-                        <input
-                          type="number"
-                          min="1"
-                          step="0.01"
-                          inputMode="decimal"
-                          value={rateDrafts[c.stop_id] ?? ''}
-                          onChange={(e) =>
-                            setRateDrafts((d) => ({ ...d, [c.stop_id as string]: e.target.value }))
-                          }
-                          placeholder="Set fee ₹"
-                          aria-label={`Transport fee amount for ${c.stop_name ?? 'this stop'}`}
-                          className="h-8 w-28 rounded-lg border border-amber-300 bg-amber-50 px-2 text-right text-sm text-gray-900 placeholder:text-amber-700/60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-gray-100 dark:placeholder:text-amber-300/60"
-                        />
-                      ) : (
-                        <span className="text-amber-700 dark:text-amber-400">
-                          {c.skip_reason ? FINE_SKIP_LABEL[c.skip_reason] : 'Cannot be charged'}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <RateDraftContext.Provider value={rateDraftCtx}>
+              {/* A short selection reads as a plain list; a long one gets search + pages. */}
+              <DataTable
+                columns={PREVIEW_COLUMNS}
+                data={candidates}
+                entityName="learners"
+                getRowId={(c) => c.person_id}
+                compact={candidates.length <= 10}
+                pinFirstColumn={false}
+                searchPlaceholder="Search learner, route or stop..."
+                emptyMessage="No learners to charge."
+              />
+            </RateDraftContext.Provider>
           )}
         </div>
 

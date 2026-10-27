@@ -7,9 +7,11 @@
 // object on this page is the route itself, one row each, carrying the full
 // operating detail: timings, stops, driver, bus, load and turnout.
 //
-// Built as a real <table> rather than a div grid: this is genuinely tabular
-// data, so semantic markup gives screen readers row/column context for free
-// and lets the header cells carry the sort controls.
+// Rendered on the shared DataTable engine: this is genuinely tabular data, so
+// a real <table> gives screen readers row/column context, the headers sort,
+// and below 900px each route becomes a card instead of a sideways scroll.
+// The board keeps its own search / "Only issues" / sort controls because they
+// run the triage rules below, which the engine's generic search can't.
 //
 // Triage rules live in lib/dashboard/route-state.ts so they stay testable;
 // this file only decides how each state looks. Colour encodes operational
@@ -17,10 +19,12 @@
 
 import React, { useDeferredValue, useMemo, useState } from 'react';
 import Link from 'next/link';
+import type { ColumnDef } from '@tanstack/react-table';
 import {
   AlertCircle, Bus, CheckCircle2, CircleDot, MapPin, Search, UserPlus, UserX, X,
 } from 'lucide-react';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { DataTable } from '@/components/ui/data-table';
+import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import { card, num } from '../../_viz/kit';
 import { formatTime } from '@/lib/dashboard/format';
 import {
@@ -159,41 +163,26 @@ export function RouteBoard({ routes }: { routes: DashboardRouteRow[] }) {
         </div>
       </header>
 
-      {rows.length === 0 ? (
-        <p className="px-5 py-10 text-center text-sm text-muted-foreground">
-          No routes match that filter. Clear it to see all {routes.length}.
-        </p>
-      ) : (
-        // Table already provides its own overflow-auto wrapper, so a wide
-        // operating table scrolls horizontally on a phone rather than wrapping
-        // into something unreadable.
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <Th className="w-14">No.</Th>
-              <Th className="min-w-[200px]">Route</Th>
-              <Th className="min-w-[150px]">Driver</Th>
-              <Th className="min-w-[140px]">Timing</Th>
-              <Th className="min-w-[140px]">Bus</Th>
-              <Th className="text-right">Booked</Th>
-              <Th className="text-right">Boarded</Th>
-              <Th className="min-w-[150px]">Turnout</Th>
-              <Th className="min-w-[160px]">Status</Th>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <RouteRow key={row.route.id} {...row} />
-            ))}
-          </TableBody>
-        </Table>
-      )}
+      <div className="p-4">
+        {/* Keyed on the sort control: a header sort lives inside the table, so
+            without a remount picking "Busiest" after sorting by Driver would
+            change the data underneath while the header sort still won. */}
+        <DataTable
+          key={sort}
+          columns={ROUTE_COLUMNS}
+          data={rows}
+          compact
+          pageSize={100}
+          getRowId={(row) => row.route.id}
+          emptyMessage={`No routes match that filter. Clear it to see all ${routes.length}.`}
+        />
+      </div>
     </section>
   );
 }
 
 /**
- * Column header, with two defaults from the shared TableHead undone.
+ * Header with two defaults from the shared TableHead undone.
  *
  * That component hardcodes `uppercase` and `text-gray-500`. All-caps labels
  * are a decorative tic that costs legibility on a dense board, and a literal
@@ -201,105 +190,144 @@ export function RouteBoard({ routes }: { routes: DashboardRouteRow[] }) {
  * following `--muted-foreground`. Overridden here rather than in the shared
  * component, which ~20 other admin pages depend on looking as it does.
  */
-function Th({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <TableHead
-      scope="col"
-      className={`normal-case tracking-normal text-muted-foreground ${className ?? ''}`}
-    >
-      {children}
-    </TableHead>
-  );
-}
+const headCls = 'normal-case tracking-normal text-muted-foreground';
 
-function RouteRow({ route: r, state }: DecoratedRoute) {
-  const turnout = turnoutOf(r);
-  const load = loadOf(r);
-  const tone = TONE[state.kind];
-  const Icon = STATE_ICON[state.kind];
-  // Turnout can exceed 100% on walk-up routes; the bar fills and the note
-  // carries the overflow rather than the number being clamped to a tidy lie.
-  const fill = turnout === null ? 0 : Math.min(turnout, 100);
-
-  // The row highlights on hover to keep the eye on one route across nine
-  // columns, but it is NOT itself clickable — only the route number and name
-  // are links. cursor-pointer on the whole row would promise a click target
-  // that seven of the cells do not honour.
-  return (
-    <TableRow className="transition-colors duration-200 hover:bg-muted/60">
-      {/* The route number anchors the row: officers know buses by number. */}
-      <TableCell className="align-top">
-        <Link
-          href={`/routes/${r.id}`}
-          className="text-lg font-semibold leading-none tabular-nums text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {r.routeNumber}
-        </Link>
-      </TableCell>
-
-      <TableCell className="align-top">
-        <Link href={`/routes/${r.id}`} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <span className="block truncate font-medium text-foreground">{r.routeName}</span>
-          <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="h-3 w-3 shrink-0" aria-hidden />
-            <span className="truncate">
-              {r.startLocation ?? '—'} to {r.endLocation ?? '—'}
-            </span>
+// The rows arrive already ordered by the sort control (DataTable has no
+// default-sort prop); a header click re-sorts within that.
+//
+// No row is itself clickable — only the route number and name are links.
+// cursor-pointer on the whole row would promise a click target that seven of
+// the cells do not honour.
+const ROUTE_COLUMNS: ColumnDef<DecoratedRoute>[] = [
+  {
+    // The route number anchors the row: officers know buses by number.
+    id: 'number',
+    accessorFn: ({ route }) => route.routeNumber,
+    sortingFn: (a, b) =>
+      a.original.route.routeNumber.localeCompare(b.original.route.routeNumber, undefined, { numeric: true }),
+    size: 64,
+    meta: { label: 'No.' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="No." className={headCls} />,
+    cell: ({ row: { original: { route: r } } }) => (
+      <Link
+        href={`/routes/${r.id}`}
+        className="text-lg font-semibold leading-none tabular-nums text-foreground hover:text-green-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {r.routeNumber}
+      </Link>
+    ),
+  },
+  {
+    id: 'route',
+    accessorFn: ({ route }) => route.routeName,
+    meta: { label: 'Route' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Route" className={headCls} />,
+    cell: ({ row: { original: { route: r } } }) => (
+      <Link href={`/routes/${r.id}`} className="block min-w-[200px] max-w-[280px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="block truncate font-medium text-foreground">{r.routeName}</span>
+        <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+          <MapPin className="h-3 w-3 shrink-0" aria-hidden />
+          <span className="truncate">
+            {r.startLocation ?? '—'} to {r.endLocation ?? '—'}
           </span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
-            {num(r.stops)} {r.stops === 1 ? 'stop' : 'stops'}
-          </span>
-        </Link>
-      </TableCell>
-
-      <TableCell className="align-top">
-        {r.driverName ? (
-          <span className="text-sm text-foreground">{r.driverName}</span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: TONE['no-driver'] }}>
-            <UserX className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            Unassigned
-          </span>
-        )}
-      </TableCell>
-
-      <TableCell className="align-top">
+        </span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {num(r.stops)} {r.stops === 1 ? 'stop' : 'stops'}
+        </span>
+      </Link>
+    ),
+  },
+  {
+    id: 'driver',
+    accessorFn: ({ route }) => route.driverName ?? '',
+    meta: { label: 'Driver' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Driver" className={headCls} />,
+    cell: ({ row: { original: { route: r } } }) =>
+      r.driverName ? (
+        <span className="text-sm text-foreground">{r.driverName}</span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: TONE['no-driver'] }}>
+          <UserX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          Unassigned
+        </span>
+      ),
+  },
+  {
+    id: 'timing',
+    accessorFn: ({ route }) => route.departureTime ?? '',
+    meta: { label: 'Timing' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Timing" className={headCls} />,
+    cell: ({ row: { original: { route: r } } }) => (
+      <>
         <span className="block text-sm tabular-nums text-foreground">
           {formatTime(r.departureTime)} – {formatTime(r.arrivalTime)}
         </span>
         {r.duration && <span className="mt-0.5 block text-xs text-muted-foreground">{r.duration}</span>}
-      </TableCell>
-
-      <TableCell className="align-top">
-        {r.vehicleRegistration ? (
-          <>
-            <span className="flex items-center gap-1.5 text-sm text-foreground">
-              <Bus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="truncate">{r.vehicleRegistration}</span>
-            </span>
-            {load !== null && (
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {load}% of {r.capacity} seats
-              </span>
-            )}
-          </>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: TONE['no-bus'] }}>
-            <Bus className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            No bus
+      </>
+    ),
+  },
+  {
+    id: 'bus',
+    accessorFn: ({ route }) => route.vehicleRegistration ?? '',
+    meta: { label: 'Bus' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Bus" className={headCls} />,
+    cell: ({ row: { original: { route: r } } }) => {
+      const load = loadOf(r);
+      return r.vehicleRegistration ? (
+        <>
+          <span className="flex items-center gap-1.5 text-sm text-foreground">
+            <Bus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="truncate">{r.vehicleRegistration}</span>
           </span>
-        )}
-      </TableCell>
-
-      <TableCell className="text-right align-top text-sm tabular-nums text-foreground">
-        {num(r.booked)}
-      </TableCell>
-      <TableCell className="text-right align-top text-sm tabular-nums text-foreground">
-        {num(r.boarded)}
-      </TableCell>
-
-      <TableCell className="align-top">
-        <span className="flex items-center gap-2">
+          {load !== null && (
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {load}% of {r.capacity} seats
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: TONE['no-bus'] }}>
+          <Bus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          No bus
+        </span>
+      );
+    },
+  },
+  {
+    id: 'booked',
+    accessorFn: ({ route }) => route.booked,
+    meta: { label: 'Booked' },
+    header: ({ column }) => (
+      <div className="flex justify-end"><DataTableColumnHeader column={column} title="Booked" className={headCls} /></div>
+    ),
+    cell: ({ row }) => (
+      <span className="block text-right text-sm tabular-nums text-foreground">{num(row.original.route.booked)}</span>
+    ),
+  },
+  {
+    id: 'boarded',
+    accessorFn: ({ route }) => route.boarded,
+    meta: { label: 'Boarded' },
+    header: ({ column }) => (
+      <div className="flex justify-end"><DataTableColumnHeader column={column} title="Boarded" className={headCls} /></div>
+    ),
+    cell: ({ row }) => (
+      <span className="block text-right text-sm tabular-nums text-foreground">{num(row.original.route.boarded)}</span>
+    ),
+  },
+  {
+    id: 'turnout',
+    // No-booking routes have no turnout at all; sort them below a real 0%.
+    accessorFn: ({ route }) => turnoutOf(route) ?? -1,
+    meta: { label: 'Turnout' },
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Turnout" className={headCls} />,
+    cell: ({ row: { original: { route: r, state } } }) => {
+      const turnout = turnoutOf(r);
+      // Turnout can exceed 100% on walk-up routes; the bar fills and the note
+      // carries the overflow rather than the number being clamped to a tidy lie.
+      const fill = turnout === null ? 0 : Math.min(turnout, 100);
+      return (
+        <span className="flex min-w-[150px] items-center gap-2">
           <span
             className="h-1.5 flex-1 overflow-hidden rounded-full"
             style={{ background: 'color-mix(in oklab, var(--viz-neutral) 22%, transparent)' }}
@@ -313,28 +341,42 @@ function RouteRow({ route: r, state }: DecoratedRoute) {
                 asked the OS for reduced motion. */}
             <span
               className="block h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none"
-              style={{ width: `${fill}%`, background: tone }}
+              style={{ width: `${fill}%`, background: TONE[state.kind] }}
             />
           </span>
           <span className="w-11 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
             {turnout === null ? '—' : `${turnout}%`}
           </span>
         </span>
-      </TableCell>
-
-      <TableCell className="align-top">
-        {/* Icon plus text, never colour alone: colour is not the only carrier
-            of the state, so it survives colour-blindness and greyscale. */}
-        <span className="flex items-center gap-1.5 text-xs" style={{ color: tone }}>
-          <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="truncate">{state.note || 'Running normally'}</span>
-        </span>
-        {r.tripStatus && (
-          <span className="mt-0.5 block text-xs capitalize text-muted-foreground">
-            Trip {r.tripStatus}
+      );
+    },
+  },
+  {
+    // Not header-sortable: "Issues first" in the board's sort control is the
+    // status ordering, with its own priority rules.
+    id: 'status',
+    accessorFn: ({ state }) => state.note || 'Running normally',
+    enableSorting: false,
+    meta: { label: 'Status' },
+    header: () => <span className={headCls}>Status</span>,
+    cell: ({ row: { original: { route: r, state } } }) => {
+      const tone = TONE[state.kind];
+      const Icon = STATE_ICON[state.kind];
+      return (
+        <>
+          {/* Icon plus text, never colour alone: colour is not the only carrier
+              of the state, so it survives colour-blindness and greyscale. */}
+          <span className="flex items-center gap-1.5 text-xs" style={{ color: tone }}>
+            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{state.note || 'Running normally'}</span>
           </span>
-        )}
-      </TableCell>
-    </TableRow>
-  );
-}
+          {r.tripStatus && (
+            <span className="mt-0.5 block text-xs capitalize text-muted-foreground">
+              Trip {r.tripStatus}
+            </span>
+          )}
+        </>
+      );
+    },
+  },
+];

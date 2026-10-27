@@ -1,16 +1,12 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { titleCase } from '@/lib/format/display';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { DataTable } from '@/components/ui/data-table';
 import { istToday } from '@/lib/booking/window';
 import { fetchChecks } from './inspection-api';
+import { getCheckColumns } from './columns';
 
-const LEG_LABEL: Record<'onward' | 'return', string> = { onward: 'Morning', return: 'Evening' };
-const STATUS_BADGE: Record<'draft' | 'submitted', string> = {
-  draft: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  submitted: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-};
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function daysAgo(n: number): string {
@@ -29,8 +25,6 @@ export function checksRange(sp: { get: (k: string) => string | null }): { from: 
   };
 }
 
-const num = 'whitespace-nowrap px-4 py-3 text-right text-gray-700 dark:text-gray-300';
-
 export function ChecksTab({
   from,
   to,
@@ -40,14 +34,21 @@ export function ChecksTab({
   to: string;
   onRangeChange: (r: { from: string; to: string }) => void;
 }) {
-  const router = useRouter();
-
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['checks', from, to],
     queryFn: () => fetchChecks({ from, to }),
   });
 
-  const rows = data?.rows ?? [];
+  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const columns = useMemo(() => getCheckColumns(from, to), [from, to]);
+  // Route filter options from the checks actually in range, in route order.
+  const routeOptions = useMemo(() => {
+    const nums = new Set<string>();
+    for (const c of rows) if (c.routeNumber) nums.add(c.routeNumber);
+    return [...nums]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((n) => ({ label: n, value: n }));
+  }, [rows]);
 
   return (
     <div className="min-w-0 space-y-4">
@@ -83,77 +84,20 @@ export function ChecksTab({
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full min-w-[980px] text-sm">
-          <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
-            <tr>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Bus</th>
-              <th className="px-4 py-3">Trip</th>
-              <th className="px-4 py-3">Inspector</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Scanned</th>
-              <th className="px-4 py-3 text-right">Unpaid</th>
-              <th className="px-4 py-3 text-right">No booking</th>
-              <th className="px-4 py-3 text-right">Not on route</th>
-              <th className="px-4 py-3 text-right">Unknown cards</th>
-              <th className="px-4 py-3 text-right">Fines raised</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {isLoading &&
-              Array.from({ length: 3 }, (_, i) => (
-                <tr key={i}>
-                  <td className="px-4 py-3" colSpan={11}>
-                    <div className="h-4 w-full animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
-                  </td>
-                </tr>
-              ))}
-            {!isLoading && rows.length === 0 && (
-              <tr>
-                <td className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={11}>
-                  No checks in this range.
-                </td>
-              </tr>
-            )}
-            {rows.map((c) => (
-              <tr
-                key={c.id}
-                onClick={() => router.push(`/inspections/checks/${c.id}?from=${from}&to=${to}`)}
-                className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60"
-              >
-                <td className="whitespace-nowrap px-4 py-3 text-gray-700 dark:text-gray-300">{c.checkDate}</td>
-                <td className="min-w-0 px-4 py-3 text-gray-700 dark:text-gray-300">
-                  {c.routeNumber ?? '—'}
-                  {c.busRegistration ? ` · ${c.busRegistration}` : ''}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-700 dark:text-gray-300">{LEG_LABEL[c.leg]}</td>
-                <td className="min-w-0 px-4 py-3 text-gray-700 dark:text-gray-300">{c.checkerName ? titleCase(c.checkerName) : c.checkerEmail ?? '—'}</td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_BADGE[c.status]}`}>
-                    {c.status === 'submitted' ? 'Submitted' : 'Draft'}
-                  </span>
-                </td>
-                <td className={num}>{c.scanned.checked}</td>
-                <td className={num}>{c.scanned.unpaid}</td>
-                <td className={num}>{c.scanned.noBooking}</td>
-                <td className={num}>{c.scanned.notOnRoute}</td>
-                <td className={num}>{c.scanned.unknownCards}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-right">
-                  {c.status === 'draft' ? (
-                    // Fines are decided only at submit.
-                    <span className="text-gray-400 dark:text-gray-500">—</span>
-                  ) : c.scanned.finesRaised > 0 ? (
-                    <span className="font-semibold text-red-700 dark:text-red-300">{c.scanned.finesRaised}</span>
-                  ) : (
-                    <span className="text-gray-400 dark:text-gray-500">0</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={rows}
+        entityName="checks"
+        isLoading={isLoading}
+        getRowId={(c) => c.id}
+        searchPlaceholder="Search bus, route or inspector..."
+        emptyMessage="No checks in this range."
+        filters={[
+          ...(routeOptions.length ? [{ columnId: 'route', title: 'Route', options: routeOptions }] : []),
+          { columnId: 'leg', title: 'Trip', options: [{ label: 'Morning', value: 'onward' }, { label: 'Evening', value: 'return' }] },
+          { columnId: 'status', title: 'Status', options: [{ label: 'Submitted', value: 'submitted' }, { label: 'Draft', value: 'draft' }] },
+        ]}
+      />
     </div>
   );
 }
