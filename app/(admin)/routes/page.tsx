@@ -3,11 +3,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Upload, Route as RouteIcon, Navigation, Activity, Users, Trash2, BarChart3 } from 'lucide-react';
+import { Plus, Upload, Trash2, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { RouteImportDialog } from './route-import-dialog';
-import { getRouteColumns, type RouteRow } from './columns';
+import { getRouteColumns, isBusReporting, routeBusState, routeRiders, type RouteRow } from './columns';
 
 // Single request: the API embeds route_stops (ids only) via a nested select,
 // and the table/stats need nothing else — no per-route stop fetches, no
@@ -32,6 +35,9 @@ const RoutesPage = () => {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ rows: RouteRow[]; reset?: () => void } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const cf = useCardFilters();
 
   useEffect(() => {
     const userData = localStorage.getItem('adminUser');
@@ -58,46 +64,31 @@ const RoutesPage = () => {
     return { ok: res.ok && !!body.success, message: body.message, error: body.error };
   };
 
-  const handleDeleteRoute = async (route: RouteRow) => {
-    if (
-      !confirm(
-        `Are you sure you want to delete route ${route.route_number}?\n\nThis cannot be undone and will also delete all associated stops.`
-      )
-    )
-      return;
-    try {
-      const result = await deleteRouteById(route.id);
-      if (!result.ok) throw new Error(result.error || 'Failed to delete route');
-      toast.success(result.message || 'Route deleted');
-      await refetch();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete route');
-    }
-  };
+  // Single and bulk delete share one confirmation dialog (was window.confirm).
+  const handleDeleteRoute = (route: RouteRow) => setDeleteTarget({ rows: [route] });
+  const handleBulkDeleteRoutes = (rows: RouteRow[], reset: () => void) => setDeleteTarget({ rows, reset });
 
-  const handleBulkDeleteRoutes = async (rows: RouteRow[], reset: () => void) => {
-    if (
-      !confirm(
-        `Delete ${rows.length} route(s)?\n\nThis cannot be undone and will also delete all associated stops.`
-      )
-    )
-      return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { rows, reset } = deleteTarget;
+    setDeleting(true);
     try {
       const results = await Promise.all(rows.map((r) => deleteRouteById(r.id)));
       const failed = results.filter((r) => !r.ok);
-      reset();
-      await refetch();
+      reset?.();
       if (failed.length === 0) {
-        toast.success(`Deleted ${rows.length} route(s)`);
+        toast.success(rows.length === 1 ? results[0].message || 'Route deleted' : `Deleted ${rows.length} routes`);
       } else {
-        const succeeded = rows.length - failed.length;
         toast.error(
-          `Deleted ${succeeded}/${rows.length}. ${failed.length} could not be deleted` +
+          `Deleted ${rows.length - failed.length}/${rows.length}. ${failed.length} could not be deleted` +
             (failed[0]?.error ? `: ${failed[0].error}` : '')
         );
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete selected routes');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete route');
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
       await refetch();
     }
   };
@@ -122,67 +113,55 @@ const RoutesPage = () => {
     [canManage, canDelete, router]
   );
 
+  // Cards point at routes that can't run properly; each filters the table.
   const total = routes.length;
-  const active = routes.filter((r) => r.status === 'active').length;
-  // tms_route.total_capacity is stale (0 for all routes); the meaningful figure
-  // is assigned passengers — learners + staff — summed from the per-route counts
-  // the list API now returns.
-  const totalPassengers = routes.reduce((s, r) => s + (r._learnerCount || 0) + (r._staffCount || 0), 0);
-  const gpsEnabled = routes.filter((r) => r.start_latitude && r.start_longitude).length;
-  const stats = [
-    { label: 'Total Routes', value: total, icon: RouteIcon },
-    { label: 'Active', value: active, icon: Activity },
-    { label: 'Passengers', value: totalPassengers, icon: Users },
-    { label: 'GPS Enabled', value: gpsEnabled, icon: Navigation },
-  ];
+  const noBus = routes.filter((r) => routeBusState(r) !== 'ok').length;
+  const noDriver = routes.filter((r) => !r._driverName).length;
+  const overCapacity = routes.filter((r) => r._busCapacity && routeRiders(r) > r._busCapacity).length;
+  const reporting = routes.filter((r) => isBusReporting(r)).length;
+  const totalPassengers = routes.reduce((s, r) => s + routeRiders(r), 0);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Routes</h1>
-          <p className="text-gray-600">
-            Transportation routes and their stops. Live vehicle tracking is on the{' '}
-            <button onClick={() => router.push('/track-all')} className="font-medium text-green-600 hover:underline">
-              Track All
-            </button>{' '}
-            page.
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {/* Analytics is a read-only view, so it is NOT behind canManage —
-              anyone who can see the routes list can see how they ran today. */}
-          <button onClick={() => router.push('/routes/analytics')} className={outlineBtn}>
-            <BarChart3 className="h-4 w-4" /> Analytics
-          </button>
-          {canManage && (
-            <button onClick={() => setIsImportOpen(true)} className={outlineBtn}>
-              <Upload className="h-4 w-4" /> Import Routes
+      <PageHeader
+        description="Bus routes with their bus, driver, stops and riders."
+        actions={
+          <>
+            {/* Analytics is read-only, so it is NOT behind canManage. */}
+            <button onClick={() => router.push('/routes/analytics')} className={outlineBtn}>
+              <BarChart3 className="h-4 w-4" /> Analytics
             </button>
-          )}
-          {/* Add Route is an in-module page (no popup), matching the drivers module. */}
-          {canManage && (
-            <button
-              onClick={() => router.push('/routes/new')}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-            >
-              <Plus className="h-4 w-4" /> Add Route
-            </button>
-          )}
-        </div>
-      </div>
+            {canManage && (
+              <button onClick={() => setIsImportOpen(true)} className={outlineBtn}>
+                <Upload className="h-4 w-4" /> Import Routes
+              </button>
+            )}
+            {canManage && (
+              <button
+                onClick={() => router.push('/routes/new')}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+              >
+                <Plus className="h-4 w-4" /> Add Route
+              </button>
+            )}
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <s.icon className="h-4 w-4 text-gray-400" />
-              {s.label}
-            </div>
-            <p className="mt-1 text-2xl font-bold text-gray-900">{s.value}</p>
-          </div>
-        ))}
-      </div>
+      <SummaryCards>
+        <SummaryCard label="All routes" value={total} hint={`${totalPassengers.toLocaleString()} riders`} {...cf.allCard()} />
+        <SummaryCard label="No bus" value={noBus} tone={noBus ? 'danger' : 'neutral'} title="No bus, or a bus that no longer exists" {...cf.card('bus', 'none')} />
+        <SummaryCard label="No driver" value={noDriver} tone={noDriver ? 'warn' : 'neutral'} {...cf.card('driver', 'none')} />
+        <SummaryCard label="Over capacity" value={overCapacity} tone={overCapacity ? 'danger' : 'neutral'} title="More riders allocated than the bus has seats" {...cf.card('occupancy', 'over')} />
+        <SummaryCard
+          label="Buses reporting"
+          value={`${reporting} / ${total}`}
+          tone={reporting ? 'good' : 'neutral'}
+          hint="Open live tracking"
+          title="Buses that sent a GPS position in the last 5 minutes"
+          href="/track-all"
+        />
+      </SummaryCards>
 
       <DataTable
         columns={columns}
@@ -192,6 +171,10 @@ const RoutesPage = () => {
         searchPlaceholder="Search route #, name, location..."
         enableRowSelection={canManage}
         getRowId={(r) => r.id}
+        columnFilters={cf.filters}
+        onColumnFiltersChange={cf.setFilters}
+        // Distance / travel time / fare are mostly blank; still in the Columns menu.
+        initialColumnVisibility={{ journey: false, distance: false, duration: false, fare: false }}
         filters={[
           {
             columnId: 'status',
@@ -214,6 +197,17 @@ const RoutesPage = () => {
             </button>
           ) : null
         }
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && !deleting && setDeleteTarget(null)}
+        title={deleteTarget?.rows.length === 1 ? `Delete route ${deleteTarget.rows[0].route_number}?` : `Delete ${deleteTarget?.rows.length ?? 0} routes?`}
+        description="This cannot be undone and also deletes the route's stops."
+        confirmLabel="Delete"
+        danger
+        loading={deleting}
+        onConfirm={confirmDelete}
       />
 
       <RouteImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} onImported={() => refetch()} />

@@ -75,11 +75,52 @@ async function getRoutes() {
     for (const a of (staffAssigns ?? []) as { transport_route_id: string }[]) {
       staffCounts[a.transport_route_id] = (staffCounts[a.transport_route_id] ?? 0) + 1;
     }
-    const data = (routes ?? []).map((r) => ({
-      ...r,
-      _learnerCount: learnerCounts[r.id] ?? 0,
-      _staffCount: staffCounts[r.id] ?? 0,
-    }));
+    // Bus and driver for the list's Bus / Driver / Occupancy columns. A route's
+    // driver can be set from either admin screen (tms_route.driver_id = staff.id,
+    // or tms_driver.assigned_route_id), so both are honoured. A few routes point
+    // at vehicles that no longer exist; those come back with no bus.
+    const routeRows = (routes ?? []) as { id: string; vehicle_id: string | null; driver_id: string | null }[];
+    const vehicleIds = [...new Set(routeRows.map((r) => r.vehicle_id).filter(Boolean))] as string[];
+    const [{ data: vehicles }, { data: opsDrivers }] = await Promise.all([
+      vehicleIds.length
+        ? supabase.from('tms_vehicle').select('id, registration_number, capacity, last_gps_update').in('id', vehicleIds)
+        : Promise.resolve({ data: [] as { id: string; registration_number: string | null; capacity: number | null; last_gps_update: string | null }[] }),
+      supabase.from('tms_driver').select('staff_id, assigned_route_id').not('assigned_route_id', 'is', null),
+    ]);
+    const vehicleById = new Map(
+      ((vehicles ?? []) as { id: string; registration_number: string | null; capacity: number | null; last_gps_update: string | null }[]).map((v) => [v.id, v])
+    );
+    const driverStaffByRoute = new Map<string, string>();
+    for (const r of routeRows) if (r.driver_id) driverStaffByRoute.set(r.id, r.driver_id);
+    for (const d of (opsDrivers ?? []) as { staff_id: string; assigned_route_id: string }[]) {
+      if (!driverStaffByRoute.has(d.assigned_route_id)) driverStaffByRoute.set(d.assigned_route_id, d.staff_id);
+    }
+    const staffIds = [...new Set(driverStaffByRoute.values())];
+    const { data: driverStaff } = staffIds.length
+      ? await supabase.from('staff').select('id, first_name, last_name').in('id', staffIds)
+      : { data: [] as { id: string; first_name: string | null; last_name: string | null }[] };
+    const driverName = new Map(
+      ((driverStaff ?? []) as { id: string; first_name: string | null; last_name: string | null }[]).map((s) => [
+        s.id,
+        `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim(),
+      ])
+    );
+
+    const data = (routes ?? []).map((r) => {
+      const v = r.vehicle_id ? vehicleById.get(r.vehicle_id) : undefined;
+      const staffId = driverStaffByRoute.get(r.id);
+      return {
+        ...r,
+        _learnerCount: learnerCounts[r.id] ?? 0,
+        _staffCount: staffCounts[r.id] ?? 0,
+        _busNumber: v?.registration_number ?? null,
+        // vehicle_id set but no such vehicle — shown as "Missing bus".
+        _busMissing: !!r.vehicle_id && !v,
+        _busCapacity: v?.capacity ?? null,
+        _busLastGps: v?.last_gps_update ?? null,
+        _driverName: staffId ? driverName.get(staffId) || null : null,
+      };
+    });
 
     return NextResponse.json({
       success: true,

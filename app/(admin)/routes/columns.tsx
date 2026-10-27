@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Eye, MapPin, MoreHorizontal, Navigation, Pencil, Trash2, Users } from 'lucide-react';
+import { titleCase } from '@/lib/format/display';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import {
@@ -36,6 +37,41 @@ export interface RouteRow {
   vehicles?: { registration_number?: string } | null;
   start_latitude?: number | null;
   start_longitude?: number | null;
+  // Joined by /api/admin/routes for the Bus / Driver / Occupancy columns.
+  _busNumber?: string | null;
+  _busMissing?: boolean;
+  _busCapacity?: number | null;
+  _busLastGps?: string | null;
+  _driverName?: string | null;
+}
+
+export const routeRiders = (r: RouteRow) => (r._learnerCount ?? 0) + (r._staffCount ?? 0);
+
+/** 'none' | 'missing' | 'ok' — used by the "No bus" card filter. */
+export const routeBusState = (r: RouteRow) => (r._busNumber ? 'ok' : r._busMissing ? 'missing' : 'none');
+
+/** A bus counts as reporting when its last GPS fix is under 5 minutes old (Track All's "Live"). */
+export const isBusReporting = (r: RouteRow, now = Date.now()) =>
+  !!r._busLastGps && now - new Date(r._busLastGps).getTime() < 5 * 60_000;
+
+// Riders against the bus's seats, as a bar. No seats known -> riders only.
+function OccupancyCell({ r }: { r: RouteRow }) {
+  const riders = routeRiders(r);
+  const seats = r._busCapacity ?? 0;
+  if (!seats) return <span className="tabular-nums text-sm text-gray-600 dark:text-gray-300">{riders} riders</span>;
+  const pct = Math.round((riders / seats) * 100);
+  const bar = pct > 100 ? 'bg-red-500' : pct >= 85 ? 'bg-amber-500' : 'bg-green-500';
+  return (
+    <div className="w-28" title={`${riders} riders on ${seats} seats (${pct}%)`}>
+      <div className="flex justify-between text-xs tabular-nums text-gray-600 dark:text-gray-300">
+        <span>{riders}/{seats}</span>
+        <span className={pct > 100 ? 'font-semibold text-red-600 dark:text-red-400' : ''}>{pct}%</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+        <div className={`h-full ${bar}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+    </div>
+  );
 }
 
 const fmtTime = (t?: string) => (t ? t.slice(0, 5) : '—'); // 'HH:MM:SS' → 'HH:MM'
@@ -84,6 +120,7 @@ export function getRouteColumns(
     ...(canManage ? [selectColumn] : []),
     {
       accessorKey: 'route_number',
+      meta: { label: 'Route no.' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Route #" />,
       size: 90,
       cell: ({ row }) => (
@@ -92,6 +129,7 @@ export function getRouteColumns(
     },
     {
       accessorKey: 'route_name',
+      meta: { label: 'Name' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
       cell: ({ row }) => (
         <Link
@@ -104,6 +142,7 @@ export function getRouteColumns(
     },
     {
       id: 'journey',
+      meta: { label: 'Journey' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Journey" />,
       accessorFn: (r) => `${r.start_location ?? ''} ${r.end_location ?? ''}`,
       enableSorting: false,
@@ -118,6 +157,7 @@ export function getRouteColumns(
     },
     {
       id: 'timing',
+      meta: { label: 'Timing' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Timing" />,
       accessorFn: (r) => r.departure_time ?? '',
       cell: ({ row }) => (
@@ -128,6 +168,7 @@ export function getRouteColumns(
     },
     {
       id: 'distance',
+      meta: { label: 'Distance' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Distance" />,
       accessorFn: (r) => Number(r.distance) || 0,
       size: 100,
@@ -142,6 +183,7 @@ export function getRouteColumns(
     },
     {
       id: 'duration',
+      meta: { label: 'Travel time' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Travel time" />,
       accessorFn: (r) => r.duration ?? '',
       enableSorting: false,
@@ -154,6 +196,7 @@ export function getRouteColumns(
     },
     {
       id: 'fare',
+      meta: { label: 'Fare' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Fare" />,
       accessorFn: (r) => Number(r.fare) || 0,
       size: 100,
@@ -168,6 +211,7 @@ export function getRouteColumns(
     },
     {
       id: 'stops',
+      meta: { label: 'Stops' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Stops" />,
       accessorFn: (r) => r.route_stops?.length ?? 0,
       size: 80,
@@ -175,6 +219,7 @@ export function getRouteColumns(
     },
     {
       id: 'passengers',
+      meta: { label: 'Passengers' },
       // Combined count = learners + staff. Clicking it opens the combined roster
       // (both lists) at /routes/[id]/passengers.
       header: ({ column }) => <DataTableColumnHeader column={column} title="Passengers" />,
@@ -195,7 +240,48 @@ export function getRouteColumns(
       },
     },
     {
+      id: 'bus',
+      meta: { label: 'Bus' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Bus" />,
+      accessorFn: (r) => r._busNumber ?? '',
+      filterFn: (row, _id, value) => routeBusState(row.original) === value || (value === 'none' && routeBusState(row.original) === 'missing'),
+      cell: ({ row }) => {
+        const r = row.original;
+        if (r._busNumber) return <span className="whitespace-nowrap font-medium text-gray-800 dark:text-gray-200">{r._busNumber}</span>;
+        return r._busMissing ? (
+          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-400" title="The route points at a bus that no longer exists — pick a bus in Edit">
+            Missing bus
+          </span>
+        ) : (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">No bus</span>
+        );
+      },
+    },
+    {
+      id: 'driver',
+      meta: { label: 'Driver' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Driver" />,
+      accessorFn: (r) => r._driverName ?? '',
+      filterFn: (row, _id, value) => (value === 'none' ? !row.original._driverName : true),
+      cell: ({ row }) =>
+        row.original._driverName ? (
+          <span className="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{titleCase(row.original._driverName)}</span>
+        ) : (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">No driver</span>
+        ),
+    },
+    {
+      id: 'occupancy',
+      meta: { label: 'Occupancy' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Occupancy" />,
+      accessorFn: (r) => (r._busCapacity ? routeRiders(r) / r._busCapacity : -1),
+      // 'over' (card) = more riders than seats.
+      filterFn: (row, id, value) => (value === 'over' ? (row.getValue(id) as number) > 1 : true),
+      cell: ({ row }) => <OccupancyCell r={row.original} />,
+    },
+    {
       id: 'status',
+      meta: { label: 'Status' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (r) => r.status ?? '',
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,

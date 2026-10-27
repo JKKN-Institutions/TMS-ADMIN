@@ -4,7 +4,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import type { AssignmentRow } from './columns';
+import { assignmentPerson, type AssignmentRow } from './columns';
 
 /**
  * Styled confirm dialog for removing a staff ↔ route assignment (replaces the
@@ -60,7 +60,7 @@ export function AssignmentDeleteDialog({
           </div>
           <DialogDescription className="pt-2">
             This removes the assignment of{' '}
-            <span className="break-words font-medium text-gray-900">{assignment?.staff_email}</span> from route{' '}
+            <span className="break-words font-medium text-gray-900">{assignment ? assignmentPerson(assignment) : ''}</span> from route{' '}
             <span className="font-medium text-gray-900">{routeLabel}</span>. The staff member and the route are not
             deleted and the assignment can be re-created later. This action cannot be undone.
           </DialogDescription>

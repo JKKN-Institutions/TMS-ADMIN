@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useEffect, useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -131,6 +132,7 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
   const [insertAfter, setInsertAfter] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [stopBusy, setStopBusy] = useState(false);
+  const [stopToDelete, setStopToDelete] = useState<Stop | null>(null);
 
   const set = (k: keyof FormState, v: string) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -262,7 +264,7 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
   };
 
   const deleteStop = async (stop: Stop) => {
-    if (!stop.id || !confirm(`Delete the stop "${stop.stop_name}"?`)) return;
+    if (!stop.id) return;
     setStopBusy(true);
     try {
       const res = await fetch(`/api/admin/routes/${routeId}/stops?stopId=${stop.id}`, { method: 'DELETE' });
@@ -425,7 +427,7 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
                 )}
                 <button
                   type="button"
-                  onClick={() => deleteStop(s)}
+                  onClick={() => setStopToDelete(s)}
                   disabled={stopBusy || !s.id}
                   className="shrink-0 rounded-md p-1.5 text-red-500 transition-colors hover:bg-red-50 disabled:opacity-40 dark:hover:bg-red-500/10"
                   aria-label={`Delete ${s.stop_name}`}
@@ -441,6 +443,20 @@ export default function RouteEditPage({ params }: { params: Promise<{ routeId: s
       <SectionCard title="Possible stops">
         <PossibleStopsManager routeId={routeId} routeName={form.route_name} />
       </SectionCard>
+
+      <ConfirmDialog
+        open={!!stopToDelete}
+        onOpenChange={(o) => !o && !stopBusy && setStopToDelete(null)}
+        title={`Delete the stop "${stopToDelete?.stop_name ?? ''}"?`}
+        description="Learners boarding at this stop lose their boarding stop. To rename or move a stop, edit it instead."
+        confirmLabel="Delete stop"
+        danger
+        loading={stopBusy}
+        onConfirm={async () => {
+          if (stopToDelete) await deleteStop(stopToDelete);
+          setStopToDelete(null);
+        }}
+      />
     </div>
   );
 }

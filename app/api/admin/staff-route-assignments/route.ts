@@ -45,6 +45,26 @@ async function loadRouteCapacities(
   return out;
 }
 
+// lower(email) and lower(institution_email) → staff display name.
+async function loadStaffNamesByEmail(supabase: ReturnType<typeof createServiceRoleClient>) {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('first_name, last_name, email, institution_email, designation, is_active');
+  if (error) throw error;
+  const out = new Map<string, { name: string; designation: string | null }>();
+  type Row = { first_name: string | null; last_name: string | null; email: string | null; institution_email: string | null; designation: string | null; is_active: boolean | null };
+  // Active rows last so they win when an address appears twice.
+  const rows = ((data ?? []) as Row[]).sort((a, b) => Number(!!a.is_active) - Number(!!b.is_active));
+  for (const r of rows) {
+    const name = `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim();
+    if (!name) continue;
+    for (const e of [r.email, r.institution_email]) {
+      if (e) out.set(e.toLowerCase().trim(), { name, designation: r.designation });
+    }
+  }
+  return out;
+}
+
 // GET: active staff↔route assignments, each with its embedded tms_route.
 async function getAssignments() {
   try {
@@ -84,10 +104,21 @@ async function getAssignments() {
       loadRouteCapacities(supabase, routes ?? []),
     ]);
 
+    // Display names. Assignments store only the email the admin typed, which
+    // may be the personal (staff.email) or institutional address, in any case,
+    // so match both columns case-insensitively. ~900 staff rows: one read.
+    const nameByEmail = await loadStaffNamesByEmail(supabase).catch((e) => {
+      console.error('Assignment staff-name lookup error:', e);
+      return new Map<string, { name: string; designation: string | null }>();
+    });
+
     const assignments = (rows ?? []).map((r) => {
       const route = routeById.get(r.route_id);
+      const person = nameByEmail.get(String(r.staff_email ?? '').toLowerCase().trim());
       return {
         ...r,
+        staff_name: person?.name ?? null,
+        staff_designation: person?.designation ?? null,
         routes: route
           ? {
               ...route,
