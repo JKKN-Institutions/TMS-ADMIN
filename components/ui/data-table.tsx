@@ -84,7 +84,7 @@ interface DataTableProps<TData, TValue> {
   onColumnFiltersChange?: (filters: ColumnFiltersState) => void;
   /** Keep the first data column (and the checkbox) visible while scrolling sideways. Default on. */
   pinFirstColumn?: boolean;
-  /** Below 900px render each row as a card instead of a cut-off table. Default on. */
+  /** Below 900px render each row as a card. Default OFF: the user wants the table format everywhere (it scrolls sideways with the first column pinned). */
   mobileCards?: boolean;
   /**
    * Small embedded table (a breakdown inside a detail page or dialog): no
@@ -114,7 +114,7 @@ export function DataTable<TData, TValue>({
   columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 10,
   entityName = 'rows', isLoading = false, enableRowSelection = false, canSelectRow, getRowId, toolbarActions,
   onFilteredRowsChange, initialColumnVisibility, initialColumnFilters, columnFilters: controlledFilters,
-  onColumnFiltersChange, pinFirstColumn = true, mobileCards = true, compact = false, emptyMessage = 'No results.',
+  onColumnFiltersChange, pinFirstColumn = true, mobileCards = false, compact = false, emptyMessage = 'No results.',
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [innerFilters, setInnerFilters] = React.useState<ColumnFiltersState>(initialColumnFilters ?? []);

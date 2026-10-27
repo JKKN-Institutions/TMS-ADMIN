@@ -178,7 +178,6 @@ export function CoverageGrid({
         searchPlaceholder="Search route…"
         // A matrix makes no sense as cards; it scrolls sideways instead, with
         // the route column pinned.
-        mobileCards={false}
       />
     </div>
   );

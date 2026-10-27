@@ -297,7 +297,7 @@ const columns = useMemo(
 | `initialColumnVisibility` | `VisibilityState` | a column that only powers a filter can start hidden |
 | `onFilteredRowsChange` | `(rows, isFiltered) => void` | for totals/export that must follow filters; memoise `data` or it loops |
 | `pinFirstColumn` | `boolean` | default on: checkbox + first data column stay visible when scrolling sideways |
-| `mobileCards` | `boolean` | default on: below 900px rows render as cards labelled by `meta.label`; turn off for matrices |
+| `mobileCards` | `boolean` | default OFF — user rule: table format on every screen size, never cards. Don't turn it on |
 | `compact` | `boolean` | embedded breakdowns (detail pages, dialogs): no toolbar, footer only when >1 page |
 | `emptyMessage` | `ReactNode` | replaces "No results." |
 
