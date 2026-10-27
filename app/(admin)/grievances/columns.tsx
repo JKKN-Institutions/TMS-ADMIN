@@ -12,6 +12,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { grievanceCategoryLabel } from '@/lib/grievances/categories';
+import { AgeBadge } from '@/components/ui/display-bits';
+import { ageInDays, isActiveTicket, isOverdueTicket } from '@/lib/format/display';
+
+/** Status filter: 'active' = open or in progress (the default view); 'done' = resolved or closed. */
+export const statusFilterFn = (value: string, status: string) =>
+  value === 'active' ? isActiveTicket(status) : value === 'done' ? status === 'resolved' || status === 'closed' : status === value;
 
 // Shape of one row from GET /api/admin/transport-grievances (tms_grievance,
 // with learner + route labels joined server-side).
@@ -146,12 +152,23 @@ export function getGrievanceColumns(
       id: 'status',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (g) => g.status ?? '',
-      filterFn: (row, id, value) => (row.getValue(id) as string) === value,
+      filterFn: (row, id, value) => statusFilterFn(String(value), row.getValue(id) as string),
       size: 130,
       cell: ({ row }) => <StatusBadge status={row.original.status} />,
     },
     {
+      id: 'age',
+      meta: { label: 'Age' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Age" />,
+      accessorFn: (g) => ageInDays(g.createdAt),
+      // Card filter 'overdue'.
+      filterFn: (row, _id, value) => (value === 'overdue' ? isOverdueTicket(row.original) : true),
+      size: 120,
+      cell: ({ row }) => <AgeBadge status={row.original.status} priority={row.original.priority} createdAt={row.original.createdAt} />,
+    },
+    {
       accessorKey: 'createdAt',
+      meta: { label: 'Submitted' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Submitted" />,
       size: 120,
       cell: ({ row }) => (

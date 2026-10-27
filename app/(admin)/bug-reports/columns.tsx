@@ -3,6 +3,12 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import { Eye, MoreHorizontal } from 'lucide-react';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
+import { AgeBadge } from '@/components/ui/display-bits';
+import { ageInDays, isActiveTicket, isOverdueTicket } from '@/lib/format/display';
+
+/** Status filter: 'active' = open or in progress (the default view); 'done' = resolved or closed. */
+export const statusFilterFn = (value: string, status: string) =>
+  value === 'active' ? isActiveTicket(status) : value === 'done' ? status === 'resolved' || status === 'closed' : status === value;
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -130,9 +136,18 @@ export function getBugColumns(onView: (b: BugReportRow) => void): ColumnDef<BugR
       id: 'status',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
       accessorFn: (b) => b.status ?? '',
-      filterFn: (r, id, value) => (r.getValue(id) as string) === value,
+      filterFn: (r, id, value) => statusFilterFn(String(value), r.getValue(id) as string),
       size: 130,
       cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    },
+    {
+      id: 'age',
+      meta: { label: 'Age' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Age" />,
+      accessorFn: (b) => ageInDays(b.createdAt),
+      filterFn: (r, _id, value) => (value === 'overdue' ? isOverdueTicket(r.original) : true),
+      size: 120,
+      cell: ({ row }) => <AgeBadge status={row.original.status} priority={row.original.priority} createdAt={row.original.createdAt} />,
     },
     {
       accessorKey: 'createdAt',

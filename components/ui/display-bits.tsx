@@ -2,7 +2,10 @@
 
 import { Phone } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { daysUntil, expiryState, formatDate, isPlaceholderPhone, type ExpiryState } from '@/lib/format/display';
+import {
+  ageInDays, daysUntil, expiryState, formatAge, formatDate, isActiveTicket, isOverdueTicket, isPlaceholderPhone,
+  type ExpiryState,
+} from '@/lib/format/display';
 
 const EXPIRY_CLS: Record<ExpiryState, string> = {
   missing: 'bg-gray-100 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300',
@@ -45,4 +48,21 @@ export function PhoneLink({ phone }: { phone: string | null | undefined }) {
       {phone}
     </a>
   );
+}
+
+/** How long a ticket has been waiting, red with "Overdue" once past its window. */
+export function AgeBadge({ status, priority, createdAt }: { status: string; priority?: string | null; createdAt: string }) {
+  const days = ageInDays(createdAt);
+  if (!isActiveTicket(status)) return <span className="text-sm text-gray-500">{formatAge(days)}</span>;
+  if (isOverdueTicket({ status, priority, createdAt })) {
+    return (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+        <span className="text-sm font-medium text-red-600 dark:text-red-400">{formatAge(days)}</span>
+        <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-700 dark:bg-red-500/15 dark:text-red-400">
+          Overdue
+        </span>
+      </span>
+    );
+  }
+  return <span className="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatAge(days)}</span>;
 }

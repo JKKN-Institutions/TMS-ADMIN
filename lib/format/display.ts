@@ -53,3 +53,32 @@ export function formatDate(date: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return date;
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
+
+// ── Ticket age (grievances, bug reports) ────────────────────────────────────
+
+/** Statuses that still need someone to act. */
+export const ACTIVE_TICKET_STATUSES = ['open', 'in_progress'] as const;
+
+export const isActiveTicket = (status: string | null | undefined) =>
+  (ACTIVE_TICKET_STATUSES as readonly string[]).includes(status ?? '');
+
+/** Whole days since the item was raised. */
+export function ageInDays(createdAt: string | null | undefined): number {
+  if (!createdAt) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000));
+}
+
+/**
+ * Overdue = still open/in progress past its response window: 3 days for
+ * high/critical priority, 7 days for everything else (agreed 2026-10-26).
+ */
+export function isOverdueTicket(t: { status: string; priority?: string | null; createdAt: string }): boolean {
+  if (!isActiveTicket(t.status)) return false;
+  const limit = t.priority === 'high' || t.priority === 'critical' ? 3 : 7;
+  return ageInDays(t.createdAt) > limit;
+}
+
+/** "Today", "1 day", "12 days". */
+export function formatAge(days: number): string {
+  return days === 0 ? 'Today' : days === 1 ? '1 day' : `${days} days`;
+}

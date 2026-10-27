@@ -2,10 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock, MessageSquare, X } from 'lucide-react';
+import { Check, ChevronDown, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DataTable } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { isActiveTicket, isOverdueTicket } from '@/lib/format/display';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,30 +59,6 @@ async function fetchDetail(id: string): Promise<Detail> {
   return (await res.json()).data as Detail;
 }
 
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  accent,
-}: {
-  label: string;
-  value: number;
-  icon: typeof MessageSquare;
-  accent: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${accent}`}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div>
-        <div className="text-2xl font-semibold leading-none text-gray-900 dark:text-gray-100">{value}</div>
-        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{label}</div>
-      </div>
-    </div>
-  );
-}
-
 // Styled status picker — matches the app's Radix dropdown style (rounded border,
 // chevron trigger, green-hover items with a check on the active one) used by the
 // table filters, instead of the unstyleable native <select> popup.
@@ -122,6 +102,9 @@ export default function GrievancesPage() {
   const [comment, setComment] = useState('');
   const [resolution, setResolution] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
+  // Opens on what still needs action; clearing the chip shows everything.
+  const cf = useCardFilters([{ id: 'status', value: 'active' }]);
+  const [closing, setClosing] = useState<GrievanceRow | null>(null);
 
   const detail = useQuery({
     queryKey: ['admin-grievance', openId],
@@ -174,7 +157,9 @@ export default function GrievancesPage() {
     setResolution('');
     setComment('');
   };
-  const onSetStatus = (g: GrievanceRow, status: string) => updateStatus.mutate({ grievanceId: g.id, status });
+  // Closing ends the conversation for the learner, so it confirms first.
+  const onSetStatus = (g: GrievanceRow, status: string) =>
+    status === 'closed' ? setClosing(g) : updateStatus.mutate({ grievanceId: g.id, status });
 
   const columns = useMemo(
     () => getGrievanceColumns(onView, onSetStatus, canManage),
@@ -185,9 +170,10 @@ export default function GrievancesPage() {
   const stats = useMemo(
     () => ({
       total: list.length,
-      open: list.filter((g) => g.status === 'open').length,
+      active: list.filter((g) => isActiveTicket(g.status)).length,
+      overdue: list.filter((g) => isOverdueTicket(g)).length,
       inProgress: list.filter((g) => g.status === 'in_progress').length,
-      resolved: list.filter((g) => g.status === 'resolved').length,
+      resolved: list.filter((g) => g.status === 'resolved' || g.status === 'closed').length,
     }),
     [list]
   );
@@ -208,30 +194,31 @@ export default function GrievancesPage() {
   if (error) return <div className="p-4 text-destructive">{(error as Error).message}</div>;
 
   return (
-    <div className="space-y-5 p-4">
-      <div>
-        <h1 className="text-xl font-semibold">Transport Grievances</h1>
-        <p className="text-sm text-muted-foreground">Review, respond to and resolve learner transport grievances.</p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader description="Complaints raised by learners, drivers and boarding staff. Reply, update the status, and resolve." />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Total" value={stats.total} icon={MessageSquare} accent="bg-gray-100 text-gray-600 dark:bg-gray-500/20 dark:text-gray-300" />
-        <StatCard label="Open" value={stats.open} icon={AlertCircle} accent="bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" />
-        <StatCard label="In progress" value={stats.inProgress} icon={Clock} accent="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" />
-        <StatCard label="Resolved" value={stats.resolved} icon={CheckCircle2} accent="bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400" />
-      </div>
+      <SummaryCards>
+        <SummaryCard label="Needs action" value={stats.active} tone={stats.active ? 'warn' : 'neutral'} title="Open or in progress" {...cf.card('status', 'active')} />
+        <SummaryCard label="Overdue" value={stats.overdue} tone={stats.overdue ? 'danger' : 'neutral'} title="Waiting more than 3 days (high priority) or 7 days" {...cf.card('age', 'overdue')} />
+        <SummaryCard label="In progress" value={stats.inProgress} tone="info" {...cf.card('status', 'in_progress')} />
+        <SummaryCard label="Resolved / closed" value={stats.resolved} tone="good" {...cf.card('status', 'done')} />
+        <SummaryCard label="All grievances" value={stats.total} {...cf.allCard()} />
+      </SummaryCards>
 
       <DataTable
         columns={columns}
         data={list}
         entityName="grievances"
         isLoading={isLoading}
+        columnFilters={cf.filters}
+        onColumnFiltersChange={cf.setFilters}
         searchPlaceholder="Search subject, learner, roll…"
         filters={[
           {
             columnId: 'status',
             title: 'Status',
             options: [
+              { label: 'Needs action', value: 'active' },
               { label: 'Open', value: 'open' },
               { label: 'In progress', value: 'in_progress' },
               { label: 'Resolved', value: 'resolved' },
@@ -376,6 +363,18 @@ export default function GrievancesPage() {
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={!!closing}
+        onOpenChange={(o) => !o && !updateStatus.isPending && setClosing(null)}
+        title="Close this grievance?"
+        description={closing ? `"${closing.subject}" will be closed and the learner can no longer reply to it.` : undefined}
+        confirmLabel="Close grievance"
+        loading={updateStatus.isPending}
+        onConfirm={() =>
+          closing &&
+          updateStatus.mutate({ grievanceId: closing.id, status: 'closed' }, { onSettled: () => setClosing(null) })
+        }
+      />
     </div>
   );
 }
