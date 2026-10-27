@@ -86,6 +86,14 @@ interface DataTableProps<TData, TValue> {
   pinFirstColumn?: boolean;
   /** Below 900px render each row as a card instead of a cut-off table. Default on. */
   mobileCards?: boolean;
+  /**
+   * Small embedded table (a breakdown inside a detail page or dialog): no
+   * toolbar, and the count/pagination footer only appears when there is more
+   * than one page. Sorting, pinning and the phone card view still apply.
+   */
+  compact?: boolean;
+  /** Text shown when there are no rows. */
+  emptyMessage?: React.ReactNode;
 }
 
 const PAGE_SIZES = [25, 50, 100];
@@ -106,7 +114,7 @@ export function DataTable<TData, TValue>({
   columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 25,
   entityName = 'rows', isLoading = false, enableRowSelection = false, canSelectRow, getRowId, toolbarActions,
   onFilteredRowsChange, initialColumnVisibility, initialColumnFilters, columnFilters: controlledFilters,
-  onColumnFiltersChange, pinFirstColumn = true, mobileCards = true,
+  onColumnFiltersChange, pinFirstColumn = true, mobileCards = true, compact = false, emptyMessage = 'No results.',
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [innerFilters, setInnerFilters] = React.useState<ColumnFiltersState>(initialColumnFilters ?? []);
@@ -218,6 +226,7 @@ export function DataTable<TData, TValue>({
     <TooltipProvider delayDuration={300}>
     <div className="space-y-3">
       {/* Toolbar */}
+      {!compact && (
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           {globalSearch && (
@@ -306,6 +315,7 @@ export function DataTable<TData, TValue>({
           </DropdownMenu>
         </div>
       </div>
+      )}
 
       {/* Active filter chips */}
       {chips.length > 0 && (
@@ -373,7 +383,7 @@ export function DataTable<TData, TValue>({
                 </TableRow>
               ))
             ) : (
-              <TableRow><TableCell colSpan={visibleLeaf.length || columns.length} className="h-24 text-center text-gray-500">No results.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={visibleLeaf.length || columns.length} className="h-24 text-center text-gray-500">{emptyMessage}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -387,12 +397,13 @@ export function DataTable<TData, TValue>({
           ) : pageRows.length ? (
             pageRows.map((row) => <RowCard key={row.id} row={row} columnLabel={columnLabel} />)
           ) : (
-            <div className="rounded-xl border border-gray-200 bg-white py-10 text-center text-sm text-gray-500">No results.</div>
+            <div className="rounded-xl border border-gray-200 bg-white py-10 text-center text-sm text-gray-500">{emptyMessage}</div>
           )}
         </div>
       )}
 
       {/* Count + pagination */}
+      {(!compact || pageCount > 1) && (
       <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
         <div className="flex-1 text-sm text-gray-600">
           Showing <span className="font-medium text-gray-900">{firstShown.toLocaleString()}–{lastShown.toLocaleString()}</span> of{' '}
@@ -416,6 +427,7 @@ export function DataTable<TData, TValue>({
           </div>
         </div>
       </div>
+      )}
     </div>
     </TooltipProvider>
   );
