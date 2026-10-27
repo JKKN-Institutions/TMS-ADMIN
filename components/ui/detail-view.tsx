@@ -94,7 +94,9 @@ export function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-0.5 break-words text-sm font-medium text-gray-900">{empty ? '—' : value}</p>
+      {/* A div, not a p: values are ReactNode and often contain block elements
+          (photo grids, badge rows), which are invalid inside <p> and break hydration. */}
+      <div className="mt-0.5 break-words text-sm font-medium text-gray-900">{empty ? '—' : value}</div>
     </div>
   );
 }

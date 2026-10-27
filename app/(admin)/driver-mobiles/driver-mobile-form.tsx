@@ -312,12 +312,21 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
             <div className="mt-3 flex flex-wrap gap-3">
               {form.image_paths.map((path, i) => (
                 <div key={path} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={imagePreviews[path] ?? ''}
-                    alt={i === 0 ? 'Cover handover photo' : `Handover photo ${i + 1}`}
-                    className="h-24 w-24 rounded border border-gray-200 object-cover dark:border-gray-700"
-                  />
+                  {/* The signed preview URL arrives after the path; until then show a
+                      placeholder (an empty src would re-request the page). */}
+                  {imagePreviews[path] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={imagePreviews[path]!}
+                      alt={i === 0 ? 'Cover handover photo' : `Handover photo ${i + 1}`}
+                      className="h-24 w-24 rounded border border-gray-200 object-cover dark:border-gray-700"
+                    />
+                  ) : (
+                    <div
+                      aria-label="Loading photo preview"
+                      className="h-24 w-24 animate-pulse rounded border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800"
+                    />
+                  )}
                   {i === 0 && (
                     <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">
                       Cover
