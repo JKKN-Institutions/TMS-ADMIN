@@ -1,9 +1,9 @@
--- UI improvement plan, data clean-up (2026-10-27).
+-- UI improvement plan, data clean-up (2026-10-27). APPLIED to the live DB 2026-10-27.
 -- Text fixes only; rows are updated in place (never deleted — deleting a route
 -- stop orphans or cascades the riders boarding there).
 --
 -- Route 39's start point is spelled KALLIPATTI while its name says KAALIPATTI;
--- only the stray spaces are fixed here until the correct spelling is confirmed.
+-- the user chose to keep both spellings as they are; only the stray spaces are fixed.
 
 begin;
 

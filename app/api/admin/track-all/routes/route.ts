@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { isPlaceholderPhone } from '@/lib/format/display';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -153,7 +154,7 @@ async function handler(_request: NextRequest, auth: AuthContext) {
         routeId: r.id,
         routeNumber: r.route_number,
         routeName: r.route_name,
-        driver: d ? { id: d.id, name: driverName || '—', phone: s?.phone?.trim() || null } : null,
+        driver: d ? { id: d.id, name: driverName || '—', phone: s?.phone && !isPlaceholderPhone(s.phone) ? s.phone.trim() : null } : null,
         vehicle: veh ? { id: veh.id, registrationNumber: veh.registration_number } : null,
         position,
         heading: veh?.gps_heading ?? null,

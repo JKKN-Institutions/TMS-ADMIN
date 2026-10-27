@@ -29,19 +29,9 @@ export function ExpiryBadge({ date, missingLabel = 'Not on file' }: { date: stri
   );
 }
 
-/** Tap-to-call phone number; flags known placeholder numbers instead of offering a call. */
+/** Tap-to-call phone number. Known placeholder numbers (e.g. 9898989898) show as empty. */
 export function PhoneLink({ phone }: { phone: string | null | undefined }) {
-  if (!phone) return <span className="text-gray-400">—</span>;
-  if (isPlaceholderPhone(phone)) {
-    return (
-      <span className="inline-flex items-center gap-1.5" title="Placeholder number — the real number is not on file">
-        <span className="text-gray-400 line-through">{phone}</span>
-        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-          Placeholder
-        </span>
-      </span>
-    );
-  }
+  if (!phone || isPlaceholderPhone(phone)) return <span className="text-gray-400">—</span>;
   return (
     <a href={`tel:${phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1 text-gray-700 hover:text-green-700 hover:underline dark:text-gray-300">
       <Phone className="h-3.5 w-3.5 text-gray-400" />
