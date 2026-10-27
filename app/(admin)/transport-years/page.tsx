@@ -6,8 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, CalendarRange, CheckCircle, Star, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import UniversalStatCard from '@/components/universal-stat-card';
 import { getTransportYearColumns, type TransportYearRow } from './columns';
 
 async function fetchYears(): Promise<TransportYearRow[]> {
@@ -104,50 +104,30 @@ export default function TransportYearsPage() {
     [canManage, canDelete]
   );
 
-  const total = years.length;
-  const active = years.filter((y) => y.is_active).length;
+  // Only a handful of years exist, so no summary cards — the current year is
+  // named in the description instead.
   const current = years.find((y) => y.is_current);
-  const stats = [
-    { title: 'Total Years', value: total, subtitle: 'All transport years', icon: CalendarRange, color: 'blue' as const },
-    { title: 'Active', value: active, subtitle: 'Open for operations', icon: CheckCircle, color: 'green' as const },
-    { title: 'Current Year', value: current?.name ?? '—', subtitle: 'In effect now', icon: Star, color: 'purple' as const },
-  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Transport Years</h1>
-          <p className="text-gray-600">Manage academic year periods for the transport module</p>
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
+      <PageHeader
+        description={
+          <>
+            Academic years that bus fees and passes belong to.{' '}
+            {current ? <>Current year: <span className="font-medium text-gray-900 dark:text-gray-100">{current.name}</span>.</> : 'No year is marked current — fees cannot be assigned until one is.'}
+          </>
+        }
+        actions={
+          canManage && (
             <button
               onClick={() => router.push('/transport-years/new')}
               className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
             >
               <Plus className="h-4 w-4" /> Add Transport Year
             </button>
-          </div>
-        )}
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        {stats.map((s, i) => (
-          <UniversalStatCard
-            key={s.title}
-            title={s.title}
-            value={s.value}
-            subtitle={s.subtitle}
-            icon={s.icon}
-            color={s.color}
-            variant="default"
-            loading={loading}
-            delay={i}
-          />
-        ))}
-      </div>
+          )
+        }
+      />
 
       {/* Data table */}
       <DataTable

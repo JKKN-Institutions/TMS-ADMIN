@@ -7,8 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, Receipt, CheckCircle, IndianRupee, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DataTable } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import UniversalStatCard from '@/components/universal-stat-card';
 import { getFeeColumns } from './columns';
 import { inr } from './columns';
 import type { FeeStructureRow } from '@/lib/fees/types';
@@ -102,58 +102,38 @@ export default function FeesPage() {
     [canManage, canDelete]
   );
 
-  const total = rows.length;
-  const active = rows.filter((r) => r.status === 'active').length;
+  // A few structures only — no summary cards; the active fee range is in the description.
   const range = activeAnnualFeeRange(rows);
-  const rangeLabel = !range ? '—' : range.min === range.max ? inr(range.min) : `${inr(range.min)} – ${inr(range.max)}`;
-  const stats = [
-    { title: 'Structures', value: total, subtitle: 'All maintenance fee structures', icon: Receipt, color: 'blue' as const },
-    { title: 'Active', value: active, subtitle: 'Ready to generate', icon: CheckCircle, color: 'green' as const },
-    { title: 'Annual Fee Range', value: rangeLabel, subtitle: 'Per person, across active fees', icon: IndianRupee, color: 'purple' as const },
-  ];
+  const rangeLabel = !range ? null : range.min === range.max ? inr(range.min) : `${inr(range.min)} – ${inr(range.max)}`;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Transport Maintenance Fee</h1>
-          <p className="text-gray-600">
-            The recurring charge the institution collects. Configure structures and generate bills.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Link
-            href="/fees/fine-rates"
-            className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            <IndianRupee className="h-4 w-4" /> Transport Fee rates
-          </Link>
-          {canManage && (
-            <button
-              onClick={() => router.push('/fees/new')}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+      <PageHeader
+        description={
+          <>
+            The yearly bus maintenance charge. Set up fee structures here, then generate bills.
+            {rangeLabel && <> Active fees: <span className="font-medium text-gray-900 dark:text-gray-100">{rangeLabel}</span> per person a year.</>}
+          </>
+        }
+        actions={
+          <>
+            <Link
+              href="/fees/fine-rates"
+              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              <Plus className="h-4 w-4" /> Add Structure
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        {stats.map((s, i) => (
-          <UniversalStatCard
-            key={s.title}
-            title={s.title}
-            value={s.value}
-            subtitle={s.subtitle}
-            icon={s.icon}
-            color={s.color}
-            variant="default"
-            loading={loading}
-            delay={i}
-          />
-        ))}
-      </div>
+              <IndianRupee className="h-4 w-4" /> Transport Fee rates
+            </Link>
+            {canManage && (
+              <button
+                onClick={() => router.push('/fees/new')}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+              >
+                <Plus className="h-4 w-4" /> Add Structure
+              </button>
+            )}
+          </>
+        }
+      />
 
       <DataTable
         columns={columns}

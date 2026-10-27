@@ -11,6 +11,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Clock } from 'lucide-react';
+import { PageHeader } from '@/components/ui/page-header';
 import { CoverageGrid } from './coverage-grid';
 import {
   DEFAULT_COVERAGE_THRESHOLD,
@@ -65,14 +66,8 @@ export default function AttendanceCoveragePage() {
   });
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
-      <header className="min-w-0">
-        <h1 className="text-xl font-semibold text-foreground">Attendance coverage</h1>
-        <p className="text-sm text-muted-foreground">
-          Every route, every service day. Only marks made by a person count — trips closed by the
-          auto-absent job are shown separately.
-        </p>
-      </header>
+    <div className="space-y-4">
+      <PageHeader description="Whether each bus was marked on each service day. Only marks made by staff count; trips closed automatically at the end of the marking window are shown in blue." />
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-xs text-muted-foreground">
@@ -126,8 +121,8 @@ export default function AttendanceCoveragePage() {
         <div className="flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
           <p className="min-w-0 text-foreground">
-            {data.summary.autoOnlyRouteDays} route-days were closed by the auto-absent job with no
-            mark from any staff member. Those learners are recorded absent, but nobody was marking
+            {data.summary.autoOnlyRouteDays} route-days were closed automatically with no mark from
+            any staff member. Those learners are recorded absent, but nobody was marking
             the bus.
           </p>
         </div>

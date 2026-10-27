@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { BarChart3, CalendarCheck, Download } from 'lucide-react';
 import { DataTable, FilterSelect } from '@/components/ui/data-table';
+import { PageHeader } from '@/components/ui/page-header';
+import { SummaryCard, SummaryCards } from '@/components/ui/summary-cards';
 import { istToday, addDays } from '@/lib/booking/window';
 import { getBookingColumns } from './columns';
 import { toBookingsCsv } from '@/lib/booking/bookings-csv';
@@ -49,7 +51,15 @@ function exportCsv(rows: BookingListRow[], dateStamp: string) {
 export default function BookingsPage() {
   const today = istToday();
   const [from, setFrom] = useState<string>(today);
-  const [to, setTo] = useState<string>(addDays(today, 92));
+  // Default to today's bookings — the list admins actually work from. It used
+  // to open on the next 92 days, burying today under three months of rows.
+  const [to, setTo] = useState<string>(today);
+  const presets = [
+    { label: 'Today', from: today, to: today },
+    { label: 'Tomorrow', from: addDays(today, 1), to: addDays(today, 1) },
+    { label: 'Next 7 days', from: today, to: addDays(today, 6) },
+    { label: 'Next 30 days', from: today, to: addDays(today, 29) },
+  ];
   const [routeId, setRouteId] = useState('');
 
   const { data: routes = [] } = useQuery({ queryKey: ['admin-routes'], queryFn: fetchRoutes });
@@ -61,36 +71,50 @@ export default function BookingsPage() {
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const columns = useMemo(() => getBookingColumns(today), [today]);
 
-  const stats = useMemo(() => {
-    const learners = new Set(rows.map((r) => r.learner_id));
-    const routeSet = new Set(rows.map((r) => r.route_id));
-    const todayCount = rows.filter((r) => r.travel_date === today).length;
-    return [
-      { label: 'Bookings (in range)', value: rows.length },
-      { label: 'Distinct Learners', value: learners.size },
-      { label: 'Routes', value: routeSet.size },
-      { label: "Today's Bookings", value: todayCount },
-    ];
-  }, [rows, today]);
+  const stats = useMemo(() => ({
+    learners: new Set(rows.map((r) => r.learner_id)).size,
+    routes: new Set(rows.map((r) => r.route_id)).size,
+    byAdmin: rows.filter((r) => r.booked_by_label === 'Admin').length,
+  }), [rows]);
+  const rangeLabel = from === to ? (from === today ? 'today' : from) : `${from} to ${to}`;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Bookings</h1>
-          <p className="text-gray-600 dark:text-gray-400">Daily bus bookings across all routes — read-only, over the live booking system.</p>
-        </div>
-        <Link
-          href="/bookings/analytics"
-          className="inline-flex h-[38px] shrink-0 cursor-pointer items-center gap-2 self-start rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-        >
-          <BarChart3 className="h-4 w-4" aria-hidden="true" /> Analytics
-        </Link>
-      </div>
+      <PageHeader
+        description="Seats learners have booked on each bus. View only."
+        actions={
+          <Link
+            href="/bookings/analytics"
+            className="inline-flex h-[38px] shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            <BarChart3 className="h-4 w-4" aria-hidden="true" /> Analytics
+          </Link>
+        }
+      />
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-wrap gap-1.5 self-center" role="group" aria-label="Date range">
+          {presets.map((p) => {
+            const on = from === p.from && to === p.to;
+            return (
+              <button
+                key={p.label}
+                type="button"
+                aria-pressed={on}
+                onClick={() => { setFrom(p.from); setTo(p.to); }}
+                className={`h-[38px] rounded-lg border px-3 text-sm font-medium transition-colors ${
+                  on
+                    ? 'border-green-600 bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
         <label className="text-sm">From<input type="date" className={`mt-1 block ${input}`} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="text-sm">To<input type="date" className={`mt-1 block ${input}`} value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <label className="text-sm">To<input type="date" className={`mt-1 block ${input}`} value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
         <div className="text-sm">
           <span className="mb-1 block text-gray-700 dark:text-gray-300">Route</span>
           <FilterSelect
@@ -102,14 +126,12 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="text-sm text-gray-500">{s.label}</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{s.value}</p>
-          </div>
-        ))}
-      </div>
+      <SummaryCards>
+        <SummaryCard label="Bookings" value={rows.length.toLocaleString()} hint={rangeLabel} />
+        <SummaryCard label="Learners" value={stats.learners.toLocaleString()} />
+        <SummaryCard label="Routes" value={stats.routes} />
+        <SummaryCard label="Booked by admin" value={stats.byAdmin} />
+      </SummaryCards>
 
       {isError ? (
         <div className="py-16 text-center">

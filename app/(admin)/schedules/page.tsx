@@ -3,7 +3,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { CalendarDays, Ban, Users, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { CalendarDays, Ban, Users, Plus, Trash2, RefreshCw, ChevronRight } from 'lucide-react';
+import { PageHeader } from '@/components/ui/page-header';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { formatDate } from '@/lib/format/display';
 
 type Tab = 'calendar' | 'windows' | 'manifest';
 const istToday = () => new Date(Date.now() + (5 * 60 + 30) * 60_000).toISOString().slice(0, 10);
@@ -26,10 +29,7 @@ export default function SchedulesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Transport Schedule Management</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Service calendar, booking windows, and daily load — over the live booking system.</p>
-      </div>
+      <PageHeader description="Holidays and no-service days, per-route booking windows, and each day's bus load." />
 
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
         <TabButton active={tab === 'calendar'} onClick={() => setTab('calendar')} icon={<CalendarDays className="h-4 w-4" />} label="Service Calendar" />
@@ -55,6 +55,111 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
 
 const card = 'rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900';
 const input = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800';
+
+
+/* ---- Shared: dated rows, upcoming first, past collapsed ---- */
+// Both lists used to be plain text lines in date order, so this term's
+// upcoming holidays sat under every past one. Upcoming rows now come first in
+// a table; past rows fold away. Deletes confirm first.
+function DatedTable<T extends { id: string }>({
+  rows, dateOf, columns, onDelete, deleting, describe, empty,
+}: {
+  rows: T[];
+  dateOf: (r: T) => string;
+  columns: { header: string; cell: (r: T) => React.ReactNode }[];
+  onDelete: (r: T) => Promise<unknown>;
+  deleting: boolean;
+  describe: (r: T) => string;
+  empty: string;
+}) {
+  const today = istToday();
+  const [pending, setPending] = useState<T | null>(null);
+  const upcoming = rows.filter((r) => dateOf(r).slice(0, 10) >= today).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+  const past = rows.filter((r) => dateOf(r).slice(0, 10) < today).sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
+
+  const table = (list: T[]) => (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 dark:border-gray-800">
+            <th className="py-2 pr-3 font-medium">Date</th>
+            {columns.map((c) => <th key={c.header} className="py-2 pr-3 font-medium">{c.header}</th>)}
+            <th className="py-2 text-right font-medium"><span className="sr-only">Delete</span></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          {list.map((r) => {
+            const d = dateOf(r).slice(0, 10);
+            const weekday = new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' });
+            return (
+              <tr key={r.id}>
+                <td className="whitespace-nowrap py-2 pr-3 font-medium text-gray-900 dark:text-gray-100">
+                  {formatDate(d)} <span className="text-xs font-normal text-gray-500">{weekday}</span>
+                </td>
+                {columns.map((c) => <td key={c.header} className="py-2 pr-3">{c.cell(r)}</td>)}
+                <td className="py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setPending(r)}
+                    aria-label={`Delete ${describe(r)}`}
+                    title="Delete"
+                    className="rounded-md p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div className={card}>
+      {rows.length === 0 ? (
+        <p className="text-sm text-gray-500">{empty}</p>
+      ) : (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upcoming ({upcoming.length})</h3>
+          {upcoming.length ? table(upcoming) : <p className="text-sm text-gray-500">Nothing upcoming.</p>}
+          {past.length > 0 && (
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400">
+                <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" /> Past ({past.length})
+              </summary>
+              <div className="mt-2 opacity-80">{table(past)}</div>
+            </details>
+          )}
+        </div>
+      )}
+      <ConfirmDialog
+        open={!!pending}
+        onOpenChange={(o) => !o && !deleting && setPending(null)}
+        title={`Delete ${pending ? describe(pending) : ''}?`}
+        description="Bookings for that date go back to the normal rules."
+        confirmLabel="Delete"
+        danger
+        loading={deleting}
+        onConfirm={async () => {
+          if (pending) await onDelete(pending).catch(() => undefined);
+          setPending(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function TypeBadge({ tone, children }: { tone: 'red' | 'amber' | 'green' | 'gray'; children: React.ReactNode }) {
+  const cls = {
+    red: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400',
+    amber: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+    green: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400',
+    gray: 'bg-gray-100 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300',
+  }[tone];
+  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{children}</span>;
+}
 
 /* ---- Tab 1: Service Calendar ---- */
 interface ServiceCalRow { id: string; exception_date: string; route_id: string | null; kind: 'holiday' | 'no_service'; note: string | null }
@@ -89,6 +194,7 @@ function ServiceCalendarTab() {
       if (!res.ok) throw new Error('Failed');
     },
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['svc-cal'] }); },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to remove'),
   });
 
   return (
@@ -107,18 +213,19 @@ function ServiceCalendarTab() {
           <Plus className="h-4 w-4" /> Add
         </button>
       </div>
-      <div className={card}>
-        {(data ?? []).length === 0 ? <p className="text-sm text-gray-500">No exceptions.</p> : (
-          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-            {(data ?? []).map((r) => (
-              <li key={r.id} className="flex items-center justify-between py-2 text-sm">
-                <span><strong>{r.exception_date}</strong> · {r.kind === 'holiday' ? 'Holiday' : 'No service'}{r.note ? ` — ${r.note}` : ''}{r.route_id ? ' (route-specific)' : ' (all routes)'}</span>
-                <button type="button" onClick={() => del.mutate(r.id)} className="text-red-600 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <DatedTable
+        rows={data ?? []}
+        dateOf={(r) => r.exception_date}
+        empty="No holidays or no-service days added."
+        describe={(r) => `${r.kind === 'holiday' ? 'holiday' : 'no-service day'} on ${formatDate(r.exception_date)}`}
+        deleting={del.isPending}
+        onDelete={(r) => del.mutateAsync(r.id)}
+        columns={[
+          { header: 'Type', cell: (r) => (r.kind === 'holiday' ? <TypeBadge tone="red">Holiday</TypeBadge> : <TypeBadge tone="amber">No service</TypeBadge>) },
+          { header: 'Applies to', cell: (r) => (r.route_id ? 'One route' : 'All routes') },
+          { header: 'Note', cell: (r) => r.note || <span className="text-gray-400">—</span> },
+        ]}
+      />
     </div>
   );
 }
@@ -161,6 +268,7 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
       if (!res.ok) throw new Error('Failed');
     },
     onSuccess: () => { toast.success('Removed'); qc.invalidateQueries({ queryKey: ['windows', routeId] }); },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to remove'),
   });
 
   return (
@@ -180,18 +288,19 @@ function BookingWindowsTab({ routes }: { routes: RouteOpt[] }) {
           className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-50">Save window</button>
       </div>
       {routeId && (
-        <div className={card}>
-          {(data ?? []).length === 0 ? <p className="text-sm text-gray-500">No overrides for this route — the default 8 PM-day-before rule applies.</p> : (
-            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-              {(data ?? []).map((w) => (
-                <li key={w.id} className="flex items-center justify-between py-2 text-sm">
-                  <span><strong>{w.travel_date}</strong> · {w.booking_enabled ? 'Open' : 'Closed'}{w.deadline ? ` · deadline ${new Date(w.deadline).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : ''}{w.capacity_override != null ? ` · cap ${w.capacity_override}` : ''}</span>
-                  <button type="button" onClick={() => del.mutate(w.id)} className="text-red-600 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <DatedTable
+          rows={data ?? []}
+          dateOf={(w) => w.travel_date}
+          empty="No changes for this route — the normal booking deadline applies."
+          describe={(w) => `booking window on ${formatDate(w.travel_date)}`}
+          deleting={del.isPending}
+          onDelete={(w) => del.mutateAsync(w.id)}
+          columns={[
+            { header: 'Booking', cell: (w) => (w.booking_enabled ? <TypeBadge tone="green">Open</TypeBadge> : <TypeBadge tone="red">Closed</TypeBadge>) },
+            { header: 'Deadline', cell: (w) => (w.deadline ? new Date(w.deadline).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : <span className="text-gray-400">Normal</span>) },
+            { header: 'Seat limit', cell: (w) => (w.capacity_override != null ? w.capacity_override : <span className="text-gray-400">Bus seats</span>) },
+          ]}
+        />
       )}
     </div>
   );
