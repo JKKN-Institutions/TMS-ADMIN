@@ -286,11 +286,28 @@ const columns = useMemo(
 | `isLoading` | `boolean` | renders skeleton rows |
 | `searchPlaceholder` | `string` | global fuzzy search box hint |
 | `globalSearch` | `boolean` | default `true`; set `false` to hide the search box |
-| `pageSize` | `number` | default `10` |
-| `filters` | `DataTableFilter[]` | each `columnId` MUST equal a filterable column's `id` |
+| `pageSize` | `number` | default `10` (menu offers 10/25/50/100); don't override it in admin pages |
+| `filters` | `DataTableFilter[]` | each `columnId` MUST equal a filterable column's `id`; 2+ collapse into one Filters button with chips |
 | `enableRowSelection` | `boolean` | requires the `select` column + `getRowId` |
+| `canSelectRow` | `(row) => boolean` | per-row selectability |
 | `getRowId` | `(row, i) => string` | use the stable PK so selection survives sort/filter |
 | `toolbarActions` | `(ctx) => ReactNode` | right-side slot; `ctx` has `selectedRows` + `resetSelection` |
+| `initialColumnFilters` | `ColumnFiltersState` | e.g. grievances open on "Needs action" |
+| `columnFilters` + `onColumnFiltersChange` | controlled | let `SummaryCards` (`useCardFilters()` in `components/ui/summary-cards.tsx`) drive filters |
+| `initialColumnVisibility` | `VisibilityState` | a column that only powers a filter can start hidden |
+| `onFilteredRowsChange` | `(rows, isFiltered) => void` | for totals/export that must follow filters; memoise `data` or it loops |
+| `pinFirstColumn` | `boolean` | default on: checkbox + first data column stay visible when scrolling sideways |
+| `mobileCards` | `boolean` | default on: below 900px rows render as cards labelled by `meta.label`; turn off for matrices |
+| `compact` | `boolean` | embedded breakdowns (detail pages, dialogs): no toolbar, footer only when >1 page |
+| `emptyMessage` | `ReactNode` | replaces "No results." |
+
+Column `meta`: always set `meta: { label: 'Name' }` (headers are components, so the card view and
+Columns menu need a plain label); `meta: { hideInCard: true }` drops a column from phone cards.
+
+The engine has **no row-click** and **no default-sort** prop: link the first cell instead of the
+row, and pre-sort `data` for a default order (remount with `key` if an outside control re-sorts).
+If a cell holds an input whose value lives in page state, don't rebuild columns on every keystroke
+(the input remounts and loses focus) — pass the value through React context instead.
 
 ---
 

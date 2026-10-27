@@ -172,7 +172,6 @@ export function RouteBoard({ routes }: { routes: DashboardRouteRow[] }) {
           columns={ROUTE_COLUMNS}
           data={rows}
           compact
-          pageSize={100}
           getRowId={(row) => row.route.id}
           emptyMessage={`No routes match that filter. Clear it to see all ${routes.length}.`}
         />

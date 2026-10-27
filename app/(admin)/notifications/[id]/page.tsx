@@ -9,12 +9,9 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { CategoryBadge, PriorityBadge } from '../columns';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { DataTable } from '@/components/ui/data-table';
+import { recipientColumns, READ_STATUS_OPTIONS, type DetailRecipient } from './recipients-columns';
 
-interface DetailRecipient {
-  userId: string;
-  email: string | null;
-  readAt: string | null;
-}
 interface Detail {
   id: string;
   title: string | null;
@@ -123,21 +120,16 @@ export default function NotificationDetailPage({ params }: { params: Promise<{ i
                       : `${data.stats.recipients.toLocaleString()} total`}
                   </span>
                 </div>
-                <div className="max-h-[28rem] divide-y divide-gray-50 overflow-y-auto dark:divide-gray-800">
-                  {data.recipients.length === 0 ? (
-                    <p className="px-5 py-8 text-center text-sm text-muted-foreground">No recipients.</p>
-                  ) : (
-                    data.recipients.map((r) => (
-                      <div key={r.userId} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
-                        <span className="truncate text-gray-700 dark:text-gray-200">{r.email ?? r.userId}</span>
-                        {r.readAt ? (
-                          <span className="shrink-0 text-xs font-medium text-green-600 dark:text-green-400">Read · {fmt(r.readAt)}</span>
-                        ) : (
-                          <span className="shrink-0 text-xs text-gray-400">Unread</span>
-                        )}
-                      </div>
-                    ))
-                  )}
+                <div className="p-4">
+                  <DataTable
+                    columns={recipientColumns}
+                    data={data.recipients}
+                    entityName="recipients"
+                    searchPlaceholder="Search recipient…"
+                    filters={[{ columnId: 'status', title: 'Status', options: READ_STATUS_OPTIONS }]}
+                    getRowId={(r) => r.userId}
+                    emptyMessage="No recipients."
+                  />
                 </div>
               </section>
             </div>

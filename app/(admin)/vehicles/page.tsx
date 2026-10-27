@@ -55,6 +55,18 @@ const VehiclesPage = () => {
     if (isError) toast.error('Failed to load vehicles');
   }, [isError]);
 
+  // Route filter: every route a bus serves today, in route-number order.
+  const routeOptions = useMemo(() => {
+    const nums = new Set<string>();
+    for (const v of vehicles as VehicleRow[]) for (const r of v._routes ?? []) if (r.number) nums.add(r.number);
+    return [
+      ...[...nums]
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .map((n) => ({ label: `Route ${n}`, value: n })),
+      { label: 'No route', value: 'none' },
+    ];
+  }, [vehicles]);
+
   // Single and bulk delete share one confirmation dialog (was window.confirm).
   const handleDeleteVehicle = (vehicle: VehicleRow) => setDeleteTarget({ rows: [vehicle] });
   const handleBulkDeleteVehicles = (rows: VehicleRow[], reset: () => void) => setDeleteTarget({ rows, reset });
@@ -191,6 +203,7 @@ const VehiclesPage = () => {
         // columns are summarised by Documents. All stay in the Columns menu.
         initialColumnVisibility={{ next_maintenance: false, insurance_expiry: false, fitness_expiry: false, mileage: false }}
         filters={[
+          { columnId: 'route', title: 'Route', options: routeOptions },
           {
             columnId: 'documents',
             title: 'Documents',

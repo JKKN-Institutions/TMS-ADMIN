@@ -176,8 +176,6 @@ export function CoverageGrid({
         getRowId={(r) => r.routeId}
         entityName="routes"
         searchPlaceholder="Search route…"
-        // The whole fleet (~35 routes) on one page, as before.
-        pageSize={50}
         // A matrix makes no sense as cards; it scrolls sideways instead, with
         // the route column pinned.
         mobileCards={false}

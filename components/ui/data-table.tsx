@@ -96,7 +96,7 @@ interface DataTableProps<TData, TValue> {
   emptyMessage?: React.ReactNode;
 }
 
-const PAGE_SIZES = [25, 50, 100];
+const PAGE_SIZES = [10, 25, 50, 100];
 const UTILITY_COLUMNS = new Set(['select', 'actions']);
 
 // "licenseNumber" -> "License Number" for the column-visibility menu.
@@ -111,7 +111,7 @@ function prettifyColumnId(id: string) {
 }
 
 export function DataTable<TData, TValue>({
-  columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 25,
+  columns, data, searchPlaceholder = 'Search...', globalSearch = true, filters = [], pageSize = 10,
   entityName = 'rows', isLoading = false, enableRowSelection = false, canSelectRow, getRowId, toolbarActions,
   onFilteredRowsChange, initialColumnVisibility, initialColumnFilters, columnFilters: controlledFilters,
   onColumnFiltersChange, pinFirstColumn = true, mobileCards = true, compact = false, emptyMessage = 'No results.',

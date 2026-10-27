@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { AlertTriangle, CheckCircle, Eye, MoreHorizontal, Navigation, Pencil, Trash2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -58,6 +59,8 @@ export interface VehicleRow {
   monthly_emi?: number | string | null;
   fuel_card_number?: string | null;
   operating_cost_per_km?: number | string | null;
+  /** Routes this bus serves (from tms_route.vehicle_id), joined by the list API. */
+  _routes?: { id: string; number: string; name: string }[];
   // Emergency
   emergency_contact_name?: string | null;
   emergency_contact_phone?: string | null;
@@ -222,6 +225,39 @@ export function getVehicleColumns(
           {row.original.registration_number}
         </button>
       ),
+    },
+    {
+      // Route number(s) this bus runs; sorts numerically, filters by route or "none".
+      id: 'route',
+      meta: { label: 'Route No' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Route No" />,
+      accessorFn: (v) => (v._routes ?? []).map((r) => r.number).join(', '),
+      sortingFn: (a, b) =>
+        (Number.parseFloat(a.original._routes?.[0]?.number ?? '') || Infinity) -
+        (Number.parseFloat(b.original._routes?.[0]?.number ?? '') || Infinity),
+      filterFn: (row, _id, value) => {
+        const nums = (row.original._routes ?? []).map((r) => r.number);
+        return value === 'none' ? nums.length === 0 : nums.includes(value as string);
+      },
+      size: 110,
+      cell: ({ row }) => {
+        const rs = row.original._routes ?? [];
+        if (!rs.length) return <span className="text-gray-400">No route</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {rs.map((r) => (
+              <Link
+                key={r.id}
+                href={`/routes/${r.id}`}
+                title={r.name}
+                className="font-semibold tabular-nums text-gray-900 hover:text-green-600 hover:underline dark:text-gray-100"
+              >
+                {r.number}
+              </Link>
+            ))}
+          </div>
+        );
+      },
     },
     {
       accessorKey: 'model',

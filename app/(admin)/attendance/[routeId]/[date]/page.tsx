@@ -276,8 +276,6 @@ export default function AttendanceDayPage({
           data={data.rows}
           getRowId={(r) => r.learner_id}
           entityName="learners"
-          // A whole bus on one page, as the plain table showed it.
-          pageSize={100}
           searchPlaceholder="Search learner, roll, stop…"
           filters={[{ columnId: 'status', title: 'Status', options: STATUS_OPTIONS }]}
           emptyMessage="No learners on this roster."

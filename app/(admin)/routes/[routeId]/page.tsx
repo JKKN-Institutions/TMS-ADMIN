@@ -1,21 +1,12 @@
 'use client';
 
-import { use } from 'react';
+import { use, useMemo } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { MapPin, Navigation, Pencil, Users } from 'lucide-react';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
-
-interface RouteStop {
-  id: string;
-  stop_name: string;
-  stop_time: string; // morning / inbound (to-college) pickup
-  evening_time?: string | null; // evening / outbound (from-college) drop
-  sequence_order: number;
-  is_major_stop: boolean;
-  latitude?: number | null;
-  longitude?: number | null;
-}
+import { DataTable } from '@/components/ui/data-table';
+import { stopColumns, fmtTime, STOP_TYPE_OPTIONS, type RouteStop } from './stops-columns';
 
 interface RouteDetail {
   id: string;
@@ -45,8 +36,6 @@ interface RouteDetail {
 
 interface DriverOption { id: string; name?: string | null }
 interface VehicleOption { id: string; registration_number?: string | null; vehicle_number?: string | null }
-
-const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '—');
 
 // Occupancy "{riders} / {seats}". Riders = passengers = learners + staff (both
 // occupy a seat), counted live by the API. Seats come from the assigned vehicle
@@ -130,6 +119,14 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
     queryFn: fetchVehicles,
   });
 
+  // Pre-sorted by sequence: the table has no default-sort prop, so data order
+  // IS the default order. Memoised (before the early returns) so the table
+  // isn't handed a fresh array on every render.
+  const stops = useMemo(
+    () => (route?.route_stops ?? []).slice().sort((a, b) => a.sequence_order - b.sequence_order),
+    [route]
+  );
+
   const loading = routeLoading || driversLoading || vehiclesLoading;
   const error = routeIsError;
 
@@ -165,7 +162,6 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
     );
   }
 
-  const stops = (route.route_stops ?? []).slice().sort((a, b) => a.sequence_order - b.sequence_order);
   const hasGps = !!(route.start_latitude && route.start_longitude);
 
   return (
@@ -250,31 +246,16 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
             <MapPin className="h-4 w-4 text-gray-400" /> No stops configured for this route.
           </p>
         ) : (
-          <ol className="space-y-2">
-            {stops.map((s, i) => (
-              <li key={s.id} className="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-2.5">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-semibold text-green-700 dark:bg-green-500/20 dark:text-green-300">
-                  {s.sequence_order ?? i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-gray-900">{s.stop_name}</p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs">
-                    <span className="text-gray-600 dark:text-gray-300">
-                      <span className="text-gray-400 dark:text-gray-500">Morning</span> {fmtTime(s.stop_time)}
-                    </span>
-                    <span className="text-gray-600 dark:text-gray-300">
-                      <span className="text-gray-400 dark:text-gray-500">Evening</span> {fmtTime(s.evening_time)}
-                    </span>
-                  </div>
-                </div>
-                {s.is_major_stop && (
-                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
-                    Major
-                  </span>
-                )}
-              </li>
-            ))}
-          </ol>
+          <DataTable
+            columns={stopColumns}
+            data={stops}
+            entityName="stops"
+            searchPlaceholder="Search stop name or time…"
+            pinFirstColumn={false}
+            getRowId={(s) => s.id}
+            filters={stops.some((s) => s.is_major_stop) ? [{ columnId: 'type', title: 'Type', options: STOP_TYPE_OPTIONS }] : []}
+            emptyMessage="No stops match."
+          />
         )}
       </SectionCard>
     </div>

@@ -3,9 +3,11 @@
 import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Loader2, Search, UserPlus } from 'lucide-react';
+import { Loader2, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
+import { DataTable } from '@/components/ui/data-table';
+import { CandidateSelectionContext, candidateColumns, routeLabel } from './columns';
 import {
   groupCandidatesByRoute,
   chunkIds,
@@ -35,27 +37,28 @@ async function fetchCandidates(): Promise<Candidate[]> {
 export default function BulkAssignPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [results, setResults] = useState<{ summary: BulkSummary; results: BulkResult[] } | null>(null);
 
-  const { data: candidates = [], isLoading, refetch } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['bulk-assign-candidates'],
     queryFn: fetchCandidates,
   });
+  // Memoised: an inline `= []` default is a new array every render while loading.
+  const candidates = useMemo(() => data ?? [], [data]);
 
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? candidates.filter((c) =>
-          [c.name, c.email, c.staffCode ?? '', c.routeNumber, c.routeName]
-            .some((v) => v.toLowerCase().includes(q))
-        )
-      : candidates;
-    return groupCandidatesByRoute(filtered);
-  }, [candidates, query]);
+  // Route groups now only feed the Route filter (same order the grouped list
+  // used) and the "across N routes" count.
+  const groups = useMemo(() => groupCandidatesByRoute(candidates), [candidates]);
+  const routeFilter = useMemo(
+    () => [{
+      columnId: 'route',
+      title: 'Route',
+      options: groups.map((g) => ({ label: `${routeLabel(g)} (${g.staff.length})`, value: g.routeId })),
+    }],
+    [groups]
+  );
 
   const toggle = (staffId: string) =>
     setSelected((prev) => {
@@ -75,6 +78,10 @@ export default function BulkAssignPage() {
       }
       return next;
     });
+
+  // toggle/toggleGroup only use functional setState, so they never go stale.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const selection = useMemo(() => ({ selected, toggle, toggleMany: toggleGroup }), [selected]);
 
   const selectedRouteCount = useMemo(
     () => new Set(candidates.filter((c) => selected.has(c.staffId)).map((c) => c.routeId)).size,
@@ -170,78 +177,21 @@ export default function BulkAssignPage() {
         </SectionCard>
       )}
 
-      <SectionCard title={`Unassigned bus-required staff (${candidates.length})`}>
-        <div className="relative mb-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            className="input pl-10!"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name, email or route…"
+      <SectionCard
+        title={`Unassigned bus-required staff (${candidates.length} across ${groups.length} route${groups.length === 1 ? '' : 's'})`}
+      >
+        <CandidateSelectionContext.Provider value={selection}>
+          <DataTable
+            columns={candidateColumns}
+            data={candidates}
+            entityName="staff"
+            isLoading={isLoading}
+            searchPlaceholder="Search name, email or route…"
+            filters={routeFilter}
+            getRowId={(c) => c.staffId}
+            emptyMessage="No unassigned bus-required staff. Everyone eligible already has a route."
           />
-        </div>
-
-        {isLoading && <p className="text-sm text-gray-500">Loading candidates…</p>}
-        {!isLoading && groups.length === 0 && (
-          <p className="text-sm text-gray-500">
-            No unassigned bus-required staff. Everyone eligible already has a route.
-          </p>
-        )}
-
-        <div className="space-y-3">
-          {groups.map((g) => {
-            const isCollapsed = collapsed.has(g.routeId);
-            const allOn = g.staff.every((s) => selected.has(s.staffId));
-            return (
-              <div key={g.routeId} className="rounded-lg border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2 px-3 py-2">
-                  <button
-                    type="button"
-                    aria-label={isCollapsed ? `Expand route ${g.routeNumber}` : `Collapse route ${g.routeNumber}`}
-                    onClick={() =>
-                      setCollapsed((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(g.routeId)) next.delete(g.routeId);
-                        else next.add(g.routeId);
-                        return next;
-                      })
-                    }
-                    className="text-gray-400 hover:text-gray-600"
-                  >
-                    {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {g.routeNumber} - {g.routeName}
-                  </span>
-                  <span className="shrink-0 text-xs text-gray-500">{g.staff.length}</span>
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(g.staff)}
-                    className="shrink-0 text-xs font-medium text-green-600 hover:underline"
-                  >
-                    {allOn ? 'Clear' : 'Select all'}
-                  </button>
-                </div>
-                {!isCollapsed && (
-                  <div className="grid grid-cols-1 gap-1 border-t border-gray-100 px-3 py-2 sm:grid-cols-2 dark:border-gray-700">
-                    {g.staff.map((s) => (
-                      <label key={s.staffId} className="flex items-center gap-2 py-1 text-sm">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 shrink-0 rounded border-gray-300 text-green-600"
-                          checked={selected.has(s.staffId)}
-                          onChange={() => toggle(s.staffId)}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100">{s.name}</span>
-                        <span className="shrink-0 truncate text-xs text-gray-400">{s.email}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        </CandidateSelectionContext.Provider>
       </SectionCard>
 
       <div className="flex items-center justify-between gap-2">

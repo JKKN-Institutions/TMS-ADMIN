@@ -22,7 +22,20 @@ async function getVehicles() {
       console.error('Vehicles query error:', error);
       return NextResponse.json({ error: 'Failed to fetch vehicles' }, { status: 500 });
     }
-    return NextResponse.json({ success: true, data: vehicles ?? [], count: vehicles?.length ?? 0 });
+    // The bus -> route link lives on tms_route.vehicle_id; attach the route(s)
+    // each bus serves so the list can show and filter by route number.
+    const { data: routes } = await supabase
+      .from('tms_route')
+      .select('id, route_number, route_name, vehicle_id')
+      .not('vehicle_id', 'is', null);
+    const byVehicle = new Map<string, { id: string; number: string; name: string }[]>();
+    for (const r of routes ?? []) {
+      const list = byVehicle.get(r.vehicle_id) ?? [];
+      list.push({ id: r.id, number: String(r.route_number ?? ''), name: r.route_name ?? '' });
+      byVehicle.set(r.vehicle_id, list);
+    }
+    const rows = (vehicles ?? []).map((v) => ({ ...v, _routes: byVehicle.get(v.id) ?? [] }));
+    return NextResponse.json({ success: true, data: rows, count: rows.length });
   } catch (e) {
     console.error('Vehicles API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

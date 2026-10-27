@@ -3,8 +3,10 @@
 import { use, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { MapPin, Briefcase, Download, Phone, Clock } from 'lucide-react';
+import { MapPin, Briefcase, Download } from 'lucide-react';
 import { DetailPageHeader, SectionCard } from '@/components/ui/detail-view';
+import { DataTable } from '@/components/ui/data-table';
+import { countStops, getRosterColumns, getRosterFilters, hasNoStop, type RosterRow } from '../roster-columns';
 
 interface StaffMember {
   name: string;
@@ -23,33 +25,6 @@ interface RosterData {
   route: { id: string; route_number: string; route_name: string };
   total: number;
   staff: StaffMember[];
-}
-
-// Stops grouped in boarding order (the roster arrives already sorted by sequence).
-interface StopGroup {
-  key: string;
-  stop_name: string;
-  pickup: string | null;
-  evening: string | null;
-  staff: StaffMember[];
-}
-
-function groupByStop(staff: StaffMember[]): StopGroup[] {
-  const groups: StopGroup[] = [];
-  for (const s of staff) {
-    const key = s.stop_id ?? 'none';
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) last.staff.push(s);
-    else
-      groups.push({
-        key,
-        stop_name: s.stop_name ?? 'No stop assigned',
-        pickup: s.pickup,
-        evening: s.evening,
-        staff: [s],
-      });
-  }
-  return groups;
 }
 
 function downloadCsv(data: RosterData) {
@@ -102,7 +77,13 @@ export default function RouteStaffPage({ params }: { params: Promise<{ routeId: 
     error,
   } = useQuery({ queryKey: ['route-staff', routeId], queryFn: () => fetchRouteStaff(routeId) });
 
-  const groups = useMemo(() => (data ? groupByStop(data.staff) : []), [data]);
+  const rows: RosterRow[] = useMemo(
+    () => (data?.staff ?? []).map((s, i) => ({ ...s, order: i + 1, kind: 'staff' as const })),
+    [data]
+  );
+  const columns = useMemo(() => getRosterColumns('staff'), []);
+  const filters = useMemo(() => getRosterFilters(rows, 'staff'), [rows]);
+  const stopCount = useMemo(() => countStops(rows), [rows]);
 
   if (loading) {
     return (
@@ -131,7 +112,7 @@ export default function RouteStaffPage({ params }: { params: Promise<{ routeId: 
         crumbs={crumbs(routeId, data.route.route_number)}
         backHref={`/routes/${routeId}`}
         title={`Route ${data.route.route_number} — Staff`}
-        subtitle={`${data.route.route_name} · ${data.total} staff · ${groups.length} stop${groups.length === 1 ? '' : 's'}`}
+        subtitle={`${data.route.route_name} · ${data.total} staff · ${stopCount} stop${stopCount === 1 ? '' : 's'}`}
         actions={
           data.total > 0 ? (
             <button
@@ -151,68 +132,18 @@ export default function RouteStaffPage({ params }: { params: Promise<{ routeId: 
           </p>
         </SectionCard>
       ) : (
-        groups.map((g) => (
-          <div
-            key={g.key}
-            className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
-          >
-            {/* Stop header: stacks on phones, one row from sm up */}
-            <div className="flex flex-col gap-1.5 border-b border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <MapPin className="h-4 w-4 shrink-0 text-gray-400" />
-                <h2 className="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {g.stop_name}
-                </h2>
-                <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-500/15 dark:text-gray-300">
-                  {g.staff.length}
-                </span>
-              </div>
-              {(g.pickup || g.evening) && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500 sm:shrink-0">
-                  <span className="inline-flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-gray-400" /> Morning {g.pickup ?? '—'}
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-gray-400" /> Evening {g.evening ?? '—'}
-                  </span>
-                </div>
-              )}
-            </div>
-            {/* Staff rows: name wraps fully (never truncated); meta sits beneath it */}
-            <ul className="divide-y divide-gray-100 px-4 dark:divide-gray-800">
-              {g.staff.map((s, i) => (
-                <li key={`${g.key}-${i}`} className="flex items-start gap-3 py-2.5">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-semibold text-green-700 dark:bg-green-500/20 dark:text-green-300">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="break-words font-medium text-gray-900 dark:text-gray-100">{s.name}</span>
-                      {s.designation && (
-                        <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-500/15 dark:text-blue-400">
-                          {s.designation}
-                        </span>
-                      )}
-                    </div>
-                    {(s.staff_id || s.mobile) && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                        {s.staff_id && <span className="tabular-nums">{s.staff_id}</span>}
-                        {s.mobile && (
-                          <a href={`tel:${s.mobile}`} className="inline-flex items-center gap-1 hover:text-green-700">
-                            <Phone className="h-3.5 w-3.5" /> {s.mobile}
-                          </a>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
+        <DataTable
+          columns={columns}
+          data={rows}
+          entityName="staff"
+          filters={filters}
+          getRowId={(r) => String(r.order)}
+          initialColumnVisibility={{ email: false }}
+          searchPlaceholder="Search name, staff ID, stop..."
+        />
       )}
 
-      {data.staff.some((s) => !s.stop_id) && (
+      {rows.some(hasNoStop) && (
         <p className="flex items-center gap-2 text-xs text-gray-500">
           <MapPin className="h-3.5 w-3.5 text-gray-400" />
           Staff under &ldquo;No stop assigned&rdquo; have a route but no boarding stop set on their profile.
