@@ -42,7 +42,7 @@ type DriverRow = {
   active_route_id: string | null;
   assigned_route_id: string | null;
 };
-type StaffRow = { id: string; first_name: string | null; last_name: string | null };
+type StaffRow = { id: string; first_name: string | null; last_name: string | null; phone: string | null };
 type VehRow = {
   id: string;
   registration_number: string | null;
@@ -86,7 +86,7 @@ async function handler(_request: NextRequest, auth: AuthContext) {
     const [staffRes, vehRes] = await Promise.all([
       svc
         .from('staff')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, phone')
         .in('id', staffIds.length ? staffIds : [NONE]),
       svc
         .from('tms_vehicle')
@@ -153,7 +153,7 @@ async function handler(_request: NextRequest, auth: AuthContext) {
         routeId: r.id,
         routeNumber: r.route_number,
         routeName: r.route_name,
-        driver: d ? { id: d.id, name: driverName || '—' } : null,
+        driver: d ? { id: d.id, name: driverName || '—', phone: s?.phone?.trim() || null } : null,
         vehicle: veh ? { id: veh.id, registrationNumber: veh.registration_number } : null,
         position,
         heading: veh?.gps_heading ?? null,

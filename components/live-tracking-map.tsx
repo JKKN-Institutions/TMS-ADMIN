@@ -33,6 +33,9 @@ export interface MapBus {
   accuracyM: number | null;
   state: TrackingState;
   reason: string;
+  /** For the selected-bus card's Call button; tel: link, omitted when null. */
+  driverPhone?: string | null;
+  speedKmh?: number | null;
 }
 
 interface LiveTrackingMapProps {
@@ -40,6 +43,8 @@ interface LiveTrackingMapProps {
   /** Selection is owned by the parent so the fleet list and the map stay in step. */
   selectedRouteId: string | null;
   onSelectRoute: (routeId: string | null) => void;
+  /** Shown over the map when no bus has a position (the map still renders). */
+  emptyMessage?: { title: string; detail?: string };
 }
 
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
@@ -99,14 +104,17 @@ async function fetchEnrichment(
   }
 }
 
-const STATE_COLORS: Record<TrackingState, string> = {
+// One colour per Track All status group (the page's legend uses the same):
+// reporting green, paused/stuck amber, not sharing yellow, can't track red,
+// not set up grey.
+export const STATE_COLORS: Record<TrackingState, string> = {
   live: '#10B981',
   recent: '#10B981',
   paused: '#F59E0B',
-  stuck: '#EF4444',
-  off: '#6B7280',
-  no_vehicle: '#6B7280',
-  no_driver: '#6B7280',
+  stuck: '#F59E0B',
+  off: '#EAB308',
+  no_vehicle: '#EF4444',
+  no_driver: '#EF4444',
   unconfigured: '#6B7280',
 };
 
@@ -177,7 +185,7 @@ function buildPopup(bus: MapBus): string {
     </div>`;
 }
 
-const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteId, onSelectRoute }) => {
+const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteId, onSelectRoute, emptyMessage }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, MarkerState>>(new Map());
@@ -457,13 +465,25 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
   return (
     <div className="relative h-full min-h-[420px] w-full">
       <div ref={mapRef} className="h-full min-h-[420px] w-full" />
-      <button
-        type="button"
-        onClick={fitToMarkers}
-        className="absolute right-2.5 top-2.5 z-[1000] rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-      >
-        Recenter
-      </button>
+      {/* Bottom-right: the top-right corner belongs to Leaflet's layers control,
+          which the old "Recenter" button sat on top of. */}
+      {buses.length > 0 && (
+        <button
+          type="button"
+          onClick={fitToMarkers}
+          className="absolute bottom-3 right-3 z-[1000] rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+        >
+          Fit all buses
+        </button>
+      )}
+      {buses.length === 0 && emptyMessage && (
+        <div className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="rounded-xl border border-gray-200 bg-white/95 px-4 py-3 text-center shadow-lg dark:border-gray-700 dark:bg-gray-900/95">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white">{emptyMessage.title}</p>
+            {emptyMessage.detail && <p className="mt-0.5 max-w-xs text-xs text-gray-500 dark:text-gray-400">{emptyMessage.detail}</p>}
+          </div>
+        </div>
+      )}
       {selectedBus && (
         <div className="absolute bottom-3 left-3 z-[1000] max-w-[320px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-start justify-between gap-2">
@@ -485,11 +505,28 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             📍 {enrichment?.address ?? 'Locating…'}
           </p>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+            {selectedBus.registrationNumber ?? 'No bus number'} · {selectedBus.reason}
+            {selectedBus.speedKmh != null && FRESH_STATES.has(selectedBus.state) ? ` · ${Math.round(selectedBus.speedKmh)} km/h` : ''}
+          </p>
           {enrichment?.distanceKm != null && (
-            <p className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+            <p className="mt-1 text-xs text-green-700 dark:text-green-400">
               🚌 {enrichment.distanceKm.toFixed(1)} km to campus
               {enrichment.durationMin != null ? ` · ~${enrichment.durationMin} min` : ''}
             </p>
+          )}
+          {selectedBus.driverName && (
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+              <span className="truncate text-xs text-gray-600 dark:text-gray-300">{selectedBus.driverName}</span>
+              {selectedBus.driverPhone && (
+                <a
+                  href={`tel:${selectedBus.driverPhone.replace(/\s/g, '')}`}
+                  className="shrink-0 rounded-lg bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                >
+                  Call driver
+                </a>
+              )}
+            </div>
           )}
         </div>
       )}

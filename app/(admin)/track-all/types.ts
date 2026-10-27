@@ -6,7 +6,8 @@ export interface FleetRoute {
   routeId: string;
   routeNumber: string | null;
   routeName: string | null;
-  driver: { id: string; name: string } | null;
+  /** phone = staff.phone, for the Call action (null when not on file). */
+  driver: { id: string; name: string; phone: string | null } | null;
   vehicle: { id: string; registrationNumber: string | null } | null;
   position: { lat: number; lng: number } | null;
   heading: number | null;
