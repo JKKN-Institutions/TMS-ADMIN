@@ -82,9 +82,9 @@ interface DataTableProps<TData, TValue> {
    */
   columnFilters?: ColumnFiltersState;
   onColumnFiltersChange?: (filters: ColumnFiltersState) => void;
-  /** Keep the first data column (and the checkbox) visible while scrolling sideways. Default on. */
+  /** Keep the first data column (and the checkbox) visible while scrolling sideways, 900px and up. Default on. */
   pinFirstColumn?: boolean;
-  /** Below 900px render each row as a card. Default OFF: the user wants the table format everywhere (it scrolls sideways with the first column pinned). */
+  /** Below 900px render each row as a card. Default OFF: the user wants the table format everywhere (on a phone every column scrolls sideways together). */
   mobileCards?: boolean;
   /**
    * Small embedded table (a breakdown inside a detail page or dialog): no
@@ -177,7 +177,9 @@ export function DataTable<TData, TValue>({
 
   // Pinned columns: the checkbox (if any) plus the first real data column.
   // Offsets are measured from the declared sizes so the second sticky column
-  // starts exactly where the checkbox column ends.
+  // starts exactly where the checkbox column ends. Pinning is 900px-and-up only:
+  // on a phone a pinned name column eats most of the screen, so there every
+  // column scrolls together (the inline `left` is inert on a non-sticky cell).
   const visibleLeaf = table.getVisibleLeafColumns();
   const pinned = new Map<string, number>();
   if (pinFirstColumn) {
@@ -192,9 +194,9 @@ export function DataTable<TData, TValue>({
     if (!pinned.has(id)) return undefined;
     const last = [...pinned.keys()].pop() === id;
     return cn(
-      'sticky z-[1]',
-      header ? 'bg-gray-50' : 'bg-white group-hover:bg-gray-50 group-data-[state=selected]:bg-green-50 dark:group-data-[state=selected]:bg-green-500/10',
-      last && 'shadow-[inset_-1px_0_0_rgb(229_231_235)] dark:shadow-[inset_-1px_0_0_rgb(55_65_81)]',
+      'min-[900px]:sticky min-[900px]:z-[1]',
+      header ? 'min-[900px]:bg-gray-50' : 'min-[900px]:bg-white min-[900px]:group-hover:bg-gray-50 min-[900px]:group-data-[state=selected]:bg-green-50 min-[900px]:dark:group-data-[state=selected]:bg-green-500/10',
+      last && 'min-[900px]:shadow-[inset_-1px_0_0_rgb(229_231_235)] min-[900px]:dark:shadow-[inset_-1px_0_0_rgb(55_65_81)]',
     );
   };
   const pinStyle = (id: string, width?: number): React.CSSProperties | undefined => {
