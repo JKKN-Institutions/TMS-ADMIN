@@ -145,6 +145,7 @@ export default function BookingsPage() {
           entityName="bookings"
           isLoading={isLoading}
           getRowId={(r) => r.key}
+          initialColumnVisibility={{ dateStatus: false }}
           searchPlaceholder="Search learner, roll, route..."
           filters={[
             { columnId: 'dateStatus', title: 'When', options: [
