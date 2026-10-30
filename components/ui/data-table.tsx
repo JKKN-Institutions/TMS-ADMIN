@@ -195,7 +195,12 @@ export function DataTable<TData, TValue>({
     const last = [...pinned.keys()].pop() === id;
     return cn(
       'min-[900px]:sticky min-[900px]:z-[1]',
-      header ? 'min-[900px]:bg-gray-50' : 'min-[900px]:bg-white min-[900px]:group-hover:bg-gray-50 min-[900px]:group-data-[state=selected]:bg-green-50 min-[900px]:dark:group-data-[state=selected]:bg-green-500/10',
+      // Prefixed classes (min-[900px]:bg-white) escape the global `.dark .bg-white`
+      // remap in globals.css, so the dark surfaces are spelled out here. Opaque on
+      // purpose: a sticky cell must hide the columns scrolling beneath it.
+      header
+        ? 'min-[900px]:bg-gray-50 min-[900px]:dark:bg-[#1f2430]'
+        : 'min-[900px]:bg-white min-[900px]:group-hover:bg-gray-50 min-[900px]:group-data-[state=selected]:bg-green-50 min-[900px]:dark:bg-[#161922] min-[900px]:dark:group-hover:bg-[#1f2430] min-[900px]:dark:group-data-[state=selected]:bg-[#172a28]',
       last && 'min-[900px]:shadow-[inset_-1px_0_0_rgb(229_231_235)] min-[900px]:dark:shadow-[inset_-1px_0_0_rgb(55_65_81)]',
     );
   };
