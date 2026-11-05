@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { derivePageTitle, allNavigation, NAV_TITLE_LOOKUP } from './navigation';
+import { derivePageTitle, derivePageCrumb, allNavigation, NAV_TITLE_LOOKUP } from './navigation';
 
 describe('derivePageTitle', () => {
   it('names the maintenance fee module at /fees', () => {
@@ -30,5 +30,12 @@ describe('derivePageTitle', () => {
     expect(derivePageTitle('/tracking-devices')).toBe('Tracking Devices');
     expect(derivePageTitle('/gps-devices/abc/edit')).toBe('GPS Devices');
     expect(derivePageTitle('/driver-mobiles/new')).toBe('Tracking Mobiles');
+  });
+});
+
+describe('attendance learner register crumb', () => {
+  it('names the register page', () => {
+    expect(derivePageCrumb('/attendance/learners').name).toBe('Learner Register');
+    expect(derivePageCrumb('/attendance').name).toBe('Attendance');
   });
 });

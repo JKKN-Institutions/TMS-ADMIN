@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Clock } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { CoverageGrid } from './coverage-grid';
+import { AttendanceTabs } from './attendance-tabs';
 import {
   DEFAULT_COVERAGE_THRESHOLD,
   type CoverageRouteRow,
@@ -67,6 +68,7 @@ export default function AttendanceCoveragePage() {
 
   return (
     <div className="space-y-4">
+      <AttendanceTabs />
       <PageHeader description="Whether each bus was marked on each service day. Only marks made by staff count; trips closed automatically at the end of the marking window are shown in blue." />
 
       <div className="flex flex-wrap items-end gap-3">
