@@ -97,9 +97,18 @@ describe('decideBus', () => {
       expect(r).toEqual({ ok: false, error: 'Learner has no allocated route' });
     });
 
-    it('a learner with no bus at all (no route, no booking) is still refused', () => {
-      const r = decideBus(base({ allocatedRouteId: null, allocatedStopId: null }));
-      expect(r).toEqual({ ok: false, error: 'Learner has no allocated route' });
+    it('a learner with no bus at all (hostel / irregular) is recorded on the staffer\'s bus', () => {
+      // Owner ruling 2026-11-05: hostel students and other unregistered
+      // learners ride and are scanned; the trip must be saved.
+      const d = ok(base({ allocatedRouteId: null, allocatedStopId: null }));
+      expect(d).toEqual({ busRouteId: B49, wrongBus: null, walkUp: true, bookedRouteId: null, stopId: null });
+    });
+
+    it('a learner with no bus is still refused for staff on several buses or none', () => {
+      expect(decideBus(base({ staffRouteIds: [B24, B06], allocatedRouteId: null })).ok).toBe(false);
+      expect(decideBus(base({ staffRouteIds: [], allocatedRouteId: null }))).toEqual({
+        ok: false, error: expect.stringContaining('not assigned'),
+      });
     });
 
     it('a learner with no allocated route but a booking here is a normal boarding', () => {

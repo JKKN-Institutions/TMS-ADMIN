@@ -12,6 +12,7 @@
  *   booked on another bus              -> booked_other_bus  "X, booked on bus N"
  *   no booking, allocated here         -> ok, travelled without booking
  *   no booking, allocated elsewhere    -> foreign_learner   "X, belongs to bus N"
+ *   no booking, no bus at all          -> ok on the staffer's bus (hostel / irregular rider)
  *
  * Every case is RECORDED present on the bus boarded (owner ruling 2026-09-17:
  * the card read is proof the learner travelled; refusing left them marked
@@ -57,11 +58,11 @@ function pickBus(input: BusInput): string | null {
 }
 
 export function decideBus(input: BusInput): BusResolution {
-  // Not a bus learner at all (no allocation, no booking): refused as before.
-  // "From another bus" needs another bus to be from.
-  if (!input.allocatedRouteId && !input.booking) {
-    return { ok: false, error: 'Learner has no allocated route' };
-  }
+  // A learner with no bus at all (no allocation, no booking) — a hostel student
+  // or an unregistered day scholar — is recorded on the staffer's own bus as a
+  // trip without booking (owner ruling 2026-11-05: these trips must be counted).
+  // pickBus already falls through to the staffer's single bus; a super admin
+  // (no bus of their own) still gets "no allocated route" below.
   const bus = pickBus(input);
   if (!bus) {
     if (input.staffRouteIds && input.staffRouteIds.length === 0) {
