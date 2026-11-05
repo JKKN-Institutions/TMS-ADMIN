@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { LearnerPassenger } from '@/lib/passengers/types';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
+import { LearnerAttendanceSection } from './attendance-section';
 
 async function fetchLearner(id: string): Promise<LearnerPassenger> {
   const res = await fetch(`/api/admin/passengers/learners/${id}`);
@@ -84,6 +85,8 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
           <Field label="Assignment" value={learner.assigned ? 'Assigned' : 'Unassigned'} />
         </div>
       </SectionCard>
+
+      <LearnerAttendanceSection learnerId={learnerId} />
     </div>
   );
 }
