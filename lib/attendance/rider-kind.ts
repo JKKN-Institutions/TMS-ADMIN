@@ -5,13 +5,14 @@
  * learner who later gets a bus still reads "Hostel" for the months they rode
  * as a hosteller — the same "store it, never re-derive it" rule as is_walk_up.
  *
- *   transport      registered for the bus: bus_required AND an allocated route
+ *   transport      on a bus list (an allocated route) or booked a seat that day
  *   hosteller      not registered, but holds an active hostel allocation
  *   non_transport  not registered, not in the hostel ("Irregular")
  *
- * A registered hosteller (bus_required + route) is Transport: they are on a bus
- * list and get auto-absences like any other rider. Keep this rule identical to
- * the backfill in supabase/migrations/20261105100000_attendance_rider_kind.sql.
+ * A hosteller with a bus or a booking is Transport: they are on a bus list and
+ * the manual route marks them the same way, so the label never depends on HOW
+ * they were marked. (The 2026-11-05 backfill used bus_required AND route; live
+ * data then had 0 learners with a route but no bus_required, so they agree.)
  */
 
 export type RiderKind = 'transport' | 'hosteller' | 'non_transport';
@@ -29,8 +30,10 @@ export function classifyRider(input: {
   busRequired: boolean | null;
   allocatedRouteId: string | null;
   inHostel: boolean;
+  /** Holds a booking on any bus for the trip date. */
+  hasBooking?: boolean;
 }): RiderKind {
-  if (input.busRequired === true && input.allocatedRouteId) return 'transport';
+  if (input.allocatedRouteId || input.hasBooking) return 'transport';
   if (input.inHostel) return 'hosteller';
   return 'non_transport';
 }

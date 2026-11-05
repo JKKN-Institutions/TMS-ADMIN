@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { classifyRider, parseRiderKind, RIDER_KIND_LABEL } from './rider-kind';
 
 describe('classifyRider', () => {
-  it('is transport only when bus_required AND an allocated route', () => {
+  it('is transport when the learner has an allocated bus or a booking', () => {
     expect(classifyRider({ busRequired: true, allocatedRouteId: 'r1', inHostel: false })).toBe('transport');
     expect(classifyRider({ busRequired: true, allocatedRouteId: null, inHostel: false })).toBe('non_transport');
-    expect(classifyRider({ busRequired: false, allocatedRouteId: 'r1', inHostel: false })).toBe('non_transport');
+    // On a bus list by allocation: the manual route marks them transport too.
+    expect(classifyRider({ busRequired: false, allocatedRouteId: 'r1', inHostel: true })).toBe('transport');
+    // Booked a seat today: a transport rider, even when in the hostel.
+    expect(classifyRider({ busRequired: false, allocatedRouteId: null, inHostel: true, hasBooking: true })).toBe('transport');
   });
 
   it('a registered hosteller counts as transport', () => {

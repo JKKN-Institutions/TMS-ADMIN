@@ -248,7 +248,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const isWalkUp = bus.decision.walkUp;
     // Who this rider is, stored on the mark (Transport / Hostel / Irregular).
     // A registered rider needs no hostel lookup, so the common scan pays nothing.
-    const registered = learner.bus_required === true && !!learner.transport_route_id;
+    const registered = !!learner.transport_route_id || booked;
     const [seats, inHostel] = await Promise.all([
       isWalkUp ? seatsRemaining(svc, busRouteId, today) : Promise.resolve(1),
       registered ? Promise.resolve(false) : isActiveHosteller(svc, learner.profile_id),
@@ -258,6 +258,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       busRequired: learner.bus_required,
       allocatedRouteId: learner.transport_route_id,
       inHostel,
+      hasBooking: booked,
     });
 
     // Atomic: decision and write in one statement (see the migration comment on
