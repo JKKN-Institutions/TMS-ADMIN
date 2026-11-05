@@ -1,5 +1,6 @@
 'use client';
 
+import { isOffRosterRider, type RiderKind } from '@/lib/attendance/rider-kind';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, Clock, Volume2, VolumeX } from 'lucide-react';
@@ -48,6 +49,8 @@ type ScanResult = {
   direction?: string;
   booked?: boolean;
   walkUp?: boolean;
+  /** Transport / hosteller / non_transport, as stored on the mark. Absent from older servers. */
+  riderKind?: RiderKind;
   /** The learner booked, or belongs to, another bus. Recorded on this bus anyway. */
   wrongBus?: { kind: 'booked_other_bus' | 'foreign_learner'; routeNumber: string | null };
   reason?: 'not_booked' | 'window_closed';
@@ -369,6 +372,7 @@ export default function ScanDialog({
           booked: !json.walkUp,
           otherBus: otherBusFromReply(json.wrongBus),
           alreadyMarked: Boolean(json.alreadyMarked),
+          riderKind: json.riderKind ?? null,
         }));
         announceOnce(
           code,
@@ -712,7 +716,12 @@ function ResultPanel({ result }: { result: ScanResult }) {
                 {/* Said in words, not as a "· walk-up" suffix: this is the one
                     fact the staffer must carry off the bus, and it is now
                     recorded without them confirming anything. */}
-                {result.walkUp && (
+                {isOffRosterRider(result.riderKind) ? (
+                  <p className="text-xs font-medium text-sky-700 dark:text-sky-300">
+                    {result.riderKind === 'hosteller' ? 'Hostel student' : 'Irregular rider'} — not registered for
+                    transport. Trip recorded.
+                  </p>
+                ) : result.walkUp && (
                   <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
                     Travelled without booking — recorded.
                   </p>

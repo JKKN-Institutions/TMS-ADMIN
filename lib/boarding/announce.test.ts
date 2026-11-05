@@ -225,3 +225,19 @@ describe('mute', () => {
     expect(isVoiceMuted()).toBe(true);
   });
 });
+
+describe('scanAnnouncement — hostel / irregular riders', () => {
+  it('names a hosteller and an unregistered learner instead of "without booking"', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: false, riderKind: 'hosteller' })).toBe('Priya S, hostel');
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: false, riderKind: 'non_transport' })).toBe('Priya S, no transport');
+  });
+
+  it('a transport rider is unchanged', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: false, riderKind: 'transport' })).toBe('Priya S, without booking');
+  });
+
+  it('already marked and saved-on-phone still come first', () => {
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: false, riderKind: 'hosteller', alreadyMarked: true })).toBe('Priya S, already marked');
+    expect(scanAnnouncement({ name: 'PRIYA S', booked: false, riderKind: 'hosteller', offlineSaved: true })).toBe('Priya S, saved on phone');
+  });
+});

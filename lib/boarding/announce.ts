@@ -1,3 +1,4 @@
+import type { RiderKind } from '@/lib/attendance/rider-kind';
 /**
  * announce — says a scan result out loud, so the staffer at the bus door hears
  * who boarded without a booking without looking down at the phone.
@@ -61,12 +62,17 @@ export function scanAnnouncement(input: {
   alreadyMarked?: boolean;
   /** Kept on the phone because there was no signal. */
   offlineSaved?: boolean;
+  /** Who the rider is (server reply): hostel / unregistered riders are named as such. */
+  riderKind?: RiderKind | null;
 }): string {
   const who = spokenName(input.name) || 'Learner';
   // Said first because it is what the staffer must act on: the learner is
   // through either way, but this one means "someone else already had them".
   if (input.alreadyMarked) return `${who}, already marked`;
   if (input.offlineSaved) return `${who}, saved on phone`;
+  // Not on any bus list: say WHO they are rather than "without booking".
+  if (input.riderKind === 'hosteller') return `${who}, hostel`;
+  if (input.riderKind === 'non_transport') return `${who}, no transport`;
   const other = input.otherBus ?? null;
   if (other?.kind === 'booked') return bookedOnBusPhrase(input.name, other.routeNumber);
   if (other?.kind === 'from') return belongsToBusPhrase(input.name, other.routeNumber);

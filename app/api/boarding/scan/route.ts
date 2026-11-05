@@ -12,6 +12,8 @@ import { loadAttendanceWindows, activeDirection, type AttDirection } from '@/lib
 import { judgeTappedAt } from '@/lib/boarding/tapped-at';
 import { REJECT_REASON_TEXT } from '@/lib/boarding/offline/protocol';
 import { loadMarkingMode, allowedMethods } from '@/lib/boarding/marking-mode';
+import { classifyRider, type RiderKind } from '@/lib/attendance/rider-kind';
+import { isActiveHosteller } from '@/lib/attendance/hostel';
 
 /**
  * POST a scanned JKKN ID card → mark the learner present for today.
@@ -40,6 +42,8 @@ interface LearnerLite {
   student_photo_url: string | null;
   transport_route_id: string | null;
   transport_stop_id: string | null;
+  bus_required: boolean | null;
+  profile_id: string | null;
 }
 
 /** One learner's result from the tms_mark_attendance RPC. */
@@ -197,7 +201,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
     const [learnerRes, routeIds, booking] = await Promise.all([
       svc
         .from('learners_profiles')
-        .select('id, first_name, last_name, roll_number, student_photo_url, transport_route_id, transport_stop_id')
+        .select('id, first_name, last_name, roll_number, student_photo_url, transport_route_id, transport_stop_id, bus_required, profile_id')
         .eq('id', learnerId)
         .maybeSingle(),
       auth.isSuperAdmin ? Promise.resolve(null) : getAssignedRouteIdsForUser(auth),
@@ -242,8 +246,19 @@ async function scan(request: NextRequest, auth: AuthContext) {
     // Over capacity stays a WARNING on the response, never a refusal — the seat
     // count is advisory (a bus that is full still carried them).
     const isWalkUp = bus.decision.walkUp;
-    const overCapacity =
-      isWalkUp && (await seatsRemaining(svc, busRouteId, today)) <= 0;
+    // Who this rider is, stored on the mark (Transport / Hostel / Irregular).
+    // A registered rider needs no hostel lookup, so the common scan pays nothing.
+    const registered = learner.bus_required === true && !!learner.transport_route_id;
+    const [seats, inHostel] = await Promise.all([
+      isWalkUp ? seatsRemaining(svc, busRouteId, today) : Promise.resolve(1),
+      registered ? Promise.resolve(false) : isActiveHosteller(svc, learner.profile_id),
+    ]);
+    const overCapacity = isWalkUp && seats <= 0;
+    const riderKind: RiderKind = classifyRider({
+      busRequired: learner.bus_required,
+      allocatedRouteId: learner.transport_route_id,
+      inHostel,
+    });
 
     // Atomic: decision and write in one statement (see the migration comment on
     // tms_mark_attendance). p_allow_override stays TRUE here even after PR B —
@@ -263,6 +278,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
           booked_route_id: bookedRouteId,
           status: 'present',
           is_walk_up: isWalkUp,
+          rider_kind: riderKind,
           scanned_at: tap.at.toISOString(),
         },
       ],
@@ -350,6 +366,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
       entityLabel: learner.roll_number ?? name,
       description:
         `Scanned boarding pass for ${name} (${direction})${isWalkUp ? ' [walk-up]' : ''}` +
+        (riderKind === 'hosteller' ? ' [hostel]' : riderKind === 'non_transport' ? ' [no transport]' : '') +
         (alreadyPresent ? ' — already present, nothing written' : '') +
         (outcome?.outcome === 'overridden' ? ` — replaced an earlier "${outcome.existing_status}" mark` : '') +
         (wrongBusReply
@@ -362,6 +379,7 @@ async function scan(request: NextRequest, auth: AuthContext) {
         direction,
         rollNumber: learner.roll_number,
         walkUp: isWalkUp,
+        riderKind,
         outcome: outcome?.outcome ?? null,
         matchedBy,
         busRouteId,
@@ -388,6 +406,8 @@ async function scan(request: NextRequest, auth: AuthContext) {
       direction,
       booked,
       walkUp: isWalkUp,
+      // Transport / hosteller / non_transport — said aloud and shown as a chip.
+      riderKind,
       // Said aloud and shown on the panel: "booked on bus N" / "belongs to bus N".
       wrongBus: wrongBusReply,
       overCapacity: overCapacity || undefined,
