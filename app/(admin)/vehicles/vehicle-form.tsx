@@ -2,15 +2,22 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { SectionCard } from '@/components/ui/detail-view';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/select-menu';
 import { DocumentUploadField } from './document-upload-field';
 import type { VehicleRow } from './columns';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 interface GpsDevice { id: string; device_name?: string; device_id?: string; status?: string }
 interface DriverItem { id: string; name: string; ops: unknown | null }
+interface RouteItem {
+  id: string; route_number: string | null; route_name: string | null; status: string | null;
+  vehicle_id: string | null; _busNumber?: string | null;
+}
 
 // Form state mirrors tms_vehicle columns (camelCase). Strings for inputs.
 interface VehicleFormState {
@@ -131,9 +138,18 @@ export default function VehicleForm({
   mode, vehicleId, initial,
 }: { mode: 'create' | 'edit'; vehicleId?: string; initial?: VehicleRow }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<VehicleFormState>(initial ? fromVehicle(initial) : EMPTY);
   const [gpsDevices, setGpsDevices] = useState<GpsDevice[]>([]);
   const [drivers, setDrivers] = useState<DriverItem[]>([]);
+  // Route: the link lives on tms_route.vehicle_id, so it is loaded from the
+  // routes list and saved by the vehicles API as a separate step. `null` until
+  // the list loads — and route_id is only sent once it has, so a failed load
+  // can never wipe the bus's route.
+  const [routes, setRoutes] = useState<RouteItem[] | null>(null);
+  const [routeId, setRouteId] = useState('');
+  const { can, isSuperAdmin } = usePermissions();
+  const canEditRoute = isSuperAdmin || can(TMS_PERMISSIONS.ROUTES_EDIT);
   const [saving, setSaving] = useState(false);
   // Documents are held here until submit, then uploaded to storage (deferred).
   const [pendingDocs, setPendingDocs] = useState<{
@@ -168,6 +184,43 @@ export default function VehicleForm({
     })();
     return () => { active = false; };
   }, []);
+
+  // Routes for the picker; preselect the one this bus serves today.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/routes');
+        const json = await res.json();
+        if (!active || !json.success) return;
+        const list = json.data as RouteItem[];
+        setRoutes(list);
+        const mine = vehicleId ? list.find((r) => r.vehicle_id === vehicleId) : undefined;
+        setRouteId(mine?.id ?? '');
+      } catch { /* non-fatal: the picker stays hidden and the route untouched */ }
+    })();
+    return () => { active = false; };
+  }, [vehicleId]);
+
+  const routeLabel = (r: RouteItem) =>
+    [r.route_number, r.route_name].filter(Boolean).join(' · ') || 'Route';
+  const routeOptions: SelectMenuOption[] = [
+    { value: '', label: 'No route' },
+    ...(routes ?? [])
+      .filter((r) => r.status === 'active' || r.id === routeId)
+      .sort((a, b) => String(a.route_number ?? '').localeCompare(String(b.route_number ?? ''), undefined, { numeric: true }))
+      .map((r) => {
+        const otherBus = r.vehicle_id && r.vehicle_id !== vehicleId;
+        return {
+          value: r.id,
+          label: `${routeLabel(r)}${otherBus ? ` — now ${r._busNumber ?? 'another bus'}` : r.vehicle_id ? '' : ' — no bus'}`,
+        };
+      }),
+  ];
+  const chosenRoute = routes?.find((r) => r.id === routeId) ?? null;
+  const takesFromBus = chosenRoute && chosenRoute.vehicle_id && chosenRoute.vehicle_id !== vehicleId
+    ? chosenRoute._busNumber ?? 'another bus'
+    : null;
 
   const cancelHref = mode === 'edit' && vehicleId ? `/vehicles/${vehicleId}` : '/vehicles';
 
@@ -212,7 +265,9 @@ export default function VehicleForm({
         docPaths[key] = upJson.path as string;
       }
 
-      const payload = toPayload({ ...form, ...docPaths });
+      const payload: Record<string, unknown> = toPayload({ ...form, ...docPaths });
+      // Only once the routes loaded, and only for someone allowed to change them.
+      if (routes !== null && canEditRoute) payload.route_id = routeId || null;
       const res =
         mode === 'create'
           ? await fetch('/api/admin/vehicles', {
@@ -224,6 +279,12 @@ export default function VehicleForm({
             });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || `Failed to ${mode} vehicle`);
+      // The route lives on tms_route, so every screen showing bus<->route is stale now.
+      await Promise.all(
+        [['vehicles'], ['vehicle'], ['routes'], ['route'], ['routes-active']].map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey }),
+        ),
+      );
       toast.success(mode === 'create' ? 'Vehicle created' : 'Vehicle updated');
       const id = mode === 'edit' ? vehicleId : json.data?.id;
       router.push(id ? `/vehicles/${id}` : '/vehicles');
@@ -285,6 +346,30 @@ export default function VehicleForm({
               onValueChange={(v) => set('status', v)} options={STATUS_OPTIONS} />
           </div>
           {Num('mileage', 'Mileage (km/l)', '0.1', '12.5')}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Route">
+        <div className={grid}>
+          <div className={fieldCls}>
+            <span className={labelCls}>Route served by this bus</span>
+            {routes === null ? (
+              <p className="mt-1 text-sm text-gray-400">Loading routes…</p>
+            ) : canEditRoute ? (
+              <SelectMenu className="mt-1" ariaLabel="Route" value={routeId}
+                onValueChange={setRouteId} options={routeOptions} />
+            ) : (
+              <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                {chosenRoute ? routeLabel(chosenRoute) : 'No route'}
+                <span className="block text-xs text-gray-400">Changing the route needs route edit permission.</span>
+              </p>
+            )}
+            {takesFromBus && canEditRoute && (
+              <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                {takesFromBus} will be taken off this route and left with no route.
+              </p>
+            )}
+          </div>
         </div>
       </SectionCard>
 

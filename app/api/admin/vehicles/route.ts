@@ -3,6 +3,8 @@ import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
 import { buildVehiclePayload } from '@/lib/vehicles/fields';
+import { parseRouteChoice } from '@/lib/vehicles/route-assignment';
+import { applyRouteAssignment, describeRouteChange } from '@/lib/vehicles/route-assignment-repo';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -48,6 +50,12 @@ async function postVehicle(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = await request.json();
+    // Optional route for the new bus. The link lives on tms_route, so it is a
+    // ROUTE edit and needs that permission — checked before anything is written.
+    const routeChoice = parseRouteChoice(body);
+    if (routeChoice.provided && routeChoice.routeId && !(await requirePerm(auth, 'tms.routes.edit'))) {
+      return NextResponse.json({ error: 'You do not have permission to change routes' }, { status: 403 });
+    }
     const payload = buildVehiclePayload(body);
     if (!payload.registration_number || !payload.model || !payload.capacity) {
       return NextResponse.json({ error: 'Registration number, model, and capacity are required' }, { status: 400 });
@@ -72,14 +80,28 @@ async function postVehicle(request: NextRequest, auth: AuthContext) {
       console.error('Vehicle create error:', error);
       return NextResponse.json({ error: 'Failed to create vehicle' }, { status: 500 });
     }
+    let routeNote = '';
+    let routeError: string | null = null;
+    if (routeChoice.provided && routeChoice.routeId && data?.id) {
+      const r = await applyRouteAssignment(supabase, data.id, routeChoice.routeId);
+      if (r.ok) routeNote = describeRouteChange(r.plan, r.routeNumbers);
+      else routeError = r.error;
+    }
     await logActivity(auth, request, {
       module: 'vehicles',
       action: 'create',
       entityType: 'tms_vehicle',
       entityId: data?.id,
       entityLabel: data?.registration_number ?? (payload.registration_number as string | undefined),
-      description: `Created vehicle ${data?.registration_number ?? payload.registration_number}`,
+      description: `Created vehicle ${data?.registration_number ?? payload.registration_number}${routeNote}`,
     });
+    if (routeError) {
+      // The bus exists; say plainly that only the route part failed.
+      return NextResponse.json(
+        { error: `Vehicle created, but the route was not set: ${routeError}`, data },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ success: true, data, message: 'Vehicle created successfully' });
   } catch (e) {
     console.error('Vehicle create error:', e);
@@ -96,12 +118,31 @@ async function putVehicle(request: NextRequest, auth: AuthContext) {
     const id: string | undefined = body?.id || body?.vehicleId;
     if (!id) return NextResponse.json({ error: 'Vehicle id is required' }, { status: 400 });
 
+    const routeChoice = parseRouteChoice(body);
     const payload = buildVehiclePayload(body);
-    if (Object.keys(payload).length === 0) {
+    if (Object.keys(payload).length === 0 && !routeChoice.provided) {
       return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 });
     }
 
     const supabase = createServiceRoleClient();
+
+    // Route change requested? Only check the permission when it actually
+    // CHANGES something, so a vehicles-only editor can still save the form
+    // with the route left as it was.
+    let wantsRouteChange = false;
+    if (routeChoice.provided) {
+      const { data: linked, error: linkError } = await supabase
+        .from('tms_route').select('id').eq('vehicle_id', id);
+      if (linkError) return NextResponse.json({ error: 'Could not read routes' }, { status: 500 });
+      const current = ((linked ?? []) as { id: string }[]).map((r) => r.id);
+      wantsRouteChange = routeChoice.routeId
+        ? !(current.length === 1 && current[0] === routeChoice.routeId)
+        : current.length > 0;
+      if (wantsRouteChange && !(await requirePerm(auth, 'tms.routes.edit'))) {
+        return NextResponse.json({ error: 'You do not have permission to change routes' }, { status: 403 });
+      }
+    }
+
     const { data, error } = await supabase
       .from('tms_vehicle')
       .update({ ...payload, updated_by: auth.userId })
@@ -112,14 +153,27 @@ async function putVehicle(request: NextRequest, auth: AuthContext) {
       console.error('Vehicle update error:', error);
       return NextResponse.json({ error: 'Failed to update vehicle' }, { status: 500 });
     }
+    let routeNote = '';
+    let routeError: string | null = null;
+    if (wantsRouteChange && routeChoice.provided) {
+      const r = await applyRouteAssignment(supabase, id, routeChoice.routeId);
+      if (r.ok) routeNote = describeRouteChange(r.plan, r.routeNumbers);
+      else routeError = r.error;
+    }
     await logActivity(auth, request, {
       module: 'vehicles',
       action: 'update',
       entityType: 'tms_vehicle',
       entityId: data?.id ?? id,
       entityLabel: data?.registration_number,
-      description: `Updated vehicle ${data?.registration_number ?? id}`,
+      description: `Updated vehicle ${data?.registration_number ?? id}${routeNote}`,
     });
+    if (routeError) {
+      return NextResponse.json(
+        { error: `Vehicle saved, but the route was not changed: ${routeError}`, data },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ success: true, data, message: 'Vehicle updated successfully' });
   } catch (e) {
     console.error('Vehicle update error:', e);
