@@ -1,32 +1,34 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ComponentType } from 'react';
-import { AlertTriangle, CalendarCheck2, CheckCircle2, Percent, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarCheck2, Clock, Moon, Sun, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/data-table';
+import { MonthCalendar } from '@/components/attendance/month-calendar';
+import { istMonth, summarizeMonth } from '@/lib/attendance/month-summary';
 import { getAttendanceColumns, type AttendanceRow } from './columns';
 
-async function fetchAttendance(): Promise<AttendanceRow[]> {
-  const res = await fetch('/api/student/attendance', { cache: 'no-store', credentials: 'same-origin' });
+async function fetchAttendance(month: string): Promise<AttendanceRow[]> {
+  const res = await fetch(`/api/student/attendance?month=${month}`, { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load attendance');
   return (await res.json()).data as AttendanceRow[];
 }
 
 export default function StudentAttendancePage() {
-  const { data: items = [], isLoading, error } = useQuery({
-    queryKey: ['student-attendance'],
-    queryFn: fetchAttendance,
+  const [month, setMonth] = useState(istMonth());
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['student-attendance', month],
+    queryFn: () => fetchAttendance(month),
   });
+  const items = useMemo(() => data ?? [], [data]);
 
   // No callbacks or permission flags drive these columns, so they never change.
   const columns = useMemo(() => getAttendanceColumns(), []);
 
-  const total = items.length;
-  const present = items.filter((a) => a.status === 'present').length;
-  const absent = items.filter((a) => a.status === 'absent').length;
-  const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+  // A day counts once even when both the morning and evening trip were taken.
+  const s = summarizeMonth(items);
 
   if (error) {
     return (
@@ -48,41 +50,65 @@ export default function StudentAttendancePage() {
       <header>
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white sm:text-2xl">My Attendance</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Your boarding history — morning trips, plus past evening trips.
+          Your bus attendance month by month — morning and evening trips.
         </p>
       </header>
 
+      <label className="block w-fit text-xs font-medium text-gray-500 dark:text-gray-400">
+        Month
+        <input
+          type="month"
+          value={month}
+          max={istMonth()}
+          onChange={(e) => e.target.value && setMonth(e.target.value)}
+          className="input mt-1 block"
+        />
+      </label>
+
       {/* summary */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Stat
           icon={CalendarCheck2}
-          label="Total trips"
-          value={String(total)}
-          tone="bg-gradient-to-br from-blue-500 to-indigo-600"
+          label="Days present"
+          value={String(s.daysPresent)}
+          tone="bg-gradient-to-br from-green-500 to-emerald-600"
           loading={isLoading}
         />
         <Stat
-          icon={CheckCircle2}
-          label="Present"
-          value={String(present)}
-          tone="bg-gradient-to-br from-green-500 to-emerald-600"
+          icon={Sun}
+          label="Morning trips"
+          value={String(s.onwardPresent)}
+          tone="bg-gradient-to-br from-amber-500 to-orange-600"
+          loading={isLoading}
+        />
+        <Stat
+          icon={Moon}
+          label="Evening trips"
+          value={String(s.returnPresent)}
+          tone="bg-gradient-to-br from-blue-500 to-indigo-600"
           loading={isLoading}
         />
         <Stat
           icon={XCircle}
           label="Absent"
-          value={String(absent)}
+          value={String(s.staffAbsent)}
           tone="bg-gradient-to-br from-red-500 to-rose-600"
           loading={isLoading}
         />
         <Stat
-          icon={Percent}
-          label="Attendance"
-          value={`${rate}%`}
-          tone="bg-gradient-to-br from-purple-500 to-violet-600"
+          icon={Clock}
+          label="Not marked"
+          value={String(s.autoAbsent)}
+          tone="bg-gradient-to-br from-slate-400 to-slate-600"
           loading={isLoading}
         />
       </div>
+
+      {!isLoading && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <MonthCalendar month={month} trips={items} />
+        </div>
+      )}
 
       {/* table */}
       <DataTable

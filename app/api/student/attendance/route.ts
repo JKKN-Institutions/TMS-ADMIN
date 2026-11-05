@@ -1,4 +1,5 @@
 import { parseRiderKind } from '@/lib/attendance/rider-kind';
+import { isMonthKey, monthDays } from '@/lib/attendance/month-summary';
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -24,7 +25,7 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
   return !!data;
 }
 
-async function getAttendance(_request: NextRequest, auth: AuthContext) {
+async function getAttendance(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.PASSENGER_SELF_VIEW))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -32,14 +33,26 @@ async function getAttendance(_request: NextRequest, auth: AuthContext) {
     const learner = await getLearnerRowForUser(auth);
     if (!learner) return NextResponse.json({ error: 'Learner profile not found' }, { status: 404 });
 
+    // ?month=YYYY-MM -> that whole month (at most ~62 rows: two trips a day).
+    // No month -> the latest 60 records, as before.
+    const month = new URL(request.url).searchParams.get('month');
+    if (month !== null && !isMonthKey(month)) {
+      return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
+    }
+
     const svc = createServiceRoleClient();
-    const res = await svc
+    let query = svc
       .from('tms_attendance')
       .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at, rider_kind')
-      .eq('learner_id', learner.id)
+      .eq('learner_id', learner.id);
+    if (month) {
+      const days = monthDays(month);
+      query = query.gte('trip_date', days[0]).lte('trip_date', days[days.length - 1]);
+    }
+    const res = await query
       .order('trip_date', { ascending: false })
       .order('scanned_at', { ascending: false })
-      .limit(60);
+      .limit(month ? 100 : 60);
 
     if (res.error) {
       if ((res.error as { code?: string }).code === '42P01') {
