@@ -1,6 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
+import type { RiderKind } from '@/lib/attendance/rider-kind';
 import { Clock, Pencil, QrCode } from 'lucide-react';
 import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
@@ -15,6 +16,8 @@ export interface AttendanceRow {
   routeLabel: string | null;
   stopLabel: string | null;
   scannedAt: string;
+  /** Transport / hosteller / non_transport, stored on the mark. */
+  riderKind?: RiderKind | null;
 }
 
 const fmtDate = (d: string) =>

@@ -1,12 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarCheck2, CheckCircle2, Clock, Percent, XCircle } from 'lucide-react';
 import { SectionCard } from '@/components/ui/detail-view';
-import { SummaryCard, SummaryCards } from '@/components/ui/summary-cards';
 import { DataTable } from '@/components/ui/data-table';
-import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
+import { MonthSummaryCards } from '@/components/attendance/month-summary-cards';
+import { MonthCalendar } from '@/components/attendance/month-calendar';
+import { RiderKindBadge } from '@/components/boarding/rider-kind-badge';
+import { isMonthKey } from '@/lib/attendance/month-summary';
+import { isOffRosterRider } from '@/lib/attendance/rider-kind';
 import { getAttendanceColumns, type AttendanceRow } from '@/app/student/attendance/columns';
 
 class ForbiddenError extends Error {}
@@ -22,60 +25,47 @@ async function fetchLearnerAttendance(id: string): Promise<AttendanceRow[]> {
 const ALL = 'all';
 
 const monthLabel = (key: string) =>
-  new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-
-interface Tally {
-  total: number;
-  present: number;
-  absent: number;
-  autoAbsent: number;
-}
-
-function tally(rows: AttendanceRow[]): Tally {
-  const t: Tally = { total: rows.length, present: 0, absent: 0, autoAbsent: 0 };
-  for (const r of rows) {
-    if (r.status === 'present') t.present++;
-    else if (r.status === 'absent') {
-      t.absent++;
-      if (isAutoMark(r.method)) t.autoAbsent++;
-    }
-  }
-  return t;
-}
-
-const pct = (n: number, of: number) => (of > 0 ? Math.round((n / of) * 100) : 0);
+  new Date(`${key}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
 /**
- * One learner's boarding attendance totals + day-by-day history, for admins.
+ * One learner's bus attendance for admins: month picker (opens on ?month= from
+ * the Learner register, else the latest month with records), totals with
+ * days present counted once per date, a day-by-day calendar, and the records.
  *
  * Auto-absences are split out from staff-marked ones: the closing job marks
  * every unmarked rider absent, so a learner on a bus nobody scanned looks absent
  * even if they rode. Morning = `onward`, evening = `return`.
  */
 export function LearnerAttendanceSection({ learnerId }: { learnerId: string }) {
+  const searchParams = useSearchParams();
+  const requested = searchParams.get('month');
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['passenger-learner-attendance', learnerId],
     queryFn: () => fetchLearnerAttendance(learnerId),
     retry: (count, err) => !(err instanceof ForbiddenError) && count < 2,
   });
-  const [month, setMonth] = useState(ALL);
+  const [month, setMonth] = useState<string | null>(isMonthKey(requested) ? requested : null);
 
   const columns = useMemo(() => getAttendanceColumns(), []);
   const all = useMemo(() => data ?? [], [data]);
-  const months = useMemo(
-    () => [...new Set(all.map((r) => r.tripDate.slice(0, 7)))].sort().reverse(),
-    [all],
-  );
-  const rows = useMemo(
-    () => (month === ALL ? all : all.filter((r) => r.tripDate.startsWith(month))),
-    [all, month],
-  );
+  const months = useMemo(() => {
+    const set = new Set(all.map((r) => r.tripDate.slice(0, 7)));
+    if (month && month !== ALL) set.add(month);
+    return [...set].sort().reverse();
+  }, [all, month]);
 
-  const t = tally(rows);
-  const morning = tally(rows.filter((r) => r.direction === 'onward'));
-  const evening = tally(rows.filter((r) => r.direction === 'return'));
-  const staffAbsent = t.absent - t.autoAbsent;
-  const dash = isLoading ? '—' : undefined;
+  // No month asked for: open on the latest month that has records.
+  useEffect(() => {
+    if (month === null && data) setMonth(months[0] ?? ALL);
+  }, [month, data, months]);
+
+  const selected = month ?? ALL;
+  const rows = useMemo(
+    () => (selected === ALL ? all : all.filter((r) => r.tripDate.startsWith(selected))),
+    [all, selected],
+  );
+  const offRosterKind = rows.find((r) => isOffRosterRider(r.riderKind))?.riderKind ?? null;
 
   if (error instanceof ForbiddenError) {
     return (
@@ -89,56 +79,31 @@ export function LearnerAttendanceSection({ learnerId }: { learnerId: string }) {
     <SectionCard
       title="Attendance"
       action={
-        <select
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          aria-label="Attendance month"
-          className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700"
-        >
-          <option value={ALL}>All time</option>
-          {months.map((m) => (
-            <option key={m} value={m}>
-              {monthLabel(m)}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <RiderKindBadge kind={offRosterKind} />
+          <select
+            value={selected}
+            onChange={(e) => setMonth(e.target.value)}
+            aria-label="Attendance month"
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          >
+            <option value={ALL}>All time</option>
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)}
+              </option>
+            ))}
+          </select>
+        </div>
       }
     >
       {error ? (
         <p className="text-sm text-red-600 dark:text-red-400">Couldn&apos;t load attendance. Please refresh and try again.</p>
       ) : (
         <div className="space-y-4">
-          <SummaryCards>
-            <SummaryCard icon={CalendarCheck2} label="Total trips" value={dash ?? t.total} />
-            <SummaryCard icon={CheckCircle2} label="Present" value={dash ?? t.present} tone="good" />
-            <SummaryCard
-              icon={XCircle}
-              label="Absent"
-              value={dash ?? t.absent}
-              tone={t.absent > 0 ? 'danger' : 'neutral'}
-              hint={isLoading ? undefined : `${staffAbsent} by staff · ${t.autoAbsent} auto`}
-            />
-            <SummaryCard
-              icon={Clock}
-              label="Auto-absent"
-              value={dash ?? t.autoAbsent}
-              tone={t.autoAbsent > 0 ? 'warn' : 'neutral'}
-              hint="not marked before closing"
-              title={AUTO_MARK_TITLE}
-            />
-            <SummaryCard
-              icon={Percent}
-              label="Attendance"
-              value={dash ?? `${pct(t.present, t.total)}%`}
-              tone="info"
-              hint={isLoading ? undefined : `${t.present} of ${t.total} trips`}
-            />
-          </SummaryCards>
+          <MonthSummaryCards rows={rows} loading={isLoading} />
 
-          <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <LegLine label="Morning" t={morning} loading={isLoading} />
-            <LegLine label="Evening" t={evening} loading={isLoading} />
-          </div>
+          {selected !== ALL && !isLoading && <MonthCalendar month={selected} trips={rows} />}
 
           <DataTable
             columns={columns}
@@ -146,7 +111,7 @@ export function LearnerAttendanceSection({ learnerId }: { learnerId: string }) {
             entityName="records"
             isLoading={isLoading}
             searchPlaceholder="Search route, stop..."
-            emptyMessage="No attendance recorded for this learner yet."
+            emptyMessage={selected === ALL ? 'No attendance recorded for this learner yet.' : `No attendance in ${monthLabel(selected)}.`}
             filters={[
               {
                 columnId: 'status',
@@ -169,24 +134,5 @@ export function LearnerAttendanceSection({ learnerId }: { learnerId: string }) {
         </div>
       )}
     </SectionCard>
-  );
-}
-
-function LegLine({ label, t, loading }: { label: string; t: Tally; loading: boolean }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-gray-200 px-3 py-2">
-      <span className="font-medium text-gray-900">{label}</span>
-      {loading ? (
-        <span className="text-gray-400">—</span>
-      ) : (
-        <>
-          <span className="text-green-700 dark:text-green-400">{t.present} present</span>
-          <span className="text-red-600 dark:text-red-400">{t.absent} absent</span>
-          <span className="text-gray-500">
-            {t.total} trips · {pct(t.present, t.total)}%
-          </span>
-        </>
-      )}
-    </div>
   );
 }

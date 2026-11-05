@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { Suspense, use } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { LearnerPassenger } from '@/lib/passengers/types';
@@ -86,7 +86,9 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
         </div>
       </SectionCard>
 
-      <LearnerAttendanceSection learnerId={learnerId} />
+      <Suspense fallback={null}>
+        <LearnerAttendanceSection learnerId={learnerId} />
+      </Suspense>
     </div>
   );
 }

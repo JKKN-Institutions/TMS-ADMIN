@@ -1,3 +1,4 @@
+import { parseRiderKind } from '@/lib/attendance/rider-kind';
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -14,6 +15,7 @@ interface AttRow {
   route_id: string | null;
   stop_id: string | null;
   scanned_at: string;
+  rider_kind: string | null;
 }
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
@@ -33,7 +35,7 @@ async function getAttendance(_request: NextRequest, auth: AuthContext) {
     const svc = createServiceRoleClient();
     const res = await svc
       .from('tms_attendance')
-      .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at')
+      .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at, rider_kind')
       .eq('learner_id', learner.id)
       .order('trip_date', { ascending: false })
       .order('scanned_at', { ascending: false })
@@ -66,6 +68,7 @@ async function getAttendance(_request: NextRequest, auth: AuthContext) {
         routeLabel: route ? `${route.routeNumber} · ${route.routeName}` : null,
         stopLabel: r.stop_id ? refs.stops.get(r.stop_id) ?? null : null,
         scannedAt: r.scanned_at,
+        riderKind: parseRiderKind(r.rider_kind),
       };
     });
 

@@ -1,3 +1,4 @@
+import { parseRiderKind } from '@/lib/attendance/rider-kind';
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { denyUnlessPerm } from '@/lib/auth/require-perm';
@@ -13,6 +14,7 @@ interface AttRow {
   route_id: string | null;
   stop_id: string | null;
   scanned_at: string;
+  rider_kind: string | null;
 }
 
 /**
@@ -40,7 +42,7 @@ export async function GET(
     const svc = createServiceRoleClient();
     const res = await svc
       .from('tms_attendance')
-      .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at')
+      .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at, rider_kind')
       .eq('learner_id', learnerId)
       .order('trip_date', { ascending: false })
       .order('scanned_at', { ascending: false });
@@ -72,6 +74,7 @@ export async function GET(
         routeLabel: route ? `${route.routeNumber} · ${route.routeName}` : null,
         stopLabel: r.stop_id ? refs.stops.get(r.stop_id) ?? null : null,
         scannedAt: r.scanned_at,
+        riderKind: parseRiderKind(r.rider_kind),
       };
     });
 
