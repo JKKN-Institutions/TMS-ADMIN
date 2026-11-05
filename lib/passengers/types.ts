@@ -122,6 +122,17 @@ export interface LearnerPassenger {
   stopLabel: string | null;
   transportFee: number | null;
   assigned: boolean; // has a transport route assigned
+  /**
+   * What the learner asked for in their Bus Pass Request — set only for
+   * UNASSIGNED learners whose requested route still exists. Only the Learners
+   * list API fills it; other callers leave it undefined.
+   */
+  requested?: {
+    routeId: string;
+    stopId: string | null;
+    routeLabel: string;
+    stopLabel: string | null;
+  } | null;
 }
 
 export interface StaffPassenger {

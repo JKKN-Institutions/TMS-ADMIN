@@ -41,6 +41,16 @@ function AssignedBadge({ assigned }: { assigned: boolean }) {
   );
 }
 
+/** A route/stop the learner ASKED for in their Bus Pass Request — not yet assigned. */
+function RequestedHint({ text }: { text: string }) {
+  return (
+    <div className="min-w-0" title="Requested in the learner's Bus Pass Request — not assigned yet">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Requested</p>
+      <p className="truncate text-amber-700 dark:text-amber-300">{text}</p>
+    </div>
+  );
+}
+
 export function getLearnerColumns(
   onView: (l: LearnerPassenger) => void,
   /** Opens the Assign route dialog; omitted when the user can't allocate. */
@@ -125,15 +135,23 @@ export function getLearnerColumns(
       id: 'route',
       meta: { label: 'Route' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
-      accessorFn: (l) => l.routeLabel ?? '',
-      cell: ({ row }) => row.original.routeLabel || '—',
+      accessorFn: (l) => l.routeLabel ?? l.requested?.routeLabel ?? '',
+      cell: ({ row }) => {
+        const l = row.original;
+        if (l.routeLabel) return l.routeLabel;
+        return l.requested ? <RequestedHint text={l.requested.routeLabel} /> : '—';
+      },
     },
     {
       id: 'stop',
       meta: { label: 'Boarding stop' },
       header: ({ column }) => <DataTableColumnHeader column={column} title="Boarding Stop" />,
-      accessorFn: (l) => l.stopLabel ?? '',
-      cell: ({ row }) => row.original.stopLabel || '—',
+      accessorFn: (l) => l.stopLabel ?? l.requested?.stopLabel ?? '',
+      cell: ({ row }) => {
+        const l = row.original;
+        if (l.stopLabel) return l.stopLabel;
+        return l.requested?.stopLabel ? <RequestedHint text={l.requested.stopLabel} /> : '—';
+      },
     },
     {
       id: 'assigned',

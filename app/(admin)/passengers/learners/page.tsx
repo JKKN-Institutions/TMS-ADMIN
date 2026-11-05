@@ -27,6 +27,8 @@ const EXPORT_COLUMNS: ExportColumn<LearnerPassenger>[] = [
   { header: 'Route', value: (l) => l.routeLabel, width: 32 },
   { header: 'Boarding stop', value: (l) => l.stopLabel, width: 24 },
   { header: 'Assignment', value: (l) => (l.assigned ? 'Assigned' : 'Unassigned') },
+  { header: 'Requested route', value: (l) => l.requested?.routeLabel ?? null, width: 32 },
+  { header: 'Requested stop', value: (l) => l.requested?.stopLabel ?? null, width: 24 },
 ];
 
 async function fetchLearners(): Promise<LearnerPassenger[]> {

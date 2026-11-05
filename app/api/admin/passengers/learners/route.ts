@@ -8,6 +8,7 @@ import {
   type LearnerRow,
 } from '@/lib/passengers/types';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
+import { loadRequestedRoutes } from '@/lib/passengers/requested-route';
 
 /**
  * GET bus-required learners for the Passenger module's Learners page.
@@ -39,7 +40,7 @@ async function getLearners(_request: NextRequest, auth: AuthContext) {
     const supabase = createServiceRoleClient();
     const { data, error } = await supabase
       .from('learners_profiles')
-      .select(LEARNER_SELECT)
+      .select(`${LEARNER_SELECT}, profile_id`)
       .eq('bus_required', true)
       .in('lifecycle_status', [...ACTIVE_LIFECYCLE_STATUSES])
       .order('first_name', { ascending: true });
@@ -51,17 +52,39 @@ async function getLearners(_request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Failed to fetch learners' }, { status: 500 });
     }
 
-    const rows = (data ?? []) as unknown as LearnerRow[];
+    const rows = (data ?? []) as unknown as (LearnerRow & { profile_id: string | null })[];
+
+    // Unassigned learners: what did they ask for in their Bus Pass Request?
+    const requestedByProfile = await loadRequestedRoutes(
+      supabase,
+      rows.filter((r) => !r.transport_route_id).map((r) => r.profile_id)
+    );
+    const requested = Array.from(requestedByProfile.values());
+
     const refs = await loadPassengerRefs(supabase, {
       institutionIds: rows.map((r) => r.institution_id),
       departmentIds: rows.map((r) => r.department_id),
-      routeIds: rows.map((r) => r.transport_route_id),
-      stopIds: rows.map((r) => r.transport_stop_id),
+      routeIds: [...rows.map((r) => r.transport_route_id), ...requested.map((q) => q.routeId)],
+      stopIds: [...rows.map((r) => r.transport_stop_id), ...requested.map((q) => q.stopId)],
       programIds: rows.map((r) => r.program_id),
       semesterIds: rows.map((r) => r.semester_id),
     });
 
-    const result = rows.map((r) => mapLearner(r, refs));
+    const result = rows.map((r) => {
+      const learner = mapLearner(r, refs);
+      const q = !r.transport_route_id && r.profile_id ? requestedByProfile.get(r.profile_id) : undefined;
+      const route = q ? refs.routes.get(q.routeId) : undefined;
+      // A request pointing at a since-deleted route is not offered as a hint.
+      if (q && route) {
+        learner.requested = {
+          routeId: q.routeId,
+          stopId: q.stopId && refs.stops.has(q.stopId) ? q.stopId : null,
+          routeLabel: `${route.routeNumber} · ${route.routeName}`,
+          stopLabel: q.stopId ? refs.stops.get(q.stopId) ?? null : null,
+        };
+      }
+      return learner;
+    });
     return NextResponse.json({ success: true, data: result, count: result.length });
   } catch (e) {
     console.error('Learners API error:', e);

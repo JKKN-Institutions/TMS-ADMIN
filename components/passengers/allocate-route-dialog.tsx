@@ -38,9 +38,12 @@ export function AllocateRouteDialog({
   const [routeId, setRouteId] = useState('');
   const [stopId, setStopId] = useState('');
 
+  // Pre-fill from the learner's Bus Pass Request so assigning is one click.
+  const requested = learner && !learner.assigned ? learner.requested ?? null : null;
   useEffect(() => {
-    setRouteId('');
-    setStopId('');
+    setRouteId(requested?.routeId ?? '');
+    setStopId(requested?.stopId ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [learner?.id]);
 
   const { data: routes = [], isLoading } = useQuery({
@@ -69,6 +72,9 @@ export function AllocateRouteDialog({
   });
 
   const selectedRoute = routes.find((r) => r.id === routeId);
+  // A pre-filled id may not be offered (inactive route, stop moved to another
+  // route) — then the select shows blank, so Save must not send the stale id.
+  const stopValid = !!selectedRoute?.stops.some((s) => s.id === stopId);
 
   return (
     <Dialog open={!!learner} onOpenChange={(o) => !allocate.isPending && onOpenChange(o)}>
@@ -80,6 +86,12 @@ export function AllocateRouteDialog({
           {learner?.assigned && (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800/50">
               Current: <span className="font-medium">{learner.routeLabel}</span> · {learner.stopLabel}
+            </div>
+          )}
+          {requested && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              Bus Pass Request: <span className="font-medium">{requested.routeLabel}</span>
+              {requested.stopLabel ? <> · {requested.stopLabel}</> : ' · no stop chosen'} — pre-filled below.
             </div>
           )}
           <div>
@@ -129,7 +141,7 @@ export function AllocateRouteDialog({
           )}
           <Button
             onClick={() => learner && allocate.mutate({ learnerId: learner.id, routeId, stopId })}
-            disabled={!routeId || !stopId || allocate.isPending}
+            disabled={!selectedRoute || !stopValid || allocate.isPending}
           >
             {allocate.isPending ? 'Saving…' : 'Save'}
           </Button>
