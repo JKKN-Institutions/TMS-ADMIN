@@ -10,6 +10,7 @@
  * `groupRosterByStop`, `buildRosterRows` and `mergeAttendanceRoster` are pure,
  * unit-tested transforms; the `load*` functions are their DB companions.
  */
+import { parseRiderKind, type RiderKind } from '@/lib/attendance/rider-kind';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 // The arbitration rule lives with the boarding domain that enforces it, so the
@@ -189,6 +190,12 @@ export interface RosterRow {
    */
   is_walk_up: boolean;
   /**
+   * Who the rider was when marked (stored on the row, never re-derived):
+   * 'hosteller' / 'non_transport' get a Hostel / Irregular badge. Null when
+   * unmarked or from an offline copy saved before this field existed.
+   */
+  rider_kind?: RiderKind | null;
+  /**
    * The in-charge who owns this learner's attendance, or null when the route
    * has no in-charges (three routes) or the allocation has not been computed.
    * Ownership is INDEPENDENT of ticket state and attendance state.
@@ -255,6 +262,8 @@ export interface RosterAttendance {
   scanned_by: string | null;
   marked_by_name: string | null;
   is_walk_up: boolean;
+  /** Stored rider kind; absent when the reader did not select the column. */
+  rider_kind?: RiderKind | null;
   previous_status: string | null;
   previous_by_name: string | null;
   previous_at: string | null;
@@ -400,6 +409,7 @@ export function buildRosterRows(
       // after the mark (or cancelled after it) must not silently rewrite what
       // the in-charge recorded at the time they saw the student board.
       is_walk_up: marked ? att!.is_walk_up : false,
+      rider_kind: marked ? parseRiderKind(att!.rider_kind) : null,
       other_bus: rider.other_bus ?? null,
       owner_email: owner?.staff_email ?? null,
       owner_name: owner?.name ?? null,

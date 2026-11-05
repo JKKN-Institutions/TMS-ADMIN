@@ -492,3 +492,13 @@ describe('buildRosterRows fee state', () => {
     expect(rows[0].fee).toEqual({ state: 'unknown', owed: null });
   });
 });
+
+describe('buildRosterRows — rider kind', () => {
+  const route = { id: 'R1', route_number: '49' };
+  it('carries the stored rider kind of a marked row, and null when unmarked', () => {
+    const att = new Map([['h', attOf({ status: 'present', rider_kind: 'hosteller' })]]);
+    const rows = buildRosterRows([rider('h', '1', null), rider('u', '2', null)], route, stops, att, VIEWER);
+    expect(rows.find((r) => r.learner_id === 'h')!.rider_kind).toBe('hosteller');
+    expect(rows.find((r) => r.learner_id === 'u')!.rider_kind).toBeNull();
+  });
+});

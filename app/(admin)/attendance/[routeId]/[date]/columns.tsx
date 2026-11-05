@@ -1,5 +1,6 @@
 'use client';
 
+import { RiderKindBadge } from '@/components/boarding/rider-kind-badge';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import type { RosterRow } from '@/lib/booking/roster';
@@ -73,6 +74,9 @@ export function getRosterColumns({
             {/* Another bus is involved today. "Boarded bus N" is why a
                 back-dated mark from this page is refused: that day's row
                 belongs to bus N and must be corrected from its page. */}
+            {r.rider_kind && r.rider_kind !== 'transport' && (
+              <span className="mt-1 block"><RiderKindBadge kind={r.rider_kind} /></span>
+            )}
             {r.other_bus && (
               <span className="block text-xs text-muted-foreground">
                 {OTHER_BUS_TEXT[r.other_bus.kind]} {r.other_bus.routeNumber ?? '?'}

@@ -12,6 +12,7 @@
  * stops or its attendance THROWS a RouteRosterReadError (never an empty
  * roster), so callers can map it to a 500.
  */
+import { parseRiderKind } from '@/lib/attendance/rider-kind';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadMarkerNames } from '@/lib/boarding/identity';
 import { withOtherBuses } from '@/lib/boarding/other-bus-roster';
@@ -27,7 +28,7 @@ interface StopRow {
 }
 interface AttRow {
   learner_id: string; stop_id: string | null; status: string | null; method: string | null;
-  scanned_at: string | null; scanned_by: string | null; is_walk_up: boolean | null;
+  scanned_at: string | null; scanned_by: string | null; is_walk_up: boolean | null; rider_kind?: string | null;
   previous_status: string | null; previous_scanned_by: string | null; previous_scanned_at: string | null;
 }
 
@@ -94,7 +95,7 @@ export async function loadRouteRosterView(
   const { data: attData, error: attError } = await svc
     .from('tms_attendance')
     .select(
-      'learner_id, stop_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
+      'learner_id, stop_id, status, method, scanned_at, scanned_by, is_walk_up, rider_kind, previous_status, previous_scanned_by, previous_scanned_at',
     )
     .eq('route_id', routeId).eq('trip_date', date).eq('direction', direction);
   if (attError) throw new RouteRosterReadError('attendance', attError);
@@ -115,6 +116,7 @@ export async function loadRouteRosterView(
       scanned_by: a.scanned_by,
       marked_by_name: a.scanned_by ? markerNames.get(a.scanned_by) ?? null : null,
       is_walk_up: a.is_walk_up === true,
+      rider_kind: parseRiderKind(a.rider_kind),
       previous_status: a.previous_status,
       previous_by_name: a.previous_scanned_by ? markerNames.get(a.previous_scanned_by) ?? null : null,
       previous_at: a.previous_scanned_at,

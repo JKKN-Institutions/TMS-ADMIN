@@ -1,5 +1,6 @@
 'use client';
 
+import { RiderKindBadge } from '@/components/boarding/rider-kind-badge';
 import type { ColumnDef } from '@tanstack/react-table';
 import { QrCode, Pencil, Check, X, Ticket, TicketX, Lock, Undo2, Clock, IndianRupee, Bus } from 'lucide-react';
 import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
@@ -75,6 +76,7 @@ function TicketCell({ row }: { row: RosterRow }) {
   return (
     <div className="flex flex-col items-start gap-1">
       <TicketBadge booked={row.booked} walkUp={row.is_walk_up} />
+      <RiderKindBadge kind={row.rider_kind} />
       {other && (
         <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
           <Bus className="h-3 w-3 shrink-0" /> {OTHER_BUS_TEXT[other.kind]} {other.routeNumber ?? '?'}

@@ -1,3 +1,4 @@
+import { parseRiderKind } from '@/lib/attendance/rider-kind';
 import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -32,7 +33,7 @@ interface AttRow {
   method: string | null;
   scanned_at: string | null;
   scanned_by: string | null;
-  is_walk_up: boolean | null;
+  is_walk_up: boolean | null; rider_kind?: string | null;
   previous_status: string | null;
   previous_scanned_by: string | null;
   previous_scanned_at: string | null;
@@ -140,7 +141,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       const { data, error } = await svc
         .from('tms_attendance')
         .select(
-          'learner_id, route_id, stop_id, status, method, scanned_at, scanned_by, is_walk_up, previous_status, previous_scanned_by, previous_scanned_at',
+          'learner_id, route_id, stop_id, status, method, scanned_at, scanned_by, is_walk_up, rider_kind, previous_status, previous_scanned_by, previous_scanned_at',
         )
         .in('route_id', c)
         .eq('trip_date', date)
@@ -169,6 +170,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
         scanned_by: a.scanned_by,
         marked_by_name: a.scanned_by ? markerNames.get(a.scanned_by) ?? null : null,
         is_walk_up: a.is_walk_up === true,
+      rider_kind: parseRiderKind(a.rider_kind),
         previous_status: a.previous_status,
         previous_by_name: a.previous_scanned_by ? markerNames.get(a.previous_scanned_by) ?? null : null,
         previous_at: a.previous_scanned_at,
