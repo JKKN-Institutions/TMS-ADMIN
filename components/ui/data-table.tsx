@@ -7,8 +7,8 @@ import {
   flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable,
 } from '@tanstack/react-table';
 import {
-  Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Columns3, ListFilter, Loader2,
-  Search, Settings2, X,
+  Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Database, ListFilter, Loader2,
+  Search, Settings, Settings2, X,
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -98,6 +98,11 @@ interface DataTableProps<TData, TValue> {
 
 const PAGE_SIZES = [10, 25, 50, 100];
 const UTILITY_COLUMNS = new Set(['select', 'actions']);
+
+// MyJKKN outline control (shadcn `Button variant="outline"`): h-9, rounded-md,
+// hairline border, faint shadow. Shared by every toolbar button and filter.
+const CONTROL =
+  'inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-600';
 
 // "licenseNumber" -> "License Number" for the column-visibility menu.
 function prettifyColumnId(id: string) {
@@ -198,9 +203,10 @@ export function DataTable<TData, TValue>({
       // Prefixed classes (min-[900px]:bg-white) escape the global `.dark .bg-white`
       // remap in globals.css, so the dark surfaces are spelled out here. Opaque on
       // purpose: a sticky cell must hide the columns scrolling beneath it.
+      // Colours track TableRow: no header fill, gray-50 hover, gray-100 selected.
       header
-        ? 'min-[900px]:bg-gray-50 min-[900px]:dark:bg-[#1f2430]'
-        : 'min-[900px]:bg-white min-[900px]:group-hover:bg-gray-50 min-[900px]:group-data-[state=selected]:bg-green-50 min-[900px]:dark:bg-[#161922] min-[900px]:dark:group-hover:bg-[#1f2430] min-[900px]:dark:group-data-[state=selected]:bg-[#172a28]',
+        ? 'min-[900px]:bg-white min-[900px]:dark:bg-[#161922]'
+        : 'min-[900px]:bg-white min-[900px]:group-hover:bg-gray-50 min-[900px]:group-data-[state=selected]:bg-gray-100 min-[900px]:dark:bg-[#161922] min-[900px]:dark:group-hover:bg-[#1f2430] min-[900px]:dark:group-data-[state=selected]:bg-[#262a35]',
       last && 'min-[900px]:shadow-[inset_-1px_0_0_rgb(229_231_235)] min-[900px]:dark:shadow-[inset_-1px_0_0_rgb(55_65_81)]',
     );
   };
@@ -227,30 +233,66 @@ export function DataTable<TData, TValue>({
   });
 
   const tableCls = mobileCards ? 'hidden min-[900px]:block' : '';
+  const shareOfTotal = totalRows > 0 ? Math.round((filteredCount / totalRows) * 100) : 0;
 
   return (
     // Own provider: the table is also used by portals whose layouts have none.
     <TooltipProvider delayDuration={300}>
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Data summary strip (MyJKKN): what is showing, of how many, which page */}
+      {!compact && (
+        <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+              <span className="flex min-w-0 items-center gap-2 text-gray-600">
+                <Database className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                <span>
+                  Showing <span className="font-medium text-gray-900">{filteredCount.toLocaleString()}</span> of{' '}
+                  <span className="font-bold text-green-700 dark:text-green-400">{totalRows.toLocaleString()}</span> {entityName}
+                </span>
+              </span>
+              <span className="whitespace-nowrap font-medium text-gray-500">Page {pageIndex + 1} of {pageCount}</span>
+              {totalRows > 0 && (
+                <span className="whitespace-nowrap rounded-md bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700">
+                  {shareOfTotal}% of total
+                </span>
+              )}
+              {enableRowSelection && selectedCount > 0 && (
+                <span className="font-medium text-blue-600 dark:text-blue-400">{selectedCount.toLocaleString()} selected</span>
+              )}
+            </div>
+            {(isFiltered || isLoading) && (
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                {isFiltered && (
+                  <span className="rounded-md bg-blue-50 px-2 py-1 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">Filtered</span>
+                )}
+                {isLoading && (
+                  <span className="flex items-center gap-2 rounded-md px-2 py-1 text-green-700 dark:text-green-400">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading…
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       {!compact && (
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           {globalSearch && (
             // NEVER `flex-1` here. `flex-1` is `flex: 1 1 0%` -- a ZERO basis -- so the
             // search claims no space of its own and is left with whatever its siblings
-            // decline. basis-full gives it the whole line below sm; basis-56 keeps a
-            // 224px floor above sm so wrapping, not crushing, absorbs any shortfall.
-            // max-w-xs still caps it on wide screens.
-            <div className="relative min-w-0 basis-full sm:basis-56 sm:grow sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                placeholder={searchPlaceholder}
-                className="input h-[38px] pl-10!"
-              />
-            </div>
+            // decline. basis-full gives it the whole line below sm; fixed MyJKKN widths
+            // (200px, 300px from lg) above it.
+            <input
+              value={globalFilter}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              className="h-9 min-w-0 basis-full rounded-md border border-gray-200 bg-transparent px-3 text-sm shadow-sm transition-colors placeholder:text-gray-400 focus-visible:border-green-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-600 sm:basis-[200px] lg:basis-[300px]"
+            />
           )}
           {/* A single filter stays a plain dropdown; two or more collapse into one
               "Filters" button so the toolbar never wraps onto a second line. */}
@@ -270,37 +312,32 @@ export function DataTable<TData, TValue>({
               setValue={(id, v) => table.getColumn(id)?.setFilterValue(v)}
             />
           )}
-          {isLoading && <Loader2 className="h-4 w-4 animate-spin text-green-600" aria-label="Loading" />}
+          {isFiltered && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+            >
+              Reset <X className="h-4 w-4" aria-hidden />
+            </button>
+          )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {toolbarActions?.({ selectedRows: table.getFilteredSelectedRowModel().rows.map((r) => r.original), resetSelection })}
+          <ColumnsMenu
+            columns={hideableColumns.map((c) => ({
+              id: c.id,
+              label: columnLabel(c.id),
+              visible: c.getIsVisible(),
+              toggle: (v: boolean) => c.toggleVisibility(v),
+            }))}
+          />
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <DropdownMenuTrigger className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
-                  <Columns3 className="h-4 w-4" /> Columns
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Show or hide columns</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto">
-              <DropdownMenuLabel>Show columns</DropdownMenuLabel>
-              {hideableColumns.map((column) => (
-                <DropdownMenuCheckboxItem key={column.id} checked={column.getIsVisible()} onCheckedChange={(v) => column.toggleVisibility(!!v)}>
-                  {columnLabel(column.id)}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger
-                  className="inline-flex h-[38px] items-center justify-center rounded-lg border border-gray-300 px-2.5 text-gray-700 transition-colors hover:bg-gray-50"
-                  aria-label="Table settings"
-                >
-                  <Settings2 className="h-4 w-4" />
+                <DropdownMenuTrigger className={cn(CONTROL, 'w-9 justify-center px-0')} aria-label="Table settings">
+                  <Settings className="h-4 w-4" />
                 </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent>Table settings</TooltipContent>
@@ -328,17 +365,19 @@ export function DataTable<TData, TValue>({
       {chips.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {chips.map((c) => (
+            // MyJKKN chip: secondary badge, muted label, medium value, small X.
             <span
               key={c.id}
-              className="inline-flex items-center gap-1 rounded-full border border-green-600/30 bg-green-50 py-0.5 pl-3 pr-1 text-xs text-gray-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-gray-200"
+              className="inline-flex items-center gap-1 rounded-md bg-gray-100 py-1 pl-2 pr-1 text-xs font-semibold"
             >
-              {c.label}: <span className="font-semibold text-green-700 dark:text-green-400">{c.valueLabel}</span>
+              <span className="font-normal text-gray-500">{c.label}:</span>
+              <span className="font-medium text-gray-900">{c.valueLabel}</span>
               <button
                 onClick={() => table.getColumn(c.id)?.setFilterValue(undefined)}
-                className="ml-0.5 rounded-full p-0.5 hover:bg-green-100 dark:hover:bg-green-500/20"
+                className="ml-0.5 rounded-sm p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-900"
                 aria-label={`Remove ${c.label} filter`}
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-3 w-3" />
               </button>
             </span>
           ))}
@@ -349,11 +388,11 @@ export function DataTable<TData, TValue>({
       )}
 
       {/* Table (900px and up, or always when cards are off) */}
-      <div className={cn('overflow-x-auto rounded-xl border border-gray-200 bg-white', tableCls)}>
+      <div className={cn('overflow-x-auto rounded-md border border-gray-200 bg-white', tableCls)}>
         <Table>
-          <TableHeader className="bg-gray-50">
+          <TableHeader>
             {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id} className="hover:bg-gray-50">
+              <TableRow key={hg.id} className="hover:bg-transparent">
                 {hg.headers.map((header) => (
                   <TableHead
                     key={header.id}
@@ -380,7 +419,7 @@ export function DataTable<TData, TValue>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() ? 'selected' : undefined}
-                  className="group data-[state=selected]:bg-green-50 dark:data-[state=selected]:bg-green-500/10"
+                  className="group"
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id} className={pinClass(cell.column.id)} style={pinStyle(cell.column.id)}>
@@ -404,33 +443,35 @@ export function DataTable<TData, TValue>({
           ) : pageRows.length ? (
             pageRows.map((row) => <RowCard key={row.id} row={row} columnLabel={columnLabel} />)
           ) : (
-            <div className="rounded-xl border border-gray-200 bg-white py-10 text-center text-sm text-gray-500">{emptyMessage}</div>
+            <div className="rounded-md border border-gray-200 bg-white py-8 text-center text-sm text-gray-500">{emptyMessage}</div>
           )}
         </div>
       )}
 
       {/* Count + pagination */}
       {(!compact || pageCount > 1) && (
-      <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-        <div className="flex-1 text-sm text-gray-600">
-          Showing <span className="font-medium text-gray-900">{firstShown.toLocaleString()}–{lastShown.toLocaleString()}</span> of{' '}
-          <span className="font-medium text-gray-900">{filteredCount.toLocaleString()}</span> {entityName}
-          {filteredCount !== totalRows && <span className="text-gray-400"> (filtered from {totalRows.toLocaleString()})</span>}
-          {enableRowSelection && selectedCount > 0 && (
-            <span className="ml-2 font-medium text-green-700 dark:text-green-400">· {selectedCount.toLocaleString()} selected</span>
+      // MyJKKN footer: selection count left; rows-per-page, page X of Y and the
+      // outline pager right. Tables without selection show the row range there
+      // instead of a meaningless "0 of N row(s) selected".
+      <div className="flex w-full flex-col items-center justify-between gap-4 px-2 py-1 sm:flex-row sm:gap-8">
+        <div className="flex-1 text-sm text-gray-500">
+          {enableRowSelection ? (
+            <>{selectedCount.toLocaleString()} of {filteredCount.toLocaleString()} row(s) selected.</>
+          ) : (
+            <>Rows {firstShown.toLocaleString()}–{lastShown.toLocaleString()} of {filteredCount.toLocaleString()}</>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <span className="whitespace-nowrap">Rows per page</span>
+        <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6 lg:gap-8">
+          <div className="flex items-center gap-2">
+            <p className="whitespace-nowrap text-sm font-medium">Rows per page</p>
             <PageSizeSelect value={currentPageSize} onChange={(s) => table.setPageSize(s)} />
           </div>
-          <span className="text-sm font-medium text-gray-700">Page {pageIndex + 1} of {pageCount}</span>
-          <div className="flex items-center gap-1">
-            <PagerButton label="First page" onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}><ChevronsLeft className="h-4 w-4" /></PagerButton>
-            <PagerButton label="Previous page" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}><ChevronLeft className="h-4 w-4" /></PagerButton>
-            <PagerButton label="Next page" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}><ChevronRight className="h-4 w-4" /></PagerButton>
-            <PagerButton label="Last page" onClick={() => table.setPageIndex(pageCount - 1)} disabled={!table.getCanNextPage()}><ChevronsRight className="h-4 w-4" /></PagerButton>
+          <div className="flex items-center justify-center text-sm font-medium">Page {pageIndex + 1} of {pageCount}</div>
+          <div className="flex items-center gap-2">
+            <PagerButton label="Go to first page" className="hidden lg:inline-flex" onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}><ChevronsLeft className="h-4 w-4" /></PagerButton>
+            <PagerButton label="Go to previous page" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}><ChevronLeft className="h-4 w-4" /></PagerButton>
+            <PagerButton label="Go to next page" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}><ChevronRight className="h-4 w-4" /></PagerButton>
+            <PagerButton label="Go to last page" className="hidden lg:inline-flex" onClick={() => table.setPageIndex(pageCount - 1)} disabled={!table.getCanNextPage()}><ChevronsRight className="h-4 w-4" /></PagerButton>
           </div>
         </div>
       </div>
@@ -451,7 +492,7 @@ function RowCard<TData>({ row, columnLabel }: { row: Row<TData>; columnLabel: (i
   return (
     <div
       data-state={row.getIsSelected() ? 'selected' : undefined}
-      className="rounded-xl border border-gray-200 bg-white p-3 text-sm data-[state=selected]:border-green-600/40 data-[state=selected]:bg-green-50 dark:data-[state=selected]:bg-green-500/10"
+      className="rounded-lg border border-gray-200 bg-white p-3 text-sm data-[state=selected]:border-gray-300 data-[state=selected]:bg-gray-100 dark:data-[state=selected]:bg-[#262a35]"
     >
       <div className="flex items-start gap-3">
         {select && <div className="pt-0.5">{flexRender(select.column.columnDef.cell, select.getContext())}</div>}
@@ -484,16 +525,12 @@ function FiltersMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={cn(
-          'inline-flex h-[38px] shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors',
-          activeCount > 0
-            ? 'border-green-600/40 bg-green-50 text-gray-900 hover:bg-green-100 dark:border-green-500/40 dark:bg-green-500/10 dark:text-gray-100'
-            : 'border-gray-300 text-gray-700 hover:bg-gray-50',
-        )}
+        className={CONTROL}
       >
         <ListFilter className="h-4 w-4" /> Filters
         {activeCount > 0 && (
-          <span className="rounded-full bg-green-600 px-1.5 text-xs font-semibold text-white">{activeCount}</span>
+          // MyJKKN count pill: secondary badge beside the label.
+          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-900">{activeCount}</span>
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[13rem]">
@@ -525,13 +562,70 @@ function FiltersMenu({
   );
 }
 
-function PagerButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled: boolean; children: React.ReactNode }) {
+// MyJKKN "View" popover: a column search box over a checklist that stays open
+// while columns are toggled. Keys typed into the box must not reach Radix's
+// menu typeahead, which would otherwise jump focus to a matching item.
+function ColumnsMenu({
+  columns,
+}: {
+  columns: { id: string; label: string; visible: boolean; toggle: (v: boolean) => void }[];
+}) {
+  const [query, setQuery] = React.useState('');
+  const q = query.trim().toLowerCase();
+  const shown = q ? columns.filter((c) => c.label.toLowerCase().includes(q)) : columns;
+  return (
+    <DropdownMenu onOpenChange={(open) => { if (!open) setQuery(''); }}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger className={CONTROL}>
+            <Settings2 className="h-4 w-4" /> View
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Show or hide columns</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-[220px] p-0">
+        <div className="flex items-center gap-2 border-b border-gray-200 px-3">
+          <Search className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder="Search columns..."
+            aria-label="Search columns"
+            className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
+          />
+        </div>
+        <div className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto p-1">
+          {shown.length === 0 ? (
+            <div className="py-6 text-center text-sm text-gray-500">No columns found.</div>
+          ) : (
+            shown.map((c) => (
+              <DropdownMenuCheckboxItem
+                key={c.id}
+                checked={c.visible}
+                onCheckedChange={(v) => c.toggle(!!v)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                <span className="truncate">{c.label}</span>
+              </DropdownMenuCheckboxItem>
+            ))
+          )}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function PagerButton({ label, onClick, disabled, children, className }: { label: string; onClick: () => void; disabled: boolean; children: React.ReactNode; className?: string }) {
   return (
     <button
       aria-label={label}
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-40"
+      className={cn(
+        'inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50',
+        className,
+      )}
     >
       {children}
     </button>
@@ -558,11 +652,7 @@ export function FilterSelect({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={selected ? `${title}: ${selected.label}` : `Filter by ${title.toLowerCase()}`}
-        className={`inline-flex h-[38px] min-w-[7.5rem] max-w-[15rem] shrink-0 basis-auto items-center justify-between gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 ${
-          selected
-            ? 'border-green-600/40 bg-green-50 text-gray-900 hover:bg-green-100 dark:border-green-500/40 dark:bg-green-500/10 dark:text-gray-100 dark:hover:bg-green-500/20'
-            : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-        }`}
+        className={cn(CONTROL, 'min-w-[7.5rem] max-w-[15rem] basis-auto justify-between')}
       >
         {/* The title STAYS when a value is picked. Showing the value alone
             ("Cash") left a row of orphan words with no clue which dropdown each
@@ -573,12 +663,12 @@ export function FilterSelect({
           <span className="truncate">{title}</span>
           {selected && (
             <>
-              <span aria-hidden className="h-4 w-px shrink-0 bg-green-600/30 dark:bg-green-400/30" />
-              <span className="truncate font-semibold text-green-700 dark:text-green-400">{selected.label}</span>
+              <span aria-hidden className="h-4 w-px shrink-0 bg-gray-200" />
+              <span className="truncate rounded-sm bg-gray-100 px-1.5 text-xs font-semibold text-gray-900">{selected.label}</span>
             </>
           )}
         </span>
-        <ChevronDown className={`h-4 w-4 shrink-0 ${selected ? 'text-green-700/70 dark:text-green-400/70' : 'text-gray-400'}`} />
+        <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[10rem] overflow-y-auto">
         <DropdownMenuItem onSelect={() => onChange(undefined)}>
@@ -599,7 +689,7 @@ function PageSizeSelect({ value, onChange }: { value: number; onChange: (s: numb
   const sizes = PAGE_SIZES.includes(value) ? PAGE_SIZES : [...PAGE_SIZES, value].sort((a, b) => a - b);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex h-9 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-50">
+      <DropdownMenuTrigger className="inline-flex h-8 w-[70px] items-center justify-between rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm transition-colors hover:bg-gray-50">
         {value} <ChevronDown className="h-4 w-4 text-gray-400" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[5rem]">

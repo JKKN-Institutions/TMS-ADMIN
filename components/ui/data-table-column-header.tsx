@@ -33,17 +33,19 @@ export function DataTableColumnHeader<TData, TValue>({
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
-            '-ml-2 inline-flex h-7 items-center gap-1 rounded px-2 hover:bg-gray-100 hover:text-gray-700 data-[state=open]:bg-gray-100 focus:outline-none',
+            // MyJKKN sort trigger: ghost h-8 button; -ml-3 cancels its px-3 so the
+            // title lines up with the cell text below.
+            '-ml-3 inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-gray-100 hover:text-gray-900 data-[state=open]:bg-gray-100 dark:data-[state=open]:bg-[#262a35] focus:outline-none',
             className
           )}
         >
           <span>{title}</span>
           {sorted === 'desc' ? (
-            <ArrowDown className="h-3.5 w-3.5" />
+            <ArrowDown className="h-4 w-4" />
           ) : sorted === 'asc' ? (
-            <ArrowUp className="h-3.5 w-3.5" />
+            <ArrowUp className="h-4 w-4" />
           ) : (
-            <ChevronsUpDown className="h-3.5 w-3.5 opacity-60" />
+            <ChevronsUpDown className="h-4 w-4 opacity-60" />
           )}
         </button>
       </DropdownMenuTrigger>

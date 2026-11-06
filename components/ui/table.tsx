@@ -1,6 +1,14 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
+// MyJKKN table look: no header fill, sentence-case muted header text, tight
+// px-4 py-2 rows, light grey hover and grey selection. Gray utilities (not the
+// shadcn --muted/--card tokens) on purpose: globals.css remaps .bg-gray-* /
+// .hover:bg-gray-* to the app's #161922 / #1f2430 dark surfaces, while the
+// dark tokens are a navy that would clash with them. Variant classes such as
+// data-[state=selected]:bg-gray-100 escape that remap, so they carry their own
+// dark: colour.
+
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
     <div className="relative w-full overflow-auto">
@@ -22,20 +30,36 @@ TableBody.displayName = 'TableBody';
 
 const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(
   ({ className, ...props }, ref) => (
-    <tr ref={ref} className={cn('border-b transition-colors hover:bg-gray-50', className)} {...props} />
+    <tr
+      ref={ref}
+      className={cn(
+        'border-b border-gray-200 transition-colors hover:bg-gray-50 data-[state=selected]:bg-gray-100 dark:data-[state=selected]:bg-[#262a35]',
+        className,
+      )}
+      {...props}
+    />
   )
 );
 TableRow.displayName = 'TableRow';
 
 const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(
   ({ className, ...props }, ref) => (
-    <th ref={ref} className={cn('h-11 whitespace-nowrap px-3 text-left align-middle font-medium text-gray-500 text-xs uppercase tracking-wide', className)} {...props} />
+    <th
+      ref={ref}
+      className={cn(
+        'h-10 whitespace-nowrap px-4 text-left align-middle text-sm font-medium text-gray-500 [&:has([role=checkbox])]:pr-0',
+        className,
+      )}
+      {...props}
+    />
   )
 );
 TableHead.displayName = 'TableHead';
 
 const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => <td ref={ref} className={cn('whitespace-nowrap px-3 py-3 align-middle', className)} {...props} />
+  ({ className, ...props }, ref) => (
+    <td ref={ref} className={cn('whitespace-nowrap px-4 py-2 align-middle [&:has([role=checkbox])]:pr-0', className)} {...props} />
+  )
 );
 TableCell.displayName = 'TableCell';
 
