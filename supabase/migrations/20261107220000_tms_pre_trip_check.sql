@@ -56,35 +56,24 @@ create trigger trg_tms_pre_trip_check_updated_at before update on public.tms_pre
   for each row execute function public.tms_set_updated_at();
 
 -- ── RLS ──────────────────────────────────────────────────────────────────────
--- The app writes through service-role API routes (like tms_trip). These policies
--- make a direct client query behave correctly rather than leak or silently fail:
---   • a driver reads and inserts only their own rows. "Own" honours BOTH links,
+-- ALL writes go through the service-role API route (POST /api/driver/pre-trip-check),
+-- which uploads the photo and resolves the bus from the route. There is deliberately
+-- NO insert/update/delete policy: a client-side insert could invent a photo path,
+-- bus or date and satisfy the trip gate without a photo. Read policies only:
+--   • a driver reads only their own rows. "Own" honours BOTH links,
 --     tms_driver.profile_id and staff.profile_id, exactly like
 --     tms_trip_select_own_driver (3 of 30 drivers have no profile_id today).
 --   • the transport head (tms.dashboard.view — held only by transport_head) and
 --     super admins read every row.
--- No UPDATE or DELETE policy: a submitted check is a record, not a draft.
 alter table public.tms_pre_trip_check enable row level security;
+-- Matches tms_trip's live grants: the anon role gets nothing.
+revoke all on public.tms_pre_trip_check from anon;
 
 drop policy if exists tms_pre_trip_check_select_own_driver on public.tms_pre_trip_check;
 create policy tms_pre_trip_check_select_own_driver on public.tms_pre_trip_check
   for select to authenticated
   using (
     exists (
-      select 1
-      from public.tms_driver d
-      left join public.staff s on s.id = d.staff_id
-      where d.id = tms_pre_trip_check.driver_id
-        and (d.profile_id = auth.uid() or s.profile_id = auth.uid())
-    )
-  );
-
-drop policy if exists tms_pre_trip_check_insert_own_driver on public.tms_pre_trip_check;
-create policy tms_pre_trip_check_insert_own_driver on public.tms_pre_trip_check
-  for insert to authenticated
-  with check (
-    created_by = auth.uid()
-    and exists (
       select 1
       from public.tms_driver d
       left join public.staff s on s.id = d.staff_id
@@ -106,31 +95,17 @@ values ('tms-pre-trip-photos', 'tms-pre-trip-photos', false, 5242880,
         array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do nothing;
 
--- The app uploads server-side with the service role, under <auth uid>/<date>/...
--- These owner-only policies are a backstop for any direct client call: a user may
--- upload to and read only their own folder. Transport head / super admins see
--- photos through signed URLs minted by the server, not through a policy here.
-drop policy if exists tms_pre_trip_photos_insert_own on storage.objects;
-create policy tms_pre_trip_photos_insert_own on storage.objects
-  for insert to authenticated
-  with check (
-    bucket_id = 'tms-pre-trip-photos'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-
-drop policy if exists tms_pre_trip_photos_select_own on storage.objects;
-create policy tms_pre_trip_photos_select_own on storage.objects
-  for select to authenticated
-  using (
-    bucket_id = 'tms-pre-trip-photos'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+-- NO storage.objects policies, like every other TMS bucket: the API uploads and
+-- mints signed URLs with the service role. A client policy would let any signed-in
+-- account (learners included) upload images here. This file does not touch
+-- storage.objects at all.
 
 -- No SECURITY DEFINER function is added by this migration.
 
 -- ── Verification (run separately after applying) ─────────────────────────────
 --   select count(*) from public.tms_pre_trip_check;                         -- 0
 --   select id, public, file_size_limit from storage.buckets where id = 'tms-pre-trip-photos';
---   select policyname, cmd from pg_policies where tablename = 'tms_pre_trip_check';  -- 3 rows
---   select policyname from pg_policies where schemaname = 'storage'
---     and policyname like 'tms_pre_trip_photos_%';                          -- 2 rows
+--   select policyname, cmd from pg_policies where tablename = 'tms_pre_trip_check';  -- 2 rows, both SELECT
+--   select count(*) from pg_policies where schemaname = 'storage'
+--     and coalesce(qual, '') || coalesce(with_check, '') like '%tms-pre-trip-photos%';  -- 0
+--   select has_table_privilege('anon', 'public.tms_pre_trip_check', 'select');        -- false
