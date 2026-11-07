@@ -185,7 +185,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    // This device only: signing out here must not sign the person out of TMS
+    // on their other phone or laptop (Supabase defaults to every device).
+    await supabase.auth.signOut({ scope: 'local' });
     setUser(null);
     setProfile(null);
     profileCacheRef.current = null;
