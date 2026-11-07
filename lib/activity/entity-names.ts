@@ -17,6 +17,7 @@ const ENTITY_NAMES: Record<string, string> = {
   tms_incharge_absence: 'In-charge absence',
   tms_inspection: 'Bus inspection',
   tms_notification: 'Notification',
+  tms_pre_trip_check: 'Pre-trip check',
   tms_route: 'Route',
   tms_route_check: 'Bus inspection',
   tms_route_check_person: 'Inspected passenger',

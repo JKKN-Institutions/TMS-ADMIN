@@ -14,6 +14,13 @@ import {
 } from '@/lib/tracking/trips';
 import { deriveDirection, liveStatus, type TripDirection } from '@/lib/tracking/trip-state';
 import { istMinutesOfDay } from '@/lib/boarding/attendance-window';
+import { istToday } from '@/lib/booking/window';
+import { preTripCheckDue, type PreTripLookup } from '@/lib/tracking/pre-trip-check';
+import {
+  getTodayChecksByVehicle,
+  linkCheckToTrip,
+  lookupTodayCheck,
+} from '@/lib/tracking/pre-trip-check-repo';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -47,12 +54,25 @@ async function getActive(_request: NextRequest, auth: AuthContext) {
     const routes = await getDriverRoutes(drv.staff_id, drv.assigned_route_id, svc);
     const route = trip ? routes.find((r) => r.id === trip.route_id) ?? null : null;
 
+    // Today's pre-trip checks, so the screen can show the check before START TRIP.
+    // null = the check table is not deployed yet, or the read failed (the screen then
+    // skips the reminder rather than taking the whole trip screen down).
+    const checks = await getTodayChecksByVehicle(svc, drv.id, istToday()).catch((e) => {
+      console.error('driver/trips GET pre-trip lookup failed (non-fatal):', e);
+      return null;
+    });
+    const preTrip = {
+      enabled: checks !== null,
+      doneVehicleIds: checks ? [...checks.keys()] : [],
+    };
+
     return NextResponse.json({
       success: true,
       data: {
         trip,
         route,
         routes,
+        preTrip,
         status: trip
           ? liveStatus({
               tripStatus: trip.status,
@@ -105,6 +125,18 @@ async function startTrip(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'No vehicle assigned to this route' }, { status: 422 });
     }
 
+    // The daily pre-trip check is a REMINDER, never a block (Director, 8 Nov): the
+    // trip always starts so live tracking never stops. We only look up whether
+    // today's check is still due, so the screen can put it up full screen. Any
+    // lookup failure is logged and treated as "not due" — it must never stop a trip.
+    let preTripLookup: PreTripLookup = { kind: 'table_missing' };
+    try {
+      preTripLookup = await lookupTodayCheck(svc, drv.id, route.vehicleId, istToday());
+    } catch (e) {
+      console.error('driver/trips POST pre-trip lookup failed (non-fatal):', e);
+    }
+    const preTripDue = preTripCheckDue(preTripLookup);
+
     const direction: TripDirection =
       body?.direction === 'onward' || body?.direction === 'return'
         ? body.direction
@@ -139,6 +171,7 @@ async function startTrip(request: NextRequest, auth: AuthContext) {
     }
 
     const trip = data as unknown as TripRow;
+    if (preTripLookup.kind === 'found') await linkCheckToTrip(svc, preTripLookup.checkId, trip.id);
 
     await svc
       .from('tms_driver')
@@ -159,7 +192,7 @@ async function startTrip(request: NextRequest, auth: AuthContext) {
       metadata: { routeId, vehicleId: route.vehicleId, direction },
     });
 
-    return NextResponse.json({ success: true, data: { trip, route } }, { status: 201 });
+    return NextResponse.json({ success: true, data: { trip, route, preTripCheckDue: preTripDue } }, { status: 201 });
   } catch (e) {
     console.error('driver/trips POST error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
