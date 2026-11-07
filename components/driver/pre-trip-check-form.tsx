@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Camera, CheckCircle2, ClipboardCheck, AlertTriangle, XCircle } from 'lucide-react';
+import { Camera, CheckCircle2, ClipboardCheck, AlertTriangle, Crosshair, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   PHOTO_TOO_BIG_MESSAGE,
@@ -77,11 +77,23 @@ export function PreTripCheckForm({
   routeLabel,
   onSaved,
   onClose,
+  onEndTrip,
+  endingTrip = false,
+  endTripError = null,
 }: {
   routeId: string;
   routeLabel: string;
   onSaved: (check: SavedPreTripCheck) => void;
   onClose?: () => void;
+  /**
+   * Passed while a trip is running. The full-screen check must never stand between
+   * a driver and END TRIP (W12 review on #27), so it is pinned to the bottom of the
+   * screen, above the check, whenever this is set.
+   */
+  onEndTrip?: () => void;
+  endingTrip?: boolean;
+  /** Shown above END TRIP, so a failed end is not hidden behind the check. */
+  endTripError?: string | null;
 }) {
   const [answers, setAnswers] = useState<Partial<Record<PreTripItemKey, boolean>>>({});
   const [odometer, setOdometer] = useState('');
@@ -179,7 +191,7 @@ export function PreTripCheckForm({
       aria-label="Pre-trip check"
       className="fixed inset-0 z-50 overflow-y-auto bg-white dark:bg-gray-950"
     >
-    <div className="mx-auto max-w-lg space-y-5 p-4 pb-10">
+    <div className={cn('mx-auto max-w-lg space-y-5 p-4', onEndTrip ? 'pb-32' : 'pb-10')}>
       <div className="flex items-start gap-3">
         <ClipboardCheck className="mt-0.5 h-7 w-7 shrink-0 text-amber-700 dark:text-amber-300" />
         <div className="min-w-0 flex-1">
@@ -383,6 +395,22 @@ export function PreTripCheckForm({
         )}
       </div>
     </div>
+      {onEndTrip && (
+        <div className="fixed inset-x-0 bottom-0 z-[60] border-t border-gray-200 bg-white/95 p-3 backdrop-blur dark:border-gray-800 dark:bg-gray-950/95">
+          {endTripError && (
+            <p className="mx-auto mb-2 max-w-lg text-sm text-red-700 dark:text-red-300">{endTripError}</p>
+          )}
+          <button
+            type="button"
+            disabled={endingTrip}
+            onClick={onEndTrip}
+            className="mx-auto inline-flex w-full max-w-lg items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-red-600 to-rose-600 px-6 py-4 text-lg font-semibold text-white shadow-sm disabled:opacity-60"
+          >
+            <Crosshair className="h-5 w-5" />
+            {endingTrip ? 'Ending…' : 'END TRIP'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

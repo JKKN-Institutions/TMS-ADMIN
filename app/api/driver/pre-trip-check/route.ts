@@ -12,6 +12,7 @@ import {
   isMissingTableError,
   parsePreTripInput,
   parseSkipReason,
+  preTripRowError,
   validatePhoto,
   PRE_TRIP_PHOTO_BUCKET,
 } from '@/lib/tracking/pre-trip-check';
@@ -125,6 +126,12 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
             odometer_photo_path: path,
             notes: parsedCheck.value.notes,
           };
+    // Same rule as the database constraint, so a bad row gets a plain 400.
+    const rowError = preTripRowError(values);
+    if (rowError) {
+      if (path) await svc.storage.from(PRE_TRIP_PHOTO_BUCKET).remove([path]);
+      return NextResponse.json({ error: rowError }, { status: 400 });
+    }
     const { data, error } = await svc
       .from('tms_pre_trip_check')
       .insert({
