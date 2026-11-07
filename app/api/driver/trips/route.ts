@@ -15,7 +15,7 @@ import {
 import { deriveDirection, liveStatus, type TripDirection } from '@/lib/tracking/trip-state';
 import { istMinutesOfDay } from '@/lib/boarding/attendance-window';
 import { istToday } from '@/lib/booking/window';
-import { preTripGate } from '@/lib/tracking/pre-trip-check';
+import { preTripCheckDue, type PreTripLookup } from '@/lib/tracking/pre-trip-check';
 import {
   getTodayChecksByVehicle,
   linkCheckToTrip,
@@ -55,9 +55,8 @@ async function getActive(_request: NextRequest, auth: AuthContext) {
     const route = trip ? routes.find((r) => r.id === trip.route_id) ?? null : null;
 
     // Today's pre-trip checks, so the screen can show the check before START TRIP.
-    // null = the check table is not deployed yet (the screen then skips it). A read
-    // failure must not take the whole trip screen down: the server-side gate in POST
-    // still asks for the check, and the screen opens the form on that answer.
+    // null = the check table is not deployed yet, or the read failed (the screen then
+    // skips the reminder rather than taking the whole trip screen down).
     const checks = await getTodayChecksByVehicle(svc, drv.id, istToday()).catch((e) => {
       console.error('driver/trips GET pre-trip lookup failed (non-fatal):', e);
       return null;
@@ -126,23 +125,17 @@ async function startTrip(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'No vehicle assigned to this route' }, { status: 422 });
     }
 
-    // The daily pre-trip check: the first trip of the day on this bus cannot start
-    // until the driver has done it. Later trips the same day reuse the same check.
-    // Enforced HERE, not only on the screen, so a refresh or an old cached page cannot
-    // skip it. See lib/tracking/pre-trip-check.ts for the rule.
-    const gate = preTripGate(await lookupTodayCheck(svc, drv.id, route.vehicleId, istToday()));
-    if (!gate.allow) {
-      return NextResponse.json(
-        {
-          error: 'Do the pre-trip check before starting your first trip today.',
-          code: gate.reason,
-          data: { routeId, vehicleId: route.vehicleId },
-        },
-        // 428, not 409: the page already treats 409 as "a trip is live, adopt it".
-        // An older cached page that does not know this code shows the error text.
-        { status: 428 }
-      );
+    // The daily pre-trip check is a REMINDER, never a block (Director, 8 Nov): the
+    // trip always starts so live tracking never stops. We only look up whether
+    // today's check is still due, so the screen can put it up full screen. Any
+    // lookup failure is logged and treated as "not due" — it must never stop a trip.
+    let preTripLookup: PreTripLookup = { kind: 'table_missing' };
+    try {
+      preTripLookup = await lookupTodayCheck(svc, drv.id, route.vehicleId, istToday());
+    } catch (e) {
+      console.error('driver/trips POST pre-trip lookup failed (non-fatal):', e);
     }
+    const preTripDue = preTripCheckDue(preTripLookup);
 
     const direction: TripDirection =
       body?.direction === 'onward' || body?.direction === 'return'
@@ -178,7 +171,7 @@ async function startTrip(request: NextRequest, auth: AuthContext) {
     }
 
     const trip = data as unknown as TripRow;
-    if (gate.checkId) await linkCheckToTrip(svc, gate.checkId, trip.id);
+    if (preTripLookup.kind === 'found') await linkCheckToTrip(svc, preTripLookup.checkId, trip.id);
 
     await svc
       .from('tms_driver')
@@ -199,7 +192,7 @@ async function startTrip(request: NextRequest, auth: AuthContext) {
       metadata: { routeId, vehicleId: route.vehicleId, direction },
     });
 
-    return NextResponse.json({ success: true, data: { trip, route } }, { status: 201 });
+    return NextResponse.json({ success: true, data: { trip, route, preTripCheckDue: preTripDue } }, { status: 201 });
   } catch (e) {
     console.error('driver/trips POST error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

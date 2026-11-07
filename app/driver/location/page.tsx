@@ -48,6 +48,7 @@ async function fetchLocation(): Promise<Resp> {
 interface Trip {
   id: string;
   route_id: string;
+  vehicle_id: string;
   direction: string;
   started_at: string;
   fix_count: number;
@@ -137,18 +138,23 @@ export default function DriverLocationPage() {
 
   const [busy, setBusy] = useState(false);
   const [tripError, setTripError] = useState<string | null>(null);
-  // Set when the server refuses START TRIP for a missing check (e.g. the list below
-  // was stale). Cleared once a check is saved.
-  const [checkDemanded, setCheckDemanded] = useState(false);
   const [checkNotice, setCheckNotice] = useState<string | null>(null);
+  // The driver opened the check themselves before starting (closable).
+  const [checkOpenedEarly, setCheckOpenedEarly] = useState(false);
 
-  // Daily pre-trip check: shown in place of START TRIP until today's check exists for
-  // the bus on the selected route. The server enforces the same rule.
+  // Daily pre-trip check — a must-see reminder that NEVER blocks the trip (Director,
+  // 8 Nov). START TRIP always works. Once a trip is running on a bus with no check
+  // or skip today, the check takes the whole screen and cannot be closed: the ways
+  // out are SAVE CHECK or a recorded skip. Derived from the server's list, so a
+  // refresh does not make it go away. Tracking keeps running underneath.
+  const preTrip = tripData?.preTrip;
+  const doneToday = (vehicleId: string | null | undefined) =>
+    !!vehicleId && !!preTrip?.doneVehicleIds.includes(vehicleId);
   const selectedVehicleId =
     tripData?.routes.find((r) => r.id === selectedRouteId)?.vehicleId ?? null;
-  const checkDone = !!selectedVehicleId && !!tripData?.preTrip?.doneVehicleIds.includes(selectedVehicleId);
-  const needsCheck =
-    !trip && !checkDone && (checkDemanded || (!!tripData?.preTrip?.enabled && !!selectedVehicleId));
+  const checkMandatory = !!trip && !!preTrip?.enabled && !doneToday(trip.vehicle_id);
+  const checkDueBeforeStart = !trip && !!preTrip?.enabled && !!selectedVehicleId && !doneToday(selectedVehicleId);
+  const checkRouteId = trip?.route_id ?? selectedRouteId;
 
   const startTrip = async (routeId: string) => {
     setBusy(true);
@@ -160,12 +166,6 @@ export default function DriverLocationPage() {
         credentials: 'same-origin',
         body: JSON.stringify({ routeId }),
       });
-      // 428 = today's pre-trip check is missing. Open the check instead of an error.
-      if (res.status === 428) {
-        setCheckDemanded(true);
-        await refetchTrip();
-        return;
-      }
       // 409 = a trip is already live for this route/driver/bus. Adopt it rather than
       // showing an error the driver can do nothing about.
       if (!res.ok && res.status !== 409) {
@@ -182,22 +182,23 @@ export default function DriverLocationPage() {
   };
 
   const onCheckSaved = async (check: SavedPreTripCheck) => {
-    setCheckDemanded(false);
+    const startAfter = checkOpenedEarly && !trip && !check.any_issue;
+    setCheckOpenedEarly(false);
     await refetchTrip();
     if (check.any_issue) {
-      // Do not roll the bus on automatically after a NOT OK: the driver decides,
-      // and the transport head already has the alert.
+      // alerted === 0: nobody received it. null: already recorded earlier today
+      // (the alert went out then).
+      const what = check.skipped ? 'that the check was skipped' : 'about the NOT OK items';
       setCheckNotice(
-        // alerted === 0: nobody received it. null: already saved earlier today (the
-        // alert went out then).
         check.alerted !== 0
-          ? 'Check saved. The transport head has been told about the NOT OK items. Tap START TRIP only if the bus is safe to drive.'
-          : 'Check saved, but the alert could not be sent. Please phone the transport office about the NOT OK items before you drive.'
+          ? `Saved. The transport head has been told ${what}.`
+          : `Saved, but the alert could not be sent. Please phone the transport office ${what}.`
       );
       return;
     }
     setCheckNotice(null);
-    if (selectedRouteId) await startTrip(selectedRouteId);
+    // All OK before starting: go straight on to the trip, as before.
+    if (startAfter && selectedRouteId) await startTrip(selectedRouteId);
   };
 
   const endTrip = async () => {
@@ -359,22 +360,37 @@ export default function DriverLocationPage() {
             </div>
           )}
 
-          {checkNotice && !trip && (
+          {checkNotice && (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{checkNotice}</span>
             </div>
           )}
 
-          {/* One control, sized for a thumb. Nothing else needs pressing while driving. */}
-          {!trip && needsCheck && selectedRouteId ? (
+          {(checkMandatory || (checkOpenedEarly && checkDueBeforeStart)) && checkRouteId && (
             <PreTripCheckForm
-              key={selectedRouteId}
-              routeId={selectedRouteId}
-              routeLabel={routes.find((r) => r.id === selectedRouteId)?.label ?? 'this route'}
+              key={checkRouteId}
+              routeId={checkRouteId}
+              routeLabel={routes.find((r) => r.id === checkRouteId)?.label ?? 'this route'}
               onSaved={(c) => void onCheckSaved(c)}
+              onClose={checkMandatory ? undefined : () => setCheckOpenedEarly(false)}
             />
-          ) : trip ? (
+          )}
+
+          {checkDueBeforeStart && (
+            <button
+              type="button"
+              onClick={() => setCheckOpenedEarly(true)}
+              className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50 px-4 py-3 text-left text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
+            >
+              <span>Today&apos;s pre-trip check is not done yet.</span>
+              <span className="shrink-0 font-semibold underline">Do it now</span>
+            </button>
+          )}
+
+          {/* One control, sized for a thumb. Nothing else needs pressing while driving.
+              START TRIP is never hidden or blocked by the pre-trip check. */}
+          {trip ? (
             <button
               type="button"
               disabled={busy}

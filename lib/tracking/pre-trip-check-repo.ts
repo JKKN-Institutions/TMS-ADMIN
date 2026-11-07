@@ -9,7 +9,7 @@ import { isMissingTableError, type PreTripLookup } from './pre-trip-check';
 type Svc = ReturnType<typeof createServiceRoleClient>;
 
 export const PRE_TRIP_SELECT =
-  'id, driver_id, vehicle_id, trip_id, check_date, tyres_ok, brakes_ok, lights_ok, horn_ok, fuel_level_ok, first_aid_box_ok, odometer_km, odometer_photo_path, any_issue, notes, created_at';
+  'id, driver_id, vehicle_id, trip_id, check_date, skipped, skip_reason, tyres_ok, brakes_ok, lights_ok, horn_ok, fuel_level_ok, first_aid_box_ok, odometer_km, odometer_photo_path, any_issue, notes, created_at';
 
 export interface PreTripCheckRow {
   id: string;
@@ -17,14 +17,17 @@ export interface PreTripCheckRow {
   vehicle_id: string;
   trip_id: string | null;
   check_date: string;
-  tyres_ok: boolean;
-  brakes_ok: boolean;
-  lights_ok: boolean;
-  horn_ok: boolean;
-  fuel_level_ok: boolean;
-  first_aid_box_ok: boolean;
-  odometer_km: number;
-  odometer_photo_path: string;
+  skipped: boolean;
+  skip_reason: string | null;
+  // The answers, odometer and photo are null on a skipped row.
+  tyres_ok: boolean | null;
+  brakes_ok: boolean | null;
+  lights_ok: boolean | null;
+  horn_ok: boolean | null;
+  fuel_level_ok: boolean | null;
+  first_aid_box_ok: boolean | null;
+  odometer_km: number | null;
+  odometer_photo_path: string | null;
   any_issue: boolean;
   notes: string | null;
   created_at: string;
@@ -73,7 +76,19 @@ export async function getTodayChecksByVehicle(
   return new Map(rows.map((r) => [r.vehicle_id, r]));
 }
 
-/** Record which trip this check cleared (first trip only). Best effort. */
+/** This driver's running trip on this bus, if any (to link a check done mid-trip). */
+export async function activeTripIdOnVehicle(svc: Svc, driverId: string, vehicleId: string): Promise<string | null> {
+  const { data } = await svc
+    .from('tms_trip')
+    .select('id')
+    .eq('driver_id', driverId)
+    .eq('vehicle_id', vehicleId)
+    .eq('status', 'active')
+    .maybeSingle();
+  return (data as { id: string } | null)?.id ?? null;
+}
+
+/** Record which trip this check belongs to (first link wins). Best effort. */
 export async function linkCheckToTrip(svc: Svc, checkId: string, tripId: string): Promise<void> {
   const { error } = await svc
     .from('tms_pre_trip_check')
@@ -117,7 +132,7 @@ export async function transportHeadProfileIds(svc: Svc): Promise<string[]> {
 }
 
 /**
- * Alert the transport head that a pre-trip check found a problem. Uses the TMS
+ * Alert the transport head that a pre-trip check found a problem or was skipped. Uses the TMS
  * notification plane (in-app inbox + web push), the same path as grievances and
  * tracking reminders. Never throws; returns how many people it reached.
  */
@@ -130,6 +145,8 @@ export async function alertTransportHead(
     vehicleId: string;
     busLabel: string;
     issues: string[];
+    /** Set when the driver skipped the check instead of doing it. */
+    skipReason?: string | null;
     notes: string | null;
     actorId: string;
   }
@@ -141,10 +158,13 @@ export async function alertTransportHead(
       return 0;
     }
     const { recipientCount } = await dispatchNotification(svc, {
-      title: `Pre-trip check: problem on ${opts.busLabel}`,
-      body:
-        `${opts.driverName} marked NOT OK: ${opts.issues.join(', ')}.` +
-        (opts.notes ? ` Note: ${opts.notes}` : ''),
+      title: opts.skipReason
+        ? `Pre-trip check skipped on ${opts.busLabel}`
+        : `Pre-trip check: problem on ${opts.busLabel}`,
+      body: opts.skipReason
+        ? `${opts.driverName} skipped: ${opts.skipReason}. The trip ran without today's check.`
+        : `${opts.driverName} marked NOT OK: ${opts.issues.join(', ')}.` +
+          (opts.notes ? ` Note: ${opts.notes}` : ''),
       category: 'alert',
       priority: 'high',
       url: null, // no admin page for pre-trip checks yet
@@ -155,6 +175,7 @@ export async function alertTransportHead(
         driverId: opts.driverId,
         vehicleId: opts.vehicleId,
         issues: opts.issues,
+        skipReason: opts.skipReason ?? null,
       },
       idempotencyKey: `pre_trip_check:${opts.checkId}`,
       targeting: { type: 'users', user_ids: recipients },

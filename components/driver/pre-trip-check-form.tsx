@@ -7,12 +7,16 @@ import {
   PHOTO_TOO_BIG_MESSAGE,
   PRE_TRIP_ITEMS,
   PRE_TRIP_UPLOAD_MAX_BYTES,
+  SKIP_OTHER_MAX,
+  SKIP_REASONS,
   type PreTripItemKey,
+  type SkipReasonCode,
 } from '@/lib/tracking/pre-trip-check';
 
 export interface SavedPreTripCheck {
   id: string;
   any_issue: boolean;
+  skipped: boolean;
   /** How many people the NOT OK alert reached; null when no alert was needed or sent. */
   alerted: number | null;
 }
@@ -54,19 +58,30 @@ async function shrinkPhoto(file: File): Promise<File | null> {
   return file.size <= PRE_TRIP_UPLOAD_MAX_BYTES ? file : null;
 }
 
+type SaveResponse = {
+  error?: string;
+  data?: { check: { id: string; any_issue: boolean; skipped: boolean } | null; alerted: number | null };
+};
+
 /**
- * The driver's daily pre-trip check: six one-tap yes/no items, the odometer reading
- * and a photo of the odometer. Built for a phone held in one hand — every target is
- * thumb-sized.
+ * The driver's daily pre-trip check, shown FULL SCREEN (Director, 8 Nov): six one-tap
+ * yes/no items, the odometer reading and a photo of the odometer — or a skip with a
+ * reason. It never blocks the trip; it is a reminder the driver must answer.
+ *
+ * `onClose` is passed only when the driver opened it themselves before starting.
+ * Once a trip is running without today's check there is no close: the two ways out
+ * are SAVE CHECK or a recorded skip.
  */
 export function PreTripCheckForm({
   routeId,
   routeLabel,
   onSaved,
+  onClose,
 }: {
   routeId: string;
   routeLabel: string;
   onSaved: (check: SavedPreTripCheck) => void;
+  onClose?: () => void;
 }) {
   const [answers, setAnswers] = useState<Partial<Record<PreTripItemKey, boolean>>>({});
   const [odometer, setOdometer] = useState('');
@@ -75,6 +90,9 @@ export function PreTripCheckForm({
   const [preview, setPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [skipCode, setSkipCode] = useState<SkipReasonCode | null>(null);
+  const [skipOther, setSkipOther] = useState('');
 
   useEffect(() => {
     if (!photo) {
@@ -89,6 +107,46 @@ export function PreTripCheckForm({
   const answered = PRE_TRIP_ITEMS.filter(({ key }) => answers[key] !== undefined).length;
   const anyNo = PRE_TRIP_ITEMS.some(({ key }) => answers[key] === false);
   const ready = answered === PRE_TRIP_ITEMS.length && odometer.trim() !== '' && !!photo;
+  const skipReady = !!skipCode && (skipCode !== 'other' || skipOther.trim() !== '');
+
+  /** POST the form; shared by SAVE CHECK and the skip. */
+  const send = async (fd: FormData) => {
+    const res = await fetch('/api/driver/pre-trip-check', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: fd,
+    });
+    // 413 = the platform refused the body before our route ran (no JSON error).
+    if (res.status === 413) {
+      setError(PHOTO_TOO_BIG_MESSAGE);
+      return;
+    }
+    const j = (await res.json().catch(() => null)) as SaveResponse | null;
+    if (!res.ok || !j?.data?.check) {
+      setError(j?.error ?? 'Could not save. Please try again.');
+      return;
+    }
+    const c = j.data.check;
+    onSaved({ id: c.id, any_issue: c.any_issue, skipped: !!c.skipped, alerted: j.data.alerted ?? null });
+  };
+
+  const submitSkip = async () => {
+    if (!skipReady || !skipCode) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.set('routeId', routeId);
+      fd.set('skip', '1');
+      fd.set('skip_reason', skipCode);
+      if (skipCode === 'other') fd.set('skip_reason_other', skipOther.trim());
+      await send(fd);
+    } catch {
+      setError('Network problem. Check your connection and try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const submit = async () => {
     if (!ready || !photo) return;
@@ -106,25 +164,7 @@ export function PreTripCheckForm({
         return;
       }
       fd.set('photo', upload);
-
-      const res = await fetch('/api/driver/pre-trip-check', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: fd,
-      });
-      const j = (await res.json().catch(() => null)) as
-        | { error?: string; data?: { check: { id: string; any_issue: boolean } | null; alerted: number | null } }
-        | null;
-      // 413 = the platform refused the body before our route ran (no JSON error).
-      if (res.status === 413) {
-        setError(PHOTO_TOO_BIG_MESSAGE);
-        return;
-      }
-      if (!res.ok || !j?.data?.check) {
-        setError(j?.error ?? 'Could not save the check. Please try again.');
-        return;
-      }
-      onSaved({ id: j.data.check.id, any_issue: j.data.check.any_issue, alerted: j.data.alerted ?? null });
+      await send(fd);
     } catch {
       setError('Network problem. Check your connection and try again.');
     } finally {
@@ -133,15 +173,31 @@ export function PreTripCheckForm({
   };
 
   return (
-    <div className="space-y-5 rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pre-trip check"
+      className="fixed inset-0 z-50 overflow-y-auto bg-white dark:bg-gray-950"
+    >
+    <div className="mx-auto max-w-lg space-y-5 p-4 pb-10">
       <div className="flex items-start gap-3">
-        <ClipboardCheck className="mt-0.5 h-6 w-6 shrink-0 text-amber-700 dark:text-amber-300" />
-        <div>
-          <p className="text-base font-semibold text-gray-900 dark:text-white">Pre-trip check — once a day</p>
+        <ClipboardCheck className="mt-0.5 h-7 w-7 shrink-0 text-amber-700 dark:text-amber-300" />
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-semibold text-gray-900 dark:text-white">Pre-trip check — once a day</p>
           <p className="mt-0.5 text-sm text-gray-700 dark:text-gray-300">
-            Check the bus for {routeLabel} before your first trip today. Tap OK or NOT OK for each item.
+            Check the bus for {routeLabel}. Tap OK or NOT OK for each item.
+            {!onClose && ' Your trip is running and the bus is being tracked.'}
           </p>
         </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 ring-1 ring-gray-300 dark:text-gray-300 dark:ring-gray-700"
+          >
+            Not now
+          </button>
+        )}
       </div>
 
       <ul className="space-y-3">
@@ -270,6 +326,63 @@ export function PreTripCheckForm({
                 ? 'Enter the odometer reading'
                 : 'Take the odometer photo'}
       </button>
+
+      {/* The other way out: a recorded skip with a reason. Never a silent dismiss. */}
+      <div className="border-t border-gray-200 pt-4 dark:border-gray-800">
+        {!skipOpen ? (
+          <button
+            type="button"
+            onClick={() => setSkipOpen(true)}
+            className="w-full rounded-lg px-4 py-3 text-base font-medium text-gray-700 ring-1 ring-gray-300 dark:text-gray-200 dark:ring-gray-700"
+          >
+            Can&apos;t do the check now?
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-base font-medium text-gray-900 dark:text-white">Why are you skipping the check?</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {SKIP_REASONS.map(({ code, label }) => (
+                <button
+                  key={code}
+                  type="button"
+                  aria-pressed={skipCode === code}
+                  onClick={() => setSkipCode(code)}
+                  className={cn(
+                    'min-h-12 rounded-lg border-2 px-3 text-base font-medium',
+                    skipCode === code
+                      ? 'border-amber-600 bg-amber-600 text-white'
+                      : 'border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                  )}
+                >
+                  {code === 'other' ? 'Other (type a reason)' : label}
+                </button>
+              ))}
+            </div>
+            {skipCode === 'other' && (
+              <input
+                type="text"
+                value={skipOther}
+                onChange={(e) => setSkipOther(e.target.value)}
+                maxLength={SKIP_OTHER_MAX}
+                placeholder="Type the reason"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-base text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              />
+            )}
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              The transport head will be told that today&apos;s check was skipped, and why.
+            </p>
+            <button
+              type="button"
+              disabled={!skipReady || saving}
+              onClick={() => void submitSkip()}
+              className="w-full rounded-xl bg-amber-600 px-6 py-4 text-base font-semibold text-white disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'SKIP TODAY\'S CHECK'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
     </div>
   );
 }

@@ -11,10 +11,12 @@ import {
   issueLabels,
   isMissingTableError,
   parsePreTripInput,
+  parseSkipReason,
   validatePhoto,
   PRE_TRIP_PHOTO_BUCKET,
 } from '@/lib/tracking/pre-trip-check';
 import {
+  activeTripIdOnVehicle,
   alertTransportHead,
   PRE_TRIP_SELECT,
   type PreTripCheckRow,
@@ -32,13 +34,18 @@ const UNIQUE_VIOLATION = '23505';
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 /**
- * POST /api/driver/pre-trip-check — the signed-in driver submits today's pre-trip
- * check for the bus on one of THEIR routes (multipart form):
- *   routeId, tyres_ok … first_aid_box_ok ('yes' | 'no'), odometer_km, notes?, photo.
+ * POST /api/driver/pre-trip-check — the signed-in driver records today's pre-trip
+ * check for the bus on one of THEIR routes (multipart form). Two shapes:
+ *   - the check:  routeId, tyres_ok … first_aid_box_ok ('yes' | 'no'), odometer_km,
+ *                 notes?, photo
+ *   - a skip:     routeId, skip=1, skip_reason ('camera' | 'network' | 'emergency' |
+ *                 'other'), skip_reason_other (required for 'other')
  *
- * The bus is resolved from the route assignment, never from the body. The photo goes
- * to the private tms-pre-trip-photos bucket under <auth uid>/<IST date>/. Any "no"
- * alerts the transport head through the TMS notification plane.
+ * This is the ONLY writer of tms_pre_trip_check (no client insert policy). The bus is
+ * resolved from the route assignment, never from the body. The photo goes to the
+ * private tms-pre-trip-photos bucket under <auth uid>/<IST date>/. Any "no", and any
+ * skip, alerts the transport head through the TMS notification plane. Never touches
+ * the trip: the check is a reminder, not a gate (Director, 8 Nov).
  */
 async function submitCheck(request: NextRequest, auth: AuthContext) {
   try {
@@ -54,15 +61,30 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
 
     const raw: Record<string, unknown> = {};
     for (const [k, v] of form.entries()) if (typeof v === 'string') raw[k] = v;
-    const parsed = parsePreTripInput(raw);
-    if (!parsed.ok) return NextResponse.json({ error: parsed.errors.join(' '), errors: parsed.errors }, { status: 400 });
+    const isSkip = raw.skip === '1' || raw.skip === 'true';
 
-    const photo = form.get('photo');
-    const photoFile = photo instanceof File ? photo : null;
-    const photoBytes = photoFile ? new Uint8Array(await photoFile.arrayBuffer()) : new Uint8Array();
-    // Type comes from the file's first bytes, never from what the phone reports.
-    const photoCheck = validatePhoto(photoFile ? { size: photoBytes.length, head: photoBytes.subarray(0, 16) } : null);
-    if (!photoCheck.ok) return NextResponse.json({ error: photoCheck.error }, { status: 400 });
+    // Validate everything before any write.
+    let skipReason: string | null = null;
+    let parsedCheck: ReturnType<typeof parsePreTripInput> | null = null;
+    let photoBytes = new Uint8Array();
+    let photoType: 'image/jpeg' | 'image/png' | 'image/webp' | null = null;
+    if (isSkip) {
+      const r = parseSkipReason(raw.skip_reason, raw.skip_reason_other);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+      skipReason = r.reason;
+    } else {
+      parsedCheck = parsePreTripInput(raw);
+      if (!parsedCheck.ok) {
+        return NextResponse.json({ error: parsedCheck.errors.join(' '), errors: parsedCheck.errors }, { status: 400 });
+      }
+      const photo = form.get('photo');
+      const photoFile = photo instanceof File ? photo : null;
+      if (photoFile) photoBytes = new Uint8Array(await photoFile.arrayBuffer());
+      // Type comes from the file's first bytes, never from what the phone reports.
+      const photoCheck = validatePhoto(photoFile ? { size: photoBytes.length, head: photoBytes.subarray(0, 16) } : null);
+      if (!photoCheck.ok) return NextResponse.json({ error: photoCheck.error }, { status: 400 });
+      photoType = photoCheck.type;
+    }
 
     const drv = await getDriverForUser(auth);
     if (!drv) return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
@@ -77,27 +99,40 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
     const vehicleId = route.vehicleId;
     const today = istToday();
 
-    // Upload first; the row only ever points at a photo that exists.
-    const path = `${auth.userId}/${today}/${uuidv4()}.${EXT[photoCheck.type]}`;
-    const { error: upErr } = await svc.storage
-      .from(PRE_TRIP_PHOTO_BUCKET)
-      .upload(path, Buffer.from(photoBytes), { contentType: photoCheck.type, upsert: false });
-    if (upErr) {
-      console.error('pre-trip-check photo upload error:', upErr);
-      return NextResponse.json({ error: 'Could not save the odometer photo. Please try again.' }, { status: 500 });
+    // Upload first (check only); the row only ever points at a photo that exists.
+    let path: string | null = null;
+    if (photoType) {
+      path = `${auth.userId}/${today}/${uuidv4()}.${EXT[photoType]}`;
+      const { error: upErr } = await svc.storage
+        .from(PRE_TRIP_PHOTO_BUCKET)
+        .upload(path, Buffer.from(photoBytes), { contentType: photoType, upsert: false });
+      if (upErr) {
+        console.error('pre-trip-check photo upload error:', upErr);
+        return NextResponse.json({ error: 'Could not save the odometer photo. Please try again.' }, { status: 500 });
+      }
     }
 
-    const { items, odometerKm, notes } = parsed.value;
+    // A check done after the trip started (the full-screen reminder) belongs to it.
+    const tripId = await activeTripIdOnVehicle(svc, drv.id, vehicleId).catch(() => null);
+
+    const values =
+      isSkip || !parsedCheck?.ok
+        ? { skipped: true, skip_reason: skipReason }
+        : {
+            skipped: false,
+            ...parsedCheck.value.items,
+            odometer_km: parsedCheck.value.odometerKm,
+            odometer_photo_path: path,
+            notes: parsedCheck.value.notes,
+          };
     const { data, error } = await svc
       .from('tms_pre_trip_check')
       .insert({
         driver_id: drv.id,
         vehicle_id: vehicleId,
+        trip_id: tripId,
         check_date: today,
-        ...items,
-        odometer_km: odometerKm,
-        odometer_photo_path: path,
-        notes,
+        ...values,
         created_by: auth.userId,
       })
       .select(PRE_TRIP_SELECT)
@@ -105,9 +140,9 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
 
     if (error) {
       // Drop the orphaned photo whatever went wrong.
-      await svc.storage.from(PRE_TRIP_PHOTO_BUCKET).remove([path]);
+      if (path) await svc.storage.from(PRE_TRIP_PHOTO_BUCKET).remove([path]);
       if (error.code === UNIQUE_VIOLATION) {
-        // Already done today (double tap, or a second phone). Hand back the saved check.
+        // Already done (or skipped) today: double tap, or a second phone. Hand it back.
         const { data: existing } = await svc
           .from('tms_pre_trip_check')
           .select(PRE_TRIP_SELECT)
@@ -144,7 +179,8 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
         vehicleId,
         busLabel: reg ? `${reg} (route ${route.label})` : `route ${route.label}`,
         issues,
-        notes,
+        skipReason: check.skipped ? check.skip_reason : null,
+        notes: check.notes,
         actorId: auth.userId,
       });
     }
@@ -155,10 +191,12 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
       entityType: 'tms_pre_trip_check',
       entityId: check.id,
       entityLabel: route.label,
-      description: check.any_issue
-        ? `Driver's pre-trip check found problems: ${issues.join(', ')}`
-        : 'Driver completed the pre-trip check, all OK',
-      metadata: { routeId, vehicleId, odometerKm, issues, alerted },
+      description: check.skipped
+        ? `Driver skipped the pre-trip check: ${check.skip_reason}`
+        : check.any_issue
+          ? `Driver's pre-trip check found problems: ${issues.join(', ')}`
+          : 'Driver completed the pre-trip check, all OK',
+      metadata: { routeId, vehicleId, tripId, skipped: check.skipped, issues, alerted },
     });
 
     return NextResponse.json({ success: true, data: { check, alerted, alreadyDone: false } }, { status: 201 });

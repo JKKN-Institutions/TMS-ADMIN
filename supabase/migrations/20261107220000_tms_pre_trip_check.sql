@@ -1,9 +1,12 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- tms_pre_trip_check — the driver's daily pre-trip check (Director, 7 Nov 2026).
+-- tms_pre_trip_check — the driver's daily pre-trip check (Director, 7 Nov 2026;
+-- reminder-not-block ruling 8 Nov 02:4x).
 --
--- Before the FIRST trip of the day on a bus, the driver taps yes/no for six items
--- (tyres, brakes, lights, horn, fuel level, first-aid box) and photographs the
--- odometer. Any "no" alerts the transport head (in the app, via tms_notification).
+-- Once a day per bus, the driver taps yes/no for six items (tyres, brakes, lights,
+-- horn, fuel level, first-aid box) and photographs the odometer — OR records a skip
+-- with a reason ("Camera not working", "No network", "Emergency trip", "Other: …").
+-- The check NEVER blocks a trip: live tracking must not stop. Any "no", and any
+-- skip, alerts the transport head (in the app, via tms_notification).
 --
 -- NOT the old Bus Inspection (tms_inspection): that was the transport head's
 -- periodic 25-item inspection, removed from the app by 20260923120000 and holding
@@ -16,33 +19,52 @@ create table if not exists public.tms_pre_trip_check (
   id                   uuid primary key default gen_random_uuid(),
   driver_id            uuid not null references public.tms_driver(id),
   vehicle_id           uuid not null references public.tms_vehicle(id),
-  -- Filled when the trip this check cleared is started. Nullable: the check is
-  -- made BEFORE the trip exists.
+  -- The trip this check belongs to: filled when a trip starts after the check, or
+  -- when the check is done during a running trip. Nullable.
   trip_id              uuid references public.tms_trip(id),
   -- Same IST-day default as tms_trip.travel_date, so a 5:30 am check is "today".
   check_date           date not null default (now() at time zone 'Asia/Kolkata')::date,
+  -- true = the driver skipped the check; skip_reason then says why.
+  skipped              boolean not null default false,
+  skip_reason          text,
   -- One column per item: true = OK, false = problem. Fixed list by design.
-  tyres_ok             boolean not null,
-  brakes_ok            boolean not null,
-  lights_ok            boolean not null,
-  horn_ok              boolean not null,
-  fuel_level_ok        boolean not null,
-  first_aid_box_ok     boolean not null,
-  odometer_km          numeric not null check (odometer_km >= 0 and odometer_km < 10000000),
-  -- Path inside the private tms-pre-trip-photos bucket.
-  odometer_photo_path  text not null,
-  -- Derived, so it can never disagree with the six answers.
+  -- Null only on a skipped row (see tms_pre_trip_check_done_or_skipped).
+  tyres_ok             boolean,
+  brakes_ok            boolean,
+  lights_ok            boolean,
+  horn_ok              boolean,
+  fuel_level_ok        boolean,
+  first_aid_box_ok     boolean,
+  odometer_km          numeric check (odometer_km >= 0 and odometer_km < 10000000),
+  -- Path inside the private tms-pre-trip-photos bucket. Null only on a skipped row.
+  odometer_photo_path  text,
+  -- Derived, so it can never disagree with the answers: any "no", or a skip.
   any_issue            boolean generated always as (
-                         not (tyres_ok and brakes_ok and lights_ok and horn_ok
-                              and fuel_level_ok and first_aid_box_ok)
+                         skipped or not coalesce(
+                           tyres_ok and brakes_ok and lights_ok and horn_ok
+                           and fuel_level_ok and first_aid_box_ok, false)
                        ) stored,
   notes                text check (notes is null or char_length(notes) <= 1000),
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
-  created_by           uuid
+  created_by           uuid,
+  -- A row is EITHER a full check (all six answers, odometer, photo, no reason)
+  -- OR a skip with a non-empty reason. Nothing in between.
+  constraint tms_pre_trip_check_done_or_skipped check (
+    (skipped
+      and skip_reason is not null
+      and char_length(btrim(skip_reason)) between 1 and 500)
+    or
+    (not skipped
+      and skip_reason is null
+      and tyres_ok is not null and brakes_ok is not null and lights_ok is not null
+      and horn_ok is not null and fuel_level_ok is not null and first_aid_box_ok is not null
+      and odometer_km is not null and odometer_photo_path is not null)
+  )
 );
 
--- One check per driver, bus and day. A second trip the same day reuses it.
+-- One record (check or skip) per driver, bus and day. A second trip the same day
+-- does not ask again.
 create unique index if not exists tms_pre_trip_check_one_per_day
   on public.tms_pre_trip_check (driver_id, vehicle_id, check_date);
 create index if not exists tms_pre_trip_check_vehicle_date
@@ -59,7 +81,7 @@ create trigger trg_tms_pre_trip_check_updated_at before update on public.tms_pre
 -- ALL writes go through the service-role API route (POST /api/driver/pre-trip-check),
 -- which uploads the photo and resolves the bus from the route. There is deliberately
 -- NO insert/update/delete policy: a client-side insert could invent a photo path,
--- bus or date and satisfy the trip gate without a photo. Read policies only:
+-- bus, date or skip and mark the day's check as done. Read policies only:
 --   • a driver reads only their own rows. "Own" honours BOTH links,
 --     tms_driver.profile_id and staff.profile_id, exactly like
 --     tms_trip_select_own_driver (3 of 30 drivers have no profile_id today).

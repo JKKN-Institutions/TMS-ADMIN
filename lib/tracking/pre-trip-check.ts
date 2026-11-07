@@ -110,31 +110,49 @@ export function validatePhoto(
 }
 
 /**
- * The check-before-start rule.
+ * Skip reasons (Director, 8 Nov). A skip is recorded, flagged as an issue and alerts
+ * the transport head exactly like a NOT OK. "Other" needs the driver's own words.
+ */
+export const SKIP_REASONS = [
+  { code: 'camera', label: 'Camera not working' },
+  { code: 'network', label: 'No network' },
+  { code: 'emergency', label: 'Emergency trip' },
+  { code: 'other', label: 'Other' },
+] as const;
+export type SkipReasonCode = (typeof SKIP_REASONS)[number]['code'];
+export const SKIP_OTHER_MAX = 300;
+
+/** The skip reason to store, e.g. "No network" or "Other: tyre shop closed". */
+export function parseSkipReason(
+  code: unknown,
+  otherText: unknown
+): { ok: true; reason: string } | { ok: false; error: string } {
+  const r = SKIP_REASONS.find((x) => x.code === code);
+  if (!r) return { ok: false, error: 'Choose why you are skipping the check.' };
+  if (r.code !== 'other') return { ok: true, reason: r.label };
+  const text = typeof otherText === 'string' ? otherText.trim() : '';
+  if (!text) return { ok: false, error: 'Type the reason for skipping the check.' };
+  if (text.length > SKIP_OTHER_MAX) return { ok: false, error: `Keep the reason under ${SKIP_OTHER_MAX} characters.` };
+  return { ok: true, reason: `Other: ${text}` };
+}
+
+/**
+ * The reminder rule (Director, 8 Nov: a must-see reminder that NEVER blocks the trip).
  *
- * - A check exists for this driver + bus today → the trip may start (second and later
- *   trips of the day do not ask again).
- * - No check today → blocked; the driver must do the check first.
- * - The check table is not there yet (code deployed before the migration is applied)
- *   → allowed, so drivers are never locked out of tracking by a deploy-order mistake.
- *   Any OTHER lookup error is not swallowed here: the caller treats it as a 500.
+ * Starting a trip always succeeds. This only decides whether the driver must now see
+ * the full-screen check:
+ * - a check or skip exists for this driver + bus today → not due (later trips of the
+ *   day do not ask again);
+ * - none today → due;
+ * - the check table is not deployed yet → not due (nothing to record it in).
  */
 export type PreTripLookup =
   | { kind: 'found'; checkId: string }
   | { kind: 'none' }
   | { kind: 'table_missing' };
 
-export type PreTripGate = { allow: true; checkId: string | null } | { allow: false; reason: 'pre_trip_check_required' };
-
-export function preTripGate(lookup: PreTripLookup): PreTripGate {
-  switch (lookup.kind) {
-    case 'found':
-      return { allow: true, checkId: lookup.checkId };
-    case 'table_missing':
-      return { allow: true, checkId: null };
-    case 'none':
-      return { allow: false, reason: 'pre_trip_check_required' };
-  }
+export function preTripCheckDue(lookup: PreTripLookup): boolean {
+  return lookup.kind === 'none';
 }
 
 /**

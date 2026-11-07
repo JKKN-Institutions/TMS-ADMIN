@@ -1,7 +1,9 @@
 /**
  * Route-level tests for the daily pre-trip check (review on TMS-ADMIN #27):
- *   - POST /api/driver/trips refuses the first trip of the day without a check (428)
- *   - POST /api/driver/pre-trip-check: duplicate same-day check, transport-head alert
+ *   - POST /api/driver/trips NEVER refuses a trip over the check (Director, 8 Nov);
+ *     it only reports whether today's check is still due
+ *   - POST /api/driver/pre-trip-check: check, skip with reason, duplicate same-day
+ *     record, transport-head alert for NOT OK and for a skip
  *   - the migration gives clients no write path (no storage.objects policy, no insert
  *     policy, anon revoked)
  * Supabase is a fake that records calls; no network, no database.
@@ -49,6 +51,8 @@ interface FakeConfig {
   checkLookup: Result;
   /** insert into tms_pre_trip_check → single */
   checkInsert: Result;
+  /** activeTripIdOnVehicle → maybeSingle on tms_trip */
+  activeTrip: Result;
 }
 let cfg: FakeConfig;
 const calls: { table: string; op: string; arg?: unknown }[] = [];
@@ -73,6 +77,7 @@ function builder(table: string) {
   };
   b.maybeSingle = async (): Promise<Result> => {
     if (table === 'tms_pre_trip_check') return cfg.checkLookup;
+    if (table === 'tms_trip') return cfg.activeTrip;
     if (table === 'custom_roles') return ok({ id: 'role-th' });
     if (table === 'tms_vehicle') return ok({ registration_number: 'TN28 AB 1234' });
     if (table === 'staff') return ok({ first_name: 'Ravi', last_name: 'K' });
@@ -106,6 +111,8 @@ const CHECK_ROW = {
   id: 'chk-1',
   driver_id: 'drv-1',
   vehicle_id: 'veh-1',
+  skipped: false,
+  skip_reason: null,
   tyres_ok: true,
   brakes_ok: true,
   lights_ok: true,
@@ -139,6 +146,15 @@ function checkRequest(
   return new NextRequest('http://localhost/api/driver/pre-trip-check', { method: 'POST', body: fd });
 }
 
+function skipRequest(code: string, other = '') {
+  const fd = new FormData();
+  fd.set('routeId', 'route-1');
+  fd.set('skip', '1');
+  fd.set('skip_reason', code);
+  if (other) fd.set('skip_reason_other', other);
+  return new NextRequest('http://localhost/api/driver/pre-trip-check', { method: 'POST', body: fd });
+}
+
 const inserts = (table: string) => calls.filter((c) => c.table === table && c.op === 'insert');
 
 beforeEach(() => {
@@ -146,24 +162,23 @@ beforeEach(() => {
   upload.mockClear();
   remove.mockClear();
   dispatchNotification.mockClear();
-  cfg = { checkLookup: ok(null), checkInsert: ok(CHECK_ROW) };
+  cfg = { checkLookup: ok(null), checkInsert: ok(CHECK_ROW), activeTrip: ok(null) };
 });
 
-describe('POST /api/driver/trips — check before start', () => {
-  it('refuses the first trip of the day with 428 when there is no check, and starts nothing', async () => {
+describe('POST /api/driver/trips — the check never blocks the trip', () => {
+  it('starts the first trip of the day with no check, and reports the check as due', async () => {
     cfg.checkLookup = ok(null);
     const res = await startTripPOST(startTripRequest());
-    expect(res.status).toBe(428);
-    const body = await res.json();
-    expect(body.code).toBe('pre_trip_check_required');
-    expect(body.data).toEqual({ routeId: 'route-1', vehicleId: 'veh-1' });
-    expect(inserts('tms_trip')).toHaveLength(0);
+    expect(res.status).toBe(201);
+    expect((await res.json()).data.preTripCheckDue).toBe(true);
+    expect(inserts('tms_trip')).toHaveLength(1);
   });
 
-  it('starts the trip when today\'s check exists and links the check to the trip', async () => {
+  it('starts the trip when today\'s check exists, links it, and reports nothing due', async () => {
     cfg.checkLookup = ok({ id: 'chk-1' });
     const res = await startTripPOST(startTripRequest());
     expect(res.status).toBe(201);
+    expect((await res.json()).data.preTripCheckDue).toBe(false);
     expect(inserts('tms_trip')).toHaveLength(1);
     const link = calls.find((c) => c.table === 'tms_pre_trip_check' && c.op === 'update');
     expect(link?.arg).toEqual({ trip_id: 'trip-1' });
@@ -179,13 +194,14 @@ describe('POST /api/driver/trips — check before start', () => {
     cfg.checkLookup = { data: null, error: { code: 'PGRST205', message: 'not found' } };
     const res = await startTripPOST(startTripRequest());
     expect(res.status).toBe(201);
+    expect(inserts('tms_trip')).toHaveLength(1);
   });
 
-  it('returns 500, not a free pass, on any other lookup error', async () => {
+  it('still starts the trip when the check lookup fails for any other reason', async () => {
     cfg.checkLookup = { data: null, error: { code: '57014', message: 'timeout' } };
     const res = await startTripPOST(startTripRequest());
-    expect(res.status).toBe(500);
-    expect(inserts('tms_trip')).toHaveLength(0);
+    expect(res.status).toBe(201);
+    expect(inserts('tms_trip')).toHaveLength(1);
   });
 });
 
@@ -256,6 +272,45 @@ describe('POST /api/driver/pre-trip-check', () => {
     expect(inserts('tms_pre_trip_check')).toHaveLength(0);
   });
 
+  it('records a skip with its reason: no photo, no answers, linked to the running trip', async () => {
+    cfg.activeTrip = ok({ id: 'trip-9' });
+    cfg.checkInsert = ok({ ...CHECK_ROW, skipped: true, skip_reason: 'No network', any_issue: true });
+    const res = await checkPOST(skipRequest('network'));
+    expect(res.status).toBe(201);
+    const row = inserts('tms_pre_trip_check')[0]?.arg as Record<string, unknown>;
+    expect(row).toMatchObject({ skipped: true, skip_reason: 'No network', trip_id: 'trip-9', vehicle_id: 'veh-1' });
+    expect(row).not.toHaveProperty('tyres_ok');
+    expect(row).not.toHaveProperty('odometer_photo_path');
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('a skip alerts the transport head with "skipped: <reason>"', async () => {
+    cfg.checkInsert = ok({ ...CHECK_ROW, skipped: true, skip_reason: 'Other: tyre shop closed', any_issue: true });
+    const res = await checkPOST(skipRequest('other', 'tyre shop closed'));
+    expect(res.status).toBe(201);
+    const row = inserts('tms_pre_trip_check')[0]?.arg as Record<string, unknown>;
+    expect(row.skip_reason).toBe('Other: tyre shop closed');
+    expect(dispatchNotification).toHaveBeenCalledTimes(1);
+    const input = dispatchNotification.mock.calls[0][1] as Record<string, any>;
+    expect(input.body).toContain('skipped: Other: tyre shop closed');
+    expect(input.title).toContain('skipped');
+    expect(input.targeting).toEqual({ type: 'users', user_ids: ['p-head-1', 'p-head-2'] });
+    expect(input.metadata.skipReason).toBe('Other: tyre shop closed');
+  });
+
+  it('refuses a skip without a reason, writing nothing', async () => {
+    for (const [code, other] of [
+      ['', ''],
+      ['because', ''],
+      ['other', '   '],
+    ] as const) {
+      const res = await checkPOST(skipRequest(code, other));
+      expect(res.status).toBe(400);
+    }
+    expect(inserts('tms_pre_trip_check')).toHaveLength(0);
+    expect(dispatchNotification).not.toHaveBeenCalled();
+  });
+
   it('rejects a check without a photo before touching storage or the table', async () => {
     const fd = await checkRequest().formData();
     fd.delete('photo');
@@ -285,6 +340,14 @@ describe('migration: clients have no write path', () => {
     const policies = [...sql.matchAll(/create\s+policy\s+\w+\s+on\s+public\.tms_pre_trip_check\s+for\s+(\w+)/g)].map((m) => m[1]);
     expect(policies.length).toBeGreaterThan(0);
     expect(new Set(policies)).toEqual(new Set(['select']));
+  });
+
+  it('allows empty answers and photo only on a skip with a reason, and flags every skip', () => {
+    expect(sql).toMatch(/skipped\s+boolean\s+not\s+null\s+default\s+false/);
+    expect(sql).toMatch(/skip_reason\s+text/);
+    expect(sql).toContain('tms_pre_trip_check_done_or_skipped');
+    expect(sql).toMatch(/skip_reason\s+is\s+not\s+null/);
+    expect(sql).toMatch(/any_issue\s+boolean\s+generated\s+always\s+as\s*\(\s*skipped\s+or/);
   });
 
   it('revokes everything from anon', () => {

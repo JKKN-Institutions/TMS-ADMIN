@@ -3,7 +3,8 @@ import {
   issueLabels,
   isMissingTableError,
   parsePreTripInput,
-  preTripGate,
+  preTripCheckDue,
+  parseSkipReason,
   validatePhoto,
   sniffImageType,
   PRE_TRIP_UPLOAD_MAX_BYTES,
@@ -23,17 +24,37 @@ const ALL_YES = {
   first_aid_box_ok: 'yes',
 };
 
-describe('preTripGate (check before start)', () => {
-  it('blocks the first trip of the day when no check exists', () => {
-    expect(preTripGate({ kind: 'none' })).toEqual({ allow: false, reason: 'pre_trip_check_required' });
+describe('preTripCheckDue (reminder, never a block)', () => {
+  it('is due when there is no check or skip today', () => {
+    expect(preTripCheckDue({ kind: 'none' })).toBe(true);
   });
 
-  it('allows a trip once today\'s check exists, and passes its id on for linking', () => {
-    expect(preTripGate({ kind: 'found', checkId: 'c1' })).toEqual({ allow: true, checkId: 'c1' });
+  it('is not due once today\'s check or skip exists', () => {
+    expect(preTripCheckDue({ kind: 'found', checkId: 'c1' })).toBe(false);
   });
 
-  it('allows the trip when the check table is not deployed yet (never locks drivers out)', () => {
-    expect(preTripGate({ kind: 'table_missing' })).toEqual({ allow: true, checkId: null });
+  it('is not due when the check table is not deployed yet', () => {
+    expect(preTripCheckDue({ kind: 'table_missing' })).toBe(false);
+  });
+});
+
+describe('parseSkipReason', () => {
+  it('stores the label for the fixed reasons', () => {
+    expect(parseSkipReason('camera', '')).toEqual({ ok: true, reason: 'Camera not working' });
+    expect(parseSkipReason('network', undefined)).toEqual({ ok: true, reason: 'No network' });
+    expect(parseSkipReason('emergency', null)).toEqual({ ok: true, reason: 'Emergency trip' });
+  });
+
+  it('stores the typed words for Other', () => {
+    expect(parseSkipReason('other', '  tyre shop closed ')).toEqual({ ok: true, reason: 'Other: tyre shop closed' });
+  });
+
+  it('refuses a skip with no reason', () => {
+    expect(parseSkipReason(undefined, undefined).ok).toBe(false);
+    expect(parseSkipReason('', '').ok).toBe(false);
+    expect(parseSkipReason('because', '').ok).toBe(false);
+    expect(parseSkipReason('other', '   ').ok).toBe(false);
+    expect(parseSkipReason('other', 'x'.repeat(301)).ok).toBe(false);
   });
 });
 
