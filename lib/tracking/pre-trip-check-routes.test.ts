@@ -116,22 +116,26 @@ const CHECK_ROW = {
   notes: null,
 };
 
-function startTripRequest() {
+function startTripRequest(routeId = 'route-1') {
   return new NextRequest('http://localhost/api/driver/trips', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ routeId: 'route-1' }),
+    body: JSON.stringify({ routeId }),
   });
 }
 
-function checkRequest(answers: Record<string, string> = {}) {
+function checkRequest(
+  answers: Record<string, string> = {},
+  photo: File = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'odo.jpg', { type: 'image/jpeg' }),
+  routeId = 'route-1'
+) {
   const fd = new FormData();
-  fd.set('routeId', 'route-1');
+  fd.set('routeId', routeId);
   for (const k of ['tyres_ok', 'brakes_ok', 'lights_ok', 'horn_ok', 'fuel_level_ok', 'first_aid_box_ok']) {
     fd.set(k, answers[k] ?? 'yes');
   }
   fd.set('odometer_km', '124530');
-  fd.set('photo', new File([new Uint8Array([0xff, 0xd8, 0xff])], 'odo.jpg', { type: 'image/jpeg' }));
+  fd.set('photo', photo);
   return new NextRequest('http://localhost/api/driver/pre-trip-check', { method: 'POST', body: fd });
 }
 
@@ -163,6 +167,12 @@ describe('POST /api/driver/trips — check before start', () => {
     expect(inserts('tms_trip')).toHaveLength(1);
     const link = calls.find((c) => c.table === 'tms_pre_trip_check' && c.op === 'update');
     expect(link?.arg).toEqual({ trip_id: 'trip-1' });
+  });
+
+  it('refuses a route not assigned to this driver with 403', async () => {
+    const res = await startTripPOST(startTripRequest('route-someone-else'));
+    expect(res.status).toBe(403);
+    expect(inserts('tms_trip')).toHaveLength(0);
   });
 
   it('still starts trips when the check table is not deployed yet', async () => {
@@ -218,6 +228,32 @@ describe('POST /api/driver/pre-trip-check', () => {
     expect(input.idempotencyKey).toBe('pre_trip_check:chk-1');
     expect(input.body).toContain('Brakes, Horn');
     expect(input.title).toContain('TN28 AB 1234');
+  });
+
+  it('refuses a check for a route not assigned to this driver with 403, writing nothing', async () => {
+    const res = await checkPOST(checkRequest({}, undefined, 'route-someone-else'));
+    expect(res.status).toBe(403);
+    expect(upload).not.toHaveBeenCalled();
+    expect(inserts('tms_pre_trip_check')).toHaveLength(0);
+  });
+
+  it('stores the type read from the bytes, not the type the phone reported', async () => {
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'odo.jpg', {
+      type: 'image/jpeg',
+    });
+    const res = await checkPOST(checkRequest({}, png));
+    expect(res.status).toBe(201);
+    const [path, , opts] = upload.mock.calls[0] as [string, unknown, { contentType: string }];
+    expect(opts.contentType).toBe('image/png');
+    expect(path).toMatch(/\.png$/);
+  });
+
+  it('rejects a non-image labelled as a JPEG, writing nothing', async () => {
+    const fake = new File([new TextEncoder().encode('%PDF-1.7 not a photo')], 'odo.jpg', { type: 'image/jpeg' });
+    const res = await checkPOST(checkRequest({}, fake));
+    expect(res.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+    expect(inserts('tms_pre_trip_check')).toHaveLength(0);
   });
 
   it('rejects a check without a photo before touching storage or the table', async () => {

@@ -59,8 +59,10 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
 
     const photo = form.get('photo');
     const photoFile = photo instanceof File ? photo : null;
-    const photoError = validatePhoto(photoFile);
-    if (photoError || !photoFile) return NextResponse.json({ error: photoError }, { status: 400 });
+    const photoBytes = photoFile ? new Uint8Array(await photoFile.arrayBuffer()) : new Uint8Array();
+    // Type comes from the file's first bytes, never from what the phone reports.
+    const photoCheck = validatePhoto(photoFile ? { size: photoBytes.length, head: photoBytes.subarray(0, 16) } : null);
+    if (!photoCheck.ok) return NextResponse.json({ error: photoCheck.error }, { status: 400 });
 
     const drv = await getDriverForUser(auth);
     if (!drv) return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
@@ -76,10 +78,10 @@ async function submitCheck(request: NextRequest, auth: AuthContext) {
     const today = istToday();
 
     // Upload first; the row only ever points at a photo that exists.
-    const path = `${auth.userId}/${today}/${uuidv4()}.${EXT[photoFile.type] ?? 'jpg'}`;
+    const path = `${auth.userId}/${today}/${uuidv4()}.${EXT[photoCheck.type]}`;
     const { error: upErr } = await svc.storage
       .from(PRE_TRIP_PHOTO_BUCKET)
-      .upload(path, Buffer.from(await photoFile.arrayBuffer()), { contentType: photoFile.type, upsert: false });
+      .upload(path, Buffer.from(photoBytes), { contentType: photoCheck.type, upsert: false });
     if (upErr) {
       console.error('pre-trip-check photo upload error:', upErr);
       return NextResponse.json({ error: 'Could not save the odometer photo. Please try again.' }, { status: 500 });

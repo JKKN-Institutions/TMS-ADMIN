@@ -21,7 +21,14 @@ export type PreTripItems = Record<PreTripItemKey, boolean>;
 
 export const PRE_TRIP_PHOTO_BUCKET = 'tms-pre-trip-photos';
 export const PRE_TRIP_PHOTO_MAX_BYTES = 5 * 1024 * 1024; // matches the bucket limit
+/**
+ * What the phone may send. Below Vercel's ~4.5 MB request-body limit, so an
+ * oversize photo gets a plain message instead of a platform 413. The screen shrinks
+ * the photo to a ≤1600 px JPEG first, which is normally a few hundred KB.
+ */
+export const PRE_TRIP_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 export const PRE_TRIP_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export type PreTripPhotoType = (typeof PRE_TRIP_PHOTO_TYPES)[number];
 export const PRE_TRIP_NOTES_MAX = 1000;
 const ODOMETER_MAX_KM = 10_000_000;
 
@@ -71,13 +78,35 @@ export function issueLabels(items: Partial<Record<PreTripItemKey, boolean | null
   return PRE_TRIP_ITEMS.filter(({ key }) => items[key] === false).map(({ label }) => label);
 }
 
-export function validatePhoto(file: { size: number; type: string } | null): string | null {
-  if (!file || file.size === 0) return 'Take a photo of the odometer.';
-  if (!(PRE_TRIP_PHOTO_TYPES as readonly string[]).includes(file.type)) {
-    return 'The odometer photo must be a JPG, PNG or WebP image.';
+/**
+ * The real image type from the file's first bytes. The type the phone reports is
+ * not trusted: it can be missing, wrong (HEIC labelled image/jpeg) or forged.
+ */
+export function sniffImageType(head: Uint8Array): PreTripPhotoType | null {
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+  if (
+    head.length >= 8 &&
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => head[i] === b)
+  ) {
+    return 'image/png';
   }
-  if (file.size > PRE_TRIP_PHOTO_MAX_BYTES) return 'The odometer photo must be 5 MB or smaller.';
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.slice(from, to));
+  if (head.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
   return null;
+}
+
+export const PHOTO_TOO_BIG_MESSAGE =
+  'The photo is too large to send. Please take the photo again, a little further from the odometer.';
+
+/** Check the photo by size and by its real bytes. Returns the sniffed type on success. */
+export function validatePhoto(
+  file: { size: number; head: Uint8Array } | null
+): { ok: true; type: PreTripPhotoType } | { ok: false; error: string } {
+  if (!file || file.size === 0) return { ok: false, error: 'Take a photo of the odometer.' };
+  if (file.size > PRE_TRIP_UPLOAD_MAX_BYTES) return { ok: false, error: PHOTO_TOO_BIG_MESSAGE };
+  const type = sniffImageType(file.head);
+  if (!type) return { ok: false, error: 'The odometer photo must be a JPG, PNG or WebP image.' };
+  return { ok: true, type };
 }
 
 /**

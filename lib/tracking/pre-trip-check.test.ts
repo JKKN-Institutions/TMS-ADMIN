@@ -5,8 +5,14 @@ import {
   parsePreTripInput,
   preTripGate,
   validatePhoto,
-  PRE_TRIP_PHOTO_MAX_BYTES,
+  sniffImageType,
+  PRE_TRIP_UPLOAD_MAX_BYTES,
 } from './pre-trip-check';
+
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const WEBP = new Uint8Array([...'RIFF'].map((c) => c.charCodeAt(0)).concat([0, 0, 0, 0], [...'WEBP'].map((c) => c.charCodeAt(0))));
+const PDF = new Uint8Array([...'%PDF-1.7'].map((c) => c.charCodeAt(0)));
 
 const ALL_YES = {
   tyres_ok: 'yes',
@@ -86,15 +92,34 @@ describe('issueLabels', () => {
   });
 });
 
-describe('validatePhoto', () => {
-  it('requires a photo', () => {
-    expect(validatePhoto(null)).not.toBeNull();
-    expect(validatePhoto({ size: 0, type: 'image/jpeg' })).not.toBeNull();
+describe('sniffImageType (real type from the first bytes)', () => {
+  it('recognises JPEG, PNG and WebP', () => {
+    expect(sniffImageType(JPEG)).toBe('image/jpeg');
+    expect(sniffImageType(PNG)).toBe('image/png');
+    expect(sniffImageType(WEBP)).toBe('image/webp');
   });
 
-  it('accepts a normal JPG and rejects other types or oversize files', () => {
-    expect(validatePhoto({ size: 1000, type: 'image/jpeg' })).toBeNull();
-    expect(validatePhoto({ size: 1000, type: 'application/pdf' })).not.toBeNull();
-    expect(validatePhoto({ size: PRE_TRIP_PHOTO_MAX_BYTES + 1, type: 'image/jpeg' })).not.toBeNull();
+  it('rejects anything else, whatever the phone claims it is', () => {
+    expect(sniffImageType(PDF)).toBeNull();
+    expect(sniffImageType(new Uint8Array())).toBeNull();
+  });
+});
+
+describe('validatePhoto', () => {
+  it('requires a photo', () => {
+    expect(validatePhoto(null).ok).toBe(false);
+    expect(validatePhoto({ size: 0, head: JPEG }).ok).toBe(false);
+  });
+
+  it('accepts a real image and returns its sniffed type', () => {
+    expect(validatePhoto({ size: 1000, head: PNG })).toEqual({ ok: true, type: 'image/png' });
+  });
+
+  it('rejects non-images and anything over the upload limit (below Vercel\'s body limit)', () => {
+    expect(validatePhoto({ size: 1000, head: PDF }).ok).toBe(false);
+    const big = validatePhoto({ size: PRE_TRIP_UPLOAD_MAX_BYTES + 1, head: JPEG });
+    expect(big.ok).toBe(false);
+    expect(!big.ok && big.error).toMatch(/too large/);
+    expect(PRE_TRIP_UPLOAD_MAX_BYTES).toBeLessThan(4.5 * 1024 * 1024);
   });
 });

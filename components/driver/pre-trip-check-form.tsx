@@ -3,7 +3,12 @@
 import { useEffect, useState } from 'react';
 import { Camera, CheckCircle2, ClipboardCheck, AlertTriangle, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { PRE_TRIP_ITEMS, type PreTripItemKey } from '@/lib/tracking/pre-trip-check';
+import {
+  PHOTO_TOO_BIG_MESSAGE,
+  PRE_TRIP_ITEMS,
+  PRE_TRIP_UPLOAD_MAX_BYTES,
+  type PreTripItemKey,
+} from '@/lib/tracking/pre-trip-check';
 
 export interface SavedPreTripCheck {
   id: string;
@@ -12,28 +17,41 @@ export interface SavedPreTripCheck {
   alerted: number | null;
 }
 
-/** Longest side of the uploaded photo. Plenty to read an odometer; keeps it well under 5 MB. */
-const PHOTO_MAX_SIDE = 1600;
-
 /**
- * Re-encode the camera photo as a JPEG no larger than PHOTO_MAX_SIDE. Phone cameras
- * produce 3–8 MB files; this keeps the upload quick on a weak signal. Falls back to
- * the original file if the browser cannot decode it.
+ * Re-encode the camera photo as a JPEG with its longest side at most `maxSide`.
+ * Phone cameras produce 3–8 MB files; Vercel refuses request bodies over ~4.5 MB.
+ * Returns null if the browser cannot decode the photo at all.
  */
-async function shrinkPhoto(file: File): Promise<File> {
+async function encodeJpeg(file: File, maxSide: number, quality: number): Promise<File | null> {
   try {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
     canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
-    return blob ? new File([blob], 'odometer.jpg', { type: 'image/jpeg' }) : file;
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    return blob ? new File([blob], 'odometer.jpg', { type: 'image/jpeg' }) : null;
   } catch {
-    return file;
+    return null;
   }
+}
+
+/**
+ * The photo to upload: ~1600 px JPEG, then a smaller one if that is somehow still
+ * too big. If the phone cannot re-encode it, the original is used only when it is
+ * already under the upload limit; otherwise null (the screen asks for a retake).
+ */
+async function shrinkPhoto(file: File): Promise<File | null> {
+  for (const [side, quality] of [
+    [1600, 0.8],
+    [1200, 0.7],
+  ] as const) {
+    const out = await encodeJpeg(file, side, quality);
+    if (out && out.size <= PRE_TRIP_UPLOAD_MAX_BYTES) return out;
+  }
+  return file.size <= PRE_TRIP_UPLOAD_MAX_BYTES ? file : null;
 }
 
 /**
@@ -82,7 +100,12 @@ export function PreTripCheckForm({
       for (const { key } of PRE_TRIP_ITEMS) fd.set(key, answers[key] ? 'yes' : 'no');
       fd.set('odometer_km', odometer.trim());
       if (notes.trim()) fd.set('notes', notes.trim());
-      fd.set('photo', await shrinkPhoto(photo));
+      const upload = await shrinkPhoto(photo);
+      if (!upload) {
+        setError(PHOTO_TOO_BIG_MESSAGE);
+        return;
+      }
+      fd.set('photo', upload);
 
       const res = await fetch('/api/driver/pre-trip-check', {
         method: 'POST',
@@ -92,6 +115,11 @@ export function PreTripCheckForm({
       const j = (await res.json().catch(() => null)) as
         | { error?: string; data?: { check: { id: string; any_issue: boolean } | null; alerted: number | null } }
         | null;
+      // 413 = the platform refused the body before our route ran (no JSON error).
+      if (res.status === 413) {
+        setError(PHOTO_TOO_BIG_MESSAGE);
+        return;
+      }
       if (!res.ok || !j?.data?.check) {
         setError(j?.error ?? 'Could not save the check. Please try again.');
         return;
@@ -186,7 +214,10 @@ export function PreTripCheckForm({
             accept="image/*"
             capture="environment"
             className="sr-only"
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              setPhoto(e.target.files?.[0] ?? null);
+              setError(null);
+            }}
           />
         </label>
         {preview && (
@@ -230,7 +261,9 @@ export function PreTripCheckForm({
         {saving
           ? 'Saving…'
           : ready
-            ? 'SAVE CHECK'
+            ? error
+              ? 'TRY AGAIN'
+              : 'SAVE CHECK'
             : answered < PRE_TRIP_ITEMS.length
               ? `Answer all items (${answered}/${PRE_TRIP_ITEMS.length})`
               : odometer.trim() === ''
