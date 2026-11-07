@@ -374,6 +374,10 @@ export default function DriverLocationPage() {
               routeLabel={routes.find((r) => r.id === checkRouteId)?.label ?? 'this route'}
               onSaved={(c) => void onCheckSaved(c)}
               onClose={checkMandatory ? undefined : () => setCheckOpenedEarly(false)}
+              // END TRIP stays reachable on top of the check while a trip runs.
+              onEndTrip={trip ? () => void endTrip() : undefined}
+              endingTrip={busy}
+              endTripError={tripError}
             />
           )}
 

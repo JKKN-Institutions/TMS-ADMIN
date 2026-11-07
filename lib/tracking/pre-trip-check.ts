@@ -155,6 +155,43 @@ export function preTripCheckDue(lookup: PreTripLookup): boolean {
   return lookup.kind === 'none';
 }
 
+/** What the server is about to write into tms_pre_trip_check. */
+export interface PreTripRowValues {
+  skipped: boolean;
+  skip_reason?: string | null;
+  tyres_ok?: boolean | null;
+  brakes_ok?: boolean | null;
+  lights_ok?: boolean | null;
+  horn_ok?: boolean | null;
+  fuel_level_ok?: boolean | null;
+  first_aid_box_ok?: boolean | null;
+  odometer_km?: number | null;
+  odometer_photo_path?: string | null;
+}
+
+/**
+ * The server-side mirror of the database rule tms_pre_trip_check_done_or_skipped:
+ * a row is EITHER a skip with a non-blank reason (1–500 characters after trimming)
+ * OR a full check (all six answers, odometer, photo, no reason). Checked before the
+ * insert so a bad row is refused with a plain message, not a database error.
+ * Returns null when the row is valid, otherwise the reason it is not.
+ */
+export function preTripRowError(v: PreTripRowValues): string | null {
+  if (v.skipped) {
+    const reason = typeof v.skip_reason === 'string' ? v.skip_reason.trim() : '';
+    if (reason.length === 0) return 'A skip needs a reason.';
+    if (reason.length > 500) return 'The skip reason is too long.';
+    return null;
+  }
+  if (v.skip_reason != null) return 'A completed check cannot carry a skip reason.';
+  for (const { key, label } of PRE_TRIP_ITEMS) {
+    if (typeof v[key] !== 'boolean') return `Answer yes or no for ${label}.`;
+  }
+  if (typeof v.odometer_km !== 'number' || !Number.isFinite(v.odometer_km)) return 'Enter the odometer reading in kilometres.';
+  if (!v.odometer_photo_path) return 'Take a photo of the odometer.';
+  return null;
+}
+
 /**
  * True when a Supabase/PostgREST error means "the table does not exist" — Postgres
  * 42P01, or PostgREST's schema-cache miss PGRST205.

@@ -63,6 +63,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Drivers', href: '/drivers', icon: UserCheck, permission: TMS_PERMISSIONS.DRIVERS_VIEW, group: 'transport' },
   { name: 'Vehicles', href: '/vehicles', icon: Car, permission: TMS_PERMISSIONS.VEHICLES_VIEW, group: 'transport' },
   { name: 'Bus Inspection', href: '/inspections', icon: ShieldCheck, permission: TMS_PERMISSIONS.ROUTE_CHECK_MANAGE, group: 'transport' },
+  { name: 'Pre-trip Checks', href: '/pre-trip-checks', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DASHBOARD_VIEW, group: 'transport' },
   // GPS devices + driver phones: one page, two tabs (each gated by its own permission).
   {
     name: 'Tracking Devices',

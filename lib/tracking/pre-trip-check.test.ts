@@ -5,6 +5,7 @@ import {
   parsePreTripInput,
   preTripCheckDue,
   parseSkipReason,
+  preTripRowError,
   validatePhoto,
   sniffImageType,
   PRE_TRIP_UPLOAD_MAX_BYTES,
@@ -142,5 +143,44 @@ describe('validatePhoto', () => {
     expect(big.ok).toBe(false);
     expect(!big.ok && big.error).toMatch(/too large/);
     expect(PRE_TRIP_UPLOAD_MAX_BYTES).toBeLessThan(4.5 * 1024 * 1024);
+  });
+});
+
+describe('preTripRowError (server mirror of tms_pre_trip_check_done_or_skipped)', () => {
+  const FULL = {
+    skipped: false,
+    tyres_ok: true,
+    brakes_ok: false,
+    lights_ok: true,
+    horn_ok: true,
+    fuel_level_ok: true,
+    first_aid_box_ok: true,
+    odometer_km: 124530,
+    odometer_photo_path: 'u/2026-11-08/x.jpg',
+  };
+
+  it('accepts a full check and a skip with a reason', () => {
+    expect(preTripRowError(FULL)).toBeNull();
+    expect(preTripRowError({ skipped: true, skip_reason: 'No network' })).toBeNull();
+  });
+
+  it('refuses a skip whose reason is missing, empty or only spaces', () => {
+    expect(preTripRowError({ skipped: true })).not.toBeNull();
+    expect(preTripRowError({ skipped: true, skip_reason: null })).not.toBeNull();
+    expect(preTripRowError({ skipped: true, skip_reason: '' })).not.toBeNull();
+    expect(preTripRowError({ skipped: true, skip_reason: '   ' })).not.toBeNull();
+    expect(preTripRowError({ skipped: true, skip_reason: '\t\n ' })).not.toBeNull();
+  });
+
+  it('refuses a reason over 500 characters', () => {
+    expect(preTripRowError({ skipped: true, skip_reason: 'x'.repeat(501) })).not.toBeNull();
+    expect(preTripRowError({ skipped: true, skip_reason: 'x'.repeat(500) })).toBeNull();
+  });
+
+  it('refuses a check with a missing answer, odometer or photo, or with a skip reason', () => {
+    expect(preTripRowError({ ...FULL, horn_ok: null })).not.toBeNull();
+    expect(preTripRowError({ ...FULL, odometer_km: null })).not.toBeNull();
+    expect(preTripRowError({ ...FULL, odometer_photo_path: null })).not.toBeNull();
+    expect(preTripRowError({ ...FULL, skip_reason: 'No network' })).not.toBeNull();
   });
 });

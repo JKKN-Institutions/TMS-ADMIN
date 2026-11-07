@@ -342,7 +342,9 @@ describe('migration: clients have no write path', () => {
     expect(new Set(policies)).toEqual(new Set(['select']));
   });
 
-  it('allows empty answers and photo only on a skip with a reason, and flags every skip', () => {
+  // Structure only. The blank-reason BEHAVIOUR is tested by preTripRowError (the
+  // server mirror) and was run against the real constraint on a throwaway Postgres.
+  it('declares the skip columns, the done-or-skipped constraint and any_issue = skipped or …', () => {
     expect(sql).toMatch(/skipped\s+boolean\s+not\s+null\s+default\s+false/);
     expect(sql).toMatch(/skip_reason\s+text/);
     expect(sql).toContain('tms_pre_trip_check_done_or_skipped');
