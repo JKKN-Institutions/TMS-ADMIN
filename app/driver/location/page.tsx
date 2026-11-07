@@ -10,6 +10,7 @@ import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
 import { CAMPUS } from '@/lib/gps/campus';
+import { PreTripCheckForm, type SavedPreTripCheck } from '@/components/driver/pre-trip-check-form';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -57,11 +58,14 @@ interface AssignableRoute {
   label: string;
   startLocation: string | null;
   endLocation: string | null;
+  vehicleId: string | null;
 }
 interface TripResp {
   trip: Trip | null;
   route: AssignableRoute | null;
   routes: AssignableRoute[];
+  /** Today's pre-trip checks. enabled=false until the check table is deployed. */
+  preTrip?: { enabled: boolean; doneVehicleIds: string[] };
   status: string | null;
 }
 
@@ -133,6 +137,18 @@ export default function DriverLocationPage() {
 
   const [busy, setBusy] = useState(false);
   const [tripError, setTripError] = useState<string | null>(null);
+  // Set when the server refuses START TRIP for a missing check (e.g. the list below
+  // was stale). Cleared once a check is saved.
+  const [checkDemanded, setCheckDemanded] = useState(false);
+  const [checkNotice, setCheckNotice] = useState<string | null>(null);
+
+  // Daily pre-trip check: shown in place of START TRIP until today's check exists for
+  // the bus on the selected route. The server enforces the same rule.
+  const selectedVehicleId =
+    tripData?.routes.find((r) => r.id === selectedRouteId)?.vehicleId ?? null;
+  const checkDone = !!selectedVehicleId && !!tripData?.preTrip?.doneVehicleIds.includes(selectedVehicleId);
+  const needsCheck =
+    !trip && !checkDone && (checkDemanded || (!!tripData?.preTrip?.enabled && !!selectedVehicleId));
 
   const startTrip = async (routeId: string) => {
     setBusy(true);
@@ -144,6 +160,12 @@ export default function DriverLocationPage() {
         credentials: 'same-origin',
         body: JSON.stringify({ routeId }),
       });
+      // 428 = today's pre-trip check is missing. Open the check instead of an error.
+      if (res.status === 428) {
+        setCheckDemanded(true);
+        await refetchTrip();
+        return;
+      }
       // 409 = a trip is already live for this route/driver/bus. Adopt it rather than
       // showing an error the driver can do nothing about.
       if (!res.ok && res.status !== 409) {
@@ -157,6 +179,25 @@ export default function DriverLocationPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onCheckSaved = async (check: SavedPreTripCheck) => {
+    setCheckDemanded(false);
+    await refetchTrip();
+    if (check.any_issue) {
+      // Do not roll the bus on automatically after a NOT OK: the driver decides,
+      // and the transport head already has the alert.
+      setCheckNotice(
+        // alerted === 0: nobody received it. null: already saved earlier today (the
+        // alert went out then).
+        check.alerted !== 0
+          ? 'Check saved. The transport head has been told about the NOT OK items. Tap START TRIP only if the bus is safe to drive.'
+          : 'Check saved, but the alert could not be sent. Please phone the transport office about the NOT OK items before you drive.'
+      );
+      return;
+    }
+    setCheckNotice(null);
+    if (selectedRouteId) await startTrip(selectedRouteId);
   };
 
   const endTrip = async () => {
@@ -318,8 +359,22 @@ export default function DriverLocationPage() {
             </div>
           )}
 
+          {checkNotice && !trip && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{checkNotice}</span>
+            </div>
+          )}
+
           {/* One control, sized for a thumb. Nothing else needs pressing while driving. */}
-          {trip ? (
+          {!trip && needsCheck && selectedRouteId ? (
+            <PreTripCheckForm
+              key={selectedRouteId}
+              routeId={selectedRouteId}
+              routeLabel={routes.find((r) => r.id === selectedRouteId)?.label ?? 'this route'}
+              onSaved={(c) => void onCheckSaved(c)}
+            />
+          ) : trip ? (
             <button
               type="button"
               disabled={busy}
