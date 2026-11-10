@@ -86,17 +86,17 @@ function BrandPanel() {
       <div aria-hidden="true" className={`${styles.pattern} pointer-events-none absolute inset-0 -z-10`} />
       <div
         aria-hidden="true"
-        className={`${styles.float} pointer-events-none absolute -right-24 -top-28 -z-10 h-80 w-80 rounded-full bg-emerald-400/20 blur-3xl`}
+        className={`${styles.float} pointer-events-none absolute -right-24 -top-28 -z-10 h-80 w-80 rounded-full bg-green-400/20 blur-3xl`}
       />
       <div
         aria-hidden="true"
-        className={`${styles.floatSlow} pointer-events-none absolute -bottom-32 -left-20 -z-10 h-96 w-96 rounded-full bg-amber-300/10 blur-3xl`}
+        className={`${styles.floatSlow} pointer-events-none absolute -bottom-32 -left-20 -z-10 h-96 w-96 rounded-full bg-green-300/10 blur-3xl`}
       />
       {/* Floating route motif (desktop only) */}
       <svg
         aria-hidden="true"
         viewBox="0 0 220 120"
-        className={`${styles.floatSlow} pointer-events-none absolute right-6 top-5 -z-10 hidden w-40 text-amber-300/40 xl:block`}
+        className={`${styles.floatSlow} pointer-events-none absolute right-6 top-5 -z-10 hidden w-40 text-green-300/40 xl:block`}
       >
         <path
           d="M8 104 C 60 104, 60 24, 110 24 S 170 88, 212 16"
@@ -108,7 +108,7 @@ function BrandPanel() {
         />
         <circle cx="8" cy="104" r="5" fill="currentColor" />
         <circle cx="110" cy="24" r="4" fill="currentColor" />
-        <circle cx="212" cy="16" r="6" fill="#fcd34d" fillOpacity="0.7" />
+        <circle cx="212" cy="16" r="6" fill="#86efac" fillOpacity="0.7" />
       </svg>
 
       {/* Branding */}
@@ -124,7 +124,7 @@ function BrandPanel() {
           <span className="block truncate text-lg font-semibold leading-tight tracking-tight">
             JKKN Transport
           </span>
-          <span className="block truncate text-xs font-medium tracking-wide text-amber-200/90">
+          <span className="block truncate text-xs font-medium tracking-wide text-green-200/90">
             Move Smart. Travel Better.
           </span>
         </span>
@@ -137,13 +137,13 @@ function BrandPanel() {
           style={delay(80)}
         >
           Smart{' '}
-          <span className="bg-gradient-to-r from-amber-200 via-amber-300 to-yellow-400 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-green-200 via-green-300 to-green-400 bg-clip-text text-transparent">
             Transport
           </span>{' '}
           Service
         </h2>
         <p
-          className={`${styles.enter} mt-3 max-w-lg text-sm leading-relaxed text-emerald-50/80 sm:text-base`}
+          className={`${styles.enter} mt-3 max-w-lg text-sm leading-relaxed text-green-50/80 sm:text-base`}
           style={delay(160)}
         >
           Smarter Journeys. Safer Travel. Better Connectivity.
@@ -158,20 +158,20 @@ function BrandPanel() {
         {FEATURES.map(({ icon: Icon, title, description }) => (
           <li
             key={title}
-            className="group flex gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-4 backdrop-blur-md lg:py-3 xl:p-4 transition duration-300 hover:-translate-y-0.5 hover:border-amber-200/30 hover:bg-white/[0.11] motion-reduce:transition-none motion-reduce:hover:translate-y-0 lg:items-center xl:flex-col xl:items-start"
+            className="group flex gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-4 backdrop-blur-md lg:py-3 xl:p-4 transition duration-300 hover:-translate-y-0.5 hover:border-green-200/30 hover:bg-white/[0.11] motion-reduce:transition-none motion-reduce:hover:translate-y-0 lg:items-center xl:flex-col xl:items-start"
           >
-            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-200 to-amber-400 text-emerald-950 shadow-[0_6px_14px_-4px_rgba(245,158,11,0.35)]">
+            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_6px_14px_-4px_rgba(34,197,94,0.35)]">
               <Icon className="h-5 w-5" aria-hidden="true" />
               {Icon === MapPin && (
                 <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-                  <span className={`${styles.pulse} absolute inline-flex h-full w-full rounded-full bg-emerald-300`} />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-950" />
+                  <span className={`${styles.pulse} absolute inline-flex h-full w-full rounded-full bg-green-300`} />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-green-950" />
                 </span>
               )}
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-semibold leading-snug">{title}</span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-emerald-50/70">
+              <span className="mt-0.5 block text-xs leading-relaxed text-green-50/70">
                 {description}
               </span>
             </span>
@@ -196,20 +196,20 @@ function BrandPanel() {
         />
         <div
           aria-hidden="true"
-          className="absolute inset-0 bg-gradient-to-t from-emerald-950/80 via-emerald-950/10 to-transparent"
+          className="absolute inset-0 bg-gradient-to-t from-green-950/80 via-green-950/10 to-transparent"
         />
-        <figcaption className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-emerald-950/50 px-3 py-1.5 text-xs font-medium backdrop-blur-md">
-          <Bus className="h-3.5 w-3.5 text-amber-300" aria-hidden="true" />
+        <figcaption className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-green-950/50 px-3 py-1.5 text-xs font-medium backdrop-blur-md">
+          <Bus className="h-3.5 w-3.5 text-green-300" aria-hidden="true" />
           JKKN College Fleet
         </figcaption>
       </figure>
 
       <p
-        className={`${styles.enter} mt-6 hidden text-xs font-medium tracking-wide text-emerald-50/60 md:block lg:mt-5 xl:mt-7`}
+        className={`${styles.enter} mt-6 hidden text-xs font-medium tracking-wide text-green-50/60 md:block lg:mt-5 xl:mt-7`}
         style={delay(400)}
       >
-        Connected Campus <span className="text-amber-300/80">•</span> Safe Travel{' '}
-        <span className="text-amber-300/80">•</span> Smart Future
+        Connected Campus <span className="text-green-300/80">•</span> Safe Travel{' '}
+        <span className="text-green-300/80">•</span> Smart Future
       </p>
     </section>
   );
@@ -296,22 +296,22 @@ function LoginContent() {
     <div className="min-h-dvh overflow-x-hidden bg-white lg:grid lg:grid-cols-2 dark:bg-neutral-950">
       <BrandPanel />
 
-      <main className="relative isolate flex items-start justify-center bg-gradient-to-b from-emerald-50/70 via-white to-emerald-50/50 px-4 py-8 sm:px-8 sm:py-12 md:items-center lg:min-h-dvh lg:py-10 dark:from-neutral-950 dark:via-neutral-950 dark:to-emerald-950/30">
+      <main className="relative isolate flex items-start justify-center bg-gradient-to-b from-green-50/70 via-white to-green-50/50 px-4 py-8 sm:px-8 sm:py-12 md:items-center lg:min-h-dvh lg:py-10 dark:from-neutral-950 dark:via-neutral-950 dark:to-green-950/30">
         <div aria-hidden="true" className={`${styles.dots} pointer-events-none absolute inset-0 -z-10 dark:opacity-30`} />
 
         <div
-          className={`${styles.enter} relative w-full max-w-[440px] rounded-[28px] border border-emerald-900/10 bg-white p-6 shadow-[0_1px_2px_rgba(6,78,59,0.06),0_28px_64px_-24px_rgba(6,78,59,0.28)] sm:p-9 -mt-10 sm:mt-0 dark:border-white/10 dark:bg-neutral-900 dark:shadow-[0_28px_64px_-24px_rgba(0,0,0,0.6)]`}
+          className={`${styles.enter} relative w-full max-w-[440px] rounded-[28px] border border-green-900/10 bg-white p-6 shadow-[0_1px_2px_rgba(20,83,45,0.06),0_28px_64px_-24px_rgba(20,83,45,0.28)] sm:p-9 -mt-10 sm:mt-0 dark:border-white/10 dark:bg-neutral-900 dark:shadow-[0_28px_64px_-24px_rgba(0,0,0,0.6)]`}
           style={delay(150)}
         >
           {/* Card header */}
           <div className="flex flex-col items-center text-center">
-            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-emerald-800 text-white shadow-[0_12px_24px_-8px_rgba(6,78,59,0.45)]">
+            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-green-600 to-green-800 text-white shadow-[0_12px_24px_-8px_rgba(20,83,45,0.45)]">
               <Bus className="h-8 w-8" aria-hidden="true" />
-              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-amber-300 text-emerald-950 ring-4 ring-white dark:ring-neutral-900">
+              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-green-300 text-green-950 ring-4 ring-white dark:ring-neutral-900">
                 <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
             </span>
-            <h1 className="mt-6 text-2xl font-bold tracking-tight text-emerald-950 sm:text-[1.7rem] dark:text-white">
+            <h1 className="mt-6 text-2xl font-bold tracking-tight text-green-950 sm:text-[1.7rem] dark:text-white">
               Welcome to JKKN Transport
             </h1>
             <p className="mt-2.5 text-sm leading-relaxed text-slate-500 dark:text-neutral-400">
@@ -335,11 +335,11 @@ function LoginContent() {
             onClick={handleGoogleLogin}
             disabled={isLoading}
             aria-busy={isLoading}
-            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-green-700 to-emerald-700 px-4 py-3.5 font-semibold text-white shadow-[0_10px_24px_-8px_rgba(6,78,59,0.45)] transition duration-200 hover:-translate-y-px hover:from-green-800 hover:to-emerald-800 hover:shadow-[0_16px_32px_-10px_rgba(6,78,59,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
+            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-green-600 to-green-700 px-4 py-3.5 font-semibold text-white shadow-[0_10px_24px_-8px_rgba(20,83,45,0.45)] transition duration-200 hover:-translate-y-px hover:from-green-700 hover:to-green-800 hover:shadow-[0_16px_32px_-10px_rgba(20,83,45,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#fff] shadow-[0_1px_2px_rgba(0,0,0,0.15)]">
               {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin text-emerald-700" aria-hidden="true" />
+                <Loader2 className="h-4 w-4 animate-spin text-green-700" aria-hidden="true" />
               ) : (
                 <GoogleIcon className="h-[18px] w-[18px]" />
               )}
@@ -351,15 +351,15 @@ function LoginContent() {
           </p>
 
           {/* Security note */}
-          <div className="mt-6 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/30">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-[0_1px_2px_rgba(6,78,59,0.08)] ring-1 ring-emerald-100 dark:bg-emerald-900/50 dark:text-emerald-300 dark:ring-emerald-800/50">
+          <div className="mt-6 flex items-start gap-3 rounded-2xl border border-green-100 bg-green-50/80 p-4 dark:border-green-900/40 dark:bg-green-950/30">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-green-700 shadow-[0_1px_2px_rgba(20,83,45,0.08)] ring-1 ring-green-100 dark:bg-green-900/50 dark:text-green-300 dark:ring-green-800/50">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </span>
             <span>
-              <span className="block text-sm font-semibold text-emerald-900 dark:text-emerald-200">
+              <span className="block text-sm font-semibold text-green-900 dark:text-green-200">
                 Secure Institutional Access
               </span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-emerald-800/75 dark:text-emerald-300/70">
+              <span className="mt-0.5 block text-xs leading-relaxed text-green-800/75 dark:text-green-300/70">
                 Only registered JKKN users are allowed to log in.
               </span>
             </span>
@@ -367,7 +367,7 @@ function LoginContent() {
 
           {/* Support */}
           <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-5 dark:border-white/10">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-amber-100 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-green-600 ring-1 ring-green-100 dark:bg-green-500/10 dark:text-green-300 dark:ring-green-500/20">
               <Headset className="h-[18px] w-[18px]" aria-hidden="true" />
             </span>
             <span>
@@ -400,7 +400,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="flex min-h-dvh items-center justify-center bg-white dark:bg-neutral-950">
-          <Loader2 className="h-6 w-6 animate-spin text-emerald-700" />
+          <Loader2 className="h-6 w-6 animate-spin text-green-700" />
         </div>
       }
     >
