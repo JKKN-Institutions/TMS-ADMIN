@@ -86,13 +86,19 @@ export function drawStopPins(group: L.LayerGroup, stops: ReadonlyArray<MapStop>,
   for (const s of ordered) {
     const state = s.state ?? 'plain';
     const marker = L.marker([s.lat, s.lng], {
-      icon: stopPinIcon(s.order, STOP_COLORS[state], { large: state === 'next', faded: state === 'passed' }),
+      icon: stopPinIcon(s.order, s.mine ? STOP_COLORS.mine : STOP_COLORS[state], {
+        large: state === 'next' || !!s.mine,
+        faded: state === 'passed' && !s.mine,
+      }),
       // Passed pins sink, the next stop rises; the bus marker (offset 1000) stays on top of all.
-      zIndexOffset: state === 'next' ? 300 : state === 'passed' ? -200 : 0,
+      zIndexOffset: s.mine ? 350 : state === 'next' ? 300 : state === 'passed' ? -200 : 0,
       keyboard: false,
     });
     marker.bindPopup(popupHtml(s, total));
-    marker.bindTooltip(escapeHtml(s.name), { permanent: state === 'next', direction: 'top' });
+    marker.bindTooltip(s.mine ? `Your stop · ${escapeHtml(s.name)}` : escapeHtml(s.name), {
+      permanent: state === 'next' || !!s.mine,
+      direction: 'top',
+    });
     marker.addTo(group);
   }
 }

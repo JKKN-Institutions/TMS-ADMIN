@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ChevronUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 import { humanizeAge } from '@/lib/gps/route-status';
@@ -17,7 +17,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SummaryCard, SummaryCards } from '@/components/ui/summary-cards';
 import type { FleetResponse, FleetRoute } from './types';
 import type { MapBus } from '@/components/live-tracking-map';
-import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { inferDirection, type StopPin, type TripDirection } from '@/lib/stops/progress';
 import { useRouteStops } from '@/components/map/use-route-stops';
 
 const LiveTrackingMap = dynamic(() => import('@/components/live-tracking-map'), {
@@ -96,48 +96,13 @@ function useWide(): boolean {
   return wide;
 }
 
-/**
- * Phone layout: the list lives in a sheet over the bottom of the screen, above
- * the bottom navigation. Drag the handle up/down (or tap it) to switch between
- * peek and expanded.
- */
-function MobileSheet({ title, children }: { title: string; children: React.ReactNode }) {
-  const [expanded, setExpanded] = useState(false);
-  const startY = useRef<number | null>(null);
-  return (
-    <div
-      className="fixed inset-x-0 z-30 flex flex-col rounded-t-2xl border-t border-gray-200 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.12)] transition-[height] duration-300 ease-out dark:border-gray-800 dark:bg-gray-900"
-      style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom))', height: expanded ? '72dvh' : '34dvh' }}
-    >
-      <button
-        type="button"
-        aria-label={expanded ? 'Collapse route list' : 'Expand route list'}
-        aria-expanded={expanded}
-        className="flex shrink-0 touch-none flex-col items-center gap-1 px-4 pb-1 pt-2"
-        onPointerDown={(e) => {
-          startY.current = e.clientY;
-          e.currentTarget.setPointerCapture(e.pointerId);
-        }}
-        onPointerUp={(e) => {
-          const dy = startY.current == null ? 0 : e.clientY - startY.current;
-          startY.current = null;
-          if (Math.abs(dy) < 8) setExpanded((v) => !v);
-          else setExpanded(dy < 0);
-        }}
-      >
-        <span className="h-1.5 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
-        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">{title}</span>
-      </button>
-      <div className="min-h-0 flex-1 px-2 pb-2">{children}</div>
-    </div>
-  );
-}
-
 export default function TrackAllPage() {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [nudges, setNudges] = useState<Record<string, NudgeState>>({});
   const [filter, setFilter] = useState<GroupKey | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  // Phone only: whether the route list under the map is open.
+  const [listOpen, setListOpen] = useState(false);
   const wide = useWide();
 
   // Live fixes for the whole fleet. Gated by RLS on realtime.messages to holders of
@@ -348,26 +313,10 @@ export default function TrackAllPage() {
     />
   );
 
-  const legend = (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-      {STATUS_GROUPS.map((g) => (
-        <span key={g.key} className="inline-flex items-center gap-1.5">
-          <span className={`h-2.5 w-2.5 rounded-full ${g.dot}`} aria-hidden /> {g.label}
-        </span>
-      ))}
-      <span className="inline-flex items-center gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-gray-400 opacity-50" aria-hidden /> Faded = last known position
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-violet-600" aria-hidden /> Numbered pins = stops of the route you pick
-      </span>
-    </div>
-  );
-
   // `isolate` keeps Leaflet's z-indexed panes (400+) inside the map box, so the
   // phone sheet and bottom bar can sit above it.
   const map = (
-    <div className="isolate h-full overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-800">
+    <div className={cn('isolate h-full overflow-hidden', wide && 'rounded-2xl border border-gray-200 dark:border-gray-800')}>
       <LiveTrackingMap
         buses={buses}
         selectedRouteId={mapSelectedRouteId}
@@ -376,6 +325,7 @@ export default function TrackAllPage() {
         routeStopsRouteId={selectedRouteId}
         routeStopCount={stopData?.total}
         stopSummary={stopSummary}
+        direction={stopData?.direction ?? inferDirection(null, now)}
         stopsSetupHref={
           selectedRouteId && stopData && stopData.pins.length === 0
             ? `/routes/${selectedRouteId}/stop-locations`
@@ -388,6 +338,83 @@ export default function TrackAllPage() {
       />
     </div>
   );
+
+  if (!wide) {
+    // Phone: the map fills the screen between the top bar and the bottom bar, and the
+    // page itself does not scroll. Status chips replace the five cards (which took a
+    // third of the screen), and the route list opens from a bar under the map.
+    const sheetTitle = filter
+      ? `${STATUS_GROUPS.find((g) => g.key === filter)?.label} · ${groupCounts[filter]}`
+      : `All routes · ${routes.length}`;
+    return (
+      <div className="-mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_8rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6">
+        <div className="shrink-0 space-y-2 border-b border-gray-200 bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900">
+          <div className="flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
+              <span className="font-semibold text-gray-900 dark:text-white">{s.reporting} of {s.trackable}</span> buses reporting
+              {showStale ? (
+                <span className="text-amber-700 dark:text-amber-400"> · data {humanizeAge(dataAgeMs)} old</span>
+              ) : (
+                updatedSec != null && (
+                  <span className="text-gray-500"> · {updatedSec < 60 ? `${updatedSec}s` : humanizeAge(updatedSec * 1000)} ago</span>
+                )
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleRefresh()}
+              disabled={isFetching}
+              aria-label="Refresh"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            >
+              <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
+            </button>
+          </div>
+          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+            {STATUS_GROUPS.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                aria-pressed={filter === g.key}
+                onClick={() => {
+                  setFilter((f) => (f === g.key ? null : g.key));
+                  setListOpen(true);
+                }}
+                className={cn(
+                  'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm',
+                  filter === g.key
+                    ? 'border-green-600 bg-green-50 font-semibold text-green-800 dark:bg-green-500/10 dark:text-green-300'
+                    : 'border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200',
+                )}
+              >
+                <span className={`h-2.5 w-2.5 rounded-full ${g.dot}`} aria-hidden />
+                {g.label}
+                <span className="font-semibold tabular-nums">{groupCounts[g.key]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1">{map}</div>
+
+        <div className="flex shrink-0 flex-col border-t border-gray-200 bg-white shadow-[0_-6px_18px_rgba(0,0,0,0.10)] dark:border-gray-800 dark:bg-gray-900">
+          <button
+            type="button"
+            onClick={() => setListOpen((v) => !v)}
+            aria-expanded={listOpen}
+            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+          >
+            <span className="text-sm font-semibold text-gray-900 dark:text-white">{sheetTitle}</span>
+            <span className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              {listOpen ? 'Close list' : 'Open list'}
+              <ChevronUp className={cn('h-5 w-5 transition-transform', listOpen && 'rotate-180')} />
+            </span>
+          </button>
+          {listOpen && <div className="h-[52dvh] min-h-0 px-2 pb-2">{list}</div>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -403,7 +430,7 @@ export default function TrackAllPage() {
         description={
           <>
             <span className="font-semibold text-gray-900 dark:text-white">{s.reporting} of {s.trackable}</span> buses
-            reporting right now. Click a status to filter; click a row or a bus to see it on the map.
+            reporting right now. Pick a status, a route or a bus.
           </>
         }
         actions={
@@ -455,26 +482,10 @@ export default function TrackAllPage() {
         ))}
       </SummaryCards>
 
-      {wide ? (
-        // Desktop: list ~35% | map ~65%, each scrolling on its own.
-        <div className="grid h-[calc(100dvh-19rem)] min-h-[480px] grid-cols-[minmax(300px,35%)_minmax(0,1fr)] gap-4">
-          <div className="min-h-0">{list}</div>
-          <div className="flex min-h-0 flex-col gap-2">
-            {legend}
-            <div className="min-h-0 flex-1">{map}</div>
-          </div>
-        </div>
-      ) : (
-        // Phone: map first, list in a draggable sheet. Bottom padding lets the
-        // map scroll clear of the collapsed sheet.
-        <div className="space-y-2 pb-[34dvh]">
-          {legend}
-          <div className="h-[55dvh]">{map}</div>
-          <MobileSheet title={filter ? `${STATUS_GROUPS.find((g) => g.key === filter)?.label} · ${groupCounts[filter]}` : `All routes · ${routes.length}`}>
-            {list}
-          </MobileSheet>
-        </div>
-      )}
+      <div className="grid h-[calc(100dvh-17.5rem)] min-h-[360px] grid-cols-[minmax(300px,35%)_minmax(0,1fr)] gap-4">
+        <div className="min-h-0">{list}</div>
+        <div className="min-h-0">{map}</div>
+      </div>
     </div>
   );
 }

@@ -1,26 +1,14 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import dynamic from 'next/dynamic';
 import type { ComponentType } from 'react';
-import { Bus, MapPin, AlertTriangle, Route as RouteIcon } from 'lucide-react';
+import { AlertTriangle, Route as RouteIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { BusContextStrip } from '@/components/live/bus-context-strip';
 import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
-import { CAMPUS } from '@/lib/gps/campus';
 import type { RoadRoute } from '@/lib/geo/route-to-campus';
-import type { StopPin, TripDirection } from '@/lib/stops/progress';
-import { useRouteStops } from '@/components/map/use-route-stops';
-import { StopsCaption } from '@/components/live/stops-caption';
-
-const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-80 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800">
-      <span className="text-sm text-gray-500">Loading map…</span>
-    </div>
-  ),
-});
+import { inferDirection, type StopPin, type TripDirection } from '@/lib/stops/progress';
+import type { TimetableStop } from '@/lib/stops/arrival';
+import { LiveTrackScreen } from '@/components/live/live-track-screen';
 
 interface Vehicle {
   registrationNumber: string | null;
@@ -47,6 +35,8 @@ interface BusData {
   roadRoute?: RoadRoute | null;
   /** The route's stops that have a confirmed map location. */
   stops?: StopPin[];
+  /** Every stop on the route, located or not. */
+  timetable?: TimetableStop[];
   direction?: TripDirection;
 }
 
@@ -54,13 +44,6 @@ async function fetchBus(): Promise<BusData> {
   const res = await fetch('/api/boarding/location', { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load location');
   return (await res.json()).data as BusData;
-}
-
-function formatUpdated(ts: string | null): string {
-  if (!ts) return 'never';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString();
 }
 
 function NoticeCard({
@@ -96,13 +79,6 @@ export default function BoardingLiveTrackPage() {
     refetchInterval: 5000,
   });
   const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
-  // A hook, so it sits above the early returns.
-  const { mapStops, summary: stopSummary } = useRouteStops(
-    data?.stops,
-    data?.direction,
-    data?.vehicle?.latitude,
-    data?.vehicle?.longitude,
-  );
 
   if (isLoading) {
     return (
@@ -111,7 +87,8 @@ export default function BoardingLiveTrackPage() {
       </div>
     );
   }
-  if (error) {
+  // A failed background refresh keeps the last good answer on screen.
+  if (error && !data) {
     return (
       <NoticeCard
         tone="red"
@@ -137,86 +114,30 @@ export default function BoardingLiveTrackPage() {
     );
   }
 
+  const lat = v?.latitude ?? null;
+  const lng = v?.longitude ?? null;
+  const hasPosition = lat != null && lng != null;
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Live bus location</h1>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-          Live position of the bus on your route ({route.label}).
-        </p>
-      </div>
-
-      <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-6 py-4 dark:border-gray-800">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-5 w-5 text-green-600 dark:text-green-400" />
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">{route.label}</h2>
-          </div>
-          {v && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-              <Bus className="h-3.5 w-3.5" />
-              {v.registrationNumber ?? '—'}
-            </span>
-          )}
-        </div>
-
-        <div className="px-6 py-5">
-          {v && v.hasFix && v.status !== 'offline' ? (
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1 text-sm font-medium text-green-700 ring-1 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-600" />
-                </span>
-                {v.status === 'online' ? 'Live now' : `Updated ${v.minutesAgo ?? '?'} min ago`}
-              </div>
-
-              <StopsCaption summary={stopSummary} pinCount={mapStops.length} />
-
-              {/* Tall on purpose: the map is the page. */}
-              <div className="h-[58dvh] max-h-[640px] min-h-[340px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-                <LivePositionMap
-                  latitude={v.latitude as number}
-                  longitude={v.longitude as number}
-                  label={`Bus ${v.registrationNumber ?? ''}`}
-                  heading={v.heading}
-                  accuracyM={v.accuracyM}
-                  destination={CAMPUS}
-                  viewer={viewer}
-                  stops={mapStops}
-                  routeGeometry={roadRoute?.geometry}
-                />
-              </div>
-
-              <BusContextStrip
-                position={{ lat: v.latitude as number, lng: v.longitude as number }}
-                heading={v.heading}
-                speedKmh={v.speed != null ? v.speed * 3.6 : null}
-                accuracyM={v.accuracyM}
-                viewer={viewer}
-                viewerStatus={viewerStatus}
-                viewerMessage={viewerMessage}
-                onLocateMe={onLocateMe}
-              />
-
-              <p className="text-xs text-gray-500 dark:text-gray-400">Last update: {formatUpdated(v.lastUpdate)}</p>
-            </div>
-          ) : (
-            <div className="flex items-start gap-3 rounded-xl border border-dashed border-gray-300 p-5 dark:border-gray-700">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800">
-                <MapPin className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-900 dark:text-white">Bus isn&apos;t sharing its location right now</p>
-                <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                  The driver hasn&apos;t started sharing, or the last update is too old. This page refreshes
-                  automatically. {v ? `Last update: ${formatUpdated(v.lastUpdate)}.` : ''}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
+    <LiveTrackScreen
+      routeLabel={route.label}
+      busNumber={v?.registrationNumber ?? null}
+      position={hasPosition ? { lat, lng } : null}
+      fresh={hasPosition && !!v && v.hasFix && v.status !== 'offline'}
+      liveNow={v?.status === 'online'}
+      minutesAgo={v?.minutesAgo ?? null}
+      lastUpdateIso={v?.lastUpdate ?? null}
+      heading={v?.heading ?? null}
+      accuracyM={v?.accuracyM ?? null}
+      speedKmh={v?.speed != null ? v.speed * 3.6 : null}
+      pins={data?.stops ?? []}
+      timetable={data?.timetable ?? []}
+      direction={data?.direction ?? inferDirection(null, Date.now())}
+      roadGeometry={roadRoute?.geometry}
+      viewer={viewer}
+      viewerStatus={viewerStatus}
+      viewerMessage={viewerMessage}
+      onLocateMe={onLocateMe}
+    />
   );
 }

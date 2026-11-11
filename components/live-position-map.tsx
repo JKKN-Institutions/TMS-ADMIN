@@ -34,6 +34,12 @@ interface LivePositionMapProps {
   stops?: MapStop[];
   /** Stops on the whole route, for "Stop 5 of 23" while some are still unplaced. */
   routeStopCount?: number;
+  /**
+   * live = the bus is reporting now. stale = this is only its last known position
+   * (drawn faded, never followed). none = no position at all: the bus is not drawn and
+   * the map frames the stops instead; latitude/longitude are then just a map centre.
+   */
+  busState?: 'live' | 'stale' | 'none';
   /** Road route (bus → campus) as [lat,lng] points; drawn as a solid blue polyline. */
   routeGeometry?: [number, number][];
 }
@@ -89,8 +95,10 @@ const CONTROL_BTN =
  *  { ssr: false }. */
 const LivePositionMap: React.FC<LivePositionMapProps> = ({
   latitude, longitude, label, zoom = 15,
-  heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry,
+  heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry, busState = 'live',
 }) => {
+  const busStateRef = useRef(busState);
+  busStateRef.current = busState;
   const wrapRef = useRef<HTMLDivElement>(null);
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -179,6 +187,28 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
+
+  // The map's box changes size when the details panel beside it opens or closes.
+  // Leaflet only measures its container once, so tell it, or it leaves grey bands.
+  useEffect(() => {
+    const el = elRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => mapRef.current?.invalidateSize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Faded for a last-known position, hidden when there is none.
+  useEffect(() => {
+    markerRef.current?.setOpacity(busState === 'none' ? 0 : busState === 'stale' ? 0.5 : 1);
+    // A hidden bus must not be tappable either.
+    const iconEl = markerRef.current?.getElement();
+    if (iconEl) iconEl.style.pointerEvents = busState === 'none' ? 'none' : '';
+    if (busState !== 'live') {
+      followRef.current = false;
+      setFollowing(false);
+    }
+  }, [busState]);
 
   // Bus glide + icon + accuracy circle.
   useEffect(() => {
@@ -296,9 +326,11 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || hasFitRef.current) return;
-    const pts: [number, number][] = [[latitude, longitude]];
+    const pts: [number, number][] = busStateRef.current === 'none' ? [] : [[latitude, longitude]];
     if (destination) pts.push([destination.lat, destination.lng]);
     if (viewer) pts.push([viewer.lat, viewer.lng]);
+    // With no live bus to look at, the stops are the picture.
+    if (busStateRef.current !== 'live') for (const s of stopsLatestRef.current) pts.push([s.lat, s.lng]);
     if (pts.length > 1) {
       map.fitBounds(L.latLngBounds(pts).pad(0.2));
       hasFitRef.current = true;
@@ -316,7 +348,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   const showWholeRoute = () => {
     const map = mapRef.current;
     if (!map) return;
-    const pts: [number, number][] = [[animPosRef.current.lat, animPosRef.current.lng]];
+    const pts: [number, number][] = busStateRef.current === 'none' ? [] : [[animPosRef.current.lat, animPosRef.current.lng]];
     if (destination) pts.push([destination.lat, destination.lng]);
     for (const s of stopsLatestRef.current) pts.push([s.lat, s.lng]);
     if (pts.length < 2) return;
@@ -335,11 +367,12 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   };
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full bg-white" style={{ minHeight: '320px' }}>
+    <div ref={wrapRef} className="relative isolate h-full w-full bg-white" style={{ minHeight: '200px' }}>
       <div ref={elRef} className="absolute inset-0" />
-      {/* Bottom-right: the top-right corner belongs to Leaflet's layers control. */}
-      <div className="absolute bottom-6 right-2 z-[1000] flex flex-col items-end gap-1.5">
-        {!following && (
+      {/* Bottom-left, above the scale bar: top-right is Leaflet's layers control and
+          bottom-right is where the app's floating buttons sit on a phone. */}
+      <div className="absolute bottom-9 left-2 z-[1000] flex flex-col items-start gap-1.5">
+        {!following && busState === 'live' && (
           <button type="button" onClick={followBus} className={CONTROL_BTN}>
             <Crosshair className="h-4 w-4" /> Follow bus
           </button>

@@ -27,7 +27,7 @@ export const studentNavigation: StudentNavItem[] = [
   { name: 'Fees', href: '/student/fees', icon: Receipt },
   { name: 'Grievances', href: '/student/grievances', icon: MessageCircle },
   { name: 'Notifications', href: '/student/notifications', icon: Bell },
-  { name: 'Live Track', href: '/student/live-track', icon: MapPin },
+  { name: 'Track my bus', shortName: 'Track', href: '/student/live-track', icon: MapPin },
   { name: 'Profile', href: '/student/profile', icon: User },
 ];
 

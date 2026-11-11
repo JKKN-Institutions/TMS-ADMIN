@@ -5,6 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { inferDirection, type StopPin, type TripDirection } from './progress';
 import type { TripTrack, TrackFix } from './suggest';
+import type { TimetableStop } from './arrival';
 
 /** Postgres "undefined column" — the location_confirmed_at migration is not applied yet. */
 export const isMissingColumn = (e: unknown) => (e as { code?: string } | null)?.code === '42703';
@@ -167,4 +168,29 @@ export async function loadTripTracks(
   return chosen
     .map((c) => ({ tripId: c.id, direction: c.direction, fixes: fixesByTrip.get(c.id) ?? [] }))
     .filter((t) => t.fixes.length > 0);
+}
+
+/**
+ * Every active stop on the route in route order — names and times only. Unlike the
+ * pins this needs no map location, so a learner sees their stop and its time even on a
+ * route whose stops nobody has placed yet. Fail-soft like the pins.
+ */
+export async function loadTimetable(svc: SupabaseClient, routeId: string): Promise<TimetableStop[]> {
+  const { data, error } = await svc
+    .from('tms_route_stop')
+    .select('id, stop_name, sequence_order, stop_time, evening_time')
+    .eq('route_id', routeId)
+    .eq('is_active', true)
+    .order('sequence_order', { ascending: true });
+  if (error) {
+    console.error('loadTimetable failed:', error.message);
+    return [];
+  }
+  return ((data ?? []) as Array<Pick<StopRow, 'id' | 'stop_name' | 'sequence_order' | 'stop_time' | 'evening_time'>>).map((s, i) => ({
+    id: s.id,
+    name: s.stop_name,
+    order: s.sequence_order ?? i + 1,
+    time: s.stop_time,
+    eveningTime: s.evening_time,
+  }));
 }

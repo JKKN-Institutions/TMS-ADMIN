@@ -16,7 +16,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 // the current user can see become the bar shortcuts; everything else lives in
 // the "More" sheet. Falls back to the first visible items if a user lacks
 // permission for these.
-const PRIMARY_HREFS = ['/dashboard', '/routes', '/vehicles', '/drivers', '/schedules', '/passengers/learners', '/grievances', '/analytics'];
+const PRIMARY_HREFS = ['/dashboard', '/track-all', '/routes', '/vehicles', '/drivers', '/schedules', '/passengers/learners', '/grievances', '/analytics'];
 
 /**
  * Mobile-only bottom navigation (hidden from 900px, where the sidebar rail shows). Replaces the slide-in sidebar on

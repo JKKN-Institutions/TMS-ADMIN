@@ -5,8 +5,7 @@ import { getAssignedRouteIdsForUser } from '@/lib/boarding/identity';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { gpsFreshness } from '@/lib/gps/freshness';
 import { cachedRouteToCampus } from '@/lib/geo/route-to-campus';
-import { loadStopPins, loadTripDirection } from '@/lib/stops/pins';
-import { inferDirection } from '@/lib/stops/progress';
+import { loadStopPins, loadTimetable, loadTripDirection } from '@/lib/stops/pins';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -96,16 +95,22 @@ async function getBoardingLocation(_request: NextRequest, auth: AuthContext) {
       }
     }
 
+    // Confirmed stop pins, and which way the bus is running (an active trip says so,
+    // otherwise the clock does).
+    const [stops, timetable, direction] = await Promise.all([
+      loadStopPins(svc, route.id),
+      loadTimetable(svc, route.id),
+      loadTripDirection(svc, route.id),
+    ]);
+
+    // The road line to campus only makes sense on the morning run. On the evening run
+    // the bus is driving AWAY from campus, and a line pointing back misleads.
     const roadRoute =
+      direction === 'onward' &&
       vehicle && vehicle.hasFix && vehicle.status !== 'offline' &&
       vehicle.latitude != null && vehicle.longitude != null
         ? await cachedRouteToCampus(vehicle.latitude, vehicle.longitude)
         : null;
-
-    // Confirmed stop pins for the map. The direction is only worth a query when there
-    // are pins to colour passed / next.
-    const stops = await loadStopPins(svc, route.id);
-    const direction = stops.length > 0 ? await loadTripDirection(svc, route.id) : inferDirection(null, Date.now());
 
     return NextResponse.json({
       success: true,
@@ -113,6 +118,7 @@ async function getBoardingLocation(_request: NextRequest, auth: AuthContext) {
         route: { id: route.id, label: `${route.route_number ?? '?'} · ${route.route_name ?? ''}`.trim() },
         stops,
         direction,
+        timetable,
         vehicle,
         roadRoute,
       },

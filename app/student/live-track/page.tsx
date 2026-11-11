@@ -2,27 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import dynamic from 'next/dynamic';
 import type { ComponentType } from 'react';
-import { Bus, MapPin, AlertTriangle, Route as RouteIcon } from 'lucide-react';
+import { AlertTriangle, Route as RouteIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { BusContextStrip } from '@/components/live/bus-context-strip';
 import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
-import { CAMPUS } from '@/lib/gps/campus';
 import { useLiveBus } from '@/hooks/use-live-bus';
 import type { RoadRoute } from '@/lib/geo/route-to-campus';
-import type { StopPin, TripDirection } from '@/lib/stops/progress';
-import { useRouteStops } from '@/components/map/use-route-stops';
-import { StopsCaption } from '@/components/live/stops-caption';
-
-const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-80 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800">
-      <span className="text-sm text-gray-500">Loading map…</span>
-    </div>
-  ),
-});
+import { inferDirection, type StopPin, type TripDirection } from '@/lib/stops/progress';
+import type { TimetableStop } from '@/lib/stops/arrival';
+import { LiveTrackScreen } from '@/components/live/live-track-screen';
 
 interface Vehicle {
   registrationNumber: string | null;
@@ -48,6 +36,10 @@ interface BusData {
   roadRoute?: RoadRoute | null;
   /** The route's stops that have a confirmed map location. */
   stops?: StopPin[];
+  /** Every stop on the route, located or not. */
+  timetable?: TimetableStop[];
+  /** The learner's own boarding stop. */
+  myStopId?: string | null;
   direction?: TripDirection;
   /** Server-supplied Realtime topic; never constructed client-side. */
   realtimeTopic?: string | null;
@@ -59,13 +51,6 @@ async function fetchBus(): Promise<Resp> {
   if (res.status === 404) return { notFound: true };
   if (!res.ok) throw new Error('Failed to load location');
   return { data: (await res.json()).data as BusData };
-}
-
-function formatUpdated(ts: string | null): string {
-  if (!ts) return 'never';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString();
 }
 
 function NoticeCard({
@@ -115,16 +100,6 @@ export default function StudentLiveTrackPage() {
 
   const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
 
-  // The position on screen: a broadcast fix outranks the polled snapshot when it is
-  // genuinely newer. Worked out here, above the early returns, because the stop pins
-  // below are a hook and hooks cannot follow a return.
-  const polledVehicle = data?.data?.vehicle ?? null;
-  const liveIsNewer =
-    !!liveFix && (liveFix.at ? Date.parse(liveFix.at) : 0) > (polledVehicle?.lastUpdate ? Date.parse(polledVehicle.lastUpdate) : 0);
-  const busLat = liveIsNewer ? liveFix.latitude : polledVehicle?.latitude ?? null;
-  const busLng = liveIsNewer ? liveFix.longitude : polledVehicle?.longitude ?? null;
-  const { mapStops, summary: stopSummary } = useRouteStops(data?.data?.stops, data?.data?.direction, busLat, busLng);
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -132,7 +107,8 @@ export default function StudentLiveTrackPage() {
       </div>
     );
   }
-  if (error) {
+  // A failed background refresh keeps the last good answer on screen.
+  if (error && !data) {
     return (
       <NoticeCard
         tone="red"
@@ -153,26 +129,9 @@ export default function StudentLiveTrackPage() {
     );
   }
 
-  const route = data?.data?.route ?? null;
-  const v = data?.data?.vehicle ?? null;
-  const roadRoute = data?.data?.roadRoute ?? null;
-
-  // A broadcast fix outranks the polled snapshot when it is genuinely newer.
-  // Compared as parsed epoch milliseconds — primitives, never object identity.
-  const polledAtMs = v?.lastUpdate ? Date.parse(v.lastUpdate) : 0;
-  const liveAtMs = liveFix?.at ? Date.parse(liveFix.at) : 0;
-  const useLive = !!liveFix && liveAtMs > polledAtMs;
-
-  const shownLat = useLive ? liveFix.latitude : v?.latitude ?? null;
-  const shownLng = useLive ? liveFix.longitude : v?.longitude ?? null;
-  const shownHeading = useLive ? liveFix.heading : v?.heading ?? null;
-  const shownAccuracyM = useLive ? liveFix.accuracyM : v?.accuracyM ?? null;
-  // Both sources report speed in METRES PER SECOND.
-  const shownSpeedMs = useLive ? liveFix.speed : v?.speed ?? null;
-  const shownUpdatedIso = useLive ? liveFix.at : v?.lastUpdate ?? null;
-  // A live broadcast proves the bus is reporting right now, whatever the last poll said.
-  const hasShownFix = shownLat != null && shownLng != null;
-
+  const bus = data?.data;
+  const route = bus?.route ?? null;
+  const v = bus?.vehicle ?? null;
   if (!route) {
     return (
       <NoticeCard
@@ -184,89 +143,40 @@ export default function StudentLiveTrackPage() {
     );
   }
 
+  // A broadcast fix outranks the polled snapshot when it is genuinely newer.
+  // Compared as parsed epoch milliseconds — primitives, never object identity.
+  const polledAtMs = v?.lastUpdate ? Date.parse(v.lastUpdate) : 0;
+  const liveAtMs = liveFix?.at ? Date.parse(liveFix.at) : 0;
+  const useLive = !!liveFix && liveAtMs > polledAtMs;
+
+  const lat = useLive ? liveFix.latitude : v?.latitude ?? null;
+  const lng = useLive ? liveFix.longitude : v?.longitude ?? null;
+  // Both sources report speed in METRES PER SECOND.
+  const speedMs = useLive ? liveFix.speed : v?.speed ?? null;
+  // A broadcast we just received IS live, whatever the last poll said.
+  const fresh = useLive || (!!v && v.hasFix && v.status !== 'offline');
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Track my bus</h1>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-          Live position of the bus on your route ({route.label}).
-        </p>
-      </div>
-
-      <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-6">
-          <div className="flex min-w-0 items-center gap-2">
-            <MapPin className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" />
-            <h2 className="truncate text-base font-semibold text-gray-900 dark:text-white">{route.label}</h2>
-          </div>
-          {v && (
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-              <Bus className="h-3.5 w-3.5" />
-              {v.registrationNumber ?? '—'}
-            </span>
-          )}
-        </div>
-
-        <div className="px-4 py-5 sm:px-6">
-          {hasShownFix && (useLive || (v && v.hasFix && v.status !== 'offline')) ? (
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1 text-sm font-medium text-green-700 ring-1 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-600" />
-                </span>
-                {/* A broadcast we just received IS live, whatever the last poll said. */}
-                {useLive || v?.status === 'online' ? 'Live now' : `Updated ${v?.minutesAgo ?? '?'} min ago`}
-              </div>
-
-              <StopsCaption summary={stopSummary} pinCount={mapStops.length} />
-
-              {/* Tall on purpose: the map is the page. */}
-              <div className="h-[58dvh] max-h-[640px] min-h-[340px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-                <LivePositionMap
-                  latitude={shownLat as number}
-                  longitude={shownLng as number}
-                  label={`Bus ${v?.registrationNumber ?? ''}`}
-                  heading={shownHeading}
-                  accuracyM={shownAccuracyM}
-                  destination={CAMPUS}
-                  viewer={viewer}
-                  stops={mapStops}
-                  routeGeometry={roadRoute?.geometry}
-                />
-              </div>
-
-              <BusContextStrip
-                position={{ lat: shownLat as number, lng: shownLng as number }}
-                heading={shownHeading}
-                speedKmh={shownSpeedMs != null ? shownSpeedMs * 3.6 : null}
-                accuracyM={shownAccuracyM}
-                viewer={viewer}
-                viewerStatus={viewerStatus}
-                viewerMessage={viewerMessage}
-                onLocateMe={onLocateMe}
-              />
-
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Last update: {formatUpdated(shownUpdatedIso)}
-              </p>
-            </div>
-          ) : (
-            <div className="flex items-start gap-3 rounded-xl border border-dashed border-gray-300 p-5 dark:border-gray-700">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800">
-                <MapPin className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-900 dark:text-white">Bus isn&apos;t sharing its location right now</p>
-                <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                  Your driver hasn&apos;t started sharing, or the last update is too old. This page refreshes
-                  automatically. {v ? `Last update: ${formatUpdated(v.lastUpdate)}.` : ''}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
+    <LiveTrackScreen
+      routeLabel={route.label}
+      busNumber={v?.registrationNumber ?? null}
+      position={lat != null && lng != null ? { lat, lng } : null}
+      fresh={fresh && lat != null && lng != null}
+      liveNow={useLive || v?.status === 'online'}
+      minutesAgo={v?.minutesAgo ?? null}
+      lastUpdateIso={useLive ? liveFix.at : v?.lastUpdate ?? null}
+      heading={useLive ? liveFix.heading : v?.heading ?? null}
+      accuracyM={useLive ? liveFix.accuracyM : v?.accuracyM ?? null}
+      speedKmh={speedMs != null ? speedMs * 3.6 : null}
+      pins={bus?.stops ?? []}
+      timetable={bus?.timetable ?? []}
+      direction={bus?.direction ?? inferDirection(null, Date.now())}
+      myStopId={bus?.myStopId ?? null}
+      roadGeometry={bus?.roadRoute?.geometry}
+      viewer={viewer}
+      viewerStatus={viewerStatus}
+      viewerMessage={viewerMessage}
+      onLocateMe={onLocateMe}
+    />
   );
 }

@@ -11,7 +11,8 @@ import { studentNavigation, type StudentNavItem } from '@/lib/student/navigation
 // is missing.
 const PRIMARY_HREFS = [
   '/student/dashboard',
-  '/student/routes',
+  '/student/live-track',
+  '/student/bookings',
   '/student/attendance',
 ];
 

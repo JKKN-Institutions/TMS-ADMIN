@@ -6,6 +6,7 @@ import { Bell, Bus, ChevronDown, Crosshair, ExternalLink, Gauge, MapPin, Phone, 
 import { cn } from '@/lib/utils';
 import { humanizeAge } from '@/lib/gps/route-status';
 import { etaMinutes, groupOf } from './status-groups';
+import { inferDirection } from '@/lib/stops/progress';
 import type { FleetRoute } from './types';
 
 /** Label for the deep link, chosen by what the admin actually has to change. */
@@ -76,7 +77,8 @@ export function RouteRow({
 
   const group = groupOf(route.state);
   const reporting = route.state === 'live' || route.state === 'recent';
-  const eta = reporting ? etaMinutes(route) : null;
+  // "Minutes to campus" is only true on the morning run; in the evening the bus is leaving.
+  const eta = reporting && inferDirection(null, Date.now()) === 'onward' ? etaMinutes(route) : null;
   const phone = route.driver?.phone ?? null;
   // Per-status action, so the obvious next step is one tap from the list.
   const needsBus = route.state === 'no_vehicle' || route.state === 'unconfigured';
