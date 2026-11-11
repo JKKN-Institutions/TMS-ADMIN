@@ -12,13 +12,13 @@ import React from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { num, panel } from '../_viz/kit';
+import { AccentStrip, num, panel, type Accent } from '../_viz/kit';
 import { routeOccupancy } from '@/lib/dashboard/occupancy';
 import type { DashboardRouteRow } from '@/lib/dashboard/types';
 
 const LIMIT = 8;
 
-export function RoutePerformance({ routes }: { routes: DashboardRouteRow[] }) {
+export function RoutePerformance({ routes, accent }: { routes: DashboardRouteRow[]; accent?: Accent }) {
   const rows = routeOccupancy(routes).slice(0, LIMIT);
   // Routes with no resolvable bus have no seat count, so they cannot appear in
   // an occupancy table. Say how many are missing rather than silently dropping
@@ -27,6 +27,7 @@ export function RoutePerformance({ routes }: { routes: DashboardRouteRow[] }) {
 
   return (
     <section className={`${panel} overflow-hidden`}>
+      <AccentStrip accent={accent} />
       <header
         className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3.5"
         style={{ borderColor: 'var(--viz-panel-border)' }}

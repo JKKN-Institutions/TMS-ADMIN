@@ -12,25 +12,35 @@
 import React from 'react';
 import Link from 'next/link';
 import { ArrowRight, type LucideIcon } from 'lucide-react';
-import { card } from '../_viz/kit';
+import { AccentStrip, card, type Accent } from '../_viz/kit';
+import { CHIP } from './colorful';
 import { relativeTime } from '@/lib/dashboard/format';
 import type { DashboardActivityItem } from '@/lib/dashboard/types';
 
 // ── Section shell ────────────────────────────────────────────────────────────
 
 export function Panel({
-  title, icon: Icon, action, children,
+  title, icon: Icon, action, accent, children,
 }: {
   title: string;
   icon: LucideIcon;
   action?: { label: string; href: string };
+  /** Optional colour: a strip on top and a solid icon chip. Omitted = plain panel. */
+  accent?: Accent;
   children: React.ReactNode;
 }) {
   return (
     <section className={`${card} flex flex-col overflow-hidden`}>
+      <AccentStrip accent={accent} />
       <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          {accent ? (
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${CHIP[accent]}`}>
+              <Icon className="h-4 w-4" aria-hidden />
+            </span>
+          ) : (
+            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          )}
           <h3 className="truncate text-sm font-semibold text-foreground">{title}</h3>
         </div>
         {action && (
