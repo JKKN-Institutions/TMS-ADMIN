@@ -80,7 +80,7 @@ function BrandPanel() {
   return (
     <section
       aria-label="JKKN Smart Transport"
-      className={`${styles.brandGradient} relative isolate flex flex-col overflow-hidden px-5 pb-8 pt-6 text-white sm:px-8 md:pb-10 lg:sticky lg:top-0 lg:h-dvh lg:px-10 lg:py-9 xl:px-14 xl:py-11`}
+      className={`${styles.brandGradient} relative isolate flex flex-col overflow-hidden px-5 pb-11 pt-4 text-white [@media(max-width:639px)_and_(max-height:720px)]:pb-10 sm:px-8 sm:pb-8 sm:pt-6 md:pb-10 lg:sticky lg:top-0 lg:h-dvh lg:px-10 lg:py-9 xl:px-14 xl:py-11`}
     >
       {/* Decorative layers */}
       <div aria-hidden="true" className={`${styles.pattern} pointer-events-none absolute inset-0 -z-10`} />
@@ -115,9 +115,9 @@ function BrandPanel() {
       <header className={`${styles.enter} flex items-center gap-3`} style={delay(0)}>
         {/* bg-[#fff], not bg-white: globals.css remaps .bg-white in dark mode,
             and the logo / Google mark must always sit on true white. */}
-        <span className="flex h-12 shrink-0 items-center rounded-xl bg-[#fff] px-2.5 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.35)] ring-1 ring-white/40">
+        <span className="flex h-10 shrink-0 items-center rounded-xl bg-[#fff] px-2 sm:h-12 sm:px-2.5 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.35)] ring-1 ring-white/40">
           {/* eager: it is the LCP element on phones */}
-          <Image src={jkknLogo} alt="JKKN" className="h-8 w-auto" sizes="80px" loading="eager" />
+          <Image src={jkknLogo} alt="JKKN" className="h-7 w-auto sm:h-8" sizes="80px" loading="eager" />
 
         </span>
         <span className="min-w-0">
@@ -131,9 +131,9 @@ function BrandPanel() {
       </header>
 
       {/* Headline */}
-      <div className="mt-7 md:mt-10 lg:mt-auto lg:pt-8">
+      <div className="mt-4 sm:mt-7 md:mt-10 lg:mt-auto lg:pt-8">
         <h2
-          className={`${styles.enter} text-[1.85rem] font-bold leading-[1.12] tracking-tight sm:text-4xl xl:text-[3.1rem]`}
+          className={`${styles.enter} text-[1.6rem] font-bold leading-[1.12] tracking-tight sm:text-4xl xl:text-[3.1rem]`}
           style={delay(80)}
         >
           Smart{' '}
@@ -143,7 +143,7 @@ function BrandPanel() {
           Service
         </h2>
         <p
-          className={`${styles.enter} mt-3 max-w-lg text-sm leading-relaxed text-white/90 sm:text-base`}
+          className={`${styles.enter} mt-1.5 max-w-lg text-[13px] leading-relaxed text-white/90 sm:mt-3 sm:text-base [@media(max-width:639px)_and_(max-height:720px)]:hidden`}
           style={delay(160)}
         >
           Smarter Journeys. Safer Travel. Better Connectivity.
@@ -293,28 +293,28 @@ function LoginContent() {
     (error ? ERROR_MESSAGES[error] ?? 'Unable to sign in. Please try again.' : null);
 
   return (
-    <div className="min-h-dvh overflow-x-hidden bg-white lg:grid lg:grid-cols-2 dark:bg-neutral-950">
+    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white lg:grid lg:grid-cols-2 dark:bg-neutral-950">
       <BrandPanel />
 
-      <main className="relative isolate flex items-start justify-center bg-gradient-to-b from-green-50/70 via-white to-green-50/50 px-4 py-8 sm:px-8 sm:py-12 md:items-center lg:min-h-dvh lg:py-10 dark:from-neutral-950 dark:via-neutral-950 dark:to-green-950/30">
+      <main className="relative isolate flex flex-1 items-start justify-center bg-gradient-to-b from-green-50/70 via-white to-green-50/50 px-4 pb-5 pt-8 [@media(max-width:639px)_and_(max-height:720px)]:pb-2 sm:px-8 sm:py-12 md:items-center lg:min-h-dvh lg:py-10 dark:from-neutral-950 dark:via-neutral-950 dark:to-green-950/30">
         <div aria-hidden="true" className={`${styles.dots} pointer-events-none absolute inset-0 -z-10 dark:opacity-30`} />
 
         <div
-          className={`${styles.enter} relative w-full max-w-[440px] rounded-[28px] border border-green-900/10 bg-white p-6 shadow-[0_1px_2px_rgba(20,83,45,0.06),0_28px_64px_-24px_rgba(20,83,45,0.28)] sm:p-9 -mt-10 sm:mt-0 dark:border-white/10 dark:bg-neutral-900 dark:shadow-[0_28px_64px_-24px_rgba(0,0,0,0.6)]`}
+          className={`${styles.enter} relative w-full max-w-[440px] rounded-[28px] border border-green-900/10 bg-white px-5 py-6 shadow-[0_1px_2px_rgba(20,83,45,0.06),0_28px_64px_-24px_rgba(20,83,45,0.28)] sm:p-9 -mt-10 sm:mt-0 dark:border-white/10 dark:bg-neutral-900 dark:shadow-[0_28px_64px_-24px_rgba(0,0,0,0.6)]`}
           style={delay(150)}
         >
           {/* Card header */}
           <div className="flex flex-col items-center text-center">
-            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-green-600 text-white shadow-[0_12px_24px_-8px_rgba(22,163,74,0.55)]">
-              <Bus className="h-8 w-8" aria-hidden="true" />
-              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-green-700 text-white ring-4 ring-white dark:ring-neutral-900">
+            <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-green-600 sm:h-16 sm:w-16 text-white shadow-[0_12px_24px_-8px_rgba(22,163,74,0.55)]">
+              <Bus className="h-6 w-6 sm:h-8 sm:w-8" aria-hidden="true" />
+              <span className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center sm:h-7 sm:w-7 justify-center rounded-full bg-green-700 text-white ring-4 ring-white dark:ring-neutral-900">
                 <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
             </span>
-            <h1 className="mt-6 text-2xl font-bold tracking-tight text-green-950 sm:text-[1.7rem] dark:text-white">
+            <h1 className="mt-4 text-[1.3rem] font-bold tracking-tight text-green-950 sm:mt-6 sm:text-[1.7rem] dark:text-white">
               Welcome to JKKN Transport
             </h1>
-            <p className="mt-2.5 text-sm leading-relaxed text-slate-500 dark:text-neutral-400">
+            <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500 sm:mt-2.5 sm:text-sm dark:text-neutral-400">
               Sign in with your registered institutional Google account to access
               your transport services.
             </p>
@@ -323,7 +323,7 @@ function LoginContent() {
           {message && (
             <div
               role="alert"
-              className="mt-6 flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
+              className="mt-4 sm:mt-6 flex gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
             >
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <span>{message}</span>
@@ -335,7 +335,7 @@ function LoginContent() {
             onClick={handleGoogleLogin}
             disabled={isLoading}
             aria-busy={isLoading}
-            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-green-600 px-4 py-3.5 font-semibold text-white shadow-[0_10px_24px_-8px_rgba(22,163,74,0.55)] transition duration-200 hover:-translate-y-px hover:bg-green-700 hover:shadow-[0_16px_32px_-10px_rgba(21,128,61,0.6)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
+            className="group mt-5 flex min-h-12 w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-green-600 px-4 py-3 sm:mt-7 sm:py-3.5 font-semibold text-white shadow-[0_10px_24px_-8px_rgba(22,163,74,0.55)] transition duration-200 hover:-translate-y-px hover:bg-green-700 hover:shadow-[0_16px_32px_-10px_rgba(21,128,61,0.6)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#fff] shadow-[0_1px_2px_rgba(0,0,0,0.15)]">
               {isLoading ? (
@@ -351,22 +351,22 @@ function LoginContent() {
           </p>
 
           {/* Security note */}
-          <div className="mt-6 flex items-start gap-3 rounded-2xl border border-green-100 bg-green-50/80 p-4 dark:border-green-900/40 dark:bg-green-950/30">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-green-600 text-white shadow-[0_6px_14px_-4px_rgba(22,163,74,0.45)]">
+          <div className="mt-4 flex items-start [@media(max-width:639px)_and_(max-height:720px)]:items-center gap-3 rounded-2xl border border-green-100 bg-green-50/80 p-3 sm:mt-6 sm:p-4 dark:border-green-900/40 dark:bg-green-950/30">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-green-600 [@media(max-width:639px)_and_(max-height:720px)]:h-7 [@media(max-width:639px)_and_(max-height:720px)]:w-7 text-white shadow-[0_6px_14px_-4px_rgba(22,163,74,0.45)]">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </span>
             <span>
               <span className="block text-sm font-semibold text-green-900 dark:text-green-200">
                 Secure Institutional Access
               </span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-green-800/75 dark:text-green-300/70">
+              <span className="mt-0.5 block text-xs leading-relaxed text-green-800/75 [@media(max-width:639px)_and_(max-height:720px)]:hidden dark:text-green-300/70">
                 Only registered JKKN users are allowed to log in.
               </span>
             </span>
           </div>
 
           {/* Support */}
-          <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-5 dark:border-white/10">
+          <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4 [@media(max-width:639px)_and_(max-height:720px)]:mt-3 [@media(max-width:639px)_and_(max-height:720px)]:pt-3 sm:mt-6 sm:pt-5 dark:border-white/10">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-600 text-white shadow-[0_6px_14px_-4px_rgba(22,163,74,0.45)]">
               <Headset className="h-[18px] w-[18px]" aria-hidden="true" />
             </span>
@@ -382,7 +382,7 @@ function LoginContent() {
 
           {/* Footer — the app has no Terms / Privacy pages yet, so these are
               plain text rather than links to URLs that don't exist. */}
-          <p className="mt-6 text-center text-[11px] leading-relaxed text-slate-400 dark:text-neutral-500">
+          <p className="mt-4 text-center text-[11px] [@media(max-width:639px)_and_(max-height:720px)]:mt-3 sm:mt-6 leading-relaxed text-slate-400 dark:text-neutral-500">
             By continuing, you agree to the{' '}
             <span className="font-medium text-slate-500 dark:text-neutral-400">Terms of Service</span>{' '}
             and{' '}
