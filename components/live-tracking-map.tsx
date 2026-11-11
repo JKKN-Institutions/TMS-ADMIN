@@ -7,6 +7,8 @@ import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/l
 import { shouldUseSnap } from '@/lib/geo/osrm';
 import { CAMPUS } from '@/lib/gps/campus';
 import type { TrackingState } from '@/lib/gps/route-status';
+import { stopsSignature, type MapStop } from '@/lib/stops/map-stops';
+import { drawStopPins } from '@/components/map/stop-pins';
 
 // Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -45,6 +47,19 @@ interface LiveTrackingMapProps {
   onSelectRoute: (routeId: string | null) => void;
   /** Shown over the map when no bus has a position (the map still renders). */
   emptyMessage?: { title: string; detail?: string };
+  /**
+   * Confirmed stop pins of the route the admin picked. Drawn even when that route's
+   * bus has no position — seeing where a route's stops are does not need a live bus.
+   */
+  routeStops?: MapStop[];
+  /** Which route `routeStops` belongs to; a change re-frames the map on its stops. */
+  routeStopsRouteId?: string | null;
+  /** Stops on the whole route, for "Stop 5 of 23" while some are still unplaced. */
+  routeStopCount?: number;
+  /** One line for the selected-bus card, e.g. "Next stop: KUMARAMANGALAM". */
+  stopSummary?: { headline: string; detail: string | null } | null;
+  /** Shown in the selected-bus card when the route has no stop pins yet. */
+  stopsSetupHref?: string | null;
 }
 
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
@@ -185,7 +200,14 @@ function buildPopup(bus: MapBus): string {
     </div>`;
 }
 
-const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteId, onSelectRoute, emptyMessage }) => {
+const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
+  buses, selectedRouteId, onSelectRoute, emptyMessage,
+  routeStops, routeStopsRouteId, routeStopCount, stopSummary, stopsSetupHref,
+}) => {
+  const stopsLayerRef = useRef<L.LayerGroup | null>(null);
+  const stopsFramedForRef = useRef<string | null>(null);
+  const routeStopsLatestRef = useRef<MapStop[]>(routeStops ?? []);
+  routeStopsLatestRef.current = routeStops ?? [];
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, MarkerState>>(new Map());
@@ -334,10 +356,35 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
       hasFitRef.current = false;
       routeLineRef.current?.remove();
       routeLineRef.current = null;
+      stopsLayerRef.current = null;
+      stopsFramedForRef.current = null;
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
+
+  // Stop pins for the picked route. Keyed on a primitive signature — this page polls,
+  // so the array is new every few seconds and a redraw would close any open popup.
+  const routeStopsKey = stopsSignature(routeStops);
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!stopsLayerRef.current) stopsLayerRef.current = L.layerGroup().addTo(map);
+    const list = routeStopsLatestRef.current;
+    drawStopPins(stopsLayerRef.current, list, routeStopCount);
+
+    // Frame the route ONCE per pick, not on every pin-state change — otherwise the
+    // map would re-zoom each time the bus passes a stop.
+    const key = list.length > 0 ? routeStopsRouteId ?? null : null;
+    if (key && stopsFramedForRef.current !== key) {
+      const pts: [number, number][] = list.map((s) => [s.lat, s.lng]);
+      const bus = markersRef.current.get(key);
+      if (bus) pts.push([bus.anim.lat, bus.anim.lng]);
+      pts.push([CAMPUS.lat, CAMPUS.lng]);
+      map.fitBounds(L.latLngBounds(pts).pad(0.12));
+    }
+    stopsFramedForRef.current = key;
+  }, [routeStopsKey, routeStopsRouteId, routeStopCount]);
 
   // Diff markers against the latest data: update existing (glide + icon + popup),
   // add new, remove gone. No clear-all, no fitBounds-every-poll (the old flicker).
@@ -394,7 +441,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
           }
         }
       } else {
-        const marker = L.marker([target.lat, target.lng], { icon }).addTo(map);
+        // Buses always draw above stop pins (whose offsets top out at 300).
+        const marker = L.marker([target.lat, target.lng], { icon, zIndexOffset: 1000 }).addTo(map);
         marker.bindPopup(popup);
         const circle = bus.accuracyM != null && bus.accuracyM > 0
           ? L.circle([target.lat, target.lng], { radius: bus.accuracyM, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
@@ -515,6 +563,19 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({ buses, selectedRouteI
               {enrichment.durationMin != null ? ` · ~${enrichment.durationMin} min` : ''}
             </p>
           )}
+          {stopSummary ? (
+            <p className="mt-1 text-xs font-medium text-violet-700 dark:text-violet-300">
+              📌 {stopSummary.headline}
+              {stopSummary.detail ? <span className="font-normal"> · {stopSummary.detail}</span> : null}
+            </p>
+          ) : stopsSetupHref ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              No stop pins for this route yet.{' '}
+              <a href={stopsSetupHref} className="font-medium text-violet-700 underline dark:text-violet-300">
+                Set stop locations
+              </a>
+            </p>
+          ) : null}
           {selectedBus.driverName && (
             <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
               <span className="truncate text-xs text-gray-600 dark:text-gray-300">{selectedBus.driverName}</span>

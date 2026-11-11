@@ -11,6 +11,9 @@ import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
 import { CAMPUS } from '@/lib/gps/campus';
 import { PreTripCheckForm, type SavedPreTripCheck } from '@/components/driver/pre-trip-check-form';
+import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { useRouteStops } from '@/components/map/use-route-stops';
+import { StopsCaption } from '@/components/live/stops-caption';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -34,6 +37,8 @@ interface VehicleLocation {
 interface RouteLocation {
   id: string;
   label: string;
+  /** The route's stops that have a confirmed map location. */
+  stops?: StopPin[];
   vehicle: VehicleLocation | null;
 }
 type Resp = { data?: { routes: RouteLocation[] }; notFound?: boolean };
@@ -135,6 +140,16 @@ export default function DriverLocationPage() {
 
   const { status, banner, network, onDuty, fix, lastSentAt, unsentCount, start } =
     useLiveTracking(activeRouteId, tripId);
+
+  // Stop pins for the route being driven, coloured passed / next from the trip's direction.
+  const tripDirection: TripDirection | null =
+    trip?.direction === 'onward' || trip?.direction === 'return' ? trip.direction : null;
+  const { mapStops, summary: stopSummary } = useRouteStops(
+    routes.find((r) => r.id === activeRouteId)?.stops,
+    tripDirection,
+    fix?.lat,
+    fix?.lng,
+  );
 
   const [busy, setBusy] = useState(false);
   const [tripError, setTripError] = useState<string | null>(null);
@@ -486,14 +501,16 @@ export default function DriverLocationPage() {
                 />
               </div>
 
+              {fix && <StopsCaption summary={stopSummary} pinCount={mapStops.length} />}
               {fix && (
-                <div className="h-80 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                <div className="h-[50dvh] max-h-[560px] min-h-[320px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                   <LivePositionMap
                     latitude={fix.lat}
                     longitude={fix.lng}
                     label="You are here"
                     accuracyM={fix.accuracy}
                     destination={CAMPUS}
+                    stops={mapStops}
                   />
                 </div>
               )}

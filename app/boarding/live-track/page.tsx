@@ -9,6 +9,9 @@ import { BusContextStrip } from '@/components/live/bus-context-strip';
 import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
 import { CAMPUS } from '@/lib/gps/campus';
 import type { RoadRoute } from '@/lib/geo/route-to-campus';
+import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { useRouteStops } from '@/components/map/use-route-stops';
+import { StopsCaption } from '@/components/live/stops-caption';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -38,10 +41,19 @@ interface RouteInfo {
   label: string;
 }
 
-async function fetchBus(): Promise<{ route: RouteInfo | null; vehicle: Vehicle | null; roadRoute?: RoadRoute | null }> {
+interface BusData {
+  route: RouteInfo | null;
+  vehicle: Vehicle | null;
+  roadRoute?: RoadRoute | null;
+  /** The route's stops that have a confirmed map location. */
+  stops?: StopPin[];
+  direction?: TripDirection;
+}
+
+async function fetchBus(): Promise<BusData> {
   const res = await fetch('/api/boarding/location', { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load location');
-  return (await res.json()).data as { route: RouteInfo | null; vehicle: Vehicle | null; roadRoute?: RoadRoute | null };
+  return (await res.json()).data as BusData;
 }
 
 function formatUpdated(ts: string | null): string {
@@ -84,6 +96,13 @@ export default function BoardingLiveTrackPage() {
     refetchInterval: 5000,
   });
   const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
+  // A hook, so it sits above the early returns.
+  const { mapStops, summary: stopSummary } = useRouteStops(
+    data?.stops,
+    data?.direction,
+    data?.vehicle?.latitude,
+    data?.vehicle?.longitude,
+  );
 
   if (isLoading) {
     return (
@@ -152,7 +171,10 @@ export default function BoardingLiveTrackPage() {
                 {v.status === 'online' ? 'Live now' : `Updated ${v.minutesAgo ?? '?'} min ago`}
               </div>
 
-              <div className="h-80 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+              <StopsCaption summary={stopSummary} pinCount={mapStops.length} />
+
+              {/* Tall on purpose: the map is the page. */}
+              <div className="h-[58dvh] max-h-[640px] min-h-[340px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <LivePositionMap
                   latitude={v.latitude as number}
                   longitude={v.longitude as number}
@@ -161,6 +183,7 @@ export default function BoardingLiveTrackPage() {
                   accuracyM={v.accuracyM}
                   destination={CAMPUS}
                   viewer={viewer}
+                  stops={mapStops}
                   routeGeometry={roadRoute?.geometry}
                 />
               </div>

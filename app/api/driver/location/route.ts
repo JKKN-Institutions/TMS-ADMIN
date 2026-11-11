@@ -10,6 +10,7 @@ import { loadTrackingSettings } from '@/lib/tracking/settings';
 import { expireStaleTrips, getActiveTripForDriver } from '@/lib/tracking/trips';
 import { shouldAcceptFix, distanceIncrementKm } from '@/lib/tracking/trip-state';
 import { publishFix } from '@/lib/tracking/broadcast';
+import { loadStopPinsByRoute } from '@/lib/stops/pins';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -46,8 +47,10 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
       live_tracking_enabled: boolean | null;
     };
     const vmap = new Map<string, VehicleRow>();
+    const svc = createServiceRoleClient();
+    // Confirmed stop pins for the driver's own map.
+    const stopsByRoute = await loadStopPinsByRoute(svc, routes.map((r) => r.id));
     if (vehicleIds.length > 0) {
-      const svc = createServiceRoleClient();
       const vres = await svc
         .from('tms_vehicle')
         .select(
@@ -63,6 +66,7 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
       return {
         id: r.id,
         label: r.label,
+        stops: stopsByRoute.get(r.id) ?? [],
         vehicle: v
           ? {
               registrationNumber: v.registration_number,

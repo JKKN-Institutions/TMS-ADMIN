@@ -11,6 +11,9 @@ import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
 import { CAMPUS } from '@/lib/gps/campus';
 import { useLiveBus } from '@/hooks/use-live-bus';
 import type { RoadRoute } from '@/lib/geo/route-to-campus';
+import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { useRouteStops } from '@/components/map/use-route-stops';
+import { StopsCaption } from '@/components/live/stops-caption';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -43,6 +46,9 @@ interface BusData {
   route: RouteInfo | null;
   vehicle: Vehicle | null;
   roadRoute?: RoadRoute | null;
+  /** The route's stops that have a confirmed map location. */
+  stops?: StopPin[];
+  direction?: TripDirection;
   /** Server-supplied Realtime topic; never constructed client-side. */
   realtimeTopic?: string | null;
 }
@@ -108,6 +114,16 @@ export default function StudentLiveTrackPage() {
   }, [serverTopic]);
 
   const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
+
+  // The position on screen: a broadcast fix outranks the polled snapshot when it is
+  // genuinely newer. Worked out here, above the early returns, because the stop pins
+  // below are a hook and hooks cannot follow a return.
+  const polledVehicle = data?.data?.vehicle ?? null;
+  const liveIsNewer =
+    !!liveFix && (liveFix.at ? Date.parse(liveFix.at) : 0) > (polledVehicle?.lastUpdate ? Date.parse(polledVehicle.lastUpdate) : 0);
+  const busLat = liveIsNewer ? liveFix.latitude : polledVehicle?.latitude ?? null;
+  const busLng = liveIsNewer ? liveFix.longitude : polledVehicle?.longitude ?? null;
+  const { mapStops, summary: stopSummary } = useRouteStops(data?.data?.stops, data?.data?.direction, busLat, busLng);
 
   if (isLoading) {
     return (
@@ -203,7 +219,10 @@ export default function StudentLiveTrackPage() {
                 {useLive || v?.status === 'online' ? 'Live now' : `Updated ${v?.minutesAgo ?? '?'} min ago`}
               </div>
 
-              <div className="h-80 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+              <StopsCaption summary={stopSummary} pinCount={mapStops.length} />
+
+              {/* Tall on purpose: the map is the page. */}
+              <div className="h-[58dvh] max-h-[640px] min-h-[340px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
                 <LivePositionMap
                   latitude={shownLat as number}
                   longitude={shownLng as number}
@@ -212,6 +231,7 @@ export default function StudentLiveTrackPage() {
                   accuracyM={shownAccuracyM}
                   destination={CAMPUS}
                   viewer={viewer}
+                  stops={mapStops}
                   routeGeometry={roadRoute?.geometry}
                 />
               </div>
