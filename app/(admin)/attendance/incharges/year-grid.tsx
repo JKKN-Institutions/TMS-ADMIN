@@ -26,9 +26,7 @@ const monthShort = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateStri
 
 function tip(m: string, s: PeriodSummary) {
   if (s.pct === null) return `${monthShort(m)} · no working days`;
-  return `${monthShort(m)} · scanned on ${s.marked} of ${s.duty} working days · by others ${s.others} · not marked ${s.missed}${
-    s.leave ? ` · leave ${s.leave}` : ''
-  }`;
+  return `${monthShort(m)} · marked on ${s.marked} of ${s.duty} working days · not marked on ${s.missed}`;
 }
 
 export function YearGrid({ rows, months, onPickMonth }: { rows: YearRow[]; months: string[]; onPickMonth: (m: string) => void }) {
@@ -72,7 +70,7 @@ export function YearGrid({ rows, months, onPickMonth }: { rows: YearRow[]; month
 
   const CHIPS: Array<{ k: Band; label: string; tone: string }> = [
     { k: 'all', label: 'All in-charges', tone: 'bg-gray-900 text-white' },
-    { k: 'never', label: 'Never scanned', tone: 'bg-red-600 text-white' },
+    { k: 'never', label: 'Never marked', tone: 'bg-red-600 text-white' },
     { k: 'low', label: 'Below 75%', tone: 'bg-amber-500 text-white' },
     { k: 'good', label: '75% and above', tone: 'bg-green-600 text-white' },
   ];
@@ -119,7 +117,7 @@ export function YearGrid({ rows, months, onPickMonth }: { rows: YearRow[]; month
       </div>
 
       <ul className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-600" aria-label="Legend">
-        <li className="inline-flex items-center gap-1.5"><span className="h-4 w-6 rounded bg-green-600" aria-hidden="true" />75% or more of working days scanned</li>
+        <li className="inline-flex items-center gap-1.5"><span className="h-4 w-6 rounded bg-green-600" aria-hidden="true" />75% or more of working days marked</li>
         <li className="inline-flex items-center gap-1.5"><span className="h-4 w-6 rounded bg-amber-400" aria-hidden="true" />50–74%</li>
         <li className="inline-flex items-center gap-1.5"><span className="h-4 w-6 rounded bg-red-600" aria-hidden="true" />below 50%</li>
         <li className="inline-flex items-center gap-1.5"><span className="h-4 w-6 rounded bg-gray-100" aria-hidden="true" />no working days</li>

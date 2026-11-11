@@ -12,7 +12,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  AlertTriangle, BarChart3, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Info, Moon, Percent, Plane, Sun,
+  AlertTriangle, BarChart3, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Info, Moon, Percent, Sun,
   UserCheck, Users, UserX, type LucideIcon,
 } from 'lucide-react';
 import { DataTable } from '@/components/ui/data-table';
@@ -71,7 +71,7 @@ async function getJson<T>(params: Record<string, string>): Promise<T> {
   return json.data as T;
 }
 
-const STATUS_OPTIONS = (['marked', 'others', 'missed', 'leave', 'pending', 'off'] as MarkingStatus[]).map((s) => ({
+const STATUS_OPTIONS = (['marked', 'missed'] as MarkingStatus[]).map((s) => ({
   label: MARKING_LABEL[s],
   value: s,
 }));
@@ -84,7 +84,8 @@ const MODES: Array<{ k: Mode; label: string; icon: LucideIcon }> = [
 
 const cellText = (r: MarkingRow, d: string) => {
   const c = r.cells[d];
-  if (!c || c.s === 'na' || c.s === 'off') return '';
+  if (!c || c.s === 'na') return '';
+  if (c.s === 'off') return '-';
   return c.s === 'marked' ? `Marked (${c.n})` : MARKING_LABEL[c.s];
 };
 
@@ -117,7 +118,7 @@ export default function InchargeMarkingPage() {
 
   // Memoised: an inline `?? []` loops the DataTable's onFilteredRowsChange while loading.
   const dayRows = useMemo<DayRow[]>(
-    () => (data?.rows ?? []).filter((r) => r.cells[date] && r.cells[date].s !== 'na').map((r) => ({ ...r, cell: r.cells[date] })),
+    () => (data?.rows ?? []).filter((r) => DUTY_STATUSES.has(r.cells[date]?.s)).map((r) => ({ ...r, cell: r.cells[date] })),
     [data, date],
   );
   const columns = useMemo(() => getInchargeColumns(date, direction), [date, direction]);
@@ -151,7 +152,7 @@ export default function InchargeMarkingPage() {
   const dash = isLoading || (mode === 'day' ? !k : !bands) ? '—' : undefined;
   const pct = (n: number) => (k && k.onDuty > 0 ? `${Math.round((n / k.onDuty) * 100)}% of on duty` : undefined);
   const ofPeople = (n: number) => (bands && bands.people > 0 ? `${Math.round((n / bands.people) * 100)}% of in-charges` : undefined);
-  const noService = mode === 'day' && !!k && k.onDuty === 0 && k.leave === 0;
+  const noService = mode === 'day' && !!k && k.onDuty === 0;
 
   // ── Export ────────────────────────────────────────────────────────────────
   const trip = direction === 'return' ? 'evening' : 'morning';
@@ -162,7 +163,7 @@ export default function InchargeMarkingPage() {
         rows: y.rows,
         title: `In-charge ${y.year} ${tripName}`,
         filename: `incharge-marking-${y.year}-${trip}`,
-        summary: `${y.year} · ${tripName} trip · % of working days each in-charge scanned learners themselves`,
+        summary: `${y.year} · ${tripName} trip · % of working days each in-charge marked`,
         columns: [
           { header: 'In-charge', value: (r) => r.name, width: 26 },
           { header: 'Email', value: (r) => r.email, width: 30 },
@@ -181,7 +182,7 @@ export default function InchargeMarkingPage() {
       });
     }
     if (mode === 'month' && data) {
-      const work = data.days.filter((d) => data.rows.some((r) => DUTY_STATUSES.has(r.cells[d].s) || r.cells[d].s === 'pending'));
+      const work = data.days.filter((d) => data.rows.some((r) => DUTY_STATUSES.has(r.cells[d].s)));
       return exportTable(format, {
         rows: data.rows,
         title: `In-charge ${month} ${tripName}`,
@@ -191,12 +192,10 @@ export default function InchargeMarkingPage() {
           { header: 'In-charge', value: (r) => r.name, width: 26 },
           { header: 'Email', value: (r) => r.email, width: 30 },
           { header: 'Bus', value: (r) => `${r.routeNumber ?? ''} ${r.routeName ?? ''}`.trim(), width: 28 },
-          { header: 'Scanned days', value: (r) => r.markedDays, width: 12 },
-          { header: 'By others', value: (r) => r.othersDays, width: 10 },
-          { header: 'Not marked', value: (r) => r.missedDays, width: 11 },
-          { header: 'Leave', value: (r) => r.leaveDays, width: 8 },
+          { header: 'Marked days', value: (r) => r.markedDays, width: 12 },
+          { header: 'Not marked days', value: (r) => r.missedDays, width: 14 },
           { header: 'Working days', value: (r) => r.dutyDays, width: 12 },
-          { header: 'Scanned %', value: (r) => (r.markedPct === null ? '' : `${r.markedPct}%`), width: 10 },
+          { header: 'Marked %', value: (r) => (r.markedPct === null ? '' : `${r.markedPct}%`), width: 10 },
           ...work.map((d) => ({ header: d.slice(5), value: (r: MarkingRow) => cellText(r, d), width: 14 })),
         ],
       });
@@ -207,7 +206,7 @@ export default function InchargeMarkingPage() {
       title: `In-charge ${date} ${tripName}`.slice(0, 31),
       filename: `incharge-marking-${date}-${trip}`,
       summary: k
-        ? `${longDate(date)} · ${tripName} trip · ${k.marked} of ${k.onDuty} in-charges scanned · ${k.others} bus marked by others · ${k.missed} not marked · ${k.leave} on leave`
+        ? `${longDate(date)} · ${tripName} trip · ${k.marked} of ${k.onDuty} in-charges marked · ${k.missed} not marked`
         : longDate(date),
       columns: [
         { header: 'In-charge', value: (r) => r.name, width: 26 },
@@ -226,7 +225,6 @@ export default function InchargeMarkingPage() {
   const canExport = mode === 'year' ? !!yearQ.data?.rows.length : mode === 'month' ? !!data?.rows.length : dayRows.length > 0;
 
   const missedCard = cf.card('status', 'missed');
-  const othersCard = cf.card('status', 'others');
   const markedCard = cf.card('status', 'marked');
 
   // ── Picker for the chosen view ────────────────────────────────────────────
@@ -327,32 +325,30 @@ export default function InchargeMarkingPage() {
 
       {/* 3. KPI tiles for the chosen period */}
       {!isError && mode === 'day' && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-          <KpiTile tone="blue" icon={Users} label="On duty" value={dash ?? k!.onDuty} sub={k ? `${k.off} with no service` : undefined} />
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <KpiTile tone="blue" icon={Users} label="On duty" value={dash ?? k!.onDuty} sub="in-charges with a working day" />
           <KpiTile
-            tone="green" icon={UserCheck} label="Scanned" value={dash ?? k!.marked} sub={pct(k?.marked ?? 0)}
+            tone="green" icon={UserCheck} label="Marked" value={dash ?? k!.marked} sub={pct(k?.marked ?? 0)}
             title="Scanned at least one learner themselves. Tap to show them." {...markedCard}
           />
           <KpiTile
-            tone="orange" icon={AlertTriangle} label="By others" value={dash ?? k!.others} sub={pct(k?.others ?? 0)}
-            title="Did not scan, but someone else scanned their bus. Tap to show them." {...othersCard}
+            tone="red" icon={UserX} label="Not marked" value={dash ?? k!.missed} sub={pct(k?.missed ?? 0)}
+            title="Did not scan any learner themselves. Tap to show them." {...missedCard}
           />
           <KpiTile
-            tone="red" icon={UserX} label="Not marked" value={dash ?? k!.missed + k!.pending}
-            sub={k ? (k.pending > 0 ? `${k.pending} not yet today` : 'nobody scanned the bus') : undefined}
-            title="Nobody scanned their bus at all. Tap to show them." {...missedCard}
+            tone="teal" icon={Percent} label="Marked %" value={dash ?? (k!.onDuty ? `${Math.round((k!.marked / k!.onDuty) * 100)}%` : '—')}
+            sub="of in-charges on duty"
           />
-          <KpiTile tone="violet" icon={Plane} label="On leave" value={dash ?? k!.leave} sub="declared absence" />
         </div>
       )}
       {!isError && mode !== 'day' && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
           <KpiTile tone="blue" icon={Users} label="In-charges" value={dash ?? bands!.people} sub={`with working days in ${mode === 'month' ? 'the month' : 'the year'}`} />
           <KpiTile
-            tone="green" icon={Percent} label="Average scanned" value={dash ?? (bands!.avg === null ? '—' : `${bands!.avg}%`)}
+            tone="green" icon={Percent} label="Average marked" value={dash ?? (bands!.avg === null ? '—' : `${bands!.avg}%`)}
             sub="of working days, per in-charge"
           />
-          <KpiTile tone="red" icon={UserX} label="Never scanned" value={dash ?? bands!.never} sub={ofPeople(bands?.never ?? 0)} title="Did not scan a single learner themselves in this period" />
+          <KpiTile tone="red" icon={UserX} label="Never marked" value={dash ?? bands!.never} sub={ofPeople(bands?.never ?? 0)} title="Did not mark a single day in this period" />
           <KpiTile tone="orange" icon={AlertTriangle} label="Below 75%" value={dash ?? bands!.low} sub={ofPeople(bands?.low ?? 0)} />
           <KpiTile tone="teal" icon={UserCheck} label="75% and above" value={dash ?? bands!.good} sub={ofPeople(bands?.good ?? 0)} />
         </div>
@@ -402,7 +398,7 @@ export default function InchargeMarkingPage() {
       )}
 
       {!isError && mode === 'year' && (
-        <SectionPanel title={`Year view · ${year}`} note={`${tripName} trip · % of working days scanned · click a month to open it`}>
+        <SectionPanel title={`Year view · ${year}`} note={`${tripName} trip · % of working days marked · click a month to open it`}>
           {yearQ.data ? (
             <YearGrid rows={yearQ.data.rows} months={yearQ.data.months} onPickMonth={openMonth} />
           ) : (

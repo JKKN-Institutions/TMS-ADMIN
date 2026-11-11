@@ -16,27 +16,27 @@
 import { isExcused, type AbsenceRow } from '@/lib/boarding/share-coverage';
 import { normEmail } from '@/lib/fees/incharge-bill-review';
 
+/**
+ * Two answers only, on a working day: the in-charge scanned learners
+ * themselves (Marked) or did not (Not marked, even if a colleague scanned
+ * the bus). Days they were not answerable for are 'off' and are not shown
+ * as a status.
+ */
 export type MarkingStatus =
   | 'marked' // scanned at least one learner themselves
-  | 'others' // did not scan, but someone else scanned the bus
-  | 'missed' // nobody scanned the bus at all
-  | 'leave' // declared absence for the day (excused)
-  | 'pending' // today, nothing scanned yet
-  | 'off' // no service: Sunday, holiday, excused day, or nobody in the fleet marked
+  | 'missed' // did not scan (shown as "Not marked")
+  | 'off' // no duty: Sunday, holiday, excused day, fleet-wide no-scan day, or declared leave
   | 'na'; // before the in-charge was assigned, or a future date
 
 export const MARKING_LABEL: Record<MarkingStatus, string> = {
   marked: 'Marked',
-  others: 'Marked by others',
   missed: 'Not marked',
-  leave: 'On leave',
-  pending: 'Not yet',
-  off: 'No service',
+  off: 'No duty',
   na: '—',
 };
 
 /** Statuses that count as a working day the in-charge was answerable for. */
-export const DUTY_STATUSES: ReadonlySet<MarkingStatus> = new Set(['marked', 'others', 'missed']);
+export const DUTY_STATUSES: ReadonlySet<MarkingStatus> = new Set(['marked', 'missed']);
 
 export interface MarkingCell {
   s: MarkingStatus;
@@ -58,12 +58,10 @@ export interface MarkingRow {
   /** IST date the duty started. */
   startDate: string;
   cells: Record<string, MarkingCell>;
-  /** Over the month: days on duty (marked + others + missed). */
+  /** Over the month: working days they were answerable for (marked + not marked). */
   dutyDays: number;
   markedDays: number;
-  othersDays: number;
   missedDays: number;
-  leaveDays: number;
   /** markedDays / dutyDays, rounded; null when there were no duty days. */
   markedPct: number | null;
 }
@@ -123,14 +121,13 @@ export function classifyCell(args: {
   bus: number;
   onLeave: boolean;
 }): MarkingStatus {
-  const { date, today, startDate, serviceDay, own, bus, onLeave } = args;
+  // `bus` (a colleague's scans) is carried for display only; it never makes a mark.
+  const { date, today, startDate, serviceDay, own, onLeave } = args;
   if (date > today || date < startDate) return 'na';
   // A scan always counts, even on a day that would otherwise be "no service".
   if (own > 0) return 'marked';
-  if (!serviceDay) return 'off';
-  if (onLeave) return 'leave';
-  if (bus > 0) return 'others';
-  return date === today ? 'pending' : 'missed';
+  if (!serviceDay || onLeave) return 'off';
+  return 'missed';
 }
 
 export function buildMarkingReport(inp: MarkingInputs): MarkingRow[] {
@@ -178,7 +175,7 @@ export function buildMarkingReport(inp: MarkingInputs): MarkingRow[] {
     for (const e of ic.emails) for (const p of byEmail.get(e) ?? []) add(p);
 
     const cells: Record<string, MarkingCell> = {};
-    let markedDays = 0, othersDays = 0, missedDays = 0, leaveDays = 0;
+    let markedDays = 0, missedDays = 0;
     for (const d of inp.days) {
       const own = ownByDay.get(d);
       const bus = busCount.get(`${ic.routeId}|${d}`) ?? 0;
@@ -193,11 +190,9 @@ export function buildMarkingReport(inp: MarkingInputs): MarkingRow[] {
       });
       cells[d] = { s, n: own?.n ?? 0, bus, first: own?.first ?? null, last: own?.last ?? null };
       if (s === 'marked') markedDays++;
-      else if (s === 'others') othersDays++;
       else if (s === 'missed') missedDays++;
-      else if (s === 'leave') leaveDays++;
     }
-    const dutyDays = markedDays + othersDays + missedDays;
+    const dutyDays = markedDays + missedDays;
     return {
       assignmentId: ic.assignmentId,
       name: ic.name,
@@ -209,9 +204,7 @@ export function buildMarkingReport(inp: MarkingInputs): MarkingRow[] {
       cells,
       dutyDays,
       markedDays,
-      othersDays,
       missedDays,
-      leaveDays,
       markedPct: dutyDays > 0 ? Math.round((markedDays / dutyDays) * 100) : null,
     };
   });
@@ -219,12 +212,10 @@ export function buildMarkingReport(inp: MarkingInputs): MarkingRow[] {
 
 /** Counts for one day across every in-charge (the KPI tiles). */
 export function summarizeDay(rows: MarkingRow[], date: string) {
-  const out = { onDuty: 0, marked: 0, others: 0, missed: 0, pending: 0, leave: 0, off: 0 };
+  const out = { onDuty: 0, marked: 0, missed: 0 };
   for (const r of rows) {
     const s = r.cells[date]?.s;
-    if (!s || s === 'na') continue;
-    if (s === 'off') { out.off++; continue; }
-    if (s === 'leave') { out.leave++; continue; }
+    if (s !== 'marked' && s !== 'missed') continue;
     out.onDuty++;
     out[s]++;
   }
@@ -236,22 +227,18 @@ export function summarizeDay(rows: MarkingRow[], date: string) {
 export interface PeriodSummary {
   duty: number;
   marked: number;
-  others: number;
   missed: number;
-  leave: number;
   /** marked / duty, rounded; null with no duty days. */
   pct: number | null;
 }
 
 export function summarizeCells(cells: MarkingCell[]): PeriodSummary {
-  const out: PeriodSummary = { duty: 0, marked: 0, others: 0, missed: 0, leave: 0, pct: null };
+  const out: PeriodSummary = { duty: 0, marked: 0, missed: 0, pct: null };
   for (const c of cells) {
     if (c.s === 'marked') out.marked++;
-    else if (c.s === 'others') out.others++;
     else if (c.s === 'missed') out.missed++;
-    else if (c.s === 'leave') out.leave++;
   }
-  out.duty = out.marked + out.others + out.missed;
+  out.duty = out.marked + out.missed;
   out.pct = out.duty > 0 ? Math.round((out.marked / out.duty) * 100) : null;
   return out;
 }

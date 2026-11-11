@@ -7,7 +7,7 @@
  *   - only days that have happened and on which buses ran are columns (Sundays,
  *     holidays and future days are hidden unless asked for), so the cells are
  *     wide enough to carry a symbol and the scan count, not just a colour;
- *   - quick filters with counts ("Never scanned", "Below 75%"...) instead of a
+ *   - quick filters with counts ("Never marked", "Below 75%"...) instead of a
  *     167-row wall, and 20 rows per page;
  *   - "Group by bus" puts a bus's in-charges together, so a bus nobody scanned
  *     reads as one bus problem rather than five red people;
@@ -16,7 +16,7 @@
  */
 
 import { Fragment, useMemo, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Clock, Plane, Search, Users, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import {
   DUTY_STATUSES, MARKING_LABEL, isSundayDate, type MarkingRow, type MarkingStatus,
 } from '@/lib/attendance/incharge-marking';
@@ -24,20 +24,14 @@ import {
 // Colour + symbol, never colour alone.
 const CELL: Record<MarkingStatus, { box: string; Icon?: typeof Check }> = {
   marked: { box: 'bg-green-600 text-white', Icon: Check },
-  others: { box: 'bg-amber-400 text-amber-950', Icon: Users },
   missed: { box: 'bg-red-600 text-white', Icon: X },
-  leave: { box: 'bg-sky-600 text-white', Icon: Plane },
-  pending: { box: 'border border-dashed border-gray-300 bg-white text-gray-400', Icon: Clock },
   off: { box: 'bg-gray-100 text-gray-300' },
   na: { box: '' },
 };
 
 const LEGEND: Array<{ s: MarkingStatus; hint: string }> = [
   { s: 'marked', hint: 'scanned learners themselves (number = how many)' },
-  { s: 'others', hint: 'did not scan; someone else scanned the bus' },
-  { s: 'missed', hint: 'nobody scanned the bus' },
-  { s: 'leave', hint: 'declared absence' },
-  { s: 'pending', hint: 'today, nothing yet' },
+  { s: 'missed', hint: 'did not scan any learner' },
 ];
 
 type Band = 'all' | 'never' | 'low' | 'good';
@@ -74,7 +68,7 @@ export function MonthGrid({
   const cols = useMemo(() => {
     const past = days.filter((d) => d <= today);
     if (allDays) return past;
-    return past.filter((d) => rows.some((r) => DUTY_STATUSES.has(r.cells[d]?.s) || r.cells[d]?.s === 'pending' || r.cells[d]?.s === 'leave'));
+    return past.filter((d) => rows.some((r) => DUTY_STATUSES.has(r.cells[d]?.s)));
   }, [days, today, rows, allDays]);
   const hiddenDays = days.filter((d) => d <= today).length - cols.length;
 
@@ -111,7 +105,7 @@ export function MonthGrid({
         let duty = 0, marked = 0;
         for (const r of list) {
           const s = r.cells[d]?.s;
-          if (s && (DUTY_STATUSES.has(s) || s === 'pending')) duty++;
+          if (s && DUTY_STATUSES.has(s)) duty++;
           if (s === 'marked') marked++;
         }
         return { d, duty, marked };
@@ -126,7 +120,7 @@ export function MonthGrid({
 
   const CHIPS: Array<{ k: Band; label: string; tone: string }> = [
     { k: 'all', label: 'All in-charges', tone: 'bg-gray-900 text-white' },
-    { k: 'never', label: 'Never scanned', tone: 'bg-red-600 text-white' },
+    { k: 'never', label: 'Never marked', tone: 'bg-red-600 text-white' },
     { k: 'low', label: 'Below 75%', tone: 'bg-amber-500 text-white' },
     { k: 'good', label: '75% and above', tone: 'bg-green-600 text-white' },
   ];
@@ -201,6 +195,10 @@ export function MonthGrid({
             </li>
           );
         })}
+        <li className="inline-flex items-center gap-1.5 text-gray-500">
+          <span className="h-5 w-5 rounded bg-gray-100" aria-hidden="true" />
+          not counted (on leave or holiday)
+        </li>
       </ul>
 
       {cols.length === 0 ? (
@@ -234,7 +232,7 @@ export function MonthGrid({
                   );
                 })}
                 <th scope="col" className="min-w-40 px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wider">
-                  Scanned days
+                  Marked days
                 </th>
               </tr>
             </thead>
@@ -249,7 +247,10 @@ export function MonthGrid({
               {shown.map((r, i) => {
                 const newBus = view === 'bus' && (i === 0 || busKey(shown[i - 1]) !== busKey(r));
                 const busMates = newBus ? list.filter((x) => busKey(x) === busKey(r)) : [];
-                const busMissed = newBus ? cols.filter((d) => busMates.every((x) => x.cells[d]?.s === 'missed')).length : 0;
+                // Days the whole bus went unscanned: every in-charge Not marked and no scans on the bus.
+        const busMissed = newBus
+          ? cols.filter((d) => busMates.every((x) => x.cells[d]?.s === 'missed' && x.cells[d]?.bus === 0)).length
+          : 0;
                 return (
                   <Fragment key={r.assignmentId}>
                     {newBus && (
@@ -327,14 +328,14 @@ export function MonthGrid({
               <tfoot>
                 <tr className="border-t-2 border-gray-200 bg-gray-50 text-xs">
                   <th scope="row" className="sticky left-0 z-10 bg-gray-50 px-4 py-2 text-left font-semibold text-gray-700">
-                    Scanned that day
+                    Marked that day
                   </th>
                   {perDay.map(({ d, duty, marked }) => (
                     <td key={d} className={`px-1 py-2 text-center tabular-nums ${d === selected ? 'bg-green-50' : ''}`}>
                       {duty === 0 ? (
                         <span className="text-gray-300">—</span>
                       ) : (
-                        <span className={`font-bold ${pctText(Math.round((marked / duty) * 100))}`} title={`${marked} of ${duty} in-charges on duty scanned`}>
+                        <span className={`font-bold ${pctText(Math.round((marked / duty) * 100))}`} title={`${marked} of ${duty} in-charges on duty marked`}>
                           {marked}/{duty}
                         </span>
                       )}

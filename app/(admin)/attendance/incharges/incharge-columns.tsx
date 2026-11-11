@@ -11,10 +11,7 @@ export type DayRow = MarkingRow & { cell: MarkingCell };
 // Solid pills, as on the Daily report: colour + word, never colour alone.
 export const STATUS_PILL: Record<MarkingStatus, string> = {
   marked: 'bg-green-600 text-white',
-  others: 'bg-amber-500 text-white',
   missed: 'bg-red-600 text-white',
-  leave: 'bg-sky-600 text-white',
-  pending: 'bg-gray-200 text-gray-700',
   off: 'bg-gray-100 text-gray-500',
   na: 'bg-gray-100 text-gray-400',
 };
