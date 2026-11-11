@@ -9,10 +9,10 @@
 .brandGradient {
   background-image: linear-gradient(
     135deg,
-    #052e16 0%,
-    #14532d 35%,
-    #166534 60%,
-    #0a3d1f 100%
+    #166534 0%,
+    #15803d 40%,
+    #16a34a 75%,
+    #15803d 100%
   );
   background-size: 220% 220%;
   animation: gradientDrift 22s ease-in-out infinite alternate;
