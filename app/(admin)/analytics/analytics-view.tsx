@@ -12,7 +12,6 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { PageHeader } from '@/components/ui/page-header';
 import { istToday, addDays } from '@/lib/booking/window';
 import {
   BarChart,
@@ -41,10 +40,13 @@ import {
   AlertTriangle,
   XCircle,
   HelpCircle,
+  Percent,
+  CalendarRange,
+  BarChart3,
 } from 'lucide-react';
 import {
   VIZ_CSS, card, inr, inrCompact, num, titleCase,
-  StatTile, Meter, Legend, EmptyState, ChartCard, VizTable as DataTable, VizTooltip,
+  Legend, EmptyState, ChartCard, AccentStrip, VizTable as DataTable, VizTooltip,
   gridProps, axisTick, axisLine, type StatusMeta,
 } from '../_viz/kit';
 import toast from 'react-hot-toast';
@@ -253,15 +255,15 @@ function Delta({ now, before }: { now: number; before: number }) {
 
 function PeriodComparison({ c }: { c: NonNullable<Analytics['comparison']> }) {
   const items = [
-    { label: 'Billed this period', now: c.current.billed, before: c.previous.billed, fmt: inrCompact },
-    { label: 'Collected this period', now: c.current.collected, before: c.previous.collected, fmt: inrCompact },
-    { label: 'Bookings this period', now: c.current.bookings, before: c.previous.bookings, fmt: num },
+    { label: 'Billed this period', now: c.current.billed, before: c.previous.billed, fmt: inrCompact, edge: 'border-l-blue-500' },
+    { label: 'Collected this period', now: c.current.collected, before: c.previous.collected, fmt: inrCompact, edge: 'border-l-green-500' },
+    { label: 'Bookings this period', now: c.current.bookings, before: c.previous.bookings, fmt: num, edge: 'border-l-violet-500' },
   ];
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {items.map((i) => (
-        <div key={i.label} className="rounded-xl border border-border bg-card px-4 py-3">
-          <p className="text-xs text-muted-foreground">{i.label}</p>
+        <div key={i.label} className={`rounded-xl border border-border border-l-4 bg-card px-4 py-3 ${i.edge}`}>
+          <p className="text-xs font-medium text-muted-foreground">{i.label}</p>
           <p className="mt-0.5 text-xl font-semibold tracking-tight text-foreground">{i.fmt(i.now)}</p>
           <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
             <Delta now={i.now} before={i.before} />
@@ -336,104 +338,148 @@ function AnalyticsPage() {
   const progress = CollectionProgressChart({ collected: k.collected, outstanding: k.outstanding });
 
   const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'financial', label: 'Financial' },
-    { id: 'operations', label: 'Operations' },
+    { id: 'overview', label: 'Overview', Icon: BarChart3 },
+    { id: 'financial', label: 'Financial', Icon: Wallet },
+    { id: 'operations', label: 'Operations', Icon: Bus },
   ] as const;
 
+  // Refetch keeps the frame: hold the render at reduced opacity, no skeleton flash.
+  const fade = refreshing ? 'pointer-events-none opacity-60 transition-opacity' : 'transition-opacity';
+
+  const tiles =
+    tab === 'overview' ? (
+      <>
+        <ColorTile tone="green" Icon={Wallet} label="Fees collected" value={inrCompact(k.collected)} sub={`of ${inrCompact(k.billed)} billed`} />
+        <ColorTile tone="blue" Icon={Percent} label="Collection rate" value={`${k.collectionRate.toFixed(1)}%`} rate={k.collectionRate} sub={`${inrCompact(k.outstanding)} still outstanding`} />
+        <ColorTile tone="violet" Icon={Users} label="Transport learners" value={num(k.learnersWithTransport)} sub={`${adoption}% of ${num(k.learnersActive)} active learners`} />
+        <ColorTile tone="orange" Icon={MessageSquareWarning} label="Open grievances" value={num(k.openGrievances)} sub={`${num(data.grievances.total)} total logged`} />
+      </>
+    ) : tab === 'financial' ? (
+      <>
+        <ColorTile tone="blue" Icon={TrendingUp} label="Total billed" value={inrCompact(k.billed)} sub={`${num(k.transportBillCount)} transport bills`} />
+        <ColorTile tone="green" Icon={Wallet} label="Collected" value={inrCompact(k.collected)} rate={k.collectionRate} sub={`${k.collectionRate.toFixed(1)}% collection rate`} />
+        <ColorTile tone="orange" Icon={Clock} label="Outstanding" value={inrCompact(k.outstanding)} sub="unpaid + partially paid" />
+        <ColorTile tone="red" Icon={AlertTriangle} label="Overdue" value={inrCompact(k.overdue)} sub="past due date, unpaid" />
+      </>
+    ) : (
+      <>
+        <ColorTile tone="blue" Icon={RouteIcon} label="Active routes" value={num(k.activeRoutes)} sub={`${num(k.totalRoutes)} total`} />
+        <ColorTile tone="violet" Icon={Bus} label="Active vehicles" value={num(k.activeVehicles)} sub={`${num(k.totalVehicles)} in fleet`} />
+        <ColorTile tone="teal" Icon={UserCheck} label="Drivers" value={num(k.drivers)} sub="staff with driver role" />
+        <ColorTile tone="green" Icon={CalendarCheck} label="Bookings in range" value={num(k.bookingsInRange)} sub={`${data.range.from} → ${data.range.to}`} />
+      </>
+    );
+
   return (
-    <div className="viz-scope space-y-6">
+    <div className="viz-scope space-y-5">
       <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
 
-      <PageHeader
-        description="Fees, riders, fleet and bookings over the chosen period. Route, bus and driver counts are as of today."
-        actions={
-          <button
-            onClick={() => fetchData(RANGES.find((x) => x.id === rangeId)!.days, true)}
-            disabled={refreshing}
-            className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        }
-      />
-
-      {/* Pinned under the fixed app header (4rem + any install banner) so the
-          period stays visible while scrolling through the charts. */}
-      <div
-        className="sticky z-10 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/95 px-3 py-2 backdrop-blur"
-        style={{ top: 'calc(4rem + var(--pwa-banner-h, 0px) + 0.5rem)' }}
-      >
-        <span className="text-xs font-medium text-muted-foreground">Period</span>
-        <div className="flex flex-wrap gap-1 rounded-lg border border-border p-1">
-          {RANGES.map((r) => (
+      {/* 1. Header banner */}
+      <header className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-green-700 via-green-600 to-green-500 px-5 py-5 text-white shadow-[0_14px_32px_-18px_rgba(21,128,61,0.8)] sm:px-7">
+        <span aria-hidden="true" className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-white/10" />
+        <span aria-hidden="true" className="absolute -bottom-20 right-40 h-40 w-40 rounded-full bg-white/5" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Transport analytics</h1>
+            <p className="mt-1 text-sm text-white/90">
+              Fees, riders, fleet and bookings over the chosen period. Route, bus and driver counts are as of today.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2.5 rounded-xl bg-white/15 px-4 py-2.5 ring-1 ring-white/25">
+              <CalendarRange className="h-5 w-5" aria-hidden="true" />
+              <div className="text-right">
+                <p className="text-xs text-white/85">{RANGES.find((x) => x.id === rangeId)!.label}</p>
+                <p className="text-sm font-semibold tabular-nums">{data.range.from} → {data.range.to}</p>
+              </div>
+            </div>
             <button
-              key={r.id}
-              onClick={() => setRangeId(r.id)}
-              aria-pressed={rangeId === r.id}
-              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                rangeId === r.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              onClick={() => fetchData(RANGES.find((x) => x.id === rangeId)!.days, true)}
+              disabled={refreshing}
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-green-700 shadow-[0_4px_12px_-4px_rgba(0,0,0,0.3)] transition-colors hover:bg-green-50 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* 2. Tabs as pills */}
+      <nav className="flex flex-wrap gap-2" aria-label="Analytics views">
+        {tabs.map((t) => {
+          const on = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              aria-pressed={on}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                on
+                  ? 'bg-green-600 text-white shadow-[0_6px_14px_-6px_rgba(22,163,74,0.7)]'
+                  : 'border border-border bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               }`}
             >
-              {r.label}
+              <t.Icon className="h-4 w-4" aria-hidden="true" />
+              {t.label}
             </button>
-          ))}
+          );
+        })}
+      </nav>
+
+      {/* 3. Colour KPI tiles for the chosen tab */}
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 ${fade}`}>{tiles}</div>
+
+      {/* 4. Period bar — pinned under the fixed app header (4rem + any install
+          banner) so the period stays visible while scrolling through the charts. */}
+      <div
+        className="sticky z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-white/95 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.05)] backdrop-blur"
+        style={{ top: 'calc(4rem + var(--pwa-banner-h, 0px) + 0.5rem)' }}
+      >
+        <CalendarRange className="ml-1 hidden h-5 w-5 text-green-600 sm:block" aria-hidden="true" />
+        <span className="text-sm font-medium text-foreground">Period</span>
+        <div className="inline-flex flex-wrap rounded-xl bg-gray-100 p-1" role="group" aria-label="Period">
+          {RANGES.map((r) => {
+            const on = rangeId === r.id;
+            return (
+              <button
+                key={r.id}
+                onClick={() => setRangeId(r.id)}
+                aria-pressed={on}
+                className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                  on ? 'bg-green-600 text-white shadow-[0_2px_6px_-2px_rgba(22,163,74,0.6)]' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {r.label}
+              </button>
+            );
+          })}
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs tabular-nums text-muted-foreground">
           {data.range.from} → {data.range.to}
         </span>
       </div>
 
+      {/* 5. Change vs the previous period */}
       {data.comparison && <PeriodComparison c={data.comparison} />}
 
-      {/* Tabs */}
-      <div className="border-b border-border">
-        <nav className="-mb-px flex gap-6">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`border-b-2 py-2.5 text-sm font-medium transition-colors ${
-                tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* Refetch keeps the frame: hold the render at reduced opacity, no skeleton flash */}
-      <div className={refreshing ? 'pointer-events-none opacity-60 transition-opacity' : 'transition-opacity'}>
+      {/* 6. Charts for the chosen tab */}
+      <div className={fade}>
         {tab === 'overview' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatTile label="Transport fees collected" value={inrCompact(k.collected)} sub={`of ${inrCompact(k.billed)} billed`} Icon={Wallet} tone="text-[var(--viz-good)]" />
-              <Meter label="Collection rate" rate={k.collectionRate} caption={`${inrCompact(k.outstanding)} still outstanding`} />
-              <StatTile label="Transport learners" value={num(k.learnersWithTransport)} sub={`${adoption}% of ${num(k.learnersActive)} active learners`} Icon={Users} tone="text-primary" />
-              <StatTile label="Open grievances" value={num(k.openGrievances)} sub={`${num(data.grievances.total)} total logged`} Icon={MessageSquareWarning} tone="text-[var(--viz-serious)]" />
-            </div>
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-              <ChartCard title="Fee collection status" subtitle={`${num(k.transportBillCount)} transport bills by payment state`} hasData={data.collectionStatus.length > 0} legend={collectionStatus.legend} chart={collectionStatus.chart} table={collectionStatus.table} />
-              <ChartCard title="Fleet document compliance" subtitle={`${num(k.totalVehicles)} vehicles · expiry within 30 days`} hasData={data.fleetCompliance.some((d) => d.valid + d.expiring + d.expired + d.unknown > 0)} legend={fleet.legend} chart={fleet.chart} table={fleet.table} />
-            </div>
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <ChartCard accent="violet" title="Fee collection status" subtitle={`${num(k.transportBillCount)} transport bills by payment state`} hasData={data.collectionStatus.length > 0} legend={collectionStatus.legend} chart={collectionStatus.chart} table={collectionStatus.table} />
+            <ChartCard accent="blue" title="Fleet document compliance" subtitle={`${num(k.totalVehicles)} vehicles · expiry within 30 days`} hasData={data.fleetCompliance.some((d) => d.valid + d.expiring + d.expired + d.unknown > 0)} legend={fleet.legend} chart={fleet.chart} table={fleet.table} />
           </div>
         )}
 
         {tab === 'financial' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatTile label="Total billed" value={inrCompact(k.billed)} sub={`${num(k.transportBillCount)} transport bills`} Icon={TrendingUp} tone="text-primary" />
-              <StatTile label="Collected" value={inrCompact(k.collected)} sub={`${k.collectionRate.toFixed(1)}% collection rate`} Icon={Wallet} tone="text-[var(--viz-good)]" />
-              <StatTile label="Outstanding" value={inrCompact(k.outstanding)} sub="unpaid + partially paid" Icon={Clock} tone="text-[var(--viz-serious)]" />
-              <StatTile label="Overdue" value={inrCompact(k.overdue)} sub="past due date, unpaid" Icon={AlertTriangle} tone="text-[var(--viz-critical)]" />
-            </div>
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-              <ChartCard title="Collection progress" subtitle="Collected vs outstanding, by amount" hasData={k.billed > 0} legend={progress.legend} chart={progress.chart} table={progress.table} />
-              <ChartCard title="Fee collection status" subtitle={`${num(k.transportBillCount)} transport bills by payment state`} hasData={data.collectionStatus.length > 0} legend={collectionStatus.legend} chart={collectionStatus.chart} table={collectionStatus.table} />
+              <ChartCard accent="green" title="Collection progress" subtitle="Collected vs outstanding, by amount" hasData={k.billed > 0} legend={progress.legend} chart={progress.chart} table={progress.table} />
+              <ChartCard accent="violet" title="Fee collection status" subtitle={`${num(k.transportBillCount)} transport bills by payment state`} hasData={data.collectionStatus.length > 0} legend={collectionStatus.legend} chart={collectionStatus.chart} table={collectionStatus.table} />
             </div>
             <ChartCard
+              accent="blue"
               title="Billing by month"
               subtitle="Transport fees billed per month"
               hasData={data.revenueTrend.length >= 2}
@@ -446,13 +492,8 @@ function AnalyticsPage() {
 
         {tab === 'operations' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatTile label="Active routes" value={num(k.activeRoutes)} sub={`${num(k.totalRoutes)} total`} Icon={RouteIcon} tone="text-primary" />
-              <StatTile label="Active vehicles" value={num(k.activeVehicles)} sub={`${num(k.totalVehicles)} in fleet`} Icon={Bus} tone="text-primary" />
-              <StatTile label="Drivers" value={num(k.drivers)} sub="staff with driver role" Icon={UserCheck} tone="text-primary" />
-              <StatTile label="Bookings in range" value={num(k.bookingsInRange)} sub={`${data.range.from} → ${data.range.to}`} Icon={CalendarCheck} tone="text-primary" />
-            </div>
             <ChartCard
+              accent="teal"
               title="Transport riders per route"
               subtitle="Bus-requiring learners and staff assigned per route (top 20)"
               hasData={data.routeLoad.length > 0}
@@ -461,7 +502,7 @@ function AnalyticsPage() {
               csv={{ filename: 'riders-per-route.csv', head: ['Route', 'Riders'], rows: data.routeLoad.map((r) => [r.name, r.riders]) }}
             />
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-              <ChartCard title="Fleet document compliance" subtitle={`${num(k.totalVehicles)} vehicles · expiry within 30 days`} hasData={data.fleetCompliance.some((d) => d.valid + d.expiring + d.expired + d.unknown > 0)} legend={fleet.legend} chart={fleet.chart} table={fleet.table} />
+              <ChartCard accent="blue" title="Fleet document compliance" subtitle={`${num(k.totalVehicles)} vehicles · expiry within 30 days`} hasData={data.fleetCompliance.some((d) => d.valid + d.expiring + d.expired + d.unknown > 0)} legend={fleet.legend} chart={fleet.chart} table={fleet.table} />
               <GrievancesPanel grievances={data.grievances} />
             </div>
           </div>
@@ -476,7 +517,9 @@ function GrievancesPanel({ grievances }: { grievances: Analytics['grievances'] }
   const order = ['open', 'in_progress', 'resolved', 'closed'];
   const byStatus = [...grievances.byStatus].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   return (
-    <section className={`${card} p-5`}>
+    <section className={`${card} overflow-hidden`}>
+      <AccentStrip accent="orange" />
+      <div className="p-5">
       <div className="mb-4">
         <h3 className="text-base font-semibold text-foreground">Grievances</h3>
         <p className="mt-0.5 text-xs text-muted-foreground">{num(grievances.total)} logged</p>
@@ -506,7 +549,56 @@ function GrievancesPanel({ grievances }: { grievances: Analytics['grievances'] }
           )}
         </>
       )}
+      </div>
     </section>
+  );
+}
+
+// ── Colour KPI tile (same look as the Attendance daily report) ───────────────
+const TILE_TONE = {
+  green: 'from-green-600 to-green-800 shadow-[0_14px_28px_-16px_rgba(22,163,74,0.85)]',
+  blue: 'from-blue-600 to-indigo-700 shadow-[0_14px_28px_-16px_rgba(37,99,235,0.85)]',
+  violet: 'from-violet-600 to-purple-700 shadow-[0_14px_28px_-16px_rgba(124,58,237,0.85)]',
+  orange: 'from-orange-600 to-orange-700 shadow-[0_14px_28px_-16px_rgba(234,88,12,0.85)]',
+  red: 'from-rose-600 to-red-700 shadow-[0_14px_28px_-16px_rgba(225,29,72,0.85)]',
+  teal: 'from-teal-600 to-cyan-700 shadow-[0_14px_28px_-16px_rgba(13,148,136,0.85)]',
+} as const;
+
+function ColorTile({
+  tone, Icon, label, value, sub, rate,
+}: {
+  tone: keyof typeof TILE_TONE;
+  Icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  sub?: string;
+  /** 0-100: draws a white progress bar under the value (e.g. collection rate). */
+  rate?: number;
+}) {
+  const pct = rate === undefined ? 0 : Math.max(0, Math.min(100, rate));
+  return (
+    <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-br p-5 text-white ${TILE_TONE[tone]}`}>
+      <span aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/10" />
+      <span aria-hidden="true" className="absolute -bottom-12 -left-6 h-24 w-24 rounded-full bg-white/5" />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/90">{label}</p>
+          <p className="mt-2 break-words text-3xl font-bold leading-none tabular-nums">{value}</p>
+        </div>
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/20 ring-1 ring-white/30">
+          <Icon className="h-6 w-6" />
+        </span>
+      </div>
+      {rate !== undefined && (
+        <div
+          className="relative mt-3 h-2 w-full overflow-hidden rounded-full bg-white/25"
+          role="meter" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={label}
+        >
+          <div className="h-full rounded-full bg-white" style={{ width: `${Math.max(pct, 1.5)}%` }} />
+        </div>
+      )}
+      {sub && <p className="relative mt-3 truncate text-xs font-medium text-white/90" title={sub}>{sub}</p>}
+    </div>
   );
 }
 
