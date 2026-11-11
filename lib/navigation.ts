@@ -124,6 +124,7 @@ export const allNavigation: NavItem[] = [
   { name: 'Daily Report', href: '/attendance', icon: CalendarDays, permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, group: 'transport', folder: 'attendance' },
   { name: 'Bus Coverage', href: '/attendance/coverage', icon: LayoutGrid, permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, group: 'transport', folder: 'attendance' },
   { name: 'Learner Register', href: '/attendance/learners', icon: ListChecks, permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, group: 'transport', folder: 'attendance' },
+  { name: 'In-charge Marking', href: '/attendance/incharges', icon: UserCheck, permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, group: 'transport', folder: 'attendance' },
   // 'Enrollments' (/enrollment-requests) merged into Learners — assign a route
   // from any learner row; the old URL redirects to the unassigned view.
   { name: 'Grievances', href: '/grievances', icon: MessageCircle, permission: TMS_PERMISSIONS.GRIEVANCES_MANAGE, group: 'services' },

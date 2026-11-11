@@ -57,6 +57,7 @@ describe('activeNavHref', () => {
     expect(activeNavHref('/attendance')).toBe('/attendance');
     expect(activeNavHref('/attendance/coverage')).toBe('/attendance/coverage');
     expect(activeNavHref('/attendance/learners')).toBe('/attendance/learners');
+    expect(activeNavHref('/attendance/incharges')).toBe('/attendance/incharges');
   });
 
   it('keeps detail pages under their list', () => {
@@ -87,9 +88,9 @@ describe('transport folders', () => {
     }
   });
 
-  it('holds exactly the three attendance pages', () => {
+  it('holds exactly the four attendance pages', () => {
     expect(allNavigation.filter((i) => i.folder === 'attendance').map((i) => i.name)).toEqual([
-      'Daily Report', 'Bus Coverage', 'Learner Register',
+      'Daily Report', 'Bus Coverage', 'Learner Register', 'In-charge Marking',
     ]);
   });
 
