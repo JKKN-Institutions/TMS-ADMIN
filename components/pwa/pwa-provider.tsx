@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Download, RefreshCw, X } from 'lucide-react';
+import {
+  runInstallPrompt, setInstallPrompt, useInstallPrompt, type InstallPromptEvent,
+} from '@/lib/pwa/install-prompt';
 
 // Install-banner dismissal is remembered per browser. Before this it lived in
 // React state only, so the ~45px bar came back on every page load and new tab.
@@ -14,11 +17,6 @@ function readInstallDismissed(): boolean {
     return false;
   }
 }
-
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: string }>;
-};
 
 /**
  * Unified PWA controller for ALL four portals (Admin/Student/Driver/Boarding).
@@ -33,7 +31,8 @@ type InstallPromptEvent = Event & {
  * content down instead of hiding it.
  */
 export default function PwaProvider() {
-  const [deferred, setDeferred] = useState<InstallPromptEvent | null>(null);
+  // Held in a shared store so the admin sidebar's Install button can use it too.
+  const deferred = useInstallPrompt();
   const [iosHint, setIosHint] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
   const [dismissedInstall, setDismissedInstall] = useState(false);
@@ -123,7 +122,7 @@ export default function PwaProvider() {
     // 2. Capture the install prompt (Android / desktop Chromium).
     const onPrompt = (e: Event) => {
       e.preventDefault();
-      setDeferred(e as InstallPromptEvent);
+      setInstallPrompt(e as InstallPromptEvent);
     };
     window.addEventListener('beforeinstallprompt', onPrompt);
 
@@ -139,7 +138,7 @@ export default function PwaProvider() {
 
     // 4. Hide install UI once the app is installed.
     const onInstalled = () => {
-      setDeferred(null);
+      setInstallPrompt(null);
       setIosHint(false);
     };
     window.addEventListener('appinstalled', onInstalled);
@@ -211,11 +210,7 @@ export default function PwaProvider() {
           <span className="inline-flex items-center gap-2">
             <button
               type="button"
-              onClick={async () => {
-                await deferred.prompt();
-                await deferred.userChoice.catch(() => undefined);
-                setDeferred(null);
-              }}
+              onClick={() => void runInstallPrompt()}
               className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 font-semibold hover:bg-white/30"
             >
               Install
