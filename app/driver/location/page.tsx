@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import {
-  AlertTriangle, Bus, MapPin, Navigation, Gauge, Clock, Radio, Crosshair, Play, Wifi, Satellite, Square,
+  AlertTriangle, Bus, MapPin, Navigation, Gauge, Clock, Radio, Crosshair, Play, Wifi, Satellite, Square, ClipboardCheck,
 } from 'lucide-react';
 import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { useLiveTracking } from '@/lib/driver/use-live-tracking';
@@ -175,8 +175,8 @@ export default function DriverLocationPage() {
   // The driver opened the check themselves before starting (closable).
   const [checkOpenedEarly, setCheckOpenedEarly] = useState(false);
 
-  // Daily pre-trip check — a must-see reminder that NEVER blocks the trip (Director,
-  // 8 Nov). START TRIP always works. Once a trip is running on a bus with no check
+  // Daily pre-trip check. Before a trip it comes first (see startControl below). Should
+  // a trip be running on a bus with no check
   // or skip today, the check takes the whole screen and cannot be closed: the ways
   // out are SAVE CHECK or a recorded skip. Derived from the server's list, so a
   // refresh does not make it go away. Tracking keeps running underneath.
@@ -215,7 +215,6 @@ export default function DriverLocationPage() {
   };
 
   const onCheckSaved = async (check: SavedPreTripCheck) => {
-    const startAfter = checkOpenedEarly && !trip && !check.any_issue;
     setCheckOpenedEarly(false);
     await refetchTrip();
     if (check.any_issue) {
@@ -230,8 +229,6 @@ export default function DriverLocationPage() {
       return;
     }
     setCheckNotice(null);
-    // All OK before starting: go straight on to the trip, as before.
-    if (startAfter && selectedRouteId) await startTrip(selectedRouteId);
   };
 
   const endTrip = async () => {
@@ -340,6 +337,54 @@ export default function DriverLocationPage() {
       />
     );
   }
+
+  // Check first, then start (transport office, 11 Nov 2026 — replaces the 8 Nov rule
+  // that START TRIP always shows). While today's check for this bus is not saved or
+  // skipped, the button in START TRIP's place opens the check; START TRIP appears only
+  // afterwards. The driver is never stuck: the check form can record a skip with a
+  // reason, which counts and alerts the transport head. Where the check table is not
+  // deployed (preTrip.enabled false) nothing is due and START TRIP shows as before.
+  const startControl = (size: string) => {
+    const cls = cn(
+      'inline-flex w-full items-center justify-center gap-2 rounded-xl px-6 font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60',
+      size,
+    );
+    if (!tripData) {
+      return (
+        <button type="button" disabled className={cn(cls, 'bg-gray-400')}>
+          Loading…
+        </button>
+      );
+    }
+    if (checkDueBeforeStart) {
+      return (
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            onClick={() => setCheckOpenedEarly(true)}
+            className={cn(cls, 'bg-gradient-to-br from-amber-500 to-orange-600')}
+          >
+            <ClipboardCheck className="h-6 w-6" />
+            DO PRE-TRIP CHECK
+          </button>
+          <p className="text-center text-xs text-gray-600 dark:text-gray-400">
+            START TRIP appears after today&apos;s check for this bus is saved.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        disabled={busy || !selectedRouteId}
+        onClick={() => selectedRouteId && void startTrip(selectedRouteId)}
+        className={cn(cls, 'bg-gradient-to-br from-green-600 to-emerald-600')}
+      >
+        <Play className="h-6 w-6" />
+        {busy ? 'Starting…' : 'START TRIP'}
+      </button>
+    );
+  };
 
   // Desktop keeps the page exactly as it was. The full-page map below is the phone layout.
   if (wide) {
@@ -457,19 +502,7 @@ export default function DriverLocationPage() {
               />
             )}
 
-            {checkDueBeforeStart && (
-              <button
-                type="button"
-                onClick={() => setCheckOpenedEarly(true)}
-                className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50 px-4 py-3 text-left text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
-              >
-                <span>Today&apos;s pre-trip check is not done yet.</span>
-                <span className="shrink-0 font-semibold underline">Do it now</span>
-              </button>
-            )}
-
-            {/* One control, sized for a thumb. Nothing else needs pressing while driving.
-                START TRIP is never hidden or blocked by the pre-trip check. */}
+            {/* One control, sized for a thumb. Nothing else needs pressing while driving. */}
             {trip ? (
               <button
                 type="button"
@@ -481,15 +514,7 @@ export default function DriverLocationPage() {
                 {busy ? 'Ending…' : 'END TRIP'}
               </button>
             ) : (
-              <button
-                type="button"
-                disabled={busy || !selectedRouteId}
-                onClick={() => selectedRouteId && void startTrip(selectedRouteId)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-green-600 to-emerald-600 px-6 py-5 text-lg font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
-              >
-                <Play className="h-5 w-5" />
-                {busy ? 'Starting…' : 'START TRIP'}
-              </button>
+              startControl('py-5 text-lg')
             )}
 
             {trip && (
@@ -862,27 +887,7 @@ export default function DriverLocationPage() {
                 ))}
               </select>
             )}
-            {checkDueBeforeStart && (
-              <button
-                type="button"
-                onClick={() => setCheckOpenedEarly(true)}
-                className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
-              >
-                <span>Today&apos;s pre-trip check is not done yet.</span>
-                <span className="shrink-0 font-semibold underline">Do it now</span>
-              </button>
-            )}
-            {/* START TRIP is never hidden or blocked by the pre-trip check or by the
-                location state (Director, 8 Nov: it always works). */}
-            <button
-              type="button"
-              disabled={busy || !selectedRouteId}
-              onClick={() => selectedRouteId && void startTrip(selectedRouteId)}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-green-600 to-emerald-600 px-6 py-4 text-xl font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
-            >
-              <Play className="h-6 w-6" />
-              {busy ? 'Starting…' : 'START TRIP'}
-            </button>
+            {startControl('py-4 text-xl')}
           </>
         )}
 
