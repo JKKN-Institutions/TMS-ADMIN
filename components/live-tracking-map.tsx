@@ -60,6 +60,11 @@ interface LiveTrackingMapProps {
   stopSummary?: { headline: string; detail: string | null } | null;
   /** Shown in the selected-bus card when the route has no stop pins yet. */
   stopsSetupHref?: string | null;
+  /**
+   * Which way the buses are running. On the evening ('return') run the road line and
+   * the "km to campus" time are left out: the bus is driving away from campus.
+   */
+  direction?: 'onward' | 'return' | null;
 }
 
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
@@ -202,8 +207,11 @@ function buildPopup(bus: MapBus): string {
 
 const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   buses, selectedRouteId, onSelectRoute, emptyMessage,
-  routeStops, routeStopsRouteId, routeStopCount, stopSummary, stopsSetupHref,
+  routeStops, routeStopsRouteId, routeStopCount, stopSummary, stopsSetupHref, direction,
 }) => {
+  const toCampus = direction !== 'return';
+  const toCampusRef = useRef(toCampus);
+  toCampusRef.current = toCampus;
   const stopsLayerRef = useRef<L.LayerGroup | null>(null);
   const stopsFramedForRef = useRef<string | null>(null);
   const routeStopsLatestRef = useRef<MapStop[]>(routeStops ?? []);
@@ -258,6 +266,11 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
     selectedIdRef.current = selectedRouteId;
     clearRouteLine();
     setEnrichment(null);
+    // Picking a route (in the list or on the map) brings its bus to the middle of the
+    // map. Keyed on the id, so the 5s poll never re-centres under the user.
+    const map = mapInstanceRef.current;
+    const st = selectedRouteId ? markersRef.current.get(selectedRouteId) : null;
+    if (map && st) map.setView([st.anim.lat, st.anim.lng], Math.max(map.getZoom(), 14), { animate: true });
   }, [selectedRouteId]);
 
   // Draw the road line + address for whichever route the parent has selected.
@@ -282,7 +295,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
     void fetchEnrichment(lat, lng, { route: true, address: true }).then((e) => {
       if (!e || selectedIdRef.current !== routeId) return;
       const map = mapInstanceRef.current;
-      if (map && e.route) {
+      if (map && e.route && toCampusRef.current) {
         clearRouteLine();
         routeLineRef.current = L.polyline(e.route.geometry, {
           color: '#2563eb', weight: 5, opacity: 0.85,
@@ -361,6 +374,16 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
       map.remove();
       mapInstanceRef.current = null;
     };
+  }, []);
+
+  // The map's box changes size when the phone's route list opens or closes. Leaflet
+  // measures its container once, so tell it, or it leaves grey bands.
+  useEffect(() => {
+    const el = mapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => mapInstanceRef.current?.invalidateSize());
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   // Stop pins for the picked route. Keyed on a primitive signature — this page polls,
@@ -511,8 +534,10 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   }, [buses]);
 
   return (
-    <div className="relative h-full min-h-[420px] w-full">
-      <div ref={mapRef} className="h-full min-h-[420px] w-full" />
+    // No tall min-height here: the caller sizes the box. A 420px minimum inside a
+    // shorter overflow-hidden box clipped the selected-bus card on phones.
+    <div className="relative isolate h-full min-h-[260px] w-full">
+      <div ref={mapRef} className="absolute inset-0" />
       {/* Bottom-right: the top-right corner belongs to Leaflet's layers control,
           which the old "Recenter" button sat on top of. */}
       {buses.length > 0 && (
@@ -523,6 +548,11 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
         >
           Fit all buses
         </button>
+      )}
+      {buses.some((b) => !FRESH_STATES.has(b.state)) && (
+        <p className="pointer-events-none absolute left-14 top-2.5 z-[1000] rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-gray-600 shadow-sm dark:bg-gray-900/90 dark:text-gray-300">
+          Faded bus = last known place
+        </p>
       )}
       {buses.length === 0 && emptyMessage && (
         <div className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center p-4">
@@ -557,7 +587,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
             {selectedBus.registrationNumber ?? 'No bus number'} · {selectedBus.reason}
             {selectedBus.speedKmh != null && FRESH_STATES.has(selectedBus.state) ? ` · ${Math.round(selectedBus.speedKmh)} km/h` : ''}
           </p>
-          {enrichment?.distanceKm != null && (
+          {toCampus && enrichment?.distanceKm != null && (
             <p className="mt-1 text-xs text-green-700 dark:text-green-400">
               🚌 {enrichment.distanceKm.toFixed(1)} km to campus
               {enrichment.durationMin != null ? ` · ~${enrichment.durationMin} min` : ''}

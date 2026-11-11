@@ -6,6 +6,7 @@ import {
   summariseProgress,
   type ProgressSummary,
   type StopPin,
+  type StopProgress,
   type TripDirection,
 } from '@/lib/stops/progress';
 import { toMapStops, type MapStop } from '@/lib/stops/map-stops';
@@ -25,19 +26,22 @@ export function useRouteStops(
   direction: TripDirection | null | undefined,
   lat: number | null | undefined,
   lng: number | null | undefined,
-): { mapStops: MapStop[]; summary: ProgressSummary | null } {
+  /** The viewer's own stop, drawn highlighted. */
+  myStopId?: string | null,
+): { mapStops: MapStop[]; summary: ProgressSummary | null; progress: StopProgress | null } {
   const stopsKey = (stops ?? []).map((s) => `${s.id}:${s.order}:${s.lat}:${s.lng}:${s.time}:${s.eveningTime}:${s.name}`).join('|');
   const dir = direction ?? null;
   const busLat = lat ?? null;
   const busLng = lng ?? null;
+  const mine = myStopId ?? null;
 
   return useMemo(() => {
     const list = stops ?? [];
-    if (list.length === 0) return { mapStops: NONE, summary: null };
+    if (list.length === 0) return { mapStops: NONE, summary: null, progress: null };
     const bus = busLat != null && busLng != null ? { lat: busLat, lng: busLng } : null;
     const progress = stopProgress(list, bus, dir);
-    return { mapStops: toMapStops(list, progress), summary: summariseProgress(list, progress, dir) };
+    return { mapStops: toMapStops(list, progress, mine), summary: summariseProgress(list, progress, dir), progress };
     // `stops` is represented by stopsKey (see above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopsKey, dir, busLat, busLng]);
+  }, [stopsKey, dir, busLat, busLng, mine]);
 }

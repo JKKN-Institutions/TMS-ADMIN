@@ -17,7 +17,7 @@ export const driverNavigation: DriverNavItem[] = [
   { name: 'My Routes', shortName: 'Routes', href: '/driver/routes', icon: Route },
   { name: 'Passengers', shortName: 'Riders', href: '/driver/passengers', icon: Users },
   { name: 'Boardings', shortName: 'Boarding', href: '/driver/boardings', icon: ClipboardList },
-  { name: 'Live Location', shortName: 'Live', href: '/driver/location', icon: MapPin },
+  { name: 'Start Trip', shortName: 'Trip', href: '/driver/location', icon: MapPin },
   { name: 'Grievances', href: '/driver/grievances', icon: MessageCircle },
   { name: 'Notifications', shortName: 'Alerts', href: '/driver/notifications', icon: Bell },
   { name: 'Profile', href: '/driver/profile', icon: User },

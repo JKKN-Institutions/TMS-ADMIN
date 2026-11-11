@@ -20,7 +20,11 @@ export default function BookBusFab() {
   const router = useRouter();
 
   // Redundant on the booking board — hide there.
-  if (pathname === '/student/bookings' || pathname.startsWith('/student/bookings/')) {
+  // Also hidden on Live Track, where it floated over the map.
+  if (
+    pathname === '/student/bookings' || pathname.startsWith('/student/bookings/') ||
+    pathname === '/student/live-track'
+  ) {
     return null;
   }
 

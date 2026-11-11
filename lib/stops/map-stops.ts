@@ -18,6 +18,8 @@ export interface MapStop {
   /** e.g. "Morning 07:20 · Evening 18:30" — shown in the popup. */
   timeLabel?: string | null;
   state?: StopPinState;
+  /** The viewer's own boarding stop: drawn in its own colour and always labelled. */
+  mine?: boolean;
 }
 
 /**
@@ -30,6 +32,8 @@ export const STOP_COLORS = {
   next: '#5b21b6',
   passed: '#9ca3af',
   plain: '#7c3aed',
+  /** The viewer's own stop. Pink: not a bus status, not the road line. */
+  mine: '#db2777',
   /** Editor only: placed but not saved yet. */
   draft: '#ea580c',
 } as const;
@@ -43,7 +47,11 @@ export function stopTimeLabel(time: string | null | undefined, eveningTime: stri
 }
 
 /** Confirmed stop pins + where the bus is among them → what the map draws. */
-export function toMapStops(stops: ReadonlyArray<StopPin>, progress: StopProgress | null): MapStop[] {
+export function toMapStops(
+  stops: ReadonlyArray<StopPin>,
+  progress: StopProgress | null,
+  myStopId?: string | null,
+): MapStop[] {
   return stops.map((s, i) => ({
     id: s.id,
     name: s.name,
@@ -52,6 +60,7 @@ export function toMapStops(stops: ReadonlyArray<StopPin>, progress: StopProgress
     lng: s.lng,
     timeLabel: stopTimeLabel(s.time, s.eveningTime),
     state: progress?.states[i] ?? 'plain',
+    mine: !!myStopId && s.id === myStopId,
   }));
 }
 
@@ -64,6 +73,6 @@ export function toMapStops(stops: ReadonlyArray<StopPin>, progress: StopProgress
 export function stopsSignature(stops: ReadonlyArray<MapStop> | null | undefined): string {
   if (!stops || stops.length === 0) return '';
   return stops
-    .map((s) => `${s.id}:${s.order}:${s.lat}:${s.lng}:${s.state ?? ''}:${s.timeLabel ?? ''}:${s.name}`)
+    .map((s) => `${s.id}:${s.order}:${s.lat}:${s.lng}:${s.state ?? ''}:${s.mine ? 'm' : ''}:${s.timeLabel ?? ''}:${s.name}`)
     .join('|');
 }

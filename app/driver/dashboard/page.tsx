@@ -35,7 +35,7 @@ async function fetchMe(): Promise<Resp> {
 const QUICK: { title: string; desc: string; icon: ComponentType<{ className?: string }>; tone: Tone; href: string }[] = [
   { title: 'My Routes', desc: 'Route & full timetable', icon: RouteIcon, tone: 'blue', href: '/driver/routes' },
   { title: 'Passengers', desc: 'Riders on your route', icon: Users, tone: 'green', href: '/driver/passengers' },
-  { title: 'Live Location', desc: "Your bus's position", icon: MapPin, tone: 'purple', href: '/driver/location' },
+  { title: 'Start trip', desc: 'Share the bus location', icon: MapPin, tone: 'purple', href: '/driver/location' },
   { title: 'Profile', desc: 'License & details', icon: User, tone: 'orange', href: '/driver/profile' },
 ];
 
@@ -43,6 +43,17 @@ export default function DriverDashboardPage() {
   const router = useRouter();
   const { profile } = useAuth();
   const { data, isLoading, error } = useQuery({ queryKey: ['driver-me'], queryFn: fetchMe });
+
+  // Same key and shape as the trip screen, so the two share one cached answer.
+  const { data: tripData } = useQuery({
+    queryKey: ['driver-active-trip'],
+    queryFn: async () => {
+      const res = await fetch('/api/driver/trips', { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()).data as { trip: { id: string } | null };
+    },
+  });
+  const tripRunning = !!tripData?.trip;
 
   const firstName = (profile?.full_name ?? '').split(' ')[0];
 
@@ -75,6 +86,26 @@ export default function DriverDashboardPage() {
         title={`Welcome${firstName ? `, ${firstName}` : ''}!`}
         subtitle="Here's your route and driving overview."
       />
+
+      {/* The first thing a driver does each run, so it is the first thing on Home. */}
+      {me.routeLabel && (
+        <button
+          type="button"
+          onClick={() => router.push('/driver/location')}
+          className={cn(
+            'flex w-full items-center justify-between gap-4 rounded-2xl px-5 py-5 text-left text-white shadow-sm transition-opacity hover:opacity-90',
+            tripRunning ? 'bg-gradient-to-br from-red-600 to-rose-600' : 'bg-gradient-to-br from-green-600 to-emerald-600'
+          )}
+        >
+          <span className="min-w-0">
+            <span className="block text-xl font-bold">{tripRunning ? 'Trip is running' : 'Start trip'}</span>
+            <span className="block truncate text-sm opacity-90">
+              {tripRunning ? 'Open the trip screen to check sharing or end the trip.' : me.routeLabel}
+            </span>
+          </span>
+          <MapPin className="h-8 w-8 shrink-0" />
+        </button>
+      )}
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={RouteIcon} tone="blue" label="Assigned route" value={me.routeLabel ?? 'Not assigned'} />

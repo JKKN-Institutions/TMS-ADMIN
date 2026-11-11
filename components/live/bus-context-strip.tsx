@@ -5,12 +5,15 @@ import { School, Navigation2, Clock, Crosshair, Gauge } from 'lucide-react';
 import { CAMPUS } from '@/lib/gps/campus';
 import { haversineKm, bearingDeg, isApproaching, etaMinutes, type LatLng } from '@/lib/gps/distance';
 import type { ViewerLocationStatus } from '@/lib/hooks/use-viewer-location';
+import type { TripDirection } from '@/lib/stops/progress';
 
 interface BusContextStripProps {
   position: LatLng | null;
   heading: number | null;
   speedKmh: number | null;
   accuracyM: number | null;
+  /** 'return' = evening run away from campus: no "to campus" time is shown. */
+  direction?: TripDirection | null;
   viewer?: LatLng | null;
   viewerStatus?: ViewerLocationStatus;
   viewerMessage?: string | null;
@@ -37,24 +40,25 @@ function fmtKm(n: number): string {
 }
 
 export function BusContextStrip({
-  position, heading, speedKmh, accuracyM,
+  position, heading, speedKmh, accuracyM, direction,
   viewer, viewerStatus, viewerMessage, onLocateMe,
 }: BusContextStripProps) {
   if (!position) return null;
   const distKm = haversineKm(position, CAMPUS);
   const approaching = isApproaching(heading, bearingDeg(position, CAMPUS));
-  const eta = approaching ? etaMinutes(distKm, speedKmh) : null;
+  const leaving = direction === 'return';
+  const eta = !leaving && approaching ? etaMinutes(distKm, speedKmh) : null;
   const fromMe = viewer ? haversineKm(position, viewer) : null;
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Chip icon={School} label="To campus" value={fmtKm(distKm)} />
-        <Chip
-          icon={Clock}
-          label="ETA (approx)"
-          value={eta != null ? `~${eta} min` : heading == null ? '—' : approaching ? '—' : 'heading away'}
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <Chip icon={School} label={leaving ? 'From campus' : 'To campus'} value={fmtKm(distKm)} />
+        {leaving ? (
+          <Chip icon={Clock} label="Run" value="Evening, from college" />
+        ) : (
+          <Chip icon={Clock} label="Reaches campus" value={eta != null ? `about ${eta} min` : '—'} />
+        )}
         <Chip icon={Gauge} label="Speed" value={speedKmh != null ? `${Math.round(speedKmh)} km/h` : '—'} />
         <Chip icon={Navigation2} label="GPS accuracy" value={accuracyM != null ? `±${Math.round(accuracyM)} m` : '—'} />
       </div>
