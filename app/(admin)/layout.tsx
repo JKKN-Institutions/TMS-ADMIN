@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { X, Bus, Search, Power } from 'lucide-react';
+import { X, Bus, Search, Power, ChevronDown } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
 import AdminHeader from '@/components/admin-header';
@@ -16,7 +16,10 @@ import {
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { usePermissions } from '@/hooks/use-permissions';
-import { allNavigation, GROUP_TITLES, canSeeNavItem, derivePageCrumb, type NavItem } from '@/lib/navigation';
+import {
+  allNavigation, GROUP_TITLES, NAV_FOLDER_BY_KEY, canSeeNavItem, derivePageCrumb,
+  activeNavHref, activeNavFolder, type NavItem, type NavFolderKey,
+} from '@/lib/navigation';
 
 // Navigation config (allNavigation, GROUP_TITLES, derivePageTitle) now lives in
 // lib/navigation.ts and is shared with the mobile bottom nav (components/bottom-nav).
@@ -51,12 +54,38 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     }
   }, [loading, user, router]);
 
+  // One folder open at a time. It follows the page: landing anywhere inside a
+  // folder opens it, and leaving for a page outside any folder closes them all.
+  const currentFolder = activeNavFolder(pathname);
+  const [openFolder, setOpenFolder] = useState<NavFolderKey | null>(currentFolder);
+  useEffect(() => {
+    setOpenFolder(currentFolder);
+  }, [pathname, currentFolder]);
+
+  // Longest match, not startsWith: /attendance is a prefix of its siblings.
+  const activeHref = activeNavHref(pathname);
   const navigation = allNavigation
     .filter((item) => isSuperAdmin || canSeeNavItem(item, can))
     .map((item) => ({
       ...item,
-      current: pathname === item.href || pathname.startsWith(item.href + '/'),
+      current: item.href === activeHref,
     }));
+  type SidebarItem = (typeof navigation)[number];
+
+  /** A section's rows in order: plain links, and folders at their first page. */
+  const sectionEntries = (items: SidebarItem[]) => {
+    const out: Array<{ item: SidebarItem } | { folder: NavFolderKey; items: SidebarItem[] }> = [];
+    for (const item of items) {
+      if (!item.folder) {
+        out.push({ item });
+        continue;
+      }
+      const block = out.find((e) => 'folder' in e && e.folder === item.folder);
+      if (block && 'folder' in block) block.items.push(item);
+      else out.push({ folder: item.folder, items: [item] });
+    }
+    return out;
+  };
 
   const groupedNavigation = navigation.reduce(
     (acc, item) => {
@@ -64,6 +93,51 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       return acc;
     },
     {} as Record<string, typeof navigation>
+  );
+
+  const renderItem = (item: SidebarItem) => (
+    <div key={item.name}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <a
+            href={item.href}
+            onClick={(e) => {
+              e.preventDefault();
+              router.push(item.href);
+              setSidebarOpen(false);
+            }}
+            className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
+          >
+            <item.icon className="icon" />
+            <span>{item.name}</span>
+          </a>
+        </TooltipTrigger>
+        {collapsed && (
+          <TooltipContent side="right">
+            {item.name}
+          </TooltipContent>
+        )}
+      </Tooltip>
+      {item.subItems && item.current && (
+        <div className="ml-6 mt-1 space-y-1">
+          {item.subItems.map((subItem) => (
+            <a
+              key={subItem.name}
+              href={subItem.href}
+              onClick={(e) => {
+                e.preventDefault();
+                router.push(subItem.href);
+                setSidebarOpen(false);
+              }}
+              className={`sidebar-nav-item text-sm ${pathname === subItem.href ? 'active' : ''}`}
+            >
+              <subItem.icon className="icon w-4 h-4" />
+              <span>{subItem.name}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 
   const handleLogout = async () => {
@@ -146,50 +220,40 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                     {GROUP_TITLES[group as NavItem['group']]}
                   </div>
                   <div className="space-y-1">
-                    {items.map((item) => (
-                      <div key={item.name}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <a
-                              href={item.href}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                router.push(item.href);
-                                setSidebarOpen(false);
-                              }}
-                              className={`sidebar-nav-item ${item.current ? 'active' : ''}`}
-                            >
-                              <item.icon className="icon" />
-                              <span>{item.name}</span>
-                            </a>
-                          </TooltipTrigger>
-                          {collapsed && (
-                            <TooltipContent side="right">
-                              {item.name}
-                            </TooltipContent>
-                          )}
-                        </Tooltip>
-                        {item.subItems && item.current && (
-                          <div className="ml-6 mt-1 space-y-1">
-                            {item.subItems.map((subItem) => (
-                              <a
-                                key={subItem.name}
-                                href={subItem.href}
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  router.push(subItem.href);
-                                  setSidebarOpen(false);
-                                }}
-                                className={`sidebar-nav-item text-sm ${pathname === subItem.href ? 'active' : ''}`}
+                    {sectionEntries(items).map((entry) => {
+                      if ('item' in entry) return renderItem(entry.item);
+                      const folder = NAV_FOLDER_BY_KEY[entry.folder];
+                      const open = openFolder === entry.folder;
+                      const hasCurrent = entry.items.some((i) => i.current);
+                      return (
+                        <div key={folder.key}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                aria-expanded={open}
+                                aria-controls={`nav-folder-${folder.key}`}
+                                onClick={() => setOpenFolder(open ? null : entry.folder)}
+                                className={`sidebar-nav-item sidebar-folder w-full cursor-pointer ${hasCurrent ? 'has-current' : ''}`}
                               >
-                                <subItem.icon className="icon w-4 h-4" />
-                                <span>{subItem.name}</span>
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                                <folder.icon className="icon" />
+                                <span className="flex-1 text-left">{folder.name}</span>
+                                <ChevronDown
+                                  aria-hidden="true"
+                                  className={`sidebar-label h-4 w-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+                                />
+                              </button>
+                            </TooltipTrigger>
+                            {collapsed && <TooltipContent side="right">{folder.name}</TooltipContent>}
+                          </Tooltip>
+                          {open && (
+                            <div id={`nav-folder-${folder.key}`} className="sidebar-folder-items">
+                              {entry.items.map(renderItem)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))

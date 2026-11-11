@@ -1,11 +1,13 @@
 'use client';
 
-import { Suspense, use } from 'react';
+import { use } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { LearnerPassenger } from '@/lib/passengers/types';
+import { ClipboardList } from 'lucide-react';
 import { DetailPageHeader, SectionCard, Field } from '@/components/ui/detail-view';
-import { LearnerAttendanceSection } from './attendance-section';
+import { usePermissions } from '@/hooks/use-permissions';
+import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 async function fetchLearner(id: string): Promise<LearnerPassenger> {
   const res = await fetch(`/api/admin/passengers/learners/${id}`);
@@ -22,6 +24,8 @@ const crumbs = (name: string) => [
 
 export default function LearnerDetailPage({ params }: { params: Promise<{ learnerId: string }> }) {
   const { learnerId } = use(params);
+  const { isSuperAdmin, can } = usePermissions();
+  const canSeeAttendance = isSuperAdmin || can(TMS_PERMISSIONS.ATTENDANCE_VIEW);
   const { data: learner, isLoading, isError } = useQuery({
     queryKey: ['passenger-learner', learnerId],
     queryFn: () => fetchLearner(learnerId),
@@ -57,6 +61,18 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
         backHref="/passengers/learners"
         title={learner.name}
         subtitle={learner.lifecycleStatus ? learner.lifecycleStatus.replace(/_/g, ' ') : 'Learner'}
+        actions={
+          // The report itself lives in the Attendance module; this is the way to it.
+          canSeeAttendance && (
+            <Link
+              href={`/attendance/learners/${learnerId}`}
+              className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              <ClipboardList className="h-4 w-4" aria-hidden="true" />
+              Attendance report
+            </Link>
+          )
+        }
       />
 
       <SectionCard title="Learner">
@@ -86,9 +102,6 @@ export default function LearnerDetailPage({ params }: { params: Promise<{ learne
         </div>
       </SectionCard>
 
-      <Suspense fallback={null}>
-        <LearnerAttendanceSection learnerId={learnerId} />
-      </Suspense>
     </div>
   );
 }

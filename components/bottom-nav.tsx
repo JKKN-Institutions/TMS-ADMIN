@@ -7,7 +7,9 @@ import {
   allNavigation,
   canSeeNavItem,
   GROUP_TITLES,
+  NAV_FOLDERS,
   NAV_GROUP_ORDER,
+  activeNavHref,
   type NavItem,
 } from '@/lib/navigation';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -32,7 +34,9 @@ export default function BottomNav() {
   const { can, isSuperAdmin, isLoading } = usePermissions();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+  // Longest match, not startsWith: /attendance is a prefix of its siblings.
+  const activeHref = activeNavHref(pathname);
+  const isActive = (href: string) => href === activeHref;
 
   const go = (href: string) => {
     router.push(href);
@@ -72,11 +76,17 @@ export default function BottomNav() {
     }
   }
 
-  const grouped = NAV_GROUP_ORDER.map((group) => ({
-    group,
-    // The four bar shortcuts are already one tap away — the sheet lists the rest.
-    items: visible.filter((i) => i.group === group && !primary.includes(i)),
-  })).filter((g) => g.items.length > 0);
+  // The four bar shortcuts are already one tap away — the sheet lists the rest.
+  // Pages in a sidebar folder are headed by the folder ("ATTENDANCE"), so a
+  // tile named "Daily Report" is never read without its module.
+  const rest = visible.filter((i) => !primary.includes(i));
+  const grouped = NAV_GROUP_ORDER.flatMap((group) => {
+    const inGroup = rest.filter((i) => i.group === group);
+    return [
+      { key: group as string, title: GROUP_TITLES[group], items: inGroup.filter((i) => !i.folder) },
+      ...NAV_FOLDERS.map((f) => ({ key: f.key as string, title: f.name, items: inGroup.filter((i) => i.folder === f.key) })),
+    ];
+  }).filter((g) => g.items.length > 0);
 
   // "More" is highlighted when the current page isn't one of the primary shortcuts.
   const moreActive = !primary.some((p) => isActive(p.href));
@@ -113,10 +123,10 @@ export default function BottomNav() {
               </div>
 
               <div className="max-h-[calc(80vh_-_3.25rem)] overflow-y-auto px-4 py-3 pb-[calc(1rem_+_env(safe-area-inset-bottom))]">
-                {grouped.map(({ group, items }) => (
-                  <div key={group} className="mb-4 last:mb-0">
+                {grouped.map(({ key, title, items }) => (
+                  <div key={key} className="mb-4 last:mb-0">
                     <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      {GROUP_TITLES[group]}
+                      {title}
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       {items.map((item) => {

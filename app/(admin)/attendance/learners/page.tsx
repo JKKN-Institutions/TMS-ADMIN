@@ -4,7 +4,7 @@
  * Learner register — every learner who has bus attendance in a month, with
  * days travelled, morning / evening trips and absences, and how many of them
  * are hostel students or irregular riders (not registered for transport but
- * scanned on a bus). Click a learner for their day-by-day calendar.
+ * scanned on a bus). Click a learner for their attendance report.
  */
 
 import { useCallback, useMemo, useState } from 'react';
