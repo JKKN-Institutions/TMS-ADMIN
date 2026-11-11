@@ -124,7 +124,7 @@ function BrandPanel() {
           <span className="block truncate text-lg font-semibold leading-tight tracking-tight">
             JKKN Transport
           </span>
-          <span className="block truncate text-xs font-medium tracking-wide text-green-200/90">
+          <span className="block truncate text-xs font-medium tracking-wide text-white/90">
             Move Smart. Travel Better.
           </span>
         </span>
@@ -137,13 +137,13 @@ function BrandPanel() {
           style={delay(80)}
         >
           Smart{' '}
-          <span className="bg-gradient-to-r from-green-200 via-green-300 to-green-400 bg-clip-text text-transparent">
+          <span className="text-green-200">
             Transport
           </span>{' '}
           Service
         </h2>
         <p
-          className={`${styles.enter} mt-3 max-w-lg text-sm leading-relaxed text-green-50/80 sm:text-base`}
+          className={`${styles.enter} mt-3 max-w-lg text-sm leading-relaxed text-white/90 sm:text-base`}
           style={delay(160)}
         >
           Smarter Journeys. Safer Travel. Better Connectivity.
@@ -160,18 +160,18 @@ function BrandPanel() {
             key={title}
             className="group flex gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-4 backdrop-blur-md lg:py-3 xl:p-4 transition duration-300 hover:-translate-y-0.5 hover:border-green-200/30 hover:bg-white/[0.11] motion-reduce:transition-none motion-reduce:hover:translate-y-0 lg:items-center xl:flex-col xl:items-start"
           >
-            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_6px_14px_-4px_rgba(34,197,94,0.35)]">
+            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#fff] text-green-600 shadow-[0_6px_14px_-4px_rgba(5,46,22,0.45)]">
               <Icon className="h-5 w-5" aria-hidden="true" />
               {Icon === MapPin && (
                 <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
                   <span className={`${styles.pulse} absolute inline-flex h-full w-full rounded-full bg-green-300`} />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-green-950" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400 ring-2 ring-green-700" />
                 </span>
               )}
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-semibold leading-snug">{title}</span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-green-50/70">
+              <span className="mt-0.5 block text-xs leading-relaxed text-white/85">
                 {description}
               </span>
             </span>
@@ -196,16 +196,16 @@ function BrandPanel() {
         />
         <div
           aria-hidden="true"
-          className="absolute inset-0 bg-gradient-to-t from-green-950/80 via-green-950/10 to-transparent"
+          className="absolute inset-0 bg-gradient-to-t from-green-900/75 via-green-900/10 to-transparent"
         />
-        <figcaption className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-green-950/50 px-3 py-1.5 text-xs font-medium backdrop-blur-md">
+        <figcaption className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-green-900/60 px-3 py-1.5 text-xs font-medium backdrop-blur-md">
           <Bus className="h-3.5 w-3.5 text-green-300" aria-hidden="true" />
           JKKN College Fleet
         </figcaption>
       </figure>
 
       <p
-        className={`${styles.enter} mt-6 hidden text-xs font-medium tracking-wide text-green-50/60 md:block lg:mt-5 xl:mt-7`}
+        className={`${styles.enter} mt-6 hidden text-xs font-medium tracking-wide text-white/80 md:block lg:mt-5 xl:mt-7`}
         style={delay(400)}
       >
         Connected Campus <span className="text-green-300/80">•</span> Safe Travel{' '}
@@ -305,9 +305,9 @@ function LoginContent() {
         >
           {/* Card header */}
           <div className="flex flex-col items-center text-center">
-            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_12px_24px_-8px_rgba(34,197,94,0.45)]">
+            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-green-600 text-white shadow-[0_12px_24px_-8px_rgba(22,163,74,0.55)]">
               <Bus className="h-8 w-8" aria-hidden="true" />
-              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-green-800 text-white ring-4 ring-white dark:ring-neutral-900">
+              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-green-700 text-white ring-4 ring-white dark:ring-neutral-900">
                 <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
             </span>
@@ -335,11 +335,11 @@ function LoginContent() {
             onClick={handleGoogleLogin}
             disabled={isLoading}
             aria-busy={isLoading}
-            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-gradient-to-br from-green-200 to-green-400 px-4 py-3.5 font-semibold text-green-950 shadow-[0_10px_24px_-8px_rgba(34,197,94,0.45)] transition duration-200 hover:-translate-y-px hover:from-green-300 hover:to-green-500 hover:shadow-[0_16px_32px_-10px_rgba(34,197,94,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
+            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-green-600 px-4 py-3.5 font-semibold text-white shadow-[0_10px_24px_-8px_rgba(22,163,74,0.55)] transition duration-200 hover:-translate-y-px hover:bg-green-700 hover:shadow-[0_16px_32px_-10px_rgba(21,128,61,0.6)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#fff] shadow-[0_1px_2px_rgba(0,0,0,0.15)]">
               {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin text-green-700" aria-hidden="true" />
+                <Loader2 className="h-4 w-4 animate-spin text-green-600" aria-hidden="true" />
               ) : (
                 <GoogleIcon className="h-[18px] w-[18px]" />
               )}
@@ -352,7 +352,7 @@ function LoginContent() {
 
           {/* Security note */}
           <div className="mt-6 flex items-start gap-3 rounded-2xl border border-green-100 bg-green-50/80 p-4 dark:border-green-900/40 dark:bg-green-950/30">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_6px_14px_-4px_rgba(34,197,94,0.35)]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-green-600 text-white shadow-[0_6px_14px_-4px_rgba(22,163,74,0.45)]">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </span>
             <span>
@@ -367,7 +367,7 @@ function LoginContent() {
 
           {/* Support */}
           <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-5 dark:border-white/10">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_6px_14px_-4px_rgba(34,197,94,0.35)]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-600 text-white shadow-[0_6px_14px_-4px_rgba(22,163,74,0.45)]">
               <Headset className="h-[18px] w-[18px]" aria-hidden="true" />
             </span>
             <span>
