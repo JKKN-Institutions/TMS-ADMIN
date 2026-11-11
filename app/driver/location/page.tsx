@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import { AlertTriangle, Bus, MapPin, Crosshair, Play, Wifi, Satellite } from 'lucide-react';
-import { Spinner, NoticeCard } from '@/components/driver/ui';
+import {
+  AlertTriangle, Bus, MapPin, Navigation, Gauge, Clock, Radio, Crosshair, Play, Wifi, Satellite, Square,
+} from 'lucide-react';
+import { Spinner, NoticeCard, PageHeader } from '@/components/driver/ui';
 import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
 import { CAMPUS } from '@/lib/gps/campus';
@@ -12,6 +14,7 @@ import { PreTripCheckForm, type SavedPreTripCheck } from '@/components/driver/pr
 import type { StopPin, TripDirection } from '@/lib/stops/progress';
 import { useRouteStops } from '@/components/map/use-route-stops';
 import { sharingHealth } from '@/lib/driver/sharing-health';
+import { StopsCaption } from '@/components/live/stops-caption';
 
 const LivePositionMap = dynamic(() => import('@/components/live-position-map'), {
   ssr: false,
@@ -88,6 +91,25 @@ function formatDuration(fromIso: string, nowMs: number): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+function formatUpdated(ts: string | null): string {
+  if (!ts) return 'never';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString();
+}
+
+function LiveStat({ icon: Icon, label, value }: { icon: typeof Gauge; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800/40">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <p className="mt-1 truncate font-semibold text-gray-900 tabular-nums dark:text-white">{value}</p>
+    </div>
+  );
+}
+
 export default function DriverLocationPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['driver-location'],
@@ -133,6 +155,21 @@ export default function DriverLocationPage() {
   const [busy, setBusy] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showSignal, setShowSignal] = useState(false);
+  // null until measured. lg (1024px) is where the bottom bar gives way to the sidebar.
+  const [wide, setWide] = useState<boolean | null>(null);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  // On the phone layout the floating bug button is lifted clear of the trip button.
+  useEffect(() => {
+    if (wide !== false) return;
+    document.body.classList.add('driver-trip-phone');
+    return () => document.body.classList.remove('driver-trip-phone');
+  }, [wide]);
   const [tripError, setTripError] = useState<string | null>(null);
   const [checkNotice, setCheckNotice] = useState<string | null>(null);
   // The driver opened the check themselves before starting (closable).
@@ -272,7 +309,7 @@ export default function DriverLocationPage() {
     };
   }, [status]);
 
-  if (isLoading) return <Spinner />;
+  if (isLoading || wide === null) return <Spinner />;
   if (error) {
     return (
       <NoticeCard
@@ -301,6 +338,309 @@ export default function DriverLocationPage() {
         title="No routes assigned"
         body="You have no routes assigned yet, so there's nothing to broadcast."
       />
+    );
+  }
+
+  // Desktop keeps the page exactly as it was. The full-page map below is the phone layout.
+  if (wide) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Live Location"
+          subtitle="Share your phone's GPS while driving so admins and students can track the bus."
+        />
+
+        {/* Broadcast control */}
+        <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-4 dark:border-gray-800">
+            <Radio className={cn('h-5 w-5', onDuty ? 'text-green-600 dark:text-green-400' : 'text-gray-400')} />
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">Broadcast my location</h2>
+          </div>
+
+          <div className="space-y-4 px-6 py-5">
+            {!trip && (
+              <>
+                {/* Explained BEFORE the browser permission prompt, not after. */}
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                  <p className="font-semibold">Location sharing starts when you tap START TRIP.</p>
+                  <p className="mt-1">
+                    Your phone will share the bus&apos;s position with the transport office and the
+                    students on this route until you tap END TRIP. Keep this screen on while driving.
+                  </p>
+                </div>
+
+                {routes.length > 1 && (
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Route you are driving
+                    </span>
+                    <select
+                      value={selectedRouteId ?? ''}
+                      onChange={(e) => setSelectedRouteId(e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                    >
+                      {routes.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </>
+            )}
+
+            {trip && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-800/40">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="truncate font-semibold text-gray-900 dark:text-white">
+                    {tripRoute?.label ?? routes.find((r) => r.id === trip.route_id)?.label ?? 'Trip in progress'}
+                  </p>
+                  <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium capitalize text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                    {trip.direction}
+                  </span>
+                </div>
+                {(tripRoute?.startLocation || tripRoute?.endLocation) && (
+                  <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                    {tripRoute?.startLocation ?? '—'} → {tripRoute?.endLocation ?? '—'}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span>Running {formatDuration(trip.started_at, Date.now())}</span>
+                  <span>{trip.fix_count} fixes sent</span>
+                  <span>{Number(trip.distance_km).toFixed(1)} km</span>
+                </div>
+              </div>
+            )}
+
+            {tripError && (
+              <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{tripError}</span>
+              </div>
+            )}
+
+            {banner && (
+              <div
+                className={cn(
+                  'flex items-start gap-2 rounded-lg px-3 py-2 text-sm ring-1',
+                  banner.tone === 'error' && 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50',
+                  banner.tone === 'warn' && 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50',
+                  banner.tone === 'info' && 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900/50'
+                )}
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  <span className="font-semibold">{banner.title}</span> {banner.body}
+                </span>
+              </div>
+            )}
+
+            {checkNotice && (
+              <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{checkNotice}</span>
+              </div>
+            )}
+
+            {(checkMandatory || (checkOpenedEarly && checkDueBeforeStart)) && checkRouteId && (
+              <PreTripCheckForm
+                key={checkRouteId}
+                routeId={checkRouteId}
+                routeLabel={routes.find((r) => r.id === checkRouteId)?.label ?? 'this route'}
+                onSaved={(c) => void onCheckSaved(c)}
+                onClose={checkMandatory ? undefined : () => setCheckOpenedEarly(false)}
+                // END TRIP stays reachable on top of the check while a trip runs.
+                onEndTrip={trip ? () => void endTrip() : undefined}
+                endingTrip={busy}
+                endTripError={tripError}
+              />
+            )}
+
+            {checkDueBeforeStart && (
+              <button
+                type="button"
+                onClick={() => setCheckOpenedEarly(true)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50 px-4 py-3 text-left text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
+              >
+                <span>Today&apos;s pre-trip check is not done yet.</span>
+                <span className="shrink-0 font-semibold underline">Do it now</span>
+              </button>
+            )}
+
+            {/* One control, sized for a thumb. Nothing else needs pressing while driving.
+                START TRIP is never hidden or blocked by the pre-trip check. */}
+            {trip ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void endTrip()}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-red-600 to-rose-600 px-6 py-5 text-lg font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                <Crosshair className="h-5 w-5" />
+                {busy ? 'Ending…' : 'END TRIP'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy || !selectedRouteId}
+                onClick={() => selectedRouteId && void startTrip(selectedRouteId)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-green-600 to-emerald-600 px-6 py-5 text-lg font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                <Play className="h-5 w-5" />
+                {busy ? 'Starting…' : 'START TRIP'}
+              </button>
+            )}
+
+            {trip && (
+              <div className="space-y-4">
+                {/* GPS and network are SEPARATE signals — a phone can have a perfect fix
+                    and no signal, or full bars and no satellites. */}
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                    <Satellite className="h-4 w-4 shrink-0 text-gray-400" />
+                    <span
+                      className={cn(
+                        'h-2.5 w-2.5 shrink-0 rounded-full',
+                        status === 'live' ? 'bg-green-500' : 'bg-amber-500'
+                      )}
+                    />
+                    <span>GPS: {status === 'live' ? 'Connected' : 'Acquiring…'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                    <Wifi className="h-4 w-4 shrink-0 text-gray-400" />
+                    <span
+                      className={cn(
+                        'h-2.5 w-2.5 shrink-0 rounded-full',
+                        network === 'connected' ? 'bg-green-500' : network === 'reconnecting' ? 'bg-amber-500' : 'bg-gray-400'
+                      )}
+                    />
+                    <span>
+                      Network:{' '}
+                      {network === 'connected'
+                        ? 'Connected'
+                        : network === 'reconnecting'
+                          ? 'Reconnecting…'
+                          : 'Waiting'}
+                      {unsentCount > 0 ? ` (${unsentCount} fixes not sent)` : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {(() => {
+                  const live = status === 'live';
+                  const paused = status === 'paused' || status === 'starting';
+                  const label = live ? 'Sharing live' : paused ? 'Paused — no fresh GPS' : 'Not sharing';
+                  const dot = live ? 'bg-green-600' : paused ? 'bg-amber-500' : 'bg-gray-400';
+                  const wrap = live
+                    ? 'bg-green-50 text-green-700 ring-green-200 dark:bg-green-950/30 dark:text-green-300 dark:ring-green-900/50'
+                    : paused
+                      ? 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/50'
+                      : 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-800 dark:text-gray-300';
+                  return (
+                    <div className={cn('inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ring-1', wrap)}>
+                      <span className="relative flex h-2 w-2">
+                        {live && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />}
+                        <span className={cn('relative inline-flex h-2 w-2 rounded-full', dot)} />
+                      </span>
+                      {label}
+                    </div>
+                  );
+                })()}
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <LiveStat
+                    icon={Navigation}
+                    label="Position"
+                    value={fix ? `${fix.lat.toFixed(5)}, ${fix.lng.toFixed(5)}` : 'acquiring…'}
+                  />
+                  <LiveStat icon={Gauge} label="Accuracy" value={fix?.accuracy != null ? `±${Math.round(fix.accuracy)} m` : '—'} />
+                  <LiveStat
+                    icon={Clock}
+                    label="Last sent"
+                    value={lastSentAt ? `${Math.max(0, Math.round((Date.now() - lastSentAt) / 1000))}s ago` : '—'}
+                  />
+                </div>
+
+                {fix && <StopsCaption summary={stopSummary} pinCount={mapStops.length} />}
+                {fix && (
+                  <div className="h-[50dvh] max-h-[560px] min-h-[320px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+                    <LivePositionMap
+                      latitude={fix.lat}
+                      longitude={fix.lng}
+                      label="You are here"
+                      accuracyM={fix.accuracy}
+                      destination={CAMPUS}
+                      stops={mapStops}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Keep this page open with the screen on while driving. Sharing pauses if you switch apps or the screen
+              locks — that&apos;s a limitation of web browsers.
+            </p>
+          </div>
+        </section>
+
+        {/* Where's my bus — last-known vehicle fix per route */}
+        {routes.map((r) => {
+          const v = r.vehicle;
+          return (
+            <section
+              key={r.id}
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-6 py-4 dark:border-gray-800">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-white">{r.label}</h2>
+                </div>
+                {v && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    <Bus className="h-3.5 w-3.5" />
+                    {v.registrationNumber ?? '—'}
+                  </span>
+                )}
+              </div>
+
+              <div className="px-6 py-5">
+                {!v ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No vehicle assigned to this route.</p>
+                ) : v.hasFix ? (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <LiveStat icon={Navigation} label="Coordinates" value={`${v.latitude}, ${v.longitude}`} />
+                    {/* gps_speed is GeolocationCoordinates.speed in METRES PER SECOND.
+                        This previously printed the raw m/s value labelled "km/h". */}
+                    <LiveStat
+                      icon={Gauge}
+                      label="Speed"
+                      value={v.speed != null ? `${Math.round(v.speed * 3.6)} km/h` : '—'}
+                    />
+                    <LiveStat icon={Clock} label="Last update" value={formatUpdated(v.lastUpdate)} />
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3 rounded-xl border border-dashed border-gray-300 p-5 dark:border-gray-700">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800">
+                      <MapPin className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">No live location yet</p>
+                      <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                        This vehicle isn&apos;t broadcasting GPS{' '}
+                        {v.liveTrackingEnabled ? '(tracking is on, awaiting a fix).' : '(tracking is off).'} Last update:{' '}
+                        {formatUpdated(v.lastUpdate)}.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
     );
   }
 
@@ -376,6 +716,10 @@ export default function DriverLocationPage() {
                 {unsentCount > 0 ? ` (${unsentCount} positions not sent)` : ''}
               </p>
               <p>
+                {routeLabel} · {trip.direction === 'return' ? 'From college' : 'To college'} · running{' '}
+                {formatDuration(trip.started_at, now)} · {Number(trip.distance_km).toFixed(1)} km
+              </p>
+              <p>
                 Last position sent: {lastSentAt ? `${Math.max(0, Math.round((now - lastSentAt) / 1000))} seconds ago` : 'none yet'}
               </p>
             </div>
@@ -417,9 +761,63 @@ export default function DriverLocationPage() {
             {trip ? 'Finding your location…' : 'Tap START TRIP to turn on location and show the bus here'}
           </p>
         )}
+        {trip && !confirmEnd && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirmEnd(true)}
+            aria-label="End trip"
+            className="absolute bottom-5 left-1/2 z-[1000] flex h-16 w-16 -translate-x-1/2 flex-col items-center justify-center gap-0.5 rounded-full border-4 border-white bg-red-600 text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] active:bg-red-700 disabled:opacity-60"
+          >
+            <Square className="h-5 w-5 fill-current" />
+            <span className="text-[10px] font-bold leading-none tracking-wide">END</span>
+          </button>
+        )}
+        {trip && confirmEnd && (
+          // A second tap is required: one accidental touch used to end the trip and
+          // hide the bus from every learner on the route.
+          <div className="absolute inset-x-3 bottom-3 z-[1000] rounded-2xl border border-red-200 bg-white p-4 shadow-[0_6px_24px_rgba(0,0,0,0.3)] dark:border-red-900/50 dark:bg-gray-900">
+            <p className="text-base font-semibold text-gray-900 dark:text-white">End this trip?</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Learners and the transport office will stop seeing the bus.</p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmEnd(false)}
+                className="rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-semibold text-gray-800 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              >
+                Keep driving
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void endTrip().then(() => setConfirmEnd(false))}
+                className="rounded-xl bg-red-600 px-4 py-3 text-base font-semibold text-white disabled:opacity-60"
+              >
+                {busy ? 'Ending…' : 'Yes, end trip'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Bottom row: small notices, then the one button. */}
+      {(checkMandatory || (checkOpenedEarly && checkDueBeforeStart)) && checkRouteId && (
+        <PreTripCheckForm
+          key={checkRouteId}
+          routeId={checkRouteId}
+          routeLabel={routes.find((r) => r.id === checkRouteId)?.label ?? 'this route'}
+          onSaved={(c) => void onCheckSaved(c)}
+          onClose={checkMandatory ? undefined : () => setCheckOpenedEarly(false)}
+          // END TRIP stays reachable on top of the check while a trip runs.
+          onEndTrip={trip ? () => void endTrip() : undefined}
+          endingTrip={busy}
+          endTripError={tripError}
+        />
+      )}
+
+      {/* Bottom row: small notices and START TRIP. During a trip it only appears when
+          there is something to say, so the map keeps the room. */}
+      {(!trip || tripError || checkNotice) && (
       <div className="shrink-0 space-y-2 border-t border-gray-200 bg-white px-4 pb-3 pt-2.5 shadow-[0_-6px_18px_rgba(0,0,0,0.10)] dark:border-gray-800 dark:bg-gray-900">
         {tripError && (
           <p className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50">
@@ -432,19 +830,6 @@ export default function DriverLocationPage() {
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{checkNotice}</span>
           </p>
-        )}
-        {(checkMandatory || (checkOpenedEarly && checkDueBeforeStart)) && checkRouteId && (
-          <PreTripCheckForm
-            key={checkRouteId}
-            routeId={checkRouteId}
-            routeLabel={routes.find((r) => r.id === checkRouteId)?.label ?? 'this route'}
-            onSaved={(c) => void onCheckSaved(c)}
-            onClose={checkMandatory ? undefined : () => setCheckOpenedEarly(false)}
-            // END TRIP stays reachable on top of the check while a trip runs.
-            onEndTrip={trip ? () => void endTrip() : undefined}
-            endingTrip={busy}
-            endTripError={tripError}
-          />
         )}
 
         {!trip && (
@@ -501,50 +886,8 @@ export default function DriverLocationPage() {
           </>
         )}
 
-        {trip &&
-          (confirmEnd ? (
-            // A second tap is required: one accidental touch used to end the trip and
-            // hide the bus from every learner on the route.
-            <div>
-              <p className="text-base font-semibold text-red-800 dark:text-red-200">End this trip?</p>
-              <p className="text-sm text-red-700 dark:text-red-300">Learners and the transport office will stop seeing the bus.</p>
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setConfirmEnd(false)}
-                  className="rounded-xl border border-gray-300 bg-white px-4 py-3.5 text-base font-semibold text-gray-800 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                >
-                  Keep driving
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void endTrip().then(() => setConfirmEnd(false))}
-                  className="rounded-xl bg-red-600 px-4 py-3.5 text-base font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-                >
-                  {busy ? 'Ending…' : 'Yes, end trip'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <p className="truncate text-xs text-gray-600 dark:text-gray-400">
-                {routeLabel} · {trip.direction === 'return' ? 'From college' : 'To college'} · running{' '}
-                {formatDuration(trip.started_at, now)} · {Number(trip.distance_km).toFixed(1)} km
-              </p>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setConfirmEnd(true)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-4 text-xl font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-60"
-              >
-                <Crosshair className="h-6 w-6" />
-                END TRIP
-              </button>
-            </>
-          ))}
       </div>
+      )}
     </div>
   );
 }

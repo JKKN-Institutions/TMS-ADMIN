@@ -901,8 +901,8 @@ html {
 /* Driver trip screen: the bottom row holds the one START / END TRIP button, so the
    floating button is lifted clear of it onto the map's right edge (the map's own
    buttons are on the left). */
-body:has(.driver-trip-screen) .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
-  bottom: calc(11rem + env(safe-area-inset-bottom)) !important;
+body.driver-trip-phone .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
+  bottom: calc(10.5rem + env(safe-area-inset-bottom)) !important;
 }
 
 /* Admin portal: the floating button sat over the last table column and the
