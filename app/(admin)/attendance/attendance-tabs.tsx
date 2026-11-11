@@ -8,6 +8,7 @@ const TABS = [
   { href: '/attendance', label: 'Daily report' },
   { href: '/attendance/coverage', label: 'Bus coverage' },
   { href: '/attendance/learners', label: 'Learner register' },
+  { href: '/attendance/incharges', label: 'In-charge marking' },
 ];
 
 /** Switches between the Attendance views. */
