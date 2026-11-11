@@ -98,6 +98,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry, busState = 'live',
 }) => {
   const busStateRef = useRef(busState);
+  const prevBusStateRef = useRef(busState);
   busStateRef.current = busState;
   const wrapRef = useRef<HTMLDivElement>(null);
   const elRef = useRef<HTMLDivElement>(null);
@@ -207,7 +208,17 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     if (busState !== 'live') {
       followRef.current = false;
       setFollowing(false);
+    } else if (prevBusStateRef.current !== 'live') {
+      // The bus just appeared (the driver tapped START TRIP, or it began reporting):
+      // go to it and follow it from here on.
+      followRef.current = true;
+      setFollowing(true);
+      // This render's position: the glide effect below has not run yet.
+      const p = { lat: latitude, lng: longitude };
+      mapRef.current?.setView([p.lat, p.lng], Math.max(mapRef.current.getZoom(), 15), { animate: true });
     }
+    prevBusStateRef.current = busState;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busState]);
 
   // Bus glide + icon + accuracy circle.
