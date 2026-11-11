@@ -6,26 +6,31 @@
  * with records), totals with a day counted once, a day-by-day calendar, every
  * record, and an Excel / PDF export.
  *
+ * Layout (top to bottom): back link → header banner → colour KPI tiles → month
+ * bar → calendar → records, matching the Daily Report.
+ *
  * Auto-absences are split out from staff-marked ones: the closing job marks
  * every unmarked rider absent, so a learner on a bus nobody scanned looks absent
  * even if they rode. Morning = `onward`, evening = `return`.
  */
 
 import { Suspense, use, useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { DetailPageHeader } from '@/components/ui/detail-view';
+import {
+  ArrowLeft, CalendarCheck2, CalendarDays, ChevronLeft, ChevronRight, Clock, Moon, Repeat, Sun, XCircle,
+} from 'lucide-react';
 import { DataTable } from '@/components/ui/data-table';
 import { ExportMenu } from '@/components/ui/export-menu';
-import { MonthSummaryCards } from '@/components/attendance/month-summary-cards';
 import { MonthCalendar } from '@/components/attendance/month-calendar';
-import { RiderKindBadge } from '@/components/boarding/rider-kind-badge';
 import { exportTable, type ExportFormat } from '@/lib/export/table-export';
-import { isAutoMark } from '@/lib/boarding/auto-mark';
+import { AUTO_MARK_TITLE, isAutoMark } from '@/lib/boarding/auto-mark';
 import { isMonthKey, summarizeMonth } from '@/lib/attendance/month-summary';
-import { isOffRosterRider } from '@/lib/attendance/rider-kind';
+import { isOffRosterRider, RIDER_KIND_LABEL } from '@/lib/attendance/rider-kind';
 import { getAttendanceColumns, type AttendanceRow } from '@/app/student/attendance/columns';
 import type { LearnerReportResponse } from '@/app/api/admin/attendance/learners/[learnerId]/route';
+import { ATT_TABLE_CSS, AttendanceBanner, BAR_BUTTON, ControlBar, KpiTile, SectionPanel } from '../../attendance-ui';
 
 class ForbiddenError extends Error {}
 
@@ -47,11 +52,13 @@ const dayLabel = (d: string) =>
 const timeLabel = (ts: string | null) =>
   ts ? new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
 
-const crumbs = (name: string) => [
-  { label: 'Attendance', href: '/attendance' },
-  { label: 'Learner Register', href: REGISTER },
-  { label: name },
-];
+function BackLink() {
+  return (
+    <Link href={REGISTER} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Learner Register
+    </Link>
+  );
+}
 
 function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
   const requested = useSearchParams().get('month');
@@ -66,6 +73,7 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
 
   const columns = useMemo(() => getAttendanceColumns(), []);
   const all = useMemo<AttendanceRow[]>(() => data?.rows ?? [], [data]);
+  // Newest first. Includes the asked-for month even when it has no records.
   const months = useMemo(() => {
     const set = new Set(all.map((r) => r.tripDate.slice(0, 7)));
     if (month && month !== ALL) set.add(month);
@@ -89,23 +97,34 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
   const learner = data?.learner ?? null;
   const name = learner?.name ?? (isLoading ? 'Loading…' : 'Learner');
   const offRosterKind = all.find((r) => isOffRosterRider(r.riderKind))?.riderKind ?? null;
+  const riderLabel = `${RIDER_KIND_LABEL[offRosterKind ?? 'transport']} rider`;
   const period = selected === ALL ? 'All time' : monthLabel(selected);
-  const subtitle =
-    [learner?.rollNumber, learner?.institution, learner?.routeLabel ? `Bus ${learner.routeLabel}` : null]
-      .filter(Boolean)
-      .join(' · ') || undefined;
+  const about = [learner?.rollNumber, learner?.institution, learner?.routeLabel ? `Bus ${learner.routeLabel}` : null]
+    .filter(Boolean)
+    .join(' · ');
+
+  const s = summarizeMonth(rows);
+  const recordedDays = new Set(rows.map((r) => r.tripDate)).size;
+  const presentPct = recordedDays > 0 ? Math.round((s.daysPresent / recordedDays) * 100) : null;
+  // An error must not fall through to zeros: "0 days present" is a different and false claim.
+  const dash = isLoading || error ? '—' : undefined;
+
+  // Step through the months that have records (the list is newest first).
+  const at = months.indexOf(selected);
+  const older = at >= 0 ? months[at + 1] : undefined;
+  const newer = at > 0 ? months[at - 1] : undefined;
 
   const onExport = (format: ExportFormat) => {
     const out = filteredRows ?? rows;
-    const s = summarizeMonth(out);
+    const t = summarizeMonth(out);
     return exportTable(format, {
       rows: out,
       title: `Attendance ${name}`.slice(0, 31), // Excel caps a sheet name at 31
       filename: `attendance-${(learner?.rollNumber ?? learnerId).replace(/[^\w-]+/g, '_')}-${selected}`,
       summary:
         `${name}${learner?.rollNumber ? ` (${learner.rollNumber})` : ''} · ${period} · ` +
-        `${s.daysPresent} days present · ${s.onwardPresent} morning · ${s.returnPresent} evening · ` +
-        `${s.staffAbsent} absent · ${s.autoAbsent} auto-absent`,
+        `${t.daysPresent} days present · ${t.onwardPresent} morning · ${t.returnPresent} evening · ` +
+        `${t.staffAbsent} absent · ${t.autoAbsent} auto-absent`,
       columns: [
         { header: 'Date', value: (r) => dayLabel(r.tripDate), width: 18 },
         { header: 'Trip', value: (r) => (r.direction === 'return' ? 'Evening' : 'Morning'), width: 10 },
@@ -120,9 +139,10 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
 
   if (error instanceof ForbiddenError) {
     return (
-      <div className="space-y-6">
-        <DetailPageHeader crumbs={crumbs('Attendance report')} backHref={REGISTER} title="Attendance report" />
-        <p className="rounded-lg border border-border p-6 text-sm text-foreground">
+      <div className="space-y-5">
+        <BackLink />
+        <AttendanceBanner title="Attendance report" />
+        <p className="rounded-xl border border-border p-6 text-sm text-foreground">
           You don&apos;t have permission to view attendance.
         </p>
       </div>
@@ -130,75 +150,124 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <DetailPageHeader
-        crumbs={crumbs(name)}
-        backHref={REGISTER}
+    <div className="space-y-5">
+      <style dangerouslySetInnerHTML={{ __html: ATT_TABLE_CSS }} />
+      <BackLink />
+
+      {/* 1. Header banner */}
+      <AttendanceBanner
         title={name}
-        subtitle={subtitle}
-        actions={
-          <>
-            <RiderKindBadge kind={offRosterKind} />
-            <select
-              value={selected}
-              onChange={(e) => setMonth(e.target.value)}
-              aria-label="Attendance month"
-              className="h-[38px] rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-            >
-              <option value={ALL}>All time</option>
-              {months.map((m) => (
-                <option key={m} value={m}>
-                  {monthLabel(m)}
-                </option>
-              ))}
-            </select>
-            <ExportMenu onExport={onExport} disabled={rows.length === 0} />
-          </>
-        }
+        description={about || 'Bus attendance report'}
+        chip={{ icon: CalendarDays, label: riderLabel, value: period }}
       />
 
-      {/* An error must not fall through to zeros: "0 days present" is a different and false claim. */}
+      {/* 2. KPI tiles */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        <KpiTile
+          tone="green" icon={CalendarCheck2} label="Days present" value={dash ?? s.daysPresent}
+          sub={dash ? undefined : presentPct === null ? 'a day counts once' : `${presentPct}% of ${recordedDays} recorded days`}
+          title="Days with at least one trip present. A day counts once even with both trips."
+        />
+        <KpiTile tone="blue" icon={Sun} label="Morning trips" value={dash ?? s.onwardPresent} sub={dash ? undefined : 'present, to college'} />
+        <KpiTile tone="violet" icon={Moon} label="Evening trips" value={dash ?? s.returnPresent} sub={dash ? undefined : 'present, return'} />
+        <KpiTile tone="teal" icon={Repeat} label="Both trips" value={dash ?? s.bothTripDays} sub={dash ? undefined : 'days with morning + evening'} />
+        <KpiTile tone="red" icon={XCircle} label="Absent" value={dash ?? s.staffAbsent} sub={dash ? undefined : 'marked by staff'} />
+        <KpiTile
+          tone="orange" icon={Clock} label="Auto-absent" value={dash ?? s.autoAbsent}
+          sub={dash ? undefined : 'not scanned before closing'} title={AUTO_MARK_TITLE}
+        />
+      </div>
+
+      {/* 3. Month bar */}
+      <ControlBar>
+        <CalendarDays className="ml-1 hidden h-5 w-5 text-green-600 sm:block" aria-hidden="true" />
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button" className={`${BAR_BUTTON} w-10`} aria-label="Older month"
+            disabled={!older} onClick={() => older && setMonth(older)}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <select
+            value={selected}
+            onChange={(e) => setMonth(e.target.value)}
+            aria-label="Attendance month"
+            className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          >
+            <option value={ALL}>All time</option>
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button" className={`${BAR_BUTTON} w-10`} aria-label="Newer month"
+            disabled={!newer} onClick={() => newer && setMonth(newer)}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMonth(ALL)}
+          disabled={selected === ALL}
+          className={`${BAR_BUTTON} px-4 text-sm font-medium`}
+        >
+          All time
+        </button>
+        <div className="ml-auto">
+          <ExportMenu onExport={onExport} disabled={rows.length === 0} />
+        </div>
+      </ControlBar>
+
       {error ? (
-        <p className="rounded-lg border border-border p-6 text-sm text-foreground">
+        <p className="rounded-xl border border-border p-6 text-sm text-foreground">
           Could not load this learner&apos;s attendance{error instanceof Error ? `: ${error.message}` : ''}. Nothing is
           shown rather than shown as zero.
         </p>
       ) : (
         <>
-          <MonthSummaryCards rows={rows} loading={isLoading} />
+          {/* 4. Day by day */}
+          {selected !== ALL && !isLoading && (
+            <SectionPanel title="Day by day" note={period}>
+              <MonthCalendar month={selected} trips={rows} />
+            </SectionPanel>
+          )}
 
-          {selected !== ALL && !isLoading && <MonthCalendar month={selected} trips={rows} />}
-
-          <DataTable
-            columns={columns}
-            data={rows}
-            getRowId={(r) => r.id}
-            entityName="records"
-            isLoading={isLoading}
-            searchPlaceholder="Search route, stop..."
-            emptyMessage={
-              selected === ALL ? 'No attendance recorded for this learner yet.' : `No attendance in ${monthLabel(selected)}.`
-            }
-            onFilteredRowsChange={onFilteredRowsChange}
-            filters={[
-              {
-                columnId: 'status',
-                title: 'Status',
-                options: [
-                  { label: 'Present', value: 'present' },
-                  { label: 'Absent', value: 'absent' },
-                ],
-              },
-              {
-                columnId: 'direction',
-                title: 'Direction',
-                options: [
-                  { label: 'Onward', value: 'onward' },
-                  { label: 'Return', value: 'return' },
-                ],
-              },
-            ]}
-          />
+          {/* 5. Every record */}
+          <SectionPanel title="Attendance records" note={`${period} · every trip recorded for this learner`} table>
+            <DataTable
+              columns={columns}
+              data={rows}
+              getRowId={(r) => r.id}
+              entityName="records"
+              isLoading={isLoading}
+              searchPlaceholder="Search route, stop..."
+              emptyMessage={
+                selected === ALL ? 'No attendance recorded for this learner yet.' : `No attendance in ${monthLabel(selected)}.`
+              }
+              onFilteredRowsChange={onFilteredRowsChange}
+              filters={[
+                {
+                  columnId: 'status',
+                  title: 'Status',
+                  options: [
+                    { label: 'Present', value: 'present' },
+                    { label: 'Absent', value: 'absent' },
+                  ],
+                },
+                {
+                  columnId: 'direction',
+                  title: 'Direction',
+                  options: [
+                    { label: 'Onward', value: 'onward' },
+                    { label: 'Return', value: 'return' },
+                  ],
+                },
+              ]}
+            />
+          </SectionPanel>
         </>
       )}
     </div>

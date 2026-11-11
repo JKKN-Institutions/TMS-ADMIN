@@ -30,6 +30,7 @@ import { VIZ_CSS } from '../_viz/kit';
 import { AttendanceTabs } from './attendance-tabs';
 import { getDailyColumns } from './daily-columns';
 import { ActionCards } from './action-cards';
+import { BAR_BUTTON, KpiTile } from './attendance-ui';
 
 // The charts pull in recharts (~390KB): load them as a separate lazy chunk, as
 // Analytics does, so the tiles and table paint without waiting for it.
@@ -73,9 +74,6 @@ async function fetchDaily(date: string, direction: Direction): Promise<DailyRepo
   if (!res.ok || !result.success) throw new Error(result.error || 'Failed to load the daily report');
   return result.data as DailyReportResponse;
 }
-
-const BAR_BUTTON =
-  'inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40';
 
 // The every-bus table in the reference dashboard's format: tinted header row,
 // centred figures, roomier rows. Scoped to this page so the shared DataTable
@@ -356,68 +354,6 @@ export default function AttendanceDailyReportPage() {
           {t && <OverallLine totals={filteredRows ? summarizeRows(filteredRows) : t} filtered={!!filteredRows} />}
         </section>
       )}
-    </div>
-  );
-}
-
-// ── KPI tile ────────────────────────────────────────────────────────────────
-
-// Solid gradients, 600→700/800 steps so white text stays readable on each.
-const TILE_TONE = {
-  blue: 'from-blue-600 to-indigo-700 shadow-[0_14px_28px_-16px_rgba(37,99,235,0.85)]',
-  violet: 'from-violet-600 to-purple-700 shadow-[0_14px_28px_-16px_rgba(124,58,237,0.85)]',
-  green: 'from-green-600 to-green-800 shadow-[0_14px_28px_-16px_rgba(22,163,74,0.85)]',
-  red: 'from-rose-600 to-red-700 shadow-[0_14px_28px_-16px_rgba(225,29,72,0.85)]',
-  orange: 'from-orange-600 to-orange-700 shadow-[0_14px_28px_-16px_rgba(234,88,12,0.85)]',
-} as const;
-
-function KpiTile({
-  tone, icon: Icon, label, value, sub, title, active, onClick,
-}: {
-  tone: keyof typeof TILE_TONE;
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: React.ReactNode;
-  sub?: string;
-  title?: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  const body = (
-    <>
-      <span aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/10" />
-      <span aria-hidden="true" className="absolute -bottom-12 -left-6 h-24 w-24 rounded-full bg-white/5" />
-      <div className="relative flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wider text-white/90">{label}</p>
-          <p className="mt-2 text-3xl font-bold leading-none tabular-nums sm:text-4xl">{value}</p>
-        </div>
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/20 ring-1 ring-white/30 sm:h-12 sm:w-12">
-          <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
-        </span>
-      </div>
-      {sub && <p className="relative mt-3 truncate text-xs font-medium text-white/90">{sub}</p>}
-    </>
-  );
-  const cls = `relative block w-full overflow-hidden rounded-2xl bg-gradient-to-br p-4 text-left text-white sm:p-5 ${TILE_TONE[tone]}`;
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        title={title}
-        aria-pressed={active}
-        className={`${cls} cursor-pointer transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 ${
-          active ? 'ring-4 ring-orange-300 ring-offset-2 dark:ring-offset-[#0f1115]' : ''
-        }`}
-      >
-        {body}
-      </button>
-    );
-  }
-  return (
-    <div className={cls} title={title}>
-      {body}
     </div>
   );
 }
