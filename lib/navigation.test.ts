@@ -36,6 +36,7 @@ describe('derivePageTitle', () => {
 describe('attendance learner register crumb', () => {
   it('names the register page', () => {
     expect(derivePageCrumb('/attendance/learners').name).toBe('Learner Register');
+    expect(derivePageCrumb('/attendance/coverage').name).toBe('Bus Coverage');
     expect(derivePageCrumb('/attendance').name).toBe('Attendance');
   });
 });

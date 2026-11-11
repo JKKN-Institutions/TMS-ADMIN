@@ -87,7 +87,10 @@ export const allNavigation: NavItem[] = [
     icon: ClipboardList,
     permission: TMS_PERMISSIONS.ATTENDANCE_VIEW,
     group: 'transport',
-    aliases: [{ name: 'Learner Register', href: '/attendance/learners' }],
+    aliases: [
+      { name: 'Bus Coverage', href: '/attendance/coverage' },
+      { name: 'Learner Register', href: '/attendance/learners' },
+    ],
   },
   { name: 'Route Optimization', href: '/route-optimization', icon: Zap, permission: TMS_PERMISSIONS.ROUTES_EDIT, group: 'transport' },
   { name: 'Staff Assignments', href: '/staff-route-assignments', icon: ClipboardCheck, permission: TMS_PERMISSIONS.DRIVERS_ASSIGN, group: 'transport' },
