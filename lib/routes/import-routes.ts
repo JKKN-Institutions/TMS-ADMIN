@@ -98,19 +98,46 @@ export async function applyRouteImport(
         existing.set(route.route_number, routeId);
       }
 
+      // A stop's CONFIRMED map location (placed by hand in Routes -> Stop locations)
+      // must survive a re-import: the import replaces the stop rows, and without this
+      // every pin on the tracking maps would vanish each time a route sheet is loaded.
+      // Carried over by stop name; select('*') so this works whether or not the
+      // confirm columns exist yet.
+      const kept = new Map<string, Array<Record<string, unknown>>>();
+      if (wasExisting) {
+        const { data: oldStops } = await db.from('tms_route_stop').select('*').eq('route_id', routeId);
+        for (const o of (oldStops ?? []) as Array<Record<string, unknown>>) {
+          if (!o.location_confirmed_at || o.latitude == null || o.longitude == null) continue;
+          const key = String(o.stop_name ?? '').trim().toLowerCase();
+          kept.set(key, [...(kept.get(key) ?? []), o]);
+        }
+      }
+
       // Replace stops.
       const del = await db.from('tms_route_stop').delete().eq('route_id', routeId);
       if (del.error) throw del.error;
 
       if (route.stops.length) {
-        const stopRows = route.stops.map((s) => ({
-          route_id: routeId,
-          stop_name: s.stop_name,
-          stop_time: s.stop_time,
-          evening_time: s.evening_time,
-          sequence_order: s.sequence_order,
-          is_major_stop: s.is_major_stop,
-        }));
+        const stopRows = route.stops.map((s) => {
+          // shift(): two stops sharing a name each take their own saved location, in order.
+          const old = kept.get(s.stop_name.trim().toLowerCase())?.shift();
+          return {
+            route_id: routeId,
+            stop_name: s.stop_name,
+            stop_time: s.stop_time,
+            evening_time: s.evening_time,
+            sequence_order: s.sequence_order,
+            is_major_stop: s.is_major_stop,
+            ...(old
+              ? {
+                  latitude: old.latitude,
+                  longitude: old.longitude,
+                  location_confirmed_at: old.location_confirmed_at,
+                  location_confirmed_by: old.location_confirmed_by ?? null,
+                }
+              : {}),
+          };
+        });
         const ins = await db.from('tms_route_stop').insert(stopRows);
         if (ins.error) throw ins.error;
       }

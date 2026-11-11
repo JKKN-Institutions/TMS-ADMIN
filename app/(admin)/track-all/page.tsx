@@ -17,6 +17,8 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SummaryCard, SummaryCards } from '@/components/ui/summary-cards';
 import type { FleetResponse, FleetRoute } from './types';
 import type { MapBus } from '@/components/live-tracking-map';
+import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { useRouteStops } from '@/components/map/use-route-stops';
 
 const LiveTrackingMap = dynamic(() => import('@/components/live-tracking-map'), {
   ssr: false,
@@ -33,6 +35,33 @@ async function fetchFleet(): Promise<FleetResponse> {
   const res = await fetch('/api/admin/track-all/routes', { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to load fleet');
   return (await res.json()) as FleetResponse;
+}
+
+interface RouteStops {
+  pins: StopPin[];
+  /** Every active stop on the route, located or not. */
+  total: number;
+  direction: TripDirection;
+}
+
+/** The picked route's confirmed stop pins. A failure just means no pins are drawn. */
+async function fetchRouteStops(routeId: string): Promise<RouteStops> {
+  const res = await fetch(`/api/admin/routes/${routeId}/stop-locations`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Failed to load stops');
+  const json = (await res.json()) as {
+    direction: TripDirection;
+    stops: Array<{
+      id: string; name: string; order: number; time: string | null; eveningTime: string | null;
+      isMajor: boolean; lat: number | null; lng: number | null; confirmed: boolean;
+    }>;
+  };
+  const pins: StopPin[] = [];
+  for (const s of json.stops) {
+    if (s.confirmed && s.lat != null && s.lng != null) {
+      pins.push({ id: s.id, name: s.name, order: s.order, lat: s.lat, lng: s.lng, time: s.time, eveningTime: s.eveningTime, isMajor: s.isMajor });
+    }
+  }
+  return { pins, total: json.stops.length, direction: json.direction };
 }
 
 function toMapBus(r: FleetRoute): MapBus | null {
@@ -209,6 +238,25 @@ export default function TrackAllPage() {
   // reports (re-arming the self-heal). `selectedRouteStillPresent` is a plain
   // boolean computed at render time — never `buses` itself — so no object/array
   // reaches a dependency array, and no effect is needed at all.
+  // Stop pins of the picked route. Fetched once per pick (stop locations change when
+  // an admin edits them, not while a bus drives), then coloured passed / next from
+  // the bus's live position.
+  const { data: stopData } = useQuery({
+    queryKey: ['route-stop-locations', selectedRouteId],
+    queryFn: () => fetchRouteStops(selectedRouteId as string),
+    enabled: !!selectedRouteId,
+    staleTime: 5 * 60_000,
+  });
+  const selectedPosition = selectedRouteId
+    ? routes.find((r) => r.routeId === selectedRouteId)?.position ?? null
+    : null;
+  const { mapStops: routeStops, summary: stopSummary } = useRouteStops(
+    stopData?.pins,
+    stopData?.direction,
+    selectedPosition?.lat,
+    selectedPosition?.lng,
+  );
+
   const selectedRouteStillPresent = selectedRouteId
     ? buses.some((b) => b.routeId === selectedRouteId)
     : true;
@@ -310,6 +358,9 @@ export default function TrackAllPage() {
       <span className="inline-flex items-center gap-1.5">
         <span className="h-2.5 w-2.5 rounded-full bg-gray-400 opacity-50" aria-hidden /> Faded = last known position
       </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-violet-600" aria-hidden /> Numbered pins = stops of the route you pick
+      </span>
     </div>
   );
 
@@ -321,6 +372,15 @@ export default function TrackAllPage() {
         buses={buses}
         selectedRouteId={mapSelectedRouteId}
         onSelectRoute={setSelectedRouteId}
+        routeStops={routeStops}
+        routeStopsRouteId={selectedRouteId}
+        routeStopCount={stopData?.total}
+        stopSummary={stopSummary}
+        stopsSetupHref={
+          selectedRouteId && stopData && stopData.pins.length === 0
+            ? `/routes/${selectedRouteId}/stop-locations`
+            : null
+        }
         emptyMessage={{
           title: 'No buses are live right now',
           detail: 'Buses appear here once a driver goes on duty and their phone sends a GPS position.',

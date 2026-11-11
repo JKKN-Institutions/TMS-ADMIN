@@ -240,7 +240,20 @@ export default function RouteViewPage({ params }: { params: Promise<{ routeId: s
         </SectionCard>
       )}
 
-      <SectionCard title={`Stops (${stops.length})`}>
+      <SectionCard
+        title={`Stops (${stops.length})`}
+        action={
+          stops.length > 0 ? (
+            <Link
+              href={`/routes/${route.id}/stop-locations`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              Stop locations on map ({stops.filter((s) => s.location_confirmed_at && s.latitude != null).length}/{stops.length})
+            </Link>
+          ) : undefined
+        }
+      >
         {stops.length === 0 ? (
           <p className="flex items-center gap-2 text-sm text-gray-500">
             <MapPin className="h-4 w-4 text-gray-400" /> No stops configured for this route.

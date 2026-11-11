@@ -12,11 +12,15 @@ export interface RouteStop {
   is_major_stop: boolean;
   latitude?: number | null;
   longitude?: number | null;
+  /** Set when a person confirmed the location on the map (Stop locations). */
+  location_confirmed_at?: string | null;
 }
 
 export const fmtTime = (t?: string | null) => (t ? t.slice(0, 5) : '—');
 
-const hasCoords = (s: RouteStop) => s.latitude != null && s.longitude != null;
+// Only a CONFIRMED location counts: bare coordinates may be an old name-lookup guess
+// (two "COLLEGE" stops were stored in Chennai), and showing those as fact misleads.
+const hasCoords = (s: RouteStop) => !!s.location_confirmed_at && s.latitude != null && s.longitude != null;
 
 export const STOP_TYPE_OPTIONS = [
   { label: 'Major', value: 'major' },
@@ -80,9 +84,9 @@ export const stopColumns: ColumnDef<RouteStop>[] = [
   {
     id: 'coordinates',
     accessorFn: (s) => (hasCoords(s) ? `${s.latitude}, ${s.longitude}` : ''),
-    meta: { label: 'Coordinates' },
+    meta: { label: 'Map location' },
     enableSorting: false,
-    header: () => <span>Coordinates</span>,
+    header: () => <span>Map location</span>,
     cell: ({ row }) => {
       const s = row.original;
       return hasCoords(s) ? (
