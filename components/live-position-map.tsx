@@ -215,7 +215,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       setFollowing(true);
       // This render's position: the glide effect below has not run yet.
       const p = { lat: latitude, lng: longitude };
-      mapRef.current?.setView([p.lat, p.lng], Math.max(mapRef.current.getZoom(), 15), { animate: true });
+      mapRef.current?.setView([p.lat, p.lng], 16, { animate: true });
     }
     prevBusStateRef.current = busState;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -343,7 +343,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     // With no live bus to look at, the stops are the picture.
     if (busStateRef.current !== 'live') for (const s of stopsLatestRef.current) pts.push([s.lat, s.lng]);
     if (pts.length > 1) {
-      map.fitBounds(L.latLngBounds(pts).pad(0.2));
+      map.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 16 });
       hasFitRef.current = true;
     }
   }, [latitude, longitude, destination, viewer]);
@@ -353,7 +353,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     setFollowing(true);
     const p = animPosRef.current;
     const map = mapRef.current;
-    if (map) map.setView([p.lat, p.lng], Math.max(map.getZoom(), 15), { animate: true });
+    if (map) map.setView([p.lat, p.lng], Math.min(Math.max(map.getZoom(), 15), 17), { animate: true });
   };
 
   const showWholeRoute = () => {
@@ -367,7 +367,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     // so the next fix does not drag the view back to the bus.
     followRef.current = false;
     setFollowing(false);
-    map.fitBounds(L.latLngBounds(pts).pad(0.12));
+    map.fitBounds(L.latLngBounds(pts).pad(0.12), { maxZoom: 16 });
   };
 
   const toggleFullscreen = () => {
