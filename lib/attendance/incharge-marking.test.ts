@@ -27,12 +27,10 @@ describe('classifyCell', () => {
   it('own scans win over everything', () => {
     expect(classifyCell({ ...c, own: 3, serviceDay: false, onLeave: true })).toBe('marked');
   });
-  it('someone else scanned the bus', () => expect(classifyCell({ ...c, bus: 20 })).toBe('others'));
+  it('a colleague scanning the bus is still Not marked for this person', () => expect(classifyCell({ ...c, bus: 20 })).toBe('missed'));
   it('nobody scanned the bus', () => expect(classifyCell(c)).toBe('missed'));
-  it('today with nothing yet is pending, not missed', () => {
-    expect(classifyCell({ ...c, date: '2026-11-07' })).toBe('pending');
-  });
-  it('leave beats others/missed', () => expect(classifyCell({ ...c, bus: 5, onLeave: true })).toBe('leave'));
+  it('today with nothing yet is Not marked', () => expect(classifyCell({ ...c, date: '2026-11-07' })).toBe('missed'));
+  it('declared leave is no duty, not a status', () => expect(classifyCell({ ...c, bus: 5, onLeave: true })).toBe('off'));
   it('no service day', () => expect(classifyCell({ ...c, serviceDay: false })).toBe('off'));
   it('before assignment and future dates are n/a', () => {
     expect(classifyCell({ ...c, startDate: '2026-11-05' })).toBe('na');
@@ -62,12 +60,12 @@ describe('buildMarkingReport', () => {
     const r = rows[0];
     expect(r.cells['2026-11-02']).toEqual({ s: 'marked', n: 12, bus: 30, first: '07:40', last: '08:05' });
     expect(r.cells['2026-11-03'].s).toBe('marked');
-    expect(r.cells['2026-11-04'].s).toBe('others');
-    expect(r.cells['2026-11-05'].s).toBe('leave');
+    expect(r.cells['2026-11-04'].s).toBe('missed'); // a colleague scanned; not their mark
+    expect(r.cells['2026-11-05'].s).toBe('off'); // leave
     expect(r.cells['2026-11-06'].s).toBe('off'); // holiday
-    expect(r.cells['2026-11-07'].s).toBe('pending'); // today
+    expect(r.cells['2026-11-07'].s).toBe('missed'); // today, nothing yet
     expect(r.cells['2026-11-08'].s).toBe('na'); // future (and a Sunday)
-    expect(r).toMatchObject({ dutyDays: 3, markedDays: 2, othersDays: 1, missedDays: 0, leaveDays: 1, markedPct: 67 });
+    expect(r).toMatchObject({ dutyDays: 4, markedDays: 2, missedDays: 2, markedPct: 50 });
   });
 
   it('a day nobody in the fleet marked is not a service day', () => {
@@ -96,7 +94,7 @@ describe('buildMarkingReport', () => {
         fleet_days: ['2026-11-02'],
       },
     }));
-    expect(summarizeDay(rows, '2026-11-02')).toEqual({ onDuty: 2, marked: 1, others: 0, missed: 1, pending: 0, leave: 0, off: 0 });
+    expect(summarizeDay(rows, '2026-11-02')).toEqual({ onDuty: 2, marked: 1, missed: 1 });
   });
 });
 
@@ -110,8 +108,8 @@ describe('monthDays', () => {
 describe('period summaries', () => {
   const cell = (s: any) => ({ s, n: 0, bus: 0, first: null, last: null });
   it('summarizeCells counts duty days only', () => {
-    expect(summarizeCells([cell('marked'), cell('others'), cell('missed'), cell('leave'), cell('off'), cell('na')]))
-      .toEqual({ duty: 3, marked: 1, others: 1, missed: 1, leave: 1, pct: 33 });
+    expect(summarizeCells([cell('marked'), cell('missed'), cell('missed'), cell('off'), cell('na')]))
+      .toEqual({ duty: 3, marked: 1, missed: 2, pct: 33 });
     expect(summarizeCells([cell('off')]).pct).toBeNull();
   });
   it('toYearRows splits by month', () => {
@@ -124,8 +122,9 @@ describe('period summaries', () => {
     }));
     const y = toYearRows(rows, ['2026-10', '2026-11'])[0];
     expect(y.months['2026-10'].pct).toBeNull();
-    expect(y.months['2026-11']).toMatchObject({ duty: 2, marked: 1, pct: 50 });
-    expect(y.total.pct).toBe(50);
+    // 2 Nov marked, 3 Nov not, and today (7 Nov) not yet = Not marked.
+    expect(y.months['2026-11']).toMatchObject({ duty: 3, marked: 1, pct: 33 });
+    expect(y.total.pct).toBe(33);
   });
   it('bandCounts', () => {
     expect(bandCounts([0, 50, 80, 100, null])).toEqual({ people: 4, avg: 58, never: 1, low: 1, good: 2 });
