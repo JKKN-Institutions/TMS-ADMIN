@@ -305,9 +305,9 @@ function LoginContent() {
         >
           {/* Card header */}
           <div className="flex flex-col items-center text-center">
-            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-green-600 to-green-800 text-white shadow-[0_12px_24px_-8px_rgba(20,83,45,0.45)]">
+            <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_12px_24px_-8px_rgba(34,197,94,0.45)]">
               <Bus className="h-8 w-8" aria-hidden="true" />
-              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-green-300 text-green-950 ring-4 ring-white dark:ring-neutral-900">
+              <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-green-800 text-white ring-4 ring-white dark:ring-neutral-900">
                 <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
             </span>
@@ -335,7 +335,7 @@ function LoginContent() {
             onClick={handleGoogleLogin}
             disabled={isLoading}
             aria-busy={isLoading}
-            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-green-600 to-green-700 px-4 py-3.5 font-semibold text-white shadow-[0_10px_24px_-8px_rgba(20,83,45,0.45)] transition duration-200 hover:-translate-y-px hover:from-green-700 hover:to-green-800 hover:shadow-[0_16px_32px_-10px_rgba(20,83,45,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
+            className="group mt-7 flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-gradient-to-br from-green-200 to-green-400 px-4 py-3.5 font-semibold text-green-950 shadow-[0_10px_24px_-8px_rgba(34,197,94,0.45)] transition duration-200 hover:-translate-y-px hover:from-green-300 hover:to-green-500 hover:shadow-[0_16px_32px_-10px_rgba(34,197,94,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 active:translate-y-0 disabled:cursor-wait disabled:opacity-80 disabled:hover:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:focus-visible:ring-offset-neutral-900"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#fff] shadow-[0_1px_2px_rgba(0,0,0,0.15)]">
               {isLoading ? (
@@ -352,7 +352,7 @@ function LoginContent() {
 
           {/* Security note */}
           <div className="mt-6 flex items-start gap-3 rounded-2xl border border-green-100 bg-green-50/80 p-4 dark:border-green-900/40 dark:bg-green-950/30">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-green-700 shadow-[0_1px_2px_rgba(20,83,45,0.08)] ring-1 ring-green-100 dark:bg-green-900/50 dark:text-green-300 dark:ring-green-800/50">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_6px_14px_-4px_rgba(34,197,94,0.35)]">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </span>
             <span>
@@ -367,7 +367,7 @@ function LoginContent() {
 
           {/* Support */}
           <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-5 dark:border-white/10">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-green-600 ring-1 ring-green-100 dark:bg-green-500/10 dark:text-green-300 dark:ring-green-500/20">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-200 to-green-400 text-green-950 shadow-[0_6px_14px_-4px_rgba(34,197,94,0.35)]">
               <Headset className="h-[18px] w-[18px]" aria-hidden="true" />
             </span>
             <span>
