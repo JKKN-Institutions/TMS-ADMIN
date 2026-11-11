@@ -170,17 +170,39 @@ export function EmptyState({ message }: { message: string }) {
   );
 }
 
+/**
+ * Optional coloured strip across the top of a card (decoration only — it never
+ * encodes data, so chart colours keep their meaning). Omit it for a plain card.
+ */
+export const ACCENT_STRIP = {
+  green: 'from-green-500 to-emerald-600',
+  blue: 'from-blue-500 to-indigo-600',
+  violet: 'from-violet-500 to-purple-600',
+  orange: 'from-amber-500 to-orange-600',
+  red: 'from-rose-500 to-red-600',
+  teal: 'from-teal-500 to-cyan-600',
+} as const;
+export type Accent = keyof typeof ACCENT_STRIP;
+
+export function AccentStrip({ accent }: { accent?: Accent }) {
+  if (!accent) return null;
+  return <div aria-hidden="true" className={`h-1.5 bg-gradient-to-r ${ACCENT_STRIP[accent]}`} />;
+}
+
 // Chart card with a chart/table toggle — every chart ships its table-view twin.
 export function ChartCard({
-  title, subtitle, legend, hasData, emptyMessage = 'No data in range', chart, table, csv,
+  title, subtitle, legend, hasData, emptyMessage = 'No data in range', chart, table, csv, accent,
 }: {
   title: string; subtitle?: string; legend?: React.ReactNode; hasData: boolean;
   emptyMessage?: string; chart: React.ReactNode; table: React.ReactNode;
   csv?: { filename: string; head: string[]; rows: (string | number)[][] };
+  accent?: Accent;
 }) {
   const [view, setView] = useState<'chart' | 'table'>('chart');
   return (
-    <section className={`${card} p-5`}>
+    <section className={`${card} overflow-hidden`}>
+      <AccentStrip accent={accent} />
+      <div className="p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-foreground">{title}</h3>
@@ -228,6 +250,7 @@ export function ChartCard({
           {legend && view === 'chart' && <div className="mt-3">{legend}</div>}
         </>
       )}
+      </div>
     </section>
   );
 }
