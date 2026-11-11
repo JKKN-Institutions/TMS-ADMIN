@@ -4,19 +4,19 @@
  * Daily report — one day, one trip, every bus: how many learners, how many
  * were marked, present and absent, and which buses need attention tomorrow.
  *
- * The simple front page of Attendance. The month-wide grid lives on the
+ * Layout (top to bottom): header banner → colour KPI tiles → date / trip bar →
+ * action cards → charts → every-bus table. The month-wide grid lives on the
  * "Bus coverage" tab; a row here opens the learner list for that bus and day.
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
-import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
 import {
-  AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, Clock, Info,
+  AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, Clock, Info, Moon, Sun,
   UserCheck, UserX, Users,
 } from 'lucide-react';
-import { PageHeader } from '@/components/ui/page-header';
-import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
+import { useCardFilters } from '@/components/ui/summary-cards';
 import { DataTable } from '@/components/ui/data-table';
 import { ExportMenu } from '@/components/ui/export-menu';
 import { exportTable, type ExportFormat } from '@/lib/export/table-export';
@@ -26,8 +26,22 @@ import {
   type DailyRouteRow, type DailyStatus, type DailyTotals,
 } from '@/lib/attendance/daily-report';
 import type { DailyReportResponse } from '@/app/api/admin/attendance/daily/route';
+import { VIZ_CSS } from '../_viz/kit';
 import { AttendanceTabs } from './attendance-tabs';
 import { getDailyColumns } from './daily-columns';
+import { ActionCards } from './action-cards';
+
+// The charts pull in recharts (~390KB): load them as a separate lazy chunk, as
+// Analytics does, so the tiles and table paint without waiting for it.
+const chartSkeleton = () => <div className="h-[22rem] animate-pulse rounded-xl bg-gray-100" />;
+const TrendAndSummary = dynamic(() => import('./daily-charts').then((m) => m.TrendAndSummary), {
+  ssr: false,
+  loading: chartSkeleton,
+});
+const BusAndWeekday = dynamic(() => import('./daily-charts').then((m) => m.BusAndWeekday), {
+  ssr: false,
+  loading: chartSkeleton,
+});
 
 type Direction = 'onward' | 'return';
 
@@ -48,8 +62,7 @@ const longDate = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const shortDate = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-const weekday = (d: string) =>
-  new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' });
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 const routeLabel = (r: DailyRouteRow) => `${r.routeNumber ?? '—'} ${r.routeName ?? ''}`.trim();
 
@@ -61,8 +74,8 @@ async function fetchDaily(date: string, direction: Direction): Promise<DailyRepo
   return result.data as DailyReportResponse;
 }
 
-const NAV_BUTTON =
-  'inline-flex h-[38px] w-[38px] items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-40';
+const BAR_BUTTON =
+  'inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40';
 
 const STATUS_OPTIONS = (['marked', 'low', 'not_marked', 'no_service'] as DailyStatus[]).map((s) => ({
   label: DAILY_STATUS_LABEL[s],
@@ -137,58 +150,133 @@ export default function AttendanceDailyReportPage() {
     });
   };
 
-  return (
-    <div className="space-y-4">
-      <AttendanceTabs />
-      <PageHeader description="One day at a time: for every bus, how many learners were marked, present and absent. Absent means the learner was not scanned on a bus that was scanned. Click a bus to see its learners." />
+  const notMarkedCard = cf.card('status', 'not_marked');
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="text-xs text-muted-foreground">
-          Date
-          <div className="mt-1 flex items-center gap-1">
-            <button type="button" className={NAV_BUTTON} aria-label="Previous day" onClick={() => setDate(stepDay(date, -1))}>
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <input
-              type="date"
-              value={date}
-              max={today}
-              onChange={(e) => e.target.value && setDate(e.target.value)}
-              className="input block"
-              aria-label="Report date"
-            />
-            <button
-              type="button"
-              className={NAV_BUTTON}
-              aria-label="Next day"
-              disabled={stepDay(date, 1) > today}
-              onClick={() => setDate(stepDay(date, 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
+  return (
+    <div className="viz-scope space-y-5">
+      <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
+      <AttendanceTabs />
+
+      {/* 1. Header banner */}
+      <header className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-green-700 via-green-600 to-green-500 px-5 py-5 text-white shadow-[0_14px_32px_-18px_rgba(21,128,61,0.8)] sm:px-7">
+        <span aria-hidden="true" className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-white/10" />
+        <span aria-hidden="true" className="absolute -bottom-20 right-40 h-40 w-40 rounded-full bg-white/5" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Daily attendance report</h1>
+            <p className="mt-1 text-sm text-white/90">
+              For every bus: learners marked, present and absent. Absent means not scanned on a bus that was
+              scanned. Click a bus to see its learners.
+            </p>
           </div>
+          <div className="flex items-center gap-3 rounded-xl bg-white/15 px-4 py-2.5 ring-1 ring-white/25">
+            {direction === 'return' ? <Moon className="h-5 w-5" aria-hidden="true" /> : <Sun className="h-5 w-5" aria-hidden="true" />}
+            <div className="text-right">
+              <p className="text-xs text-white/85">{tripName} trip</p>
+              <p className="text-sm font-semibold">{longDate(date)}</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* 2. KPI tiles */}
+      {!isError && (isLoading || showFigures) && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+          <KpiTile
+            tone="blue" icon={Users} label="Total learners" value={dash ?? t!.learners}
+            sub={t ? `on ${t.buses} buses` : undefined}
+          />
+          <KpiTile
+            tone="violet" icon={ClipboardCheck} label="Marked" value={dash ?? t!.marked}
+            sub={t ? `${pct(t.marked, t.learners)}% · ${t.busesMarked} of ${t.buses} buses` : undefined}
+            title="Learners with a record for this trip: present plus absent"
+          />
+          <KpiTile
+            tone="green" icon={UserCheck} label="Present" value={dash ?? t!.present}
+            sub={t ? presentHint : undefined} title={t ? presentHint : undefined}
+          />
+          <KpiTile
+            tone="red" icon={UserX} label="Absent" value={dash ?? t!.absent}
+            sub={
+              t
+                ? t.absent > 0 && t.autoAbsent === t.absent
+                  ? `${pct(t.absent, t.marked)}% · all automatic`
+                  : `${pct(t.absent, t.marked)}% · ${t.autoAbsent} automatic`
+                : undefined
+            }
+            title="Not scanned on a bus that was scanned. Staff scan cards; absences are written when marking closes."
+          />
+          <KpiTile
+            tone="orange" icon={AlertTriangle} label="Not marked" value={dash ?? t!.notMarked}
+            sub={t ? `${t.buses - t.busesMarked} buses · tap to show them` : undefined}
+            title="Learners with no record at all for this trip. Tap to show those buses in the table."
+            active={notMarkedCard.active}
+            onClick={notMarkedCard.onClick}
+          />
+        </div>
+      )}
+
+      {/* 3. Date / trip bar */}
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+        <CalendarDays className="ml-1 hidden h-5 w-5 text-green-600 sm:block" aria-hidden="true" />
+        <div className="flex items-center gap-1.5">
+          <button type="button" className={`${BAR_BUTTON} w-10`} aria-label="Previous day" onClick={() => setDate(stepDay(date, -1))}>
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <input
+            type="date"
+            value={date}
+            max={today}
+            onChange={(e) => e.target.value && setDate(e.target.value)}
+            className="input block"
+            aria-label="Report date"
+          />
+          <button
+            type="button"
+            className={`${BAR_BUTTON} w-10`}
+            aria-label="Next day"
+            disabled={stepDay(date, 1) > today}
+            onClick={() => setDate(stepDay(date, 1))}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
         <button
           type="button"
           onClick={() => setDate(today)}
           disabled={date === today}
-          className="inline-flex h-[38px] items-center rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-40"
+          className={`${BAR_BUTTON} px-4 text-sm font-medium`}
         >
           Today
         </button>
-        <label className="text-xs text-muted-foreground">
-          Trip
-          <select value={direction} onChange={(e) => setDirection(e.target.value as Direction)} className="input mt-1 block">
-            <option value="onward">Morning</option>
-            <option value="return">Evening</option>
-          </select>
-        </label>
-        <p className="pb-2 text-sm font-medium text-foreground">{longDate(date)}</p>
+        <div className="inline-flex rounded-xl bg-gray-100 p-1" role="group" aria-label="Trip">
+          {(['onward', 'return'] as Direction[]).map((d) => {
+            const on = direction === d;
+            const Icon = d === 'return' ? Moon : Sun;
+            return (
+              <button
+                key={d}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setDirection(d)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                  on ? 'bg-green-600 text-white shadow-[0_2px_6px_-2px_rgba(22,163,74,0.6)]' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Icon className="h-4 w-4" aria-hidden="true" />
+                {d === 'return' ? 'Evening' : 'Morning'}
+              </button>
+            );
+          })}
+        </div>
+        <div className="ml-auto">
+          <ExportMenu onExport={onExport} disabled={rows.length === 0} />
+        </div>
       </div>
 
       {/* An error must NOT fall through to zeros: "0 present" is a different and false claim. */}
       {isError && (
-        <p className="rounded-lg border border-border p-6 text-sm text-foreground">
+        <p className="rounded-xl border border-border p-6 text-sm text-foreground">
           Could not load the daily report{error instanceof Error ? `: ${error.message}` : ''}. Figures are
           not shown rather than shown as zero.
         </p>
@@ -219,105 +307,102 @@ export default function AttendanceDailyReportPage() {
         </Note>
       )}
 
-      {!isError && (isLoading || showFigures) && (
-        <SummaryCards>
-          <SummaryCard icon={Users} label="Total learners" value={dash ?? t!.learners} hint={t ? `on ${t.buses} buses` : undefined} />
-          <SummaryCard
-            icon={ClipboardCheck}
-            label="Marked"
-            value={dash ?? t!.marked}
-            tone="info"
-            hint={t ? `${t.busesMarked} of ${t.buses} buses` : undefined}
-            title="Learners with a record for this trip: present plus absent"
-          />
-          <SummaryCard icon={UserCheck} label="Present" value={dash ?? t!.present} tone="good" hint={t ? presentHint : undefined} title={t ? presentHint : undefined} />
-          <SummaryCard
-            icon={UserX}
-            label="Absent"
-            value={dash ?? t!.absent}
-            tone="danger"
-            hint={
-              t
-                ? t.absent > 0 && t.autoAbsent === t.absent
-                  ? 'all filled in automatically'
-                  : `${t.autoAbsent} filled in automatically`
-                : undefined
-            }
-            title="Not scanned on a bus that was scanned. Staff scan cards; absences are written when marking closes."
-          />
-          <SummaryCard
-            icon={AlertTriangle}
-            label="Not marked"
-            value={dash ?? t!.notMarked}
-            tone={t && t.notMarked > 0 ? 'warn' : 'good'}
-            hint={t ? `${t.buses - t.busesMarked} buses · click to show them` : undefined}
-            title="Learners with no record at all for this trip"
-            {...cf.card('status', 'not_marked')}
-          />
-        </SummaryCards>
+      {/* 4. What to do next */}
+      {showFigures && !data.nothingMarked && <ActionCards data={data} />}
+
+      {/* 5. Charts */}
+      {data && !isError && !data.noData && (
+        <TrendAndSummary data={data} date={date} onPickDate={setDate} />
       )}
+      {showFigures && !data.nothingMarked && <BusAndWeekday data={data} />}
 
-      {showFigures && !data.nothingMarked && <ActionPanel data={data} />}
-
+      {/* 6. Every bus */}
       {showFigures && (
-        <DataTable
-          columns={columns}
-          data={rows}
-          getRowId={(r) => r.routeId}
-          entityName="buses"
-          isLoading={isLoading}
-          searchPlaceholder="Search route…"
-          emptyMessage="No buses to show for this day."
-          columnFilters={cf.filters}
-          onColumnFiltersChange={cf.setFilters}
-          onFilteredRowsChange={onFilteredRowsChange}
-          filters={[{ columnId: 'status', title: 'Status', options: STATUS_OPTIONS }]}
-          toolbarActions={() => <ExportMenu onExport={onExport} disabled={rows.length === 0} />}
-        />
-      )}
-
-      {showFigures && t && <OverallLine totals={filteredRows ? summarizeRows(filteredRows) : t} filtered={!!filteredRows} />}
-
-      {data && !isError && data.trend.length > 0 && (
-        <section aria-label="Last service days">
-          <h2 className="mb-2 text-sm font-semibold text-foreground">Day by day</h2>
-          <div className="flex flex-wrap gap-2">
-            {data.trend.map((d) => {
-              const active = d.date === date;
-              return (
-                <button
-                  key={d.date}
-                  type="button"
-                  onClick={() => setDate(d.date)}
-                  aria-pressed={active}
-                  className={`min-w-[7.5rem] rounded-lg border bg-white px-3 py-2 text-left transition-colors hover:bg-gray-50 ${
-                    active ? 'border-green-600 ring-1 ring-green-600' : 'border-gray-200'
-                  }`}
-                >
-                  <span className="block text-xs text-muted-foreground">{weekday(d.date)}, {shortDate(d.date)}</span>
-                  {d.holiday ? (
-                    <span className="block text-sm text-muted-foreground">Holiday</span>
-                  ) : d.nothingMarked ? (
-                    <span className="block text-sm text-amber-700 dark:text-amber-300">No marks</span>
-                  ) : (
-                    <>
-                      <span className="block text-sm font-semibold tabular-nums text-foreground">
-                        {d.present} present
-                      </span>
-                      <span className="block text-xs tabular-nums text-muted-foreground">
-                        {d.absent} absent · {d.busesMarked}/{d.buses} buses
-                      </span>
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        <section aria-label="Every bus" className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Every bus</h2>
+          <DataTable
+            columns={columns}
+            data={rows}
+            getRowId={(r) => r.routeId}
+            entityName="buses"
+            isLoading={isLoading}
+            searchPlaceholder="Search route…"
+            emptyMessage="No buses to show for this day."
+            columnFilters={cf.filters}
+            onColumnFiltersChange={cf.setFilters}
+            onFilteredRowsChange={onFilteredRowsChange}
+            filters={[{ columnId: 'status', title: 'Status', options: STATUS_OPTIONS }]}
+          />
+          {t && <OverallLine totals={filteredRows ? summarizeRows(filteredRows) : t} filtered={!!filteredRows} />}
         </section>
       )}
     </div>
   );
 }
+
+// ── KPI tile ────────────────────────────────────────────────────────────────
+
+// Solid gradients, 600→700/800 steps so white text stays readable on each.
+const TILE_TONE = {
+  blue: 'from-blue-600 to-indigo-700 shadow-[0_14px_28px_-16px_rgba(37,99,235,0.85)]',
+  violet: 'from-violet-600 to-purple-700 shadow-[0_14px_28px_-16px_rgba(124,58,237,0.85)]',
+  green: 'from-green-600 to-green-800 shadow-[0_14px_28px_-16px_rgba(22,163,74,0.85)]',
+  red: 'from-rose-600 to-red-700 shadow-[0_14px_28px_-16px_rgba(225,29,72,0.85)]',
+  orange: 'from-orange-600 to-orange-700 shadow-[0_14px_28px_-16px_rgba(234,88,12,0.85)]',
+} as const;
+
+function KpiTile({
+  tone, icon: Icon, label, value, sub, title, active, onClick,
+}: {
+  tone: keyof typeof TILE_TONE;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: React.ReactNode;
+  sub?: string;
+  title?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const body = (
+    <>
+      <span aria-hidden="true" className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/10" />
+      <span aria-hidden="true" className="absolute -bottom-12 -left-6 h-24 w-24 rounded-full bg-white/5" />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/90">{label}</p>
+          <p className="mt-2 text-3xl font-bold leading-none tabular-nums sm:text-4xl">{value}</p>
+        </div>
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/20 ring-1 ring-white/30 sm:h-12 sm:w-12">
+          <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
+        </span>
+      </div>
+      {sub && <p className="relative mt-3 truncate text-xs font-medium text-white/90">{sub}</p>}
+    </>
+  );
+  const cls = `relative block w-full overflow-hidden rounded-2xl bg-gradient-to-br p-4 text-left text-white sm:p-5 ${TILE_TONE[tone]}`;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-pressed={active}
+        className={`${cls} cursor-pointer transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 ${
+          active ? 'ring-4 ring-orange-300 ring-offset-2 dark:ring-offset-[#0f1115]' : ''
+        }`}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={cls} title={title}>
+      {body}
+    </div>
+  );
+}
+
+// ── Notes and the Overall line ──────────────────────────────────────────────
 
 const NOTE_TONE = {
   info: 'border-sky-500/40 bg-sky-500/10',
@@ -329,7 +414,7 @@ function Note({
   icon: Icon, tone, children,
 }: { icon: React.ComponentType<{ className?: string }>; tone: keyof typeof NOTE_TONE; children: React.ReactNode }) {
   return (
-    <div className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${NOTE_TONE[tone]}`}>
+    <div className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${NOTE_TONE[tone]}`}>
       <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${NOTE_ICON[tone]}`} aria-hidden="true" />
       <p className="min-w-0 text-foreground">{children}</p>
     </div>
@@ -338,116 +423,22 @@ function Note({
 
 /** The totals of the rows on screen, as the table's "Overall" line. */
 function OverallLine({ totals: t, filtered }: { totals: DailyTotals; filtered: boolean }) {
-  const item = (label: string, value: React.ReactNode) => (
+  const item = (label: string, value: React.ReactNode, tone = 'text-foreground') => (
     <span className="whitespace-nowrap">
       <span className="text-muted-foreground">{label}</span>{' '}
-      <span className="font-semibold tabular-nums text-foreground">{value}</span>
+      <span className={`font-semibold tabular-nums ${tone}`}>{value}</span>
     </span>
   );
   return (
-    <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-lg border border-border px-4 py-3 text-sm">
+    <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-xl border border-border bg-gray-50 px-4 py-3 text-sm">
       <span className="font-semibold text-foreground">{filtered ? 'Overall (buses shown)' : 'Overall'}</span>
       {item('Total learners', t.learners)}
       {item('Marked', t.marked)}
-      {item('Present', t.present)}
-      {item('Absent', t.absent)}
-      {item('Not marked', t.notMarked)}
+      {item('Present', t.present, 'text-green-700 dark:text-green-400')}
+      {item('Absent', t.absent, 'text-red-600 dark:text-red-400')}
+      {item('Not marked', t.notMarked, 'text-orange-700 dark:text-orange-300')}
       {item('Present %', t.presentPct === null ? '—' : `${t.presentPct}%`)}
       {t.offRoster > 0 && item('Hostel / irregular riders', t.offRoster)}
     </div>
-  );
-}
-
-/** What the transport head should do before the next trip, worst first. */
-function ActionPanel({ data }: { data: DailyReportResponse }) {
-  const { noIncharge, notScanned, low } = data.actions;
-  const link = (r: DailyRouteRow) => (
-    <Link
-      href={`/attendance/${r.routeId}/${data.date}?direction=${data.direction}`}
-      className="font-medium text-foreground underline-offset-2 hover:underline"
-    >
-      {routeLabel(r)}
-    </Link>
-  );
-
-  if (noIncharge.length + notScanned.length + low.length === 0) {
-    return (
-      <div className="flex items-start gap-2 rounded-lg border border-green-500/40 bg-green-500/10 p-3 text-sm">
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" aria-hidden="true" />
-        <p className="text-foreground">
-          {data.windowOpen ? 'Nothing to act on so far.' : 'Every bus was scanned. Nothing to act on for tomorrow.'}
-        </p>
-      </div>
-    );
-  }
-
-  const sinceText = (r: DailyRouteRow) =>
-    r.lastMarked
-      ? `last marked ${shortDate(r.lastMarked)}`
-      : 'not marked in the last 5 weeks';
-
-  return (
-    <section className="rounded-xl border-2 border-amber-200 bg-white p-4 dark:border-amber-500/30" aria-label="Action for tomorrow">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-        <AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden="true" />
-        {data.windowOpen ? 'To check before marking closes' : 'Action for tomorrow'}
-      </h2>
-      <div className="mt-3 space-y-4 text-sm">
-        {noIncharge.length > 0 && (
-          <div>
-            <p className="font-medium text-foreground">
-              {noIncharge.length} bus{noIncharge.length === 1 ? ' has' : 'es have'} no in-charge, so nobody can mark{' '}
-              {noIncharge.reduce((n, r) => n + r.roster, 0)} learners.{' '}
-              <Link href="/staff-route-assignments" className="text-green-700 underline-offset-2 hover:underline dark:text-green-400">
-                Assign an in-charge
-              </Link>
-            </p>
-            <ul className="mt-1 space-y-0.5 text-muted-foreground">
-              {noIncharge.map((r) => (
-                <li key={r.routeId}>{link(r)} · {r.roster} learners · {sinceText(r)}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {notScanned.length > 0 && (
-          <div>
-            <p className="font-medium text-foreground">
-              {notScanned.length} bus{notScanned.length === 1 ? ' was' : 'es were'} not scanned by{' '}
-              {notScanned.length === 1 ? 'its' : 'their'} in-charges ({notScanned.reduce((n, r) => n + r.roster, 0)} learners).
-              Speak to them before the next trip.
-            </p>
-            <ul className="mt-1 space-y-1 text-muted-foreground">
-              {notScanned.map((r) => {
-                const names = data.inchargeNames[r.routeId] ?? [];
-                return (
-                  <li key={r.routeId}>
-                    {link(r)} · {r.roster} learners · {sinceText(r)}
-                    {!r.hasBus && ' · no bus assigned'}
-                    <span className="block text-xs">
-                      In-charges: {names.length > 0 ? names.join(', ') : `${r.incharges} assigned`}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-        {low.length > 0 && (
-          <div>
-            <p className="font-medium text-foreground">
-              {low.length} bus{low.length === 1 ? ' was' : 'es were'} scanned by too few people. Most of the absences
-              on {low.length === 1 ? 'it' : 'them'} are learners nobody scanned; ask every in-charge to scan.
-            </p>
-            <ul className="mt-1 space-y-0.5 text-muted-foreground">
-              {low.map((r) => (
-                <li key={r.routeId}>
-                  {link(r)} · {r.present} of {r.roster} present · {r.markers} of {r.incharges} in-charges scanned
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </section>
   );
 }
