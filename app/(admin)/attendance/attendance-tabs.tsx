@@ -5,11 +5,12 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
 const TABS = [
-  { href: '/attendance', label: 'Bus coverage' },
+  { href: '/attendance', label: 'Daily report' },
+  { href: '/attendance/coverage', label: 'Bus coverage' },
   { href: '/attendance/learners', label: 'Learner register' },
 ];
 
-/** Switches between the two Attendance views. */
+/** Switches between the Attendance views. */
 export function AttendanceTabs() {
   const pathname = usePathname();
   return (

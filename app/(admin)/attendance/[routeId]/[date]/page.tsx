@@ -120,6 +120,7 @@ export default function AttendanceDayPage({
     // The coverage grid counts these rows; leaving it stale would show the
     // cell still red after the day was filled in.
     await queryClient.invalidateQueries({ queryKey: ['attendance-coverage'] });
+    await queryClient.invalidateQueries({ queryKey: ['attendance-daily'] });
   }
 
   /** Mark one learner. */
@@ -182,7 +183,7 @@ export default function AttendanceDayPage({
   return (
     <div className="space-y-4 p-4 md:p-6">
       <Link href="/attendance" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Attendance coverage
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Attendance
       </Link>
 
       <header className="min-w-0">
