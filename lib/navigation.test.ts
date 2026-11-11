@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { derivePageTitle, derivePageCrumb, allNavigation, NAV_TITLE_LOOKUP } from './navigation';
+import {
+  derivePageTitle, derivePageCrumb, allNavigation, NAV_TITLE_LOOKUP,
+  activeNavHref, activeNavFolder, NAV_FOLDERS,
+} from './navigation';
 
 describe('derivePageTitle', () => {
   it('names the maintenance fee module at /fees', () => {
@@ -37,6 +40,69 @@ describe('attendance learner register crumb', () => {
   it('names the register page', () => {
     expect(derivePageCrumb('/attendance/learners').name).toBe('Learner Register');
     expect(derivePageCrumb('/attendance/coverage').name).toBe('Bus Coverage');
-    expect(derivePageCrumb('/attendance').name).toBe('Attendance');
+    expect(derivePageCrumb('/attendance').name).toBe('Daily Report');
+  });
+
+  it('names the folder, not the section, in the crumb', () => {
+    expect(derivePageCrumb('/attendance/coverage').group).toBe('Attendance');
+    expect(derivePageCrumb('/vehicles').group).toBe('Fleet');
+    expect(derivePageCrumb('/dashboard').group).toBe('Overview');
+  });
+});
+
+describe('activeNavHref', () => {
+  // REGRESSION LOCK. /attendance is a prefix of its two siblings: a startsWith
+  // check lights Daily Report on every attendance page.
+  it('lights exactly one attendance page', () => {
+    expect(activeNavHref('/attendance')).toBe('/attendance');
+    expect(activeNavHref('/attendance/coverage')).toBe('/attendance/coverage');
+    expect(activeNavHref('/attendance/learners')).toBe('/attendance/learners');
+  });
+
+  it('keeps detail pages under their list', () => {
+    expect(activeNavHref('/attendance/learners/abc-123')).toBe('/attendance/learners');
+    expect(activeNavHref('/attendance/route-1/2026-11-11')).toBe('/attendance');
+    expect(activeNavHref('/vehicles/abc/edit')).toBe('/vehicles');
+    expect(activeNavHref('/fees/fine-rates')).toBe('/fees');
+  });
+
+  it('matches nothing for an unlisted path', () => {
+    expect(activeNavHref('/some-other-page')).toBeNull();
+    // A sibling-looking path must not match by string prefix alone.
+    expect(activeNavHref('/attendance-windows')).toBeNull();
+  });
+});
+
+describe('transport folders', () => {
+  it('puts every transport page in a folder, and nothing else', () => {
+    for (const item of allNavigation) {
+      if (item.group === 'transport') expect(item.folder, item.name).toBeTruthy();
+      else expect(item.folder, item.name).toBeUndefined();
+    }
+  });
+
+  it('has no empty folder', () => {
+    for (const f of NAV_FOLDERS) {
+      expect(allNavigation.some((i) => i.folder === f.key), f.name).toBe(true);
+    }
+  });
+
+  it('holds exactly the three attendance pages', () => {
+    expect(allNavigation.filter((i) => i.folder === 'attendance').map((i) => i.name)).toEqual([
+      'Daily Report', 'Bus Coverage', 'Learner Register',
+    ]);
+  });
+
+  it('opens the folder of the current page', () => {
+    expect(activeNavFolder('/attendance/learners/abc')).toBe('attendance');
+    expect(activeNavFolder('/drivers')).toBe('fleet');
+    expect(activeNavFolder('/track-all')).toBe('tracking');
+    expect(activeNavFolder('/bookings')).toBe('routes');
+    expect(activeNavFolder('/dashboard')).toBeNull();
+  });
+
+  it('has unique hrefs, so one path lights one link', () => {
+    const hrefs = allNavigation.map((i) => i.href);
+    expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 });

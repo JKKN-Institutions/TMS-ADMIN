@@ -31,7 +31,8 @@ export function getRegisterColumns(month: string): ColumnDef<LearnerRegisterRow>
       header: ({ column }) => <DataTableColumnHeader column={column} title="Learner" />,
       cell: ({ row }) => (
         <Link
-          href={`/passengers/learners/${row.original.learnerId}?month=${month}`}
+          href={`/attendance/learners/${row.original.learnerId}?month=${month}`}
+          title="Open this learner's attendance report"
           className="block min-w-0 hover:underline"
         >
           <span className="block truncate font-medium text-foreground">{row.original.name}</span>
