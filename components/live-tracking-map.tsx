@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/lib/gps/interpolate';
 import { shouldUseSnap } from '@/lib/geo/osrm';
@@ -205,6 +206,9 @@ function buildPopup(bus: MapBus): string {
     </div>`;
 }
 
+const MAP_BTN =
+  'inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-[13px] font-semibold text-gray-700 shadow-[0_1px_4px_rgba(0,0,0,0.25)] hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+
 const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   buses, selectedRouteId, onSelectRoute, emptyMessage,
   routeStops, routeStopsRouteId, routeStopCount, stopSummary, stopsSetupHref, direction,
@@ -217,7 +221,12 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   const routeStopsLatestRef = useRef<MapStop[]>(routeStops ?? []);
   routeStopsLatestRef.current = routeStops ?? [];
   const mapRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+  // Full screen: the browser's Fullscreen API where it exists (desktop, Android);
+  // elsewhere (iPhone Safari) the map is pinned over the window instead.
+  const [fullscreen, setFullscreen] = useState(false);
+  const [pseudoFull, setPseudoFull] = useState(false);
   const markersRef = useRef<Map<string, MarkerState>>(new Map());
   const rafRef = useRef<number | null>(null);
   const hasFitRef = useRef(false);
@@ -376,8 +385,47 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
     };
   }, []);
 
-  // The map's box changes size when the phone's route list opens or closes. Leaflet
-  // measures its container once, so tell it, or it leaves grey bands.
+  // Track the real full-screen state, so Esc (which the browser handles) also
+  // flips the button back to "Full screen".
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === wrapRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // The pinned fallback has no browser Esc handling, so add it.
+  useEffect(() => {
+    if (!pseudoFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPseudoFull(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [pseudoFull]);
+
+  const toggleFullscreen = () => {
+    const el = wrapRef.current;
+    if (!el) return;
+    if (pseudoFull) {
+      setPseudoFull(false);
+      return;
+    }
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+    if (document.fullscreenEnabled && el.requestFullscreen) {
+      // If the browser refuses (policy, iframe), fall back to the pinned view.
+      el.requestFullscreen().catch(() => setPseudoFull(true));
+    } else {
+      setPseudoFull(true);
+    }
+  };
+  const isFull = fullscreen || pseudoFull;
+
+  // The map's box changes size when the phone's route list opens or closes, and
+  // when it goes full screen. Leaflet measures its container once, so tell it,
+  // or it leaves grey bands.
   useEffect(() => {
     const el = mapRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -536,19 +584,34 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   return (
     // No tall min-height here: the caller sizes the box. A 420px minimum inside a
     // shorter overflow-hidden box clipped the selected-bus card on phones.
-    <div className="relative isolate h-full min-h-[260px] w-full">
+    <div
+      ref={wrapRef}
+      className={
+        pseudoFull
+          ? 'fixed inset-0 z-[9999] isolate h-dvh w-screen bg-white dark:bg-gray-900'
+          : 'relative isolate h-full min-h-[260px] w-full bg-white dark:bg-gray-900'
+      }
+    >
       <div ref={mapRef} className="absolute inset-0" />
       {/* Bottom-right: the top-right corner belongs to Leaflet's layers control,
           which the old "Recenter" button sat on top of. */}
-      {buses.length > 0 && (
+      <div className="absolute bottom-3 right-3 z-[1000] flex flex-col items-end gap-1.5">
         <button
           type="button"
-          onClick={fitToMarkers}
-          className="absolute bottom-3 right-3 z-[1000] rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          onClick={toggleFullscreen}
+          aria-label={isFull ? 'Exit full screen' : 'Full screen map'}
+          title={isFull ? 'Exit full screen (Esc)' : 'Full screen map'}
+          className={MAP_BTN}
         >
-          Fit all buses
+          {isFull ? <Minimize2 className="h-4 w-4" aria-hidden /> : <Maximize2 className="h-4 w-4" aria-hidden />}
+          {isFull ? 'Exit' : 'Full screen'}
         </button>
-      )}
+        {buses.length > 0 && (
+          <button type="button" onClick={fitToMarkers} className={MAP_BTN}>
+            Fit all buses
+          </button>
+        )}
+      </div>
       {buses.some((b) => !FRESH_STATES.has(b.state)) && (
         <p className="pointer-events-none absolute left-14 top-2.5 z-[1000] rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-gray-600 shadow-sm dark:bg-gray-900/90 dark:text-gray-300">
           Faded bus = last known place
@@ -563,7 +626,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
         </div>
       )}
       {selectedBus && (
-        <div className="absolute bottom-3 left-3 z-[1000] max-w-[320px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+        <div className="absolute bottom-3 left-3 z-[1000] max-w-[min(320px,calc(100%-9.5rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
