@@ -905,6 +905,16 @@ body.driver-trip-phone .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-
   bottom: calc(10.5rem + env(safe-area-inset-bottom)) !important;
 }
 
+/* Learner / boarding Live Track on a phone: the details panel fills the bottom of the
+   screen, so the floating button moves to the top-right of the map, under the
+   map's layers button. */
+@media (max-width: 1023px) {
+  body.live-track-open .bug-reporter-sdk.bug-reporter-floating-btn.bug-reporter-floating-btn {
+    top: calc(9rem + var(--pwa-banner-h, 0px)) !important;
+    bottom: auto !important;
+  }
+}
+
 /* Admin portal: the floating button sat over the last table column and the
    pagination on every page. It is hidden here and opened from "Report a bug" in
    the profile menu instead (components/bug-reporter/open-bug-reporter.ts clicks

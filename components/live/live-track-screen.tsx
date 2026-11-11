@@ -77,6 +77,13 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
   } = props;
   const [expanded, setExpanded] = useState(false);
 
+  // The floating bug button sits bottom-right, exactly over this screen's details
+  // panel on a phone. While this screen is open it moves up beside the map instead.
+  useEffect(() => {
+    document.body.classList.add('live-track-open');
+    return () => document.body.classList.remove('live-track-open');
+  }, []);
+
   // Minute clock for the arrival estimate.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -196,7 +203,7 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
         <div
           className={cn(
             'min-h-0 overflow-y-auto border-t border-gray-100 px-4 dark:border-gray-800 lg:block lg:flex-1',
-            expanded ? 'block max-h-[52dvh] lg:max-h-none' : 'hidden',
+            expanded ? 'block max-h-[38dvh] lg:max-h-none' : 'hidden',
           )}
         >
           {travel.length > 0 && (
