@@ -18,8 +18,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   Activity, AlertTriangle, BarChart3, Bus, Calendar, Car, CalendarCheck, ClipboardCheck,
-  GraduationCap, Receipt, RefreshCw, Route as RouteIcon, Settings, UserCheck, Wallet,
-  type LucideIcon,
+  FileWarning, Gauge, GraduationCap, Receipt, RefreshCw, Route as RouteIcon, ScanLine, Settings,
+  Ticket, TrendingUp, UserCheck, Wallet, type LucideIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -28,12 +28,13 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { percentOf } from '@/lib/dashboard/format';
 import { LOW_OCCUPANCY_PCT, routeOccupancy } from '@/lib/dashboard/occupancy';
 import type { DashboardPayload } from '@/lib/dashboard/types';
-import { VIZ_CSS, inr, inrCompact, num, panel } from '../_viz/kit';
+import { AccentStrip, VIZ_CSS, inr, inrCompact, num, panel } from '../_viz/kit';
 import { ActivityPanel, Panel, Row } from './panels';
+import { FeesDonut, HourBars, JumpGrid, KpiGrid, TurnoutRing, UtilisationBars, WarningPanel } from './console';
 import {
-  AttentionStat, FeesDonut, HourBars, JumpCard, JumpGrid, KpiCard, KpiGrid,
-  TurnoutRing, UtilisationBars, WarningPanel,
-} from './console';
+  BANNER_BUTTON, BANNER_GHOST, ColorAttentionStat, ColorJumpCard, ColorKpi, DashboardBanner, SectionTitle,
+  type Tone,
+} from './colorful';
 import { RoutePerformance } from './route-performance';
 import { TrendChart } from './trend-chart';
 
@@ -46,16 +47,16 @@ async function fetchDashboard(): Promise<DashboardPayload> {
 }
 
 const QUICK_ACTIONS: Array<{
-  title: string; desc: string; icon: LucideIcon; href: string; permission: string;
+  title: string; desc: string; icon: LucideIcon; href: string; permission: string; tone: Tone;
 }> = [
-  { title: 'Route analytics', desc: 'Every route, booked vs boarded', icon: RouteIcon, href: '/routes/analytics', permission: TMS_PERMISSIONS.ROUTES_VIEW },
-  { title: 'Live tracking', desc: 'See every bus on the map', icon: Bus, href: '/track-all', permission: TMS_PERMISSIONS.TRACKING_VIEW },
-  { title: 'Bookings', desc: 'Who is travelling and when', icon: CalendarCheck, href: '/bookings', permission: TMS_PERMISSIONS.BOOKINGS_VIEW },
-  { title: 'Attendance', desc: 'Mark and review boardings', icon: ClipboardCheck, href: '/bookings/analytics', permission: TMS_PERMISSIONS.BOOKINGS_VIEW },
-  { title: 'Fees', desc: 'Bills, payments and dues', icon: Receipt, href: '/fees', permission: TMS_PERMISSIONS.FEES_VIEW },
-  { title: 'Schedules', desc: 'Routes, trips and timings', icon: Calendar, href: '/schedules', permission: TMS_PERMISSIONS.SCHEDULES_VIEW },
-  { title: 'Analytics', desc: 'Full transport reporting', icon: BarChart3, href: '/analytics', permission: TMS_PERMISSIONS.REPORTS_VIEW },
-  { title: 'Settings', desc: 'Configure the system', icon: Settings, href: '/settings', permission: TMS_PERMISSIONS.SETTINGS_MANAGE },
+  { title: 'Route analytics', desc: 'Every route, booked vs boarded', icon: RouteIcon, href: '/routes/analytics', permission: TMS_PERMISSIONS.ROUTES_VIEW, tone: 'teal' },
+  { title: 'Live tracking', desc: 'See every bus on the map', icon: Bus, href: '/track-all', permission: TMS_PERMISSIONS.TRACKING_VIEW, tone: 'blue' },
+  { title: 'Bookings', desc: 'Who is travelling and when', icon: CalendarCheck, href: '/bookings', permission: TMS_PERMISSIONS.BOOKINGS_VIEW, tone: 'violet' },
+  { title: 'Attendance', desc: 'Daily report, in-charges, learners', icon: ClipboardCheck, href: '/attendance', permission: TMS_PERMISSIONS.ATTENDANCE_VIEW, tone: 'green' },
+  { title: 'Fees', desc: 'Bills, payments and dues', icon: Receipt, href: '/fees', permission: TMS_PERMISSIONS.FEES_VIEW, tone: 'orange' },
+  { title: 'Schedules', desc: 'Routes, trips and timings', icon: Calendar, href: '/schedules', permission: TMS_PERMISSIONS.SCHEDULES_VIEW, tone: 'blue' },
+  { title: 'Analytics', desc: 'Full transport reporting', icon: BarChart3, href: '/analytics', permission: TMS_PERMISSIONS.REPORTS_VIEW, tone: 'violet' },
+  { title: 'Settings', desc: 'Configure the system', icon: Settings, href: '/settings', permission: TMS_PERMISSIONS.SETTINGS_MANAGE, tone: 'teal' },
 ];
 
 export default function DashboardPage() {
@@ -102,7 +103,10 @@ export default function DashboardPage() {
   // Deltas are only drawn when a comparable earlier day was found; the API
   // walks back past non-running days so Monday isn't compared to a blank Sunday.
   const delta = (now?: number, before?: number) =>
-    now === undefined || before === undefined ? null : now - before;
+    now === undefined || before === undefined || before === 0 ? null : now - before;
+  // Walk-ups, hostel and irregular riders board without a booking, so more
+  // learners can board than booked. The figure is real; it is labelled, not hidden.
+  const unbooked = today ? Math.max(0, today.present - today.bookings) : 0;
 
   // A KPI card links into its module only when the viewer can open it, so a
   // card never offers a jump that lands on /unauthorized. The figure itself
@@ -115,39 +119,23 @@ export default function DashboardPage() {
     <div className="viz-scope space-y-5">
       <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
 
-      {/* Header — greeting left, date right */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="break-words text-2xl font-bold tracking-tight text-foreground">
-            Good {partOfDay()}, {firstName(profile?.full_name) || 'there'}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Transport management overview</p>
-        </div>
-        <div className="flex flex-col items-start gap-2 sm:items-end sm:shrink-0">
-          <p className="text-sm text-muted-foreground">
-            {data ? formatHeaderDate(data.today.date) : 'Loading'}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-lg border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
-              {refreshing ? 'Refreshing' : 'Refresh'}
-            </button>
-            {can(TMS_PERMISSIONS.ROUTES_VIEW) && (
-              <button
-                onClick={() => router.push('/routes/analytics')}
-                className="inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-lg bg-green-600 px-3.5 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
-              >
-                <RouteIcon className="mr-2 h-4 w-4" aria-hidden />
-                Route analytics
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      {/* 1. Banner — greeting, date and the two actions */}
+      <DashboardBanner
+        title={`Good ${partOfDay()}, ${firstName(profile?.full_name) || 'there'}`}
+        subtitle="Transport management overview: boarding, fleet, fees and what needs attention."
+        date={data ? formatHeaderDate(data.today.date) : 'Loading'}
+      >
+        <button onClick={handleRefresh} disabled={refreshing} className={BANNER_GHOST}>
+          <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
+          {refreshing ? 'Refreshing' : 'Refresh'}
+        </button>
+        {can(TMS_PERMISSIONS.ROUTES_VIEW) && (
+          <button onClick={() => router.push('/routes/analytics')} className={BANNER_BUTTON}>
+            <RouteIcon className="mr-2 h-4 w-4" aria-hidden />
+            Route analytics
+          </button>
+        )}
+      </DashboardBanner>
 
       {/* A metric whose query failed must not read as a confident zero. */}
       {data && data.degraded.length > 0 && (
@@ -171,54 +159,68 @@ export default function DashboardPage() {
         <KpiSkeleton />
       ) : (
         <KpiGrid>
-          <KpiCard
+          <ColorKpi
+            tone="blue"
             label="Learners"
             value={num(data?.counts.learners.current ?? 0)}
             sub="bus required, active"
             icon={GraduationCap}
             href={jump('/passengers/learners', TMS_PERMISSIONS.ENROLLMENT_VIEW)}
           />
-          {/* A count of expired documents is a problem, not a footnote, so the
-              sub-line is toned rather than left as grey small print. */}
-          <KpiCard
+          {/* A count of expired documents is a problem, not a footnote. */}
+          <ColorKpi
+            tone="violet"
             label="Buses"
             value={num(data?.fleet.buses ?? 0)}
-            sub={`${num(data?.fleet.expiredDocs ?? 0)} with an expired document`}
-            subTone={(data?.fleet.expiredDocs ?? 0) > 0 ? 'var(--viz-warning)' : undefined}
+            sub={`${num(data?.fleet.expiredDocs ?? 0)} expired documents`}
+            warn={(data?.fleet.expiredDocs ?? 0) > 0}
             icon={Car}
             href={jump('/vehicles', TMS_PERMISSIONS.VEHICLES_VIEW)}
           />
-          <KpiCard
+          <ColorKpi
+            tone="teal"
             label="Routes"
             value={num(data?.fleet.routesActive ?? 0)}
             sub={`${num(data?.fleet.routesWithoutBus ?? 0)} without a bus`}
-            subTone={(data?.fleet.routesWithoutBus ?? 0) > 0 ? 'var(--viz-warning)' : undefined}
+            warn={(data?.fleet.routesWithoutBus ?? 0) > 0}
             icon={RouteIcon}
             href={jump('/routes', TMS_PERMISSIONS.ROUTES_VIEW)}
           />
-          <KpiCard
+          <ColorKpi
+            tone="orange"
             label="Drivers"
             value={num(data?.counts.drivers.current ?? 0)}
-            sub={`${num(data?.fleet.routesWithoutDriver ?? 0)} routes without one`}
-            subTone={(data?.fleet.routesWithoutDriver ?? 0) > 0 ? 'var(--viz-warning)' : undefined}
+            sub={`${num(data?.fleet.routesWithoutDriver ?? 0)} routes need a driver`}
+            warn={(data?.fleet.routesWithoutDriver ?? 0) > 0}
             icon={UserCheck}
             href={jump('/drivers', TMS_PERMISSIONS.DRIVERS_VIEW)}
           />
-          <KpiCard
+          <ColorKpi
+            tone="green"
             label="Collected today"
             value={inr(data?.finance.collectedToday ?? 0)}
             sub={`${inrCompact(data?.finance.collectedMonth ?? 0)} this month`}
-            tone="var(--viz-good)"
             icon={Wallet}
             href={jump('/fees', TMS_PERMISSIONS.FEES_VIEW)}
           />
-          <KpiCard
-            label="Attendance"
-            value={turnout === null ? '—' : `${turnout}%`}
-            sub={`${num(today?.present ?? 0)} of ${num(today?.bookings ?? 0)} booked`}
+          <ColorKpi
+            tone="red"
+            label="Boarded today"
+            value={turnout === null ? num(today?.present ?? 0) : `${turnout}%`}
+            sub={
+              unbooked > 0
+                ? `${num(today?.present ?? 0)} boarded · ${num(today?.bookings ?? 0)} booked`
+                : `${num(today?.present ?? 0)} of ${num(today?.bookings ?? 0)} booked`
+            }
             delta={delta(today?.present, prev?.present)}
+            deltaLabel="boarded vs previous day"
+            title={
+              unbooked > 0
+                ? `${num(unbooked)} more learners boarded than booked: walk-ups, hostel and irregular riders board without a booking.`
+                : undefined
+            }
             icon={ClipboardCheck}
-            href={jump('/bookings/analytics', TMS_PERMISSIONS.BOOKINGS_VIEW)}
+            href={jump('/attendance', TMS_PERMISSIONS.ATTENDANCE_VIEW)}
           />
         </KpiGrid>
       )}
@@ -226,28 +228,38 @@ export default function DashboardPage() {
       {/* Daily onboarding trend beside bus utilisation */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <div className="xl:col-span-2">
-          {loading ? <ChartSkeleton /> : <TrendChart trend={data?.trend ?? []} />}
+          {loading ? <ChartSkeleton /> : <TrendChart trend={data?.trend ?? []} accent="blue" />}
         </div>
 
-        <section className={`${panel} p-5`}>
-          <h2 className="text-base font-semibold text-foreground">Bus utilisation</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Seats booked against the assigned bus, fullest first
-          </p>
-          <div className="mt-4">
-            {loading ? <RowsSkeleton rows={5} /> : <UtilisationBars rows={occupancy} />}
+        <section className={`${panel} overflow-hidden`}>
+          <AccentStrip accent="violet" />
+          <div className="p-5">
+            <SectionTitle
+              tone="violet"
+              icon={Gauge}
+              title="Bus utilisation"
+              subtitle="Seats booked against the assigned bus, fullest first"
+            />
+            <div className="mt-4">
+              {loading ? <RowsSkeleton rows={5} /> : <UtilisationBars rows={occupancy} />}
+            </div>
           </div>
         </section>
       </div>
 
       {/* Needs attention — full width: three counted categories, then the list */}
       <section className={`${panel} overflow-hidden`}>
-        <header
-          className="flex items-center gap-2.5 border-b px-5 py-3.5"
-          style={{ borderColor: 'var(--viz-panel-border)' }}
-        >
-          <AlertTriangle className="h-4 w-4 shrink-0" style={{ color: 'var(--viz-warning)' }} aria-hidden />
-          <h2 className="text-sm font-semibold text-foreground">Needs attention</h2>
+        <header className="relative flex items-center gap-3 overflow-hidden bg-gradient-to-r from-orange-600 to-amber-500 px-5 py-3.5 text-white">
+          <span aria-hidden="true" className="absolute -right-6 -top-8 h-24 w-24 rounded-full bg-white/10" />
+          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20 ring-1 ring-white/30">
+            <AlertTriangle className="h-4 w-4" aria-hidden />
+          </span>
+          <div className="relative min-w-0">
+            <h2 className="text-sm font-semibold">Needs attention</h2>
+            <p className="text-xs text-white/90">
+              {data ? `${num(data.alerts.length)} item${data.alerts.length === 1 ? '' : 's'} to look at` : 'Checking'}
+            </p>
+          </div>
         </header>
 
         {loading ? (
@@ -256,24 +268,27 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            <div
-              className="flex flex-col divide-y sm:flex-row sm:divide-x sm:divide-y-0"
-              style={{ borderColor: 'var(--viz-panel-border)' }}
-            >
-              <AttentionStat
+            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-3">
+              <ColorAttentionStat
+                tone="violet"
+                icon={Ticket}
                 label="Bus pass requests"
                 value={data?.attention.busPassOpen ?? 0}
                 caption={`${num(data?.attention.busPassLast30 ?? 0)} raised in 30 days`}
                 change={percentChange(data?.attention.busPassLast30, data?.attention.busPassPrev30)}
                 href="/enrollment-requests"
               />
-              <AttentionStat
+              <ColorAttentionStat
+                tone="red"
+                icon={FileWarning}
                 label="Document expiry"
                 value={data?.attention.docsExpired ?? 0}
                 caption={`${num(data?.attention.docsDueSoon ?? 0)} more due within 60 days`}
                 href="/vehicles"
               />
-              <AttentionStat
+              <ColorAttentionStat
+                tone="orange"
+                icon={Gauge}
                 label="Low occupancy"
                 value={data?.attention.lowOccupancy ?? 0}
                 caption={`of ${num(data?.attention.routesWithCapacity ?? 0)} routes, under ${LOW_OCCUPANCY_PCT}% full`}
@@ -293,33 +308,42 @@ export default function DashboardPage() {
 
       {/* Boarding today beside route performance */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <section className={`${panel} p-5`}>
-          <h2 className="text-base font-semibold text-foreground">Boarding today</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Riders scanned against seats booked
-          </p>
-          {loading ? (
-            <RingSkeleton />
-          ) : (
-            <div className="mt-5 space-y-6">
-              <TurnoutRing
-                percent={turnout}
-                boarded={today?.present ?? 0}
-                booked={today?.bookings ?? 0}
-              />
-              <HourBars hours={today?.hourly ?? []} />
-            </div>
-          )}
+        <section className={`${panel} overflow-hidden`}>
+          <AccentStrip accent="green" />
+          <div className="p-5">
+            <SectionTitle tone="green" icon={ScanLine} title="Boarding today" subtitle="Riders scanned against seats booked" />
+            {loading ? (
+              <RingSkeleton />
+            ) : (
+              <div className="mt-5 space-y-6">
+                <TurnoutRing
+                  percent={turnout}
+                  boarded={today?.present ?? 0}
+                  booked={today?.bookings ?? 0}
+                />
+                {unbooked > 0 && (
+                  <p className="flex items-start gap-2 rounded-xl bg-green-50 p-3 text-xs text-green-900 ring-1 ring-green-200">
+                    <TrendingUp className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span>
+                      <strong>{num(unbooked)}</strong> more boarded than booked: walk-ups, hostel and irregular
+                      riders board without a booking, so turnout can pass 100%.
+                    </span>
+                  </p>
+                )}
+                <HourBars hours={today?.hourly ?? []} />
+              </div>
+            )}
+          </div>
         </section>
 
         <div className="xl:col-span-2">
-          {loading ? <ChartSkeleton /> : <RoutePerformance routes={data?.routes ?? []} />}
+          {loading ? <ChartSkeleton /> : <RoutePerformance routes={data?.routes ?? []} accent="teal" />}
         </div>
       </div>
 
       {/* Fleet, money and activity */}
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-3">
-        <Panel title="Fleet readiness" icon={Car} action={{ label: 'Vehicles', href: '/vehicles' }}>
+        <Panel title="Fleet readiness" icon={Car} accent="violet" action={{ label: 'Vehicles', href: '/vehicles' }}>
           {loading ? (
             <RowsSkeleton rows={5} />
           ) : (
@@ -348,7 +372,7 @@ export default function DashboardPage() {
           )}
         </Panel>
 
-        <Panel title="Transport fees" icon={Wallet} action={{ label: 'Fees', href: '/fees' }}>
+        <Panel title="Transport fees" icon={Wallet} accent="green" action={{ label: 'Fees', href: '/fees' }}>
           {loading ? (
             <RowsSkeleton rows={4} />
           ) : (
@@ -364,6 +388,7 @@ export default function DashboardPage() {
         <Panel
           title="Recent activity"
           icon={Activity}
+          accent="orange"
           action={can(TMS_PERMISSIONS.ACTIVITY_VIEW) ? { label: 'All', href: '/activity-log' } : undefined}
         >
           {loading ? (
@@ -380,12 +405,13 @@ export default function DashboardPage() {
           as a settings list, which is what these shortcuts used to look like. */}
       {quickActions.length > 0 && (
         <section aria-labelledby="jump-to">
-          <h2 id="jump-to" className="text-sm font-semibold text-foreground">Jump to</h2>
+          <h2 id="jump-to" className="text-sm font-bold uppercase tracking-wider text-foreground">Jump to</h2>
           <div className="mt-3">
             <JumpGrid>
               {quickActions.map((action) => (
-                <JumpCard
+                <ColorJumpCard
                   key={action.href}
+                  tone={action.tone}
                   title={action.title}
                   desc={action.desc}
                   icon={action.icon}

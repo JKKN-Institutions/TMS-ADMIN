@@ -12,11 +12,12 @@ import {
 } from 'recharts';
 import {
   ChartCard, Legend, VizTable, VizTooltip, axisLine, axisTick, gridProps, num,
+  type Accent,
 } from '../_viz/kit';
 import { shortDayLabel, percentOf } from '@/lib/dashboard/format';
 import type { DashboardTrendPoint } from '@/lib/dashboard/types';
 
-export function TrendChart({ trend }: { trend: DashboardTrendPoint[] }) {
+export function TrendChart({ trend, accent }: { trend: DashboardTrendPoint[]; accent?: Accent }) {
   const rows = trend.map((p) => ({
     ...p,
     label: shortDayLabel(p.date),
@@ -29,6 +30,7 @@ export function TrendChart({ trend }: { trend: DashboardTrendPoint[] }) {
 
   return (
     <ChartCard
+      accent={accent}
       title="Demand, last 14 days"
       subtitle="Seats booked against learners actually boarded"
       hasData={hasData}
