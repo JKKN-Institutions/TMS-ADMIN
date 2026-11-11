@@ -7,7 +7,7 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { istDateOf, normEmail, isMonth, monthBounds } from '@/lib/fees/incharge-bill-review';
 import type { AbsenceRow } from '@/lib/boarding/share-coverage';
 import {
-  buildMarkingReport, monthDays, type InchargeInput, type MarkingRow, type RawMarks,
+  buildMarkingReport, monthDays, toYearRows, type InchargeInput, type MarkingRow, type RawMarks, type YearRow,
 } from '@/lib/attendance/incharge-marking';
 
 export interface InchargeMarkingResponse {
@@ -16,6 +16,15 @@ export interface InchargeMarkingResponse {
   today: string;
   days: string[];
   rows: MarkingRow[];
+}
+
+export interface InchargeYearResponse {
+  year: string;
+  direction: 'onward' | 'return';
+  today: string;
+  /** 'YYYY-MM' for every month of the year up to the current one. */
+  months: string[];
+  rows: YearRow[];
 }
 
 interface StaffRow {
@@ -29,6 +38,8 @@ interface StaffRow {
 
 /**
  * GET /api/admin/attendance/incharges?month=YYYY-MM&direction=onward|return
+ * GET /api/admin/attendance/incharges?year=YYYY&direction=onward|return
+ *   (the year form returns a summary per in-charge per month, no day cells)
  *
  * The In-charge marking report: for every active in-charge assignment, each
  * day of the month classified as marked / marked by others / not marked / on
@@ -44,14 +55,25 @@ export async function GET(request: NextRequest) {
 
     const sp = new URL(request.url).searchParams;
     const today = istToday();
+    const yearParam = sp.get('year');
+    if (yearParam !== null && !/^\d{4}$/.test(yearParam)) {
+      return NextResponse.json({ error: 'year must be YYYY' }, { status: 400 });
+    }
     const month = sp.get('month') ?? today.slice(0, 7);
-    if (!isMonth(month)) return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
+    if (!yearParam && !isMonth(month)) return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
     const dirParam = sp.get('direction') ?? 'onward';
     if (dirParam !== 'onward' && dirParam !== 'return') {
       return NextResponse.json({ error: 'direction must be onward or return' }, { status: 400 });
     }
     const direction = dirParam;
-    const { first, last } = monthBounds(month);
+    const { first, last } = yearParam
+      ? { first: `${yearParam}-01-01`, last: `${yearParam}-12-31` }
+      : monthBounds(month);
+    // Every date of the range; days after today are classified 'na' and cost nothing.
+    const yearMonths = yearParam
+      ? Array.from({ length: 12 }, (_, i) => `${yearParam}-${String(i + 1).padStart(2, '0')}`).filter((m) => m <= today.slice(0, 7))
+      : [];
+    const days = yearParam ? yearMonths.flatMap(monthDays) : monthDays(month);
 
     const svc = createServiceRoleClient();
     const fail = (what: string, error: unknown) => {
@@ -132,7 +154,7 @@ export async function GET(request: NextRequest) {
     }
 
     const rows = buildMarkingReport({
-      days: monthDays(month),
+      days,
       today,
       incharges,
       marks: marksRes.data as RawMarks,
@@ -146,7 +168,11 @@ export async function GET(request: NextRequest) {
       x.name.localeCompare(y.name),
     );
 
-    const data: InchargeMarkingResponse = { month, direction, today, days: monthDays(month), rows };
+    if (yearParam) {
+      const data: InchargeYearResponse = { year: yearParam, direction, today, months: yearMonths, rows: toYearRows(rows, yearMonths) };
+      return NextResponse.json({ success: true, data });
+    }
+    const data: InchargeMarkingResponse = { month, direction, today, days, rows };
     return NextResponse.json({ success: true, data });
   } catch (e) {
     console.error('In-charge marking API error:', e);
