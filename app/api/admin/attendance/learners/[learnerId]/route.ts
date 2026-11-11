@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { denyUnlessPerm } from '@/lib/auth/require-perm';
 import { loadPassengerRefs } from '@/lib/passengers/refs';
+import { loadMarkerNames } from '@/lib/boarding/identity';
 import { LEARNER_SELECT, mapLearner, type LearnerRow } from '@/lib/passengers/types';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
@@ -15,6 +16,7 @@ interface AttRow {
   route_id: string | null;
   stop_id: string | null;
   scanned_at: string;
+  scanned_by: string | null;
   rider_kind: string | null;
 }
 
@@ -39,6 +41,8 @@ export interface LearnerReportRow {
   routeLabel: string | null;
   stopLabel: string | null;
   scannedAt: string;
+  /** Who scanned or marked it (the in-charge). Null for automatic marks or a deleted profile. */
+  markedByName: string | null;
   riderKind: RiderKind | null;
 }
 
@@ -77,7 +81,7 @@ export async function GET(
     const [att, who] = await Promise.all([
       svc
         .from('tms_attendance')
-        .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at, rider_kind')
+        .select('id, trip_date, direction, status, method, route_id, stop_id, scanned_at, scanned_by, rider_kind')
         .eq('learner_id', learnerId)
         .order('trip_date', { ascending: false })
         .order('scanned_at', { ascending: false }),
@@ -100,12 +104,15 @@ export async function GET(
     if (who.error) console.error('Learner identity query error:', who.error);
     const learnerRow = who.error ? null : ((who.data as unknown as LearnerRow | null) ?? null);
 
-    const refs = await loadPassengerRefs(svc, {
-      institutionIds: [learnerRow?.institution_id ?? null],
-      departmentIds: [learnerRow?.department_id ?? null],
-      routeIds: [...rows.map((r) => r.route_id), learnerRow?.transport_route_id ?? null],
-      stopIds: [...rows.map((r) => r.stop_id), learnerRow?.transport_stop_id ?? null],
-    });
+    const [refs, markerNames] = await Promise.all([
+      loadPassengerRefs(svc, {
+        institutionIds: [learnerRow?.institution_id ?? null],
+        departmentIds: [learnerRow?.department_id ?? null],
+        routeIds: [...rows.map((r) => r.route_id), learnerRow?.transport_route_id ?? null],
+        stopIds: [...rows.map((r) => r.stop_id), learnerRow?.transport_stop_id ?? null],
+      }),
+      loadMarkerNames(svc, rows.map((r) => r.scanned_by)),
+    ]);
 
     let learner: LearnerReportIdentity | null = null;
     if (learnerRow) {
@@ -134,6 +141,7 @@ export async function GET(
           routeLabel: route ? `${route.routeNumber} · ${route.routeName}` : null,
           stopLabel: r.stop_id ? refs.stops.get(r.stop_id) ?? null : null,
           scannedAt: r.scanned_at,
+          markedByName: r.scanned_by ? markerNames.get(r.scanned_by) ?? null : null,
           riderKind: parseRiderKind(r.rider_kind),
         };
       }),

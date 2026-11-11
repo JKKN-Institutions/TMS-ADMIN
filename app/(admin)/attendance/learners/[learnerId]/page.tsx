@@ -71,7 +71,7 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
   const [month, setMonth] = useState<string | null>(isMonthKey(requested) ? requested : null);
   const [filteredRows, setFilteredRows] = useState<AttendanceRow[] | null>(null);
 
-  const columns = useMemo(() => getAttendanceColumns(), []);
+  const columns = useMemo(() => getAttendanceColumns({ showMarker: true }), []);
   const all = useMemo<AttendanceRow[]>(() => data?.rows ?? [], [data]);
   // Newest first. Includes the asked-for month even when it has no records.
   const months = useMemo(() => {
@@ -131,7 +131,7 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
         { header: 'Bus', value: (r) => r.routeLabel, width: 30 },
         { header: 'Stop', value: (r) => r.stopLabel, width: 24 },
         { header: 'Status', value: (r) => (r.status === 'present' ? 'Present' : 'Absent'), width: 10 },
-        { header: 'Marked by', value: (r) => (isAutoMark(r.method) ? 'Automatic' : 'Staff'), width: 12 },
+        { header: 'Marked by', value: (r) => (isAutoMark(r.method) ? 'Automatic' : r.markedByName ?? 'Staff'), width: 24 },
         { header: 'Time', value: (r) => (isAutoMark(r.method) ? '' : timeLabel(r.scannedAt)), width: 10 },
       ],
     });
@@ -243,7 +243,7 @@ function LearnerAttendanceReport({ learnerId }: { learnerId: string }) {
               getRowId={(r) => r.id}
               entityName="records"
               isLoading={isLoading}
-              searchPlaceholder="Search route, stop..."
+              searchPlaceholder="Search route, stop, marked by..."
               emptyMessage={
                 selected === ALL ? 'No attendance recorded for this learner yet.' : `No attendance in ${monthLabel(selected)}.`
               }
