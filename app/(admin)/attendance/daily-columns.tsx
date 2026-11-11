@@ -2,16 +2,37 @@
 
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
+import { Bus } from 'lucide-react';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import { DAILY_STATUS_LABEL, type DailyRouteRow, type DailyStatus } from '@/lib/attendance/daily-report';
 
-// Coloured tints are not remapped in dark mode here, hence the explicit pairs.
+// Solid pills, as in the reference dashboard. Each shade keeps white text
+// readable (amber-500 would not), and solid fills need no dark-mode pair.
 const STATUS_TONE: Record<DailyStatus, string> = {
-  marked: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300',
-  low: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
-  not_marked: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
-  no_service: 'bg-gray-100 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300',
+  marked: 'bg-green-600 text-white',
+  low: 'bg-amber-700 text-white',
+  not_marked: 'bg-red-600 text-white',
+  no_service: 'bg-slate-500 text-white',
 };
+
+const DASH = <span className="text-muted-foreground">—</span>;
+
+/** A scan-time column: when the first / last card was scanned on that bus. */
+const scanTime = (
+  id: string,
+  title: string,
+  value: (r: DailyRouteRow) => string | null,
+): ColumnDef<DailyRouteRow> => ({
+  id,
+  accessorFn: (r) => value(r) ?? '',
+  enableGlobalFilter: false,
+  meta: { label: title },
+  header: ({ column }) => <DataTableColumnHeader column={column} title={title} />,
+  cell: ({ row }) => {
+    const v = value(row.original);
+    return v ? <span className="tabular-nums text-foreground">{v}</span> : DASH;
+  },
+});
 
 const isMarked = (r: DailyRouteRow) => r.status === 'marked' || r.status === 'low';
 
@@ -39,22 +60,44 @@ export function getDailyColumns(date: string, direction: 'onward' | 'return'): C
   return [
     {
       id: 'route',
+      // Number and name together, so the search box finds either.
       accessorFn: (r) => `${r.routeNumber ?? ''} ${r.routeName ?? ''}`.trim(),
+      sortingFn: (x, y) =>
+        (x.original.routeNumber ?? '').localeCompare(y.original.routeNumber ?? '', undefined, { numeric: true }),
       enableHiding: false,
-      meta: { label: 'Route' },
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Route" />,
+      meta: { label: 'Route No' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Route No" />,
       cell: ({ row }) => {
         const r = row.original;
         return (
           <Link
             href={`/attendance/${r.routeId}/${date}?direction=${direction}`}
-            className="block min-w-0 max-w-[16rem] hover:underline"
+            className="group/route inline-flex items-center gap-2.5"
             title="Open the learner list for this bus and day"
           >
-            <span className="font-medium text-foreground">{r.routeNumber ?? '—'}</span>{' '}
-            <span className="text-muted-foreground">{r.routeName ?? ''}</span>
-            {!r.hasBus && <span className="block text-xs text-amber-700 dark:text-amber-300">No bus assigned</span>}
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300">
+              <Bus className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <span className="font-semibold tabular-nums text-foreground group-hover/route:underline">
+              {r.routeNumber ?? '—'}
+            </span>
           </Link>
+        );
+      },
+    },
+    {
+      id: 'routeName',
+      accessorFn: (r) => r.routeName ?? '',
+      enableGlobalFilter: false,
+      meta: { label: 'Route name' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Route name" />,
+      cell: ({ row }) => {
+        const r = row.original;
+        return (
+          <div className="min-w-0 max-w-[15rem]">
+            <span className="block truncate text-foreground" title={r.routeName ?? undefined}>{r.routeName ?? '—'}</span>
+            {!r.hasBus && <span className="block text-xs text-amber-700 dark:text-amber-300">No bus assigned</span>}
+          </div>
         );
       },
     },
@@ -70,7 +113,7 @@ export function getDailyColumns(date: string, direction: 'onward' | 'return'): C
         const r = row.original;
         return (
           <div>
-            <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_TONE[r.status]}`}>
+            <span className={`inline-flex min-w-[6.5rem] justify-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${STATUS_TONE[r.status]}`}>
               {DAILY_STATUS_LABEL[r.status]}
             </span>
             {r.status === 'not_marked' && r.unmarkedDays > 1 && (
@@ -99,7 +142,7 @@ export function getDailyColumns(date: string, direction: 'onward' | 'return'): C
         const p = row.original.presentPct;
         if (p === null) return <span className="text-muted-foreground">—</span>;
         return (
-          <div className="w-24">
+          <div className="mx-auto w-24">
             <span className="text-sm tabular-nums">{p}%</span>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
               <div
@@ -111,6 +154,8 @@ export function getDailyColumns(date: string, direction: 'onward' | 'return'): C
         );
       },
     },
+    scanTime('firstScan', 'First scan', (r) => r.firstScan),
+    scanTime('lastScan', 'Last scan', (r) => r.lastScan),
     {
       id: 'scannedBy',
       accessorFn: (r) => r.markers,
@@ -127,11 +172,6 @@ export function getDailyColumns(date: string, direction: 'onward' | 'return'): C
           <div className="whitespace-nowrap text-sm">
             <span className="tabular-nums">{r.markers}</span>
             <span className="text-muted-foreground"> of {r.incharges} in-charges</span>
-            {r.firstScan && (
-              <span className="block text-xs tabular-nums text-muted-foreground">
-                {r.firstScan === r.lastScan ? r.firstScan : `${r.firstScan}–${r.lastScan}`}
-              </span>
-            )}
           </div>
         );
       },

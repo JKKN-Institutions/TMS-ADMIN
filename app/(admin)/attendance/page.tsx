@@ -77,6 +77,18 @@ async function fetchDaily(date: string, direction: Direction): Promise<DailyRepo
 const BAR_BUTTON =
   'inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40';
 
+// The every-bus table in the reference dashboard's format: tinted header row,
+// centred figures, roomier rows. Scoped to this page so the shared DataTable
+// (and every other admin list) keeps the MyJKKN format.
+const DAILY_TABLE_CSS = `
+.daily-table thead th{background:#f0fdf4;color:#166534;font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;height:2.75rem}
+.dark .daily-table thead th{background:#12261a;color:#bbf7d0}
+.daily-table thead th button{font-size:inherit;font-weight:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit}
+.daily-table tbody td{padding-top:.7rem;padding-bottom:.7rem}
+.daily-table th:nth-child(n+3),.daily-table td:nth-child(n+3){text-align:center}
+.daily-table th:nth-child(n+3) button{margin-left:0}
+`;
+
 const STATUS_OPTIONS = (['marked', 'low', 'not_marked', 'no_service'] as DailyStatus[]).map((s) => ({
   label: DAILY_STATUS_LABEL[s],
   value: s,
@@ -154,7 +166,7 @@ export default function AttendanceDailyReportPage() {
 
   return (
     <div className="viz-scope space-y-5">
-      <style dangerouslySetInnerHTML={{ __html: VIZ_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: VIZ_CSS + DAILY_TABLE_CSS }} />
       <AttendanceTabs />
 
       {/* 1. Header banner */}
@@ -318,8 +330,16 @@ export default function AttendanceDailyReportPage() {
 
       {/* 6. Every bus */}
       {showFigures && (
-        <section aria-label="Every bus" className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Every bus</h2>
+        <section
+          aria-label="Bus-wise attendance"
+          className="daily-table space-y-4 rounded-2xl border border-border bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_12px_28px_-18px_rgba(15,23,42,0.35)] sm:p-5"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Bus-wise attendance</h2>
+            <p className="text-xs text-muted-foreground">
+              {shortDate(date)} · {tripName} trip · click a route number for its learners
+            </p>
+          </div>
           <DataTable
             columns={columns}
             data={rows}
