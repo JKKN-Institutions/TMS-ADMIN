@@ -689,7 +689,7 @@ export default function DriverLocationPage() {
   // row at the bottom. The page itself never scrolls, so a finger on the map always
   // moves the map.
   return (
-    <div className="driver-trip-screen -mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_7.5rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6 lg:-mb-6 lg:h-[calc(100dvh_-_4rem_-_var(--pwa-banner-h,0px))]">
+    <div className="driver-trip-screen -mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_7.0625rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6 lg:-mb-6 lg:h-[calc(100dvh_-_4rem_-_var(--pwa-banner-h,0px))]">
       {/* Top strip: before the trip, which route and bus; during it, whether learners can see the bus. */}
       {trip && health ? (
         <div role="status" aria-live="polite" className={cn('shrink-0 px-4 py-2.5', tone)}>

@@ -227,6 +227,13 @@ export default function TrackAllPage() {
     : true;
   const mapSelectedRouteId = selectedRouteStillPresent ? selectedRouteId : null;
 
+  // Picking a route in the list: on a phone the list closes so the map, now centred on
+  // that bus with its card, is what the admin sees. Desktop shows both side by side.
+  const selectFromList = useCallback((id: string | null) => {
+    setSelectedRouteId(id);
+    if (id && !window.matchMedia('(min-width: 900px)').matches) setListOpen(false);
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     const res = await refetch();
     if (res.error) toast.error("Couldn't refresh — check your connection");
@@ -307,7 +314,7 @@ export default function TrackAllPage() {
       routes={routes}
       filter={filter}
       selectedRouteId={selectedRouteId}
-      onSelectRoute={setSelectedRouteId}
+      onSelectRoute={selectFromList}
       onNudge={(id) => void handleNudge(id)}
       nudges={nudges}
     />
@@ -347,7 +354,7 @@ export default function TrackAllPage() {
       ? `${STATUS_GROUPS.find((g) => g.key === filter)?.label} · ${groupCounts[filter]}`
       : `All routes · ${routes.length}`;
     return (
-      <div className="-mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_8rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6">
+      <div className="-mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_7.0625rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6">
         <div className="shrink-0 space-y-2 border-b border-gray-200 bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900">
           <div className="flex items-center justify-between gap-2">
             <p className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
@@ -410,7 +417,7 @@ export default function TrackAllPage() {
               <ChevronUp className={cn('h-5 w-5 transition-transform', listOpen && 'rotate-180')} />
             </span>
           </button>
-          {listOpen && <div className="h-[52dvh] min-h-0 px-2 pb-2">{list}</div>}
+          {listOpen && <div className="h-[38dvh] min-h-0 px-2 pb-2">{list}</div>}
         </div>
       </div>
     );

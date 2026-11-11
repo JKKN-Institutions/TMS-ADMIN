@@ -536,15 +536,15 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   return (
     // No tall min-height here: the caller sizes the box. A 420px minimum inside a
     // shorter overflow-hidden box clipped the selected-bus card on phones.
-    <div className="relative isolate h-full min-h-[260px] w-full">
+    <div className="relative isolate h-full min-h-[120px] w-full">
       <div ref={mapRef} className="absolute inset-0" />
-      {/* Bottom-right: the top-right corner belongs to Leaflet's layers control,
-          which the old "Recenter" button sat on top of. */}
+      {/* Top-right, under Leaflet's layers control: the bottom of the map belongs to the
+          selected-bus card, which is as wide as the map on a phone. */}
       {buses.length > 0 && (
         <button
           type="button"
           onClick={fitToMarkers}
-          className="absolute bottom-3 right-3 z-[1000] rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          className="absolute right-2.5 top-16 z-[1000] rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
         >
           Fit all buses
         </button>
@@ -563,7 +563,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
         </div>
       )}
       {selectedBus && (
-        <div className="absolute bottom-3 left-3 z-[1000] max-w-[320px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+        <div className="absolute bottom-3 left-3 right-3 z-[1000] max-w-[320px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
