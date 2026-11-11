@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildMarkingReport, classifyCell, monthDays, summarizeDay,
+  bandCounts, buildMarkingReport, classifyCell, monthDays, summarizeCells, summarizeDay, toYearRows,
   type InchargeInput, type MarkingInputs,
 } from './incharge-marking';
 
@@ -104,5 +104,30 @@ describe('monthDays', () => {
   it('lists every date', () => {
     expect(monthDays('2026-02')).toHaveLength(28);
     expect(monthDays('2026-11')[29]).toBe('2026-11-30');
+  });
+});
+
+describe('period summaries', () => {
+  const cell = (s: any) => ({ s, n: 0, bus: 0, first: null, last: null });
+  it('summarizeCells counts duty days only', () => {
+    expect(summarizeCells([cell('marked'), cell('others'), cell('missed'), cell('leave'), cell('off'), cell('na')]))
+      .toEqual({ duty: 3, marked: 1, others: 1, missed: 1, leave: 1, pct: 33 });
+    expect(summarizeCells([cell('off')]).pct).toBeNull();
+  });
+  it('toYearRows splits by month', () => {
+    const rows = buildMarkingReport(base({
+      marks: {
+        person_days: [{ profile_id: 'p1', email: null, d: '2026-11-02', n: 3, first: null, last: null }],
+        route_days: [],
+        fleet_days: ['2026-11-02', '2026-11-03'],
+      },
+    }));
+    const y = toYearRows(rows, ['2026-10', '2026-11'])[0];
+    expect(y.months['2026-10'].pct).toBeNull();
+    expect(y.months['2026-11']).toMatchObject({ duty: 2, marked: 1, pct: 50 });
+    expect(y.total.pct).toBe(50);
+  });
+  it('bandCounts', () => {
+    expect(bandCounts([0, 50, 80, 100, null])).toEqual({ people: 4, avg: 58, never: 1, low: 1, good: 2 });
   });
 });

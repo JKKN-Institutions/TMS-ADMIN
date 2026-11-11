@@ -230,3 +230,74 @@ export function summarizeDay(rows: MarkingRow[], date: string) {
   }
   return out;
 }
+
+// ── Month and year summaries ───────────────────────────────────────────────
+
+export interface PeriodSummary {
+  duty: number;
+  marked: number;
+  others: number;
+  missed: number;
+  leave: number;
+  /** marked / duty, rounded; null with no duty days. */
+  pct: number | null;
+}
+
+export function summarizeCells(cells: MarkingCell[]): PeriodSummary {
+  const out: PeriodSummary = { duty: 0, marked: 0, others: 0, missed: 0, leave: 0, pct: null };
+  for (const c of cells) {
+    if (c.s === 'marked') out.marked++;
+    else if (c.s === 'others') out.others++;
+    else if (c.s === 'missed') out.missed++;
+    else if (c.s === 'leave') out.leave++;
+  }
+  out.duty = out.marked + out.others + out.missed;
+  out.pct = out.duty > 0 ? Math.round((out.marked / out.duty) * 100) : null;
+  return out;
+}
+
+/** One in-charge over a year: a summary per month ('YYYY-MM') plus the year. */
+export interface YearRow {
+  assignmentId: string;
+  name: string;
+  email: string;
+  routeId: string;
+  routeNumber: string | null;
+  routeName: string | null;
+  months: Record<string, PeriodSummary>;
+  total: PeriodSummary;
+}
+
+export function toYearRows(rows: MarkingRow[], months: string[]): YearRow[] {
+  return rows.map((r) => {
+    const all = Object.entries(r.cells);
+    const byMonth: Record<string, PeriodSummary> = {};
+    for (const m of months) byMonth[m] = summarizeCells(all.filter(([d]) => d.startsWith(m)).map(([, c]) => c));
+    return {
+      assignmentId: r.assignmentId,
+      name: r.name,
+      email: r.email,
+      routeId: r.routeId,
+      routeNumber: r.routeNumber,
+      routeName: r.routeName,
+      months: byMonth,
+      total: summarizeCells(all.map(([, c]) => c)),
+    };
+  });
+}
+
+/** Tile counts for a month or a year: how many in-charges fall in each band. */
+export function bandCounts(pcts: Array<number | null>) {
+  const out = { people: 0, avg: null as number | null, never: 0, low: 0, good: 0 };
+  let sum = 0;
+  for (const p of pcts) {
+    if (p === null) continue;
+    out.people++;
+    sum += p;
+    if (p === 0) out.never++;
+    else if (p < 75) out.low++;
+    else out.good++;
+  }
+  out.avg = out.people > 0 ? Math.round(sum / out.people) : null;
+  return out;
+}
