@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { X, Bus, Search, Power, ChevronDown } from 'lucide-react';
-import toast, { Toaster } from 'react-hot-toast';
+import { X, Bus, Search, ChevronDown } from 'lucide-react';
+import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from '@/components/error-boundary';
 import AdminHeader from '@/components/admin-header';
 import BottomNav from '@/components/bottom-nav';
+import { SidebarInstallButton } from '@/components/pwa/sidebar-install-button';
 import { BugReporterWrapper } from '@/components/bug-reporter/bug-reporter-wrapper';
 import {
   Tooltip,
@@ -29,7 +30,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, loading } = useAuth();
   const { can, isSuperAdmin, isLoading: permsLoading } = usePermissions();
 
   // Restore the desktop collapse preference across reloads.
@@ -139,11 +140,6 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       )}
     </div>
   );
-
-  const handleLogout = async () => {
-    toast.success('Signing out…');
-    await signOut();
-  };
 
   if (loading || !profile) {
     return (
@@ -260,16 +256,8 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             )}
           </div>
 
-          <div className="sidebar-user">
-            <button
-              onClick={handleLogout}
-              className="btn-secondary w-full text-red-600 hover:text-red-700 hover:bg-red-50"
-              title="Sign Out"
-            >
-              <Power className="w-4 h-4 mr-2" />
-              <span className="sidebar-label">Sign Out</span>
-            </button>
-          </div>
+          {/* Sign out lives in the header's user menu; the sidebar foot offers Install. */}
+          <SidebarInstallButton />
         </div>
 
         <div className={`main-content ${collapsed ? 'sidebar-collapsed' : ''}`}>
