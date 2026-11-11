@@ -5,20 +5,22 @@
  * days travelled, morning / evening trips and absences, and how many of them
  * are hostel students or irregular riders (not registered for transport but
  * scanned on a bus). Click a learner for their attendance report.
+ *
+ * Layout (top to bottom): header banner → colour KPI tiles → month bar →
+ * learner table, matching the Daily Report.
  */
 
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnFiltersState } from '@tanstack/react-table';
-import { BedDouble, Bus, CalendarCheck2, UserRound, Users } from 'lucide-react';
-import { PageHeader } from '@/components/ui/page-header';
-import { SummaryCard, SummaryCards } from '@/components/ui/summary-cards';
+import { BedDouble, Bus, CalendarCheck2, CalendarDays, ChevronLeft, ChevronRight, UserRound, Users } from 'lucide-react';
 import { DataTable } from '@/components/ui/data-table';
 import { ExportMenu } from '@/components/ui/export-menu';
 import { exportTable, type ExportFormat } from '@/lib/export/table-export';
 import { istMonth } from '@/lib/attendance/month-summary';
 import { RIDER_KIND_LABEL, type RiderKind } from '@/lib/attendance/rider-kind';
 import { AttendanceTabs } from '../attendance-tabs';
+import { ATT_TABLE_CSS, AttendanceBanner, BAR_BUTTON, ControlBar, KpiTile, SectionPanel } from '../attendance-ui';
 import { getRegisterColumns, type LearnerRegisterRow } from './columns';
 
 async function fetchRegister(month: string): Promise<LearnerRegisterRow[]> {
@@ -30,6 +32,15 @@ async function fetchRegister(month: string): Promise<LearnerRegisterRow[]> {
 
 const monthLabel = (m: string) =>
   new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+/** The month before / after, as YYYY-MM. */
+function stepMonth(month: string, by: 1 | -1): string {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + by, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 export default function LearnerRegisterPage() {
   const [month, setMonth] = useState(istMonth());
@@ -52,6 +63,7 @@ export default function LearnerRegisterPage() {
   const travelled = rows.filter((r) => r.daysTravelled > 0);
   const count = (kind: RiderKind) => travelled.filter((r) => r.riderKind === kind).length;
   const trips = travelled.reduce((n, r) => n + r.onwardPresent + r.returnPresent, 0);
+  const morning = travelled.reduce((n, r) => n + r.onwardPresent, 0);
   const riderFilter = columnFilters.find((f) => f.id === 'rider')?.value as string | undefined;
   const toggleRider = (kind: RiderKind) =>
     setColumnFilters((prev) => {
@@ -89,81 +101,132 @@ export default function LearnerRegisterPage() {
       ],
     });
 
-  const dash = isLoading ? '—' : undefined;
+  // An error must not fall through to zeros: "0 learners" is a different and false claim.
+  const dash = isLoading || isError ? '—' : undefined;
+  const thisMonth = istMonth();
+  const all = travelled.length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      <style dangerouslySetInnerHTML={{ __html: ATT_TABLE_CSS }} />
       <AttendanceTabs />
-      <PageHeader description="Every learner's bus attendance for a month. A day counts once even when the learner rode both trips. Hostel and Irregular riders are not registered for transport and were recorded when their card was scanned." />
 
-      <label className="block w-fit text-xs text-muted-foreground">
-        Month
-        <input
-          type="month"
-          value={month}
-          max={istMonth()}
-          onChange={(e) => e.target.value && setMonth(e.target.value)}
-          className="input mt-1 block"
+      {/* 1. Header banner */}
+      <AttendanceBanner
+        title="Learner register"
+        description="Every learner's bus attendance for a month. A day counts once even when the learner rode both trips. Click a learner to open their attendance report."
+        chip={{ icon: CalendarDays, label: 'Month', value: monthLabel(month) }}
+      />
+
+      {/* 2. KPI tiles */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+        <KpiTile
+          tone="blue" icon={Users} label="Learners travelled" value={dash ?? all}
+          sub={dash ? undefined : 'at least one trip this month'}
         />
-      </label>
-
-      <SummaryCards>
-        <SummaryCard icon={Users} label="Learners travelled" value={dash ?? travelled.length} tone="info" />
-        <SummaryCard
-          icon={BedDouble}
-          label="Hostel students on bus"
-          value={dash ?? count('hosteller')}
-          tone="info"
-          hint="click to show only them"
+        <KpiTile
+          tone="green" icon={Bus} label="Transport riders" value={dash ?? count('transport')}
+          sub={dash ? undefined : `${pct(count('transport'), all)}% of learners`}
+          title="Learners registered for transport"
+        />
+        <KpiTile
+          tone="violet" icon={BedDouble} label="Hostel students" value={dash ?? count('hosteller')}
+          sub={dash ? undefined : 'on a bus · tap to show them'}
+          title="Hostel students recorded when their card was scanned on a bus. Tap to show only them."
           active={riderFilter === 'hosteller'}
           onClick={() => toggleRider('hosteller')}
         />
-        <SummaryCard
-          icon={UserRound}
-          label="Irregular riders"
-          value={dash ?? count('non_transport')}
-          hint="not registered, not hostel"
+        <KpiTile
+          tone="orange" icon={UserRound} label="Irregular riders" value={dash ?? count('non_transport')}
+          sub={dash ? undefined : 'not registered · tap to show them'}
+          title="Not registered for transport and not hostel. Tap to show only them."
           active={riderFilter === 'non_transport'}
           onClick={() => toggleRider('non_transport')}
         />
-        <SummaryCard icon={Bus} label="Transport riders" value={dash ?? count('transport')} />
-        <SummaryCard icon={CalendarCheck2} label="Trips this month" value={dash ?? trips} tone="good" />
-      </SummaryCards>
+        <KpiTile
+          tone="teal" icon={CalendarCheck2} label="Trips this month" value={dash ?? trips.toLocaleString('en-IN')}
+          sub={dash ? undefined : `${morning.toLocaleString('en-IN')} morning · ${(trips - morning).toLocaleString('en-IN')} evening`}
+        />
+      </div>
 
+      {/* 3. Month bar */}
+      <ControlBar>
+        <CalendarDays className="ml-1 hidden h-5 w-5 text-green-600 sm:block" aria-hidden="true" />
+        <div className="flex items-center gap-1.5">
+          <button type="button" className={`${BAR_BUTTON} w-10`} aria-label="Previous month" onClick={() => setMonth(stepMonth(month, -1))}>
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <input
+            type="month"
+            value={month}
+            max={thisMonth}
+            onChange={(e) => e.target.value && setMonth(e.target.value)}
+            className="input block"
+            aria-label="Register month"
+          />
+          <button
+            type="button"
+            className={`${BAR_BUTTON} w-10`}
+            aria-label="Next month"
+            disabled={month >= thisMonth}
+            onClick={() => setMonth(stepMonth(month, 1))}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMonth(thisMonth)}
+          disabled={month === thisMonth}
+          className={`${BAR_BUTTON} px-4 text-sm font-medium`}
+        >
+          This month
+        </button>
+      </ControlBar>
+
+      {/* 4. Learners */}
       {isError ? (
-        <p className="rounded-lg border border-border p-6 text-sm text-foreground">
-          Could not load the learner register{error instanceof Error ? `: ${error.message}` : ''}.
+        <p className="rounded-xl border border-border p-6 text-sm text-foreground">
+          Could not load the learner register{error instanceof Error ? `: ${error.message}` : ''}. Figures are not
+          shown rather than shown as zero.
         </p>
       ) : (
-        <DataTable
-          columns={columns}
-          data={rows}
-          entityName="learners"
-          isLoading={isLoading}
-          searchPlaceholder="Search name or roll no..."
-          emptyMessage={`No bus attendance recorded in ${monthLabel(month)}.`}
-          columnFilters={columnFilters}
-          onColumnFiltersChange={setColumnFilters}
-          onFilteredRowsChange={onFilteredRowsChange}
-          filters={[
-            {
-              columnId: 'rider',
-              title: 'Rider',
-              options: (['transport', 'hosteller', 'non_transport'] as RiderKind[]).map((k) => ({
-                label: RIDER_KIND_LABEL[k],
-                value: k,
-              })),
-            },
-            { columnId: 'route', title: 'Bus', options: routeOptions },
-          ]}
-          toolbarActions={({ selectedRows }) => (
-            <ExportMenu
-              onExport={(format) => onExport(format, selectedRows)}
-              selectedCount={selectedRows.length}
-              disabled={rows.length === 0}
-            />
-          )}
-        />
+        <SectionPanel
+          title="Learner-wise attendance"
+          note={`${monthLabel(month)} · click a learner for their report`}
+          table
+        >
+          <DataTable
+            columns={columns}
+            data={rows}
+            getRowId={(r) => r.learnerId}
+            entityName="learners"
+            isLoading={isLoading}
+            searchPlaceholder="Search name or roll no..."
+            emptyMessage={`No bus attendance recorded in ${monthLabel(month)}.`}
+            columnFilters={columnFilters}
+            onColumnFiltersChange={setColumnFilters}
+            onFilteredRowsChange={onFilteredRowsChange}
+            filters={[
+              {
+                columnId: 'rider',
+                title: 'Rider',
+                options: (['transport', 'hosteller', 'non_transport'] as RiderKind[]).map((k) => ({
+                  label: RIDER_KIND_LABEL[k],
+                  value: k,
+                })),
+              },
+              { columnId: 'route', title: 'Bus', options: routeOptions },
+            ]}
+            toolbarActions={({ selectedRows }) => (
+              <ExportMenu
+                onExport={(format) => onExport(format, selectedRows)}
+                selectedCount={selectedRows.length}
+                disabled={rows.length === 0}
+              />
+            )}
+          />
+        </SectionPanel>
       )}
     </div>
   );
