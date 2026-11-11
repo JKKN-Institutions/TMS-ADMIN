@@ -2,7 +2,7 @@
 
 import type { ColumnDef } from '@tanstack/react-table';
 import type { RiderKind } from '@/lib/attendance/rider-kind';
-import { Clock, Pencil, QrCode } from 'lucide-react';
+import { Bot, Clock, Pencil, QrCode, UserRound } from 'lucide-react';
 import { isAutoMark, AUTO_MARK_TITLE } from '@/lib/boarding/auto-mark';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 
@@ -18,6 +18,8 @@ export interface AttendanceRow {
   scannedAt: string;
   /** Transport / hosteller / non_transport, stored on the mark. */
   riderKind?: RiderKind | null;
+  /** Who scanned or marked it. Only the admin report sends this. */
+  markedByName?: string | null;
 }
 
 const fmtDate = (d: string) =>
@@ -56,8 +58,8 @@ function StatusBadge({ status }: { status: string }) {
  * select or actions column — a learner only ever reads these records, so the
  * factory takes no callbacks or permission flags.
  */
-export function getAttendanceColumns(): ColumnDef<AttendanceRow>[] {
-  return [
+export function getAttendanceColumns(opts: { showMarker?: boolean } = {}): ColumnDef<AttendanceRow>[] {
+  const cols: ColumnDef<AttendanceRow>[] = [
     {
       accessorKey: 'tripDate',
       header: ({ column }) => <DataTableColumnHeader column={column} title="Date" />,
@@ -120,4 +122,30 @@ export function getAttendanceColumns(): ColumnDef<AttendanceRow>[] {
       ),
     },
   ];
+  if (!opts.showMarker) return cols;
+
+  // Admin only: name the in-charge who scanned the learner. Automatic marks
+  // (the closing job) have no person, so they say so instead of showing a dash.
+  cols.push({
+    id: 'markedBy',
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Marked by" />,
+    accessorFn: (r) => (isAutoMark(r.method) ? 'Automatic' : r.markedByName ?? ''),
+    size: 180,
+    cell: ({ row }) => {
+      const r = row.original;
+      if (isAutoMark(r.method))
+        return (
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-gray-400" title={AUTO_MARK_TITLE}>
+            <Bot className="h-3.5 w-3.5" /> Automatic
+          </span>
+        );
+      if (!r.markedByName) return <span className="text-gray-400">—</span>;
+      return (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-medium text-gray-700 dark:text-gray-200">
+          <UserRound className="h-3.5 w-3.5 text-green-600" /> {r.markedByName}
+        </span>
+      );
+    },
+  });
+  return cols;
 }
