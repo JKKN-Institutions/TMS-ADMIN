@@ -190,7 +190,8 @@ async function handler(_request: NextRequest, auth: AuthContext) {
     };
 
     const response: FleetResponse = { success: true, summary, routes: result };
-    return NextResponse.json(response);
+    // serverNow lets the page age positions against THIS clock, not the viewer's.
+    return NextResponse.json({ ...response, serverNow: new Date().toISOString() });
   } catch (error) {
     console.error('track-all/routes GET error:', error);
     return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });

@@ -46,4 +46,6 @@ export interface FleetResponse {
   success: true;
   summary: FleetSummary;
   routes: FleetRoute[];
+  /** The server's time when it answered, for ageing positions against its clock. */
+  serverNow?: string;
 }

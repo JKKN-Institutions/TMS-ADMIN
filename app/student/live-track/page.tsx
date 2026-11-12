@@ -9,6 +9,7 @@ import { useViewerLocation } from '@/lib/hooks/use-viewer-location';
 import { useLiveBus } from '@/hooks/use-live-bus';
 import type { RoadRoute } from '@/lib/geo/route-to-campus';
 import { inferDirection, type StopPin, type TripDirection } from '@/lib/stops/progress';
+import { clockOffsetMs } from '@/lib/gps/liveness';
 import type { TimetableStop } from '@/lib/stops/arrival';
 import { LiveTrackScreen } from '@/components/live/live-track-screen';
 
@@ -43,6 +44,10 @@ interface BusData {
   direction?: TripDirection;
   /** Server-supplied Realtime topic; never constructed client-side. */
   realtimeTopic?: string | null;
+  /** The server's time when it answered. */
+  serverNow?: string;
+  /** Only in the answer to ?path=1: the road the bus drives. */
+  routePath?: [number, number][] | null;
 }
 type Resp = { data?: BusData; notFound?: boolean };
 
@@ -51,6 +56,13 @@ async function fetchBus(): Promise<Resp> {
   if (res.status === 404) return { notFound: true };
   if (!res.ok) throw new Error('Failed to load location');
   return { data: (await res.json()).data as BusData };
+}
+
+/** The road the bus drives. Asked for once per visit — it does not change while you watch. */
+async function fetchRoutePath(): Promise<[number, number][] | null> {
+  const res = await fetch('/api/student/location?path=1', { cache: 'no-store', credentials: 'same-origin' });
+  if (!res.ok) return null;
+  return ((await res.json()).data as BusData | undefined)?.routePath ?? null;
 }
 
 function NoticeCard({
@@ -85,10 +97,15 @@ export default function StudentLiveTrackPage() {
   const [topic, setTopic] = useState<string | null>(null);
   const { fix: liveFix, pollIntervalMs } = useLiveBus(topic);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, dataUpdatedAt } = useQuery({
     queryKey: ['student-live-track'],
     queryFn: fetchBus,
     refetchInterval: pollIntervalMs,
+  });
+  const { data: routePath } = useQuery({
+    queryKey: ['student-route-path'],
+    queryFn: fetchRoutePath,
+    staleTime: Infinity,
   });
 
   // The topic comes from the server response — a string, so it is safe in a
@@ -162,8 +179,6 @@ export default function StudentLiveTrackPage() {
       busNumber={v?.registrationNumber ?? null}
       position={lat != null && lng != null ? { lat, lng } : null}
       fresh={fresh && lat != null && lng != null}
-      liveNow={useLive || v?.status === 'online'}
-      minutesAgo={v?.minutesAgo ?? null}
       lastUpdateIso={useLive ? liveFix.at : v?.lastUpdate ?? null}
       heading={useLive ? liveFix.heading : v?.heading ?? null}
       accuracyM={useLive ? liveFix.accuracyM : v?.accuracyM ?? null}
@@ -173,6 +188,8 @@ export default function StudentLiveTrackPage() {
       direction={bus?.direction ?? inferDirection(null, Date.now())}
       myStopId={bus?.myStopId ?? null}
       roadGeometry={bus?.roadRoute?.geometry}
+      routePath={routePath ?? null}
+      clockOffsetMs={clockOffsetMs(bus?.serverNow, dataUpdatedAt)}
       viewer={viewer}
       viewerStatus={viewerStatus}
       viewerMessage={viewerMessage}

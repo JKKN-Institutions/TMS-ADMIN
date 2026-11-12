@@ -147,6 +147,7 @@ export default function LiveGPSTrackingModal({ isOpen, onClose, route, title }: 
                       latitude={position.lat}
                       longitude={position.lng}
                       label={bus.vehicle?.registrationNumber ? `Bus ${bus.vehicle.registrationNumber}` : 'Bus'}
+                      busState={fresh ? 'live' : 'stale'}
                       heading={fresh ? bus.heading : null}
                       accuracyM={fresh ? bus.accuracyM : null}
                       destination={CAMPUS}

@@ -11,6 +11,7 @@ import { expireStaleTrips, getActiveTripForDriver } from '@/lib/tracking/trips';
 import { shouldAcceptFix, distanceIncrementKm } from '@/lib/tracking/trip-state';
 import { publishFix } from '@/lib/tracking/broadcast';
 import { loadStopPinsByRoute } from '@/lib/stops/pins';
+import { loadRoutePath } from '@/lib/stops/route-path';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -20,7 +21,7 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 
 /** GET /api/driver/location — last-known GPS fix of the vehicle on each of the driver's
  *  route(s). Read-only "where's my bus"; vehicles with no live fix return null coords. */
-async function getLocation(_request: NextRequest, auth: AuthContext) {
+async function getLocation(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.DRIVER_SELF_VIEW))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -60,6 +61,22 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
       for (const v of (vres.data ?? []) as VehicleRow[]) vmap.set(v.id, v);
     }
 
+    // The road each route's bus drives, both ways — sent only when the page asks (once
+    // per visit, not on every poll).
+    const wantPath = request.nextUrl.searchParams.get('path') === '1';
+    const pathsByRoute = new Map<string, { onward: [number, number][] | null; return: [number, number][] | null }>();
+    if (wantPath) {
+      await Promise.all(
+        routes.map(async (r) => {
+          const [onward, back] = await Promise.all([
+            loadRoutePath(svc, r.id, 'onward'),
+            loadRoutePath(svc, r.id, 'return'),
+          ]);
+          pathsByRoute.set(r.id, { onward: onward?.points ?? null, return: back?.points ?? null });
+        }),
+      );
+    }
+
     const data = routes.map((r) => {
       const v = r.vehicleId ? vmap.get(r.vehicleId) : undefined;
       const hasFix = !!v && v.current_latitude != null && v.current_longitude != null;
@@ -67,6 +84,7 @@ async function getLocation(_request: NextRequest, auth: AuthContext) {
         id: r.id,
         label: r.label,
         stops: stopsByRoute.get(r.id) ?? [],
+        ...(wantPath ? { paths: pathsByRoute.get(r.id) ?? { onward: null, return: null } } : {}),
         vehicle: v
           ? {
               registrationNumber: v.registration_number,

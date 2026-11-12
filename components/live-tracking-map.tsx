@@ -2,17 +2,21 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { Maximize2, Minimize2 } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
+import { Crosshair, Maximize2, Minimize2, Scan } from 'lucide-react';
 import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/lib/gps/interpolate';
 import { shouldUseSnap } from '@/lib/geo/osrm';
 import { CAMPUS } from '@/lib/gps/campus';
 import type { TrackingState } from '@/lib/gps/route-status';
+import { agoText, compassOf, livenessOf, type Liveness } from '@/lib/gps/liveness';
+import { clusterPoints } from '@/lib/tracking/cluster';
 import { stopsSignature, type MapStop } from '@/lib/stops/map-stops';
-import { drawStopPins } from '@/components/map/stop-pins';
+import { drawStopPins, escapeHtml } from '@/components/map/stop-pins';
+import { busMarkerIcon, busMarkerSignature, clusterMarkerIcon, BUS_COLORS } from '@/components/map/bus-marker';
+import { addBaseLayers } from '@/components/map/base-layers';
 
 // Fix for default markers in Leaflet
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
@@ -39,6 +43,8 @@ export interface MapBus {
   /** For the selected-bus card's Call button; tel: link, omitted when null. */
   driverPhone?: string | null;
   speedKmh?: number | null;
+  /** When the position was reported (ISO). Liveness is worked out from this. */
+  lastFixAt?: string | null;
 }
 
 interface LiveTrackingMapProps {
@@ -66,11 +72,25 @@ interface LiveTrackingMapProps {
    * the "km to campus" time are left out: the bus is driving away from campus.
    */
   direction?: 'onward' | 'return' | null;
+  /**
+   * The road the picked route's bus actually drives, from a recorded trip. When
+   * present it is the route line, and the "road to campus" guess is not drawn.
+   */
+  routePath?: [number, number][] | null;
+  /**
+   * A coarse clock from the parent (it may step every few seconds). Liveness — LIVE,
+   * delayed, last known — is worked out against it, so a marker stops saying LIVE by
+   * itself when its position ages. Defaults to the time of each render.
+   */
+  nowMs?: number;
 }
 
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
 const GLIDE_MS = 4500;
-const DEFAULT_CENTER: [number, number] = [11.4444567, 77.730258]; // Tamil Nadu area
+/** Markers closer than this on screen (px, centre to centre) merge into one badge. */
+const CLUSTER_RADIUS_PX = 34;
+/** Fitting never zooms closer than this: one bus must not fill the screen with blank tiles. */
+const FIT_MAX_ZOOM = 15;
 
 // Per-route marker + the segment it is currently animating along.
 interface MarkerState {
@@ -81,13 +101,17 @@ interface MarkerState {
   to: LatLng;
   /**
    * The last RAW fix this marker was retargeted to. Tracked separately from `to`
-   * because the snap pass overwrites `to` with the road-snapped point — so for
-   * exactly the live buses that animate, `to` is NOT a record of the last position
-   * we saw, and comparing against it could never detect "nothing actually moved".
+   * because the snap pass overwrites `to` with the road-snapped point.
    */
   rawTarget: LatLng;
   start: number;
-  bus: MapBus;   // latest data for this marker, read by the click handler
+  /** A glide is in progress. The animation loop only touches markers with this set. */
+  moving: boolean;
+  bus: MapBus;
+  /** What the icon was last drawn from; the icon is rebuilt only when this changes. */
+  iconSig: string;
+  /** False while the bus is folded into a group badge. */
+  shown: boolean;
 }
 
 interface Enrichment {
@@ -125,9 +149,7 @@ async function fetchEnrichment(
   }
 }
 
-// One colour per Track All status group (the page's legend uses the same):
-// reporting green, paused/stuck amber, not sharing yellow, can't track red,
-// not set up grey.
+/** Kept for callers that colour by the server's status group. */
 export const STATE_COLORS: Record<TrackingState, string> = {
   live: '#10B981',
   recent: '#10B981',
@@ -139,120 +161,121 @@ export const STATE_COLORS: Record<TrackingState, string> = {
   unconfigured: '#6B7280',
 };
 
-/**
- * Only live/recent fixes are trustworthy as "present"; everything else ghosts back —
- * including `off`/`no_driver`/etc, whose vehicle row can still carry a days- or
- * weeks-old `current_latitude/longitude` that nothing ever clears. Deriving
- * staleness from freshness (rather than enumerating the stale states) also means a
- * future `TrackingState` can't land in the un-ghosted set by omission.
- */
-const FRESH_STATES: ReadonlySet<TrackingState> = new Set<TrackingState>(['live', 'recent']);
+const CONTROL_BTN =
+  'inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-[0_1px_4px_rgba(0,0,0,0.25)] hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
-const HTML_ESCAPES: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
+const LIVENESS_CHIP: Record<Liveness, string> = {
+  live: 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300',
+  delayed: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+  off: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
 };
-
-/** Route/driver names are free text from the DB and Leaflet renders popup HTML raw. */
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
-}
-
-function createBusIcon(bus: MapBus): L.DivIcon {
-  const color = STATE_COLORS[bus.state];
-  const stale = !FRESH_STATES.has(bus.state);
-  const opacity = stale ? 0.45 : 1;
-  const displayText = bus.routeNumber || '?';
-  // A stale fix's heading is as old as the fix, so don't imply a current direction.
-  const pointer =
-    stale || bus.heading == null || Number.isNaN(bus.heading)
-      ? ''
-      : `<div style="position:absolute;inset:0;transform:rotate(${bus.heading}deg);">
-           <div style="position:absolute;top:-6px;left:50%;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid ${color};"></div>
-         </div>`;
-  return L.divIcon({
-    className: 'custom-marker',
-    html: `
-      <div style="position:relative;width:30px;height:30px;opacity:${opacity};">
-        ${pointer}
-        <div style="
-          position:absolute;top:3px;left:3px;background:${color};width:24px;height:24px;border-radius:50%;
-          border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);
-          display:flex;align-items:center;justify-content:center;
-          color:white;font-weight:bold;font-size:11px;font-family:Arial,sans-serif;
-        ">${esc(displayText)}</div>
-      </div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-  });
-}
-
-function buildPopup(bus: MapBus): string {
-  const color = STATE_COLORS[bus.state];
-  const title = `Route ${esc(bus.routeNumber ?? '?')}${bus.routeName ? ` · ${esc(bus.routeName)}` : ''}`;
-  return `
-    <div style="min-width:220px;font-family:system-ui,-apple-system,sans-serif;">
-      <h3 style="margin:0 0 8px 0;color:#111827;font-size:15px;font-weight:600;">${title}</h3>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-        <div style="width:8px;height:8px;border-radius:50%;background:${color};"></div>
-        <span style="font-size:12px;color:#6B7280;">${esc(bus.reason)}</span>
-      </div>
-      <div style="font-size:13px;color:#374151;">
-        ${bus.registrationNumber ? `<div style="margin-bottom:4px;"><strong>Bus:</strong> ${esc(bus.registrationNumber)}</div>` : ''}
-        ${bus.driverName ? `<div><strong>Driver:</strong> ${esc(bus.driverName)}</div>` : ''}
-      </div>
-    </div>`;
-}
-
-const MAP_BTN =
-  'inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-[13px] font-semibold text-gray-700 shadow-[0_1px_4px_rgba(0,0,0,0.25)] hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
 const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   buses, selectedRouteId, onSelectRoute, emptyMessage,
-  routeStops, routeStopsRouteId, routeStopCount, stopSummary, stopsSetupHref, direction,
+  routeStops, routeStopsRouteId, routeStopCount, stopSummary, stopsSetupHref, direction, routePath,
+  nowMs: nowProp,
 }) => {
+  const nowMs = nowProp ?? Date.now();
   const toCampus = direction !== 'return';
   const toCampusRef = useRef(toCampus);
   toCampusRef.current = toCampus;
+  const hasRoutePath = !!routePath && routePath.length > 1;
+  const hasRoutePathRef = useRef(hasRoutePath);
+  hasRoutePathRef.current = hasRoutePath;
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const markersRef = useRef<Map<string, MarkerState>>(new Map());
+  const clusterLayerRef = useRef<L.LayerGroup | null>(null);
+  const clusterSigRef = useRef('');
+  const rafRef = useRef<number | null>(null);
+  const aliveRef = useRef(false);
+  const enrichRef = useRef<Map<string, { at: LatLng; snapped: LatLng | null }>>(new Map());
+  const selectedIdRef = useRef<string | null>(null);
+  const routeLineRef = useRef<L.Polyline | null>(null);
+  const pathLayerRef = useRef<L.LayerGroup | null>(null);
   const stopsLayerRef = useRef<L.LayerGroup | null>(null);
   const stopsFramedForRef = useRef<string | null>(null);
   const routeStopsLatestRef = useRef<MapStop[]>(routeStops ?? []);
   routeStopsLatestRef.current = routeStops ?? [];
-  const mapRef = useRef<HTMLDivElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  // Full screen: the browser's Fullscreen API where it exists (desktop, Android);
-  // elsewhere (iPhone Safari) the map is pinned over the window instead.
+  const nowRef = useRef(nowMs);
+  nowRef.current = nowMs;
+
+  // The view fits itself to the active buses until the user moves the map; "Fit all
+  // buses" hands control back. `fitSigRef` remembers which set of buses the view was
+  // last fitted to, so it re-fits when a bus starts or stops, not on every position.
+  const autoFitRef = useRef(true);
+  const fitSigRef = useRef<string | null>(null);
+  // The picked bus is followed until the user drags the map away.
+  const followRef = useRef(false);
+  const [following, setFollowing] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  // Where the browser has no Fullscreen API (iPhone Safari), or refuses it, the map is
+  // pinned over the window instead.
   const [pseudoFull, setPseudoFull] = useState(false);
-  const markersRef = useRef<Map<string, MarkerState>>(new Map());
-  const rafRef = useRef<number | null>(null);
-  const hasFitRef = useRef(false);
-  const enrichRef = useRef<Map<string, { at: LatLng; snapped: LatLng | null }>>(new Map());
-  const selectedIdRef = useRef<string | null>(null);
-  const routeLineRef = useRef<L.Polyline | null>(null);
+  const [showMore, setShowMore] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   const [enrichment, setEnrichment] = useState<{
     address: string | null;
     distanceKm: number | null;
     durationMin: number | null;
   } | null>(null);
 
-  // Marker click handlers are bound exactly once (see the diffing effect) so Leaflet's
-  // own popup handler survives. They reach the callback through this ref so a parent
-  // that passes a fresh arrow each render can never leave a marker calling a stale one.
+  // Marker click handlers are bound exactly once so Leaflet's own handlers survive.
+  // They reach the callback through this ref so a parent that passes a fresh arrow
+  // each render can never leave a marker calling a stale one.
   const onSelectRouteRef = useRef(onSelectRoute);
   useEffect(() => {
     onSelectRouteRef.current = onSelectRoute;
   }, [onSelectRoute]);
 
-  const fitToMarkers = () => {
+  const livenessOfBus = (b: MapBus) => livenessOf(b.lastFixAt, nowRef.current);
+
+  /** Start the animation loop if it is not running. It stops itself when nothing moves. */
+  const ensureLoop = () => {
+    if (rafRef.current != null || !aliveRef.current) return;
+    const step = () => {
+      const now = performance.now();
+      let anyMoving = false;
+      for (const st of markersRef.current.values()) {
+        if (!st.moving) continue;
+        const t = Math.min(1, (now - st.start) / GLIDE_MS);
+        const pos = interpolateLatLng(st.from, st.to, t);
+        st.anim = pos;
+        st.marker.setLatLng([pos.lat, pos.lng]);
+        st.circle?.setLatLng([pos.lat, pos.lng]);
+        if (t >= 1) st.moving = false;
+        else anyMoving = true;
+      }
+      rafRef.current = anyMoving && aliveRef.current ? requestAnimationFrame(step) : null;
+    };
+    rafRef.current = requestAnimationFrame(step);
+  };
+
+  const glideTo = (st: MarkerState, target: LatLng) => {
+    st.from = { ...st.anim };
+    st.to = target;
+    st.start = performance.now();
+    st.moving = true;
+    ensureLoop();
+  };
+
+  /** Frame the buses worth looking at: live ones if any, else every drawn bus — plus the college. */
+  const fitToBuses = () => {
     const map = mapInstanceRef.current;
     if (!map) return;
-    const markers = [...markersRef.current.values()].map((s) => s.marker);
-    if (markers.length === 0) return;
-    map.fitBounds(L.featureGroup(markers).getBounds().pad(0.15));
+    const all = [...markersRef.current.values()];
+    const active = all.filter((s) => livenessOfBus(s.bus) !== 'off');
+    const use = active.length > 0 ? active : all;
+    const pts: [number, number][] = use.map((s) => [s.to.lat, s.to.lng]);
+    pts.push([CAMPUS.lat, CAMPUS.lng]);
+    if (pts.length === 1) {
+      map.setView(pts[0], 13, { animate: true });
+      return;
+    }
+    map.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: FIT_MAX_ZOOM });
   };
 
   const clearRouteLine = () => {
@@ -260,61 +283,218 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
     routeLineRef.current = null;
   };
 
-  // The one place "which bus is selected" is resolved — used by the enrichment effect
-  // below and by the selection card. Read from the PROP, not markersRef: a ref read
-  // during render does not re-render when the poll brings new data, and on the commit
-  // that first adds a bus the ref is still holding the previous frame's map.
+  /**
+   * Fold markers that overlap on screen into count badges. The picked bus is never
+   * folded away. Runs when positions, the zoom or the selection change.
+   */
+  const recluster = () => {
+    const map = mapInstanceRef.current;
+    const layer = clusterLayerRef.current;
+    if (!map || !layer) return;
+    const selected = selectedIdRef.current;
+
+    const pts: { id: string; x: number; y: number }[] = [];
+    for (const [id, st] of markersRef.current) {
+      if (id === selected) continue;
+      const p = map.latLngToContainerPoint([st.to.lat, st.to.lng]);
+      pts.push({ id, x: p.x, y: p.y });
+    }
+    const groups = clusterPoints(pts, CLUSTER_RADIUS_PX).filter((g) => g.ids.length > 1);
+    const folded = new Set<string>();
+    for (const g of groups) for (const id of g.ids) folded.add(id);
+
+    for (const [id, st] of markersRef.current) {
+      const show = !folded.has(id);
+      if (show === st.shown) continue;
+      st.shown = show;
+      if (show) {
+        st.marker.addTo(map);
+        st.circle?.addTo(map);
+      } else {
+        st.marker.remove();
+        st.circle?.remove();
+      }
+    }
+
+    // Redraw the badges only when the grouping (or a group's live-ness) changed.
+    const sig = groups
+      .map((g) => `${g.key}:${g.ids.some((id) => livenessOfBus(markersRef.current.get(id)!.bus) === 'live') ? 1 : 0}`)
+      .join(';');
+    if (sig === clusterSigRef.current) return;
+    clusterSigRef.current = sig;
+    layer.clearLayers();
+
+    for (const g of groups) {
+      const members = g.ids.map((id) => markersRef.current.get(id)!).filter(Boolean);
+      const lat = members.reduce((n, m) => n + m.to.lat, 0) / members.length;
+      const lng = members.reduce((n, m) => n + m.to.lng, 0) / members.length;
+      const anyLive = members.some((m) => livenessOfBus(m.bus) === 'live');
+      const badge = L.marker([lat, lng], { icon: clusterMarkerIcon(members.length, anyLive), zIndexOffset: 900, keyboard: false });
+
+      badge.on('click', () => {
+        const bounds = L.latLngBounds(members.map((m) => [m.to.lat, m.to.lng] as [number, number]));
+        const spreadM = haversineMeters(
+          { lat: bounds.getSouth(), lng: bounds.getWest() },
+          { lat: bounds.getNorth(), lng: bounds.getEast() },
+        );
+        // Far enough apart that zooming in will separate them: zoom. Otherwise they are
+        // parked on the same spot and no zoom helps — list them.
+        if (spreadM > 60 && map.getZoom() < 17) {
+          map.fitBounds(bounds.pad(0.4), { maxZoom: 17 });
+          return;
+        }
+        const box = L.DomUtil.create('div');
+        box.style.cssText = 'font-family:system-ui,-apple-system,sans-serif;min-width:190px;';
+        const title = L.DomUtil.create('div', '', box);
+        title.style.cssText = 'font-weight:600;font-size:13px;color:#111827;margin-bottom:6px;';
+        title.textContent = `${members.length} buses here`;
+        for (const m of members) {
+          const lv = livenessOfBus(m.bus);
+          const row = L.DomUtil.create('button', '', box) as HTMLButtonElement;
+          row.type = 'button';
+          row.style.cssText =
+            'display:flex;align-items:center;gap:8px;width:100%;padding:7px 4px;border:0;border-top:1px solid #f3f4f6;background:none;text-align:left;cursor:pointer;font-size:13px;color:#111827;';
+          row.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${BUS_COLORS[lv]};flex:none;"></span>
+            <span style="font-weight:700;min-width:26px;">${escapeHtml(m.bus.routeNumber ?? '?')}</span>
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151;">${escapeHtml(m.bus.registrationNumber ?? m.bus.routeName ?? '')}</span>
+            <span style="color:#6b7280;font-size:11px;flex:none;">${lv === 'live' ? 'Live' : escapeHtml(agoText(m.bus.lastFixAt, nowRef.current))}</span>`;
+          L.DomEvent.on(row, 'click', (e) => {
+            L.DomEvent.stop(e);
+            map.closePopup();
+            onSelectRouteRef.current(m.bus.routeId);
+          });
+        }
+        L.popup({ offset: [0, -14], maxWidth: 280 }).setLatLng([lat, lng]).setContent(box).openOn(map);
+      });
+      badge.addTo(layer);
+    }
+  };
+
+  // The one place "which bus is selected" is resolved. Read from the PROP, not
+  // markersRef: a ref read during render does not re-render when new data arrives.
   const selectedBus = selectedRouteId
     ? (buses ?? []).find((b) => b.routeId === selectedRouteId) ?? null
     : null;
 
-  // Mirror the selected-route prop into a ref so in-flight enrichment can still cancel
-  // itself, and drop the previous route's line/address immediately — otherwise the old
-  // road line hangs on the map until the new route's OSRM call resolves.
+  // Initialise the map once.
+  useEffect(() => {
+    if (!mapRef.current || mapInstanceRef.current) return;
+    aliveRef.current = true;
+
+    const el = mapRef.current;
+    const map = L.map(el).setView([CAMPUS.lat, CAMPUS.lng], 12);
+    addBaseLayers(map);
+    L.control.scale({ imperial: false, position: 'bottomright' }).addTo(map);
+
+    L.marker([CAMPUS.lat, CAMPUS.lng], {
+      icon: L.divIcon({
+        className: 'campus-marker',
+        html: `<div style="width:26px;height:26px;border-radius:6px;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:14px;">🎓</div>`,
+        iconSize: [26, 26], iconAnchor: [13, 13],
+      }),
+      zIndexOffset: -100,
+    }).addTo(map).bindPopup(CAMPUS.label);
+
+    clusterLayerRef.current = L.layerGroup().addTo(map);
+    pathLayerRef.current = L.layerGroup().addTo(map);
+    mapInstanceRef.current = map;
+
+    // Any touch, click or wheel on the map itself is the user taking over the view.
+    // (Our own buttons sit outside this element, so they do not count.)
+    const userTookOver = () => {
+      autoFitRef.current = false;
+    };
+    el.addEventListener('pointerdown', userTookOver);
+    el.addEventListener('wheel', userTookOver, { passive: true });
+    map.on('dragstart', () => {
+      followRef.current = false;
+      setFollowing(false);
+    });
+    map.on('zoomend', recluster);
+
+    // The box changes size when the phone's route list opens or the map goes full
+    // screen. Leaflet measures its container once, so tell it.
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => map.invalidateSize()) : null;
+    ro?.observe(el);
+
+    return () => {
+      // Reset EVERY ref this effect owns. React Strict Mode remounts in dev, and any
+      // ref left populated makes the second mount silently skip the layer it guards.
+      aliveRef.current = false;
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      ro?.disconnect();
+      el.removeEventListener('pointerdown', userTookOver);
+      el.removeEventListener('wheel', userTookOver);
+      markersRef.current.clear();
+      enrichRef.current.clear();
+      clusterLayerRef.current = null;
+      clusterSigRef.current = '';
+      pathLayerRef.current = null;
+      stopsLayerRef.current = null;
+      stopsFramedForRef.current = null;
+      routeLineRef.current = null;
+      fitSigRef.current = null;
+      autoFitRef.current = true;
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Full screen uses the browser's own API on the wrapper, so the card and buttons
+  // come along. Tracking the real state means Esc (which the browser handles) also
+  // flips the button back.
+  useEffect(() => {
+    const onChange = () => {
+      setFullscreen(document.fullscreenElement === wrapRef.current);
+      setTimeout(() => mapInstanceRef.current?.invalidateSize(), 60);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Selection changed: drop the previous route's line and address, un-fold the picked
+  // bus from any group, and centre + follow it.
   useEffect(() => {
     selectedIdRef.current = selectedRouteId;
     clearRouteLine();
     setEnrichment(null);
-    // Picking a route (in the list or on the map) brings its bus to the middle of the
-    // map. Keyed on the id, so the 5s poll never re-centres under the user.
+    setShowMore(false);
     const map = mapInstanceRef.current;
     const st = selectedRouteId ? markersRef.current.get(selectedRouteId) : null;
-    if (map && st) map.setView([st.anim.lat, st.anim.lng], Math.max(map.getZoom(), 14), { animate: true });
+    if (map && st) {
+      followRef.current = true;
+      setFollowing(true);
+      map.setView([st.anim.lat, st.anim.lng], Math.min(Math.max(map.getZoom(), 14), 16), { animate: true });
+    } else {
+      followRef.current = false;
+      setFollowing(false);
+    }
+    recluster();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRouteId]);
 
-  // Draw the road line + address for whichever route the parent has selected.
-  //
-  // The deps are the route id plus the PRESENCE of its bus — deliberately not `buses`
-  // itself, and deliberately not the id alone:
-  //   - depending on `buses` would re-fire the OSRM fetch every 5s poll and redraw the
-  //     line under the user;
-  //   - depending on the id alone strands a route selected while it had no position.
-  //     The fleet list can select a route that is not reporting — that is the whole
-  //     point of this feature — and when it later starts reporting, the effect would
-  //     never retry, leaving the card stuck on "Locating…" until the user deselected
-  //     and reselected.
-  // `selectedBus != null` flips exactly once when the bus appears, so the effect
-  // self-heals without costing a fetch per poll while the bus is present.
+  // Address + road snap (+ the road to campus when there is no recorded route line)
+  // for the picked bus. Deps are the id plus the PRESENCE of its bus — not `buses`,
+  // which would re-fire the lookup on every poll.
   const hasSelectedBus = selectedBus != null;
   useEffect(() => {
     if (!selectedBus) return;
-    // Captured by value: `routeId` is `string` here, where `selectedRouteId` is
-    // `string | null`, and they are equal by construction.
     const { routeId, lat, lng } = selectedBus;
     void fetchEnrichment(lat, lng, { route: true, address: true }).then((e) => {
-      if (!e || selectedIdRef.current !== routeId) return;
+      if (!e || !aliveRef.current || selectedIdRef.current !== routeId) return;
       const map = mapInstanceRef.current;
-      if (map && e.route && toCampusRef.current) {
+      if (map && e.route && toCampusRef.current && !hasRoutePathRef.current) {
         clearRouteLine();
         routeLineRef.current = L.polyline(e.route.geometry, {
           color: '#2563eb', weight: 5, opacity: 0.85,
         }).addTo(map);
       }
       if (e.snapped) {
-        // Cache the snap so the diffing effect's snap pass keeps this bus on-road each poll.
         enrichRef.current.set(routeId, { at: { lat, lng }, snapped: e.snapped });
         const cur = markersRef.current.get(routeId);
-        if (cur) { cur.from = { ...cur.anim }; cur.to = e.snapped; cur.start = performance.now(); }
+        if (cur) glideTo(cur, e.snapped);
       }
       setEnrichment({
         address: e.address,
@@ -325,73 +505,179 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRouteId, hasSelectedBus]);
 
-  // Initialise the map once, and run ONE animation loop that glides every marker.
+  // The picked route's recorded road: a white casing under a solid line, so it reads
+  // on any map style. Keyed on a primitive signature of the points.
+  const pathKey = hasRoutePath ? `${routePath!.length}:${routePath![0].join(',')}:${routePath![routePath!.length - 1].join(',')}` : '';
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+    const layer = pathLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!hasRoutePath) return;
+    clearRouteLine(); // the recorded road replaces the "road to campus" guess
+    L.polyline(routePath!, { color: '#ffffff', weight: 8, opacity: 0.9, interactive: false }).addTo(layer);
+    L.polyline(routePath!, { color: '#1d4ed8', weight: 4, opacity: 0.9, interactive: false }).addTo(layer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathKey]);
 
-    const map = L.map(mapRef.current).setView(DEFAULT_CENTER, 10);
-    // Street basemap: standard OpenStreetMap tiles (keyless). CARTO Voyager was
-    // dropped because it now watermarks keyless tiles "API KEY REQUIRED".
-    const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 20,
-      maxNativeZoom: 19,
-      attribution: '© OpenStreetMap contributors',
-    });
-    // Satellite basemap: Esri World Imagery — free with attribution, no key.
-    const satellite = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { maxZoom: 20, attribution: 'Tiles © Esri' },
-    );
-    street.addTo(map);
-    L.control.layers({ Street: street, Satellite: satellite }, {}, { position: 'topright' }).addTo(map);
+  // Stop pins for the picked route. Keyed on a primitive signature — this page polls,
+  // so the array is new every few seconds and a redraw would close any open popup.
+  const routeStopsKey = stopsSignature(routeStops);
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (!stopsLayerRef.current) stopsLayerRef.current = L.layerGroup().addTo(map);
+    const list = routeStopsLatestRef.current;
+    drawStopPins(stopsLayerRef.current, list, routeStopCount);
 
-    L.marker([CAMPUS.lat, CAMPUS.lng], {
-      icon: L.divIcon({
-        className: 'campus-marker',
-        html: `<div style="width:26px;height:26px;border-radius:6px;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:14px;">🎓</div>`,
-        iconSize: [26, 26], iconAnchor: [13, 13],
-      }),
-    }).addTo(map).bindPopup(CAMPUS.label);
+    // Frame the route ONCE per pick — and only for a route with no bus to follow.
+    const key = list.length > 0 ? routeStopsRouteId ?? null : null;
+    if (key && stopsFramedForRef.current !== key && !markersRef.current.has(key)) {
+      const pts: [number, number][] = list.map((s) => [s.lat, s.lng]);
+      pts.push([CAMPUS.lat, CAMPUS.lng]);
+      map.fitBounds(L.latLngBounds(pts).pad(0.12), { maxZoom: FIT_MAX_ZOOM });
+    }
+    stopsFramedForRef.current = key;
+  }, [routeStopsKey, routeStopsRouteId, routeStopCount]);
 
-    mapInstanceRef.current = map;
+  // Diff markers against the latest data: update existing (glide + icon), add new,
+  // remove gone. Also re-runs on the coarse clock, so a marker's LIVE tag expires.
+  // The clock is bucketed to 10 s so a parent that ticks faster does not re-run this.
+  const clockBucket = Math.floor(nowMs / 10_000);
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
 
-    const stepAll = () => {
-      const now = performance.now();
-      for (const st of markersRef.current.values()) {
-        const t = Math.min(1, (now - st.start) / GLIDE_MS);
-        const pos = interpolateLatLng(st.from, st.to, t);
-        st.anim = pos;
-        st.marker.setLatLng([pos.lat, pos.lng]);
-        st.circle?.setLatLng([pos.lat, pos.lng]);
+    const list = buses ?? [];
+    const seen = new Set<string>();
+
+    for (const bus of list) {
+      seen.add(bus.routeId);
+      const target: LatLng = { lat: bus.lat, lng: bus.lng };
+      const liveness = livenessOf(bus.lastFixAt, nowRef.current);
+      const selected = bus.routeId === selectedRouteId;
+      const iconOpts = { label: bus.routeNumber || '?', liveness, heading: bus.heading, selected };
+      const sig = busMarkerSignature(iconOpts);
+      const existing = markersRef.current.get(bus.routeId);
+      const accuracy = liveness !== 'off' && bus.accuracyM != null && bus.accuracyM > 0 ? bus.accuracyM : null;
+      const tip = escapeHtml(bus.registrationNumber ?? `Route ${bus.routeNumber ?? '?'}`);
+
+      if (existing) {
+        existing.bus = bus;
+        // Rebuilding the icon restarts its animation, so only when it really changed.
+        if (existing.iconSig !== sig) {
+          existing.marker.setIcon(busMarkerIcon(iconOpts));
+          existing.iconSig = sig;
+        }
+        existing.marker.setZIndexOffset(selected ? 2000 : liveness === 'live' ? 1200 : 1000);
+        existing.marker.getTooltip()?.setContent(tip);
+
+        if (accuracy != null) {
+          if (!existing.circle) {
+            existing.circle = L.circle([existing.anim.lat, existing.anim.lng], { radius: accuracy, color: '#16a34a', weight: 1, fillColor: '#16a34a', fillOpacity: 0.1, interactive: false });
+            if (existing.shown) existing.circle.addTo(map);
+          } else {
+            existing.circle.setRadius(accuracy);
+          }
+        } else if (existing.circle) {
+          existing.circle.remove();
+          existing.circle = null;
+        }
+
+        // Only restart the glide when the bus actually reported a NEW position.
+        if (target.lat !== existing.rawTarget.lat || target.lng !== existing.rawTarget.lng) {
+          existing.rawTarget = target;
+          if (shouldSnap(existing.anim, target)) {
+            existing.anim = target;
+            existing.from = target;
+            existing.to = target;
+            existing.moving = false;
+            existing.marker.setLatLng([target.lat, target.lng]);
+            existing.circle?.setLatLng([target.lat, target.lng]);
+          } else {
+            glideTo(existing, target);
+          }
+          if (selected && followRef.current) map.panTo([target.lat, target.lng], { animate: true });
+        }
+      } else {
+        const marker = L.marker([target.lat, target.lng], {
+          icon: busMarkerIcon(iconOpts),
+          zIndexOffset: selected ? 2000 : liveness === 'live' ? 1200 : 1000,
+        }).addTo(map);
+        marker.bindTooltip(tip, { direction: 'top' });
+        const circle = accuracy != null
+          ? L.circle([target.lat, target.lng], { radius: accuracy, color: '#16a34a', weight: 1, fillColor: '#16a34a', fillOpacity: 0.1, interactive: false }).addTo(map)
+          : null;
+        const st: MarkerState = {
+          marker, circle, anim: target, from: target, to: target, rawTarget: target,
+          start: 0, moving: false, bus, iconSig: sig, shown: true,
+        };
+        markersRef.current.set(bus.routeId, st);
+        // Bound ONCE. `st.bus` is replaced each update, so this always reads the current route.
+        marker.on('click', () => onSelectRouteRef.current(st.bus.routeId));
       }
-      rafRef.current = requestAnimationFrame(stepAll);
-    };
-    rafRef.current = requestAnimationFrame(stepAll);
+    }
 
-    return () => {
-      // Reset EVERY ref this effect owns. React Strict Mode remounts in dev, and any
-      // ref left populated makes the second mount silently skip the layer it guards.
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      markersRef.current.clear();
-      enrichRef.current.clear();
-      hasFitRef.current = false;
-      routeLineRef.current?.remove();
-      routeLineRef.current = null;
-      stopsLayerRef.current = null;
-      stopsFramedForRef.current = null;
-      map.remove();
-      mapInstanceRef.current = null;
-    };
-  }, []);
+    // Snap pass — keep reporting buses on the road. Runs after the loop above, which
+    // retargets every marker to the RAW fix.
+    for (const bus of list) {
+      if (livenessOf(bus.lastFixAt, nowRef.current) === 'off') continue;
+      const here: LatLng = { lat: bus.lat, lng: bus.lng };
+      const prev = enrichRef.current.get(bus.routeId);
+      const movedFar = !prev || haversineMeters(prev.at, here) >= REENRICH_M;
 
-  // Track the real full-screen state, so Esc (which the browser handles) also
-  // flips the button back to "Full screen".
-  useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === wrapRef.current);
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
+      if (prev?.snapped && !movedFar) {
+        const st = markersRef.current.get(bus.routeId);
+        if (st) st.to = prev.snapped;
+      }
+
+      if (selectedIdRef.current === bus.routeId) continue;
+      if (!movedFar) continue;
+      enrichRef.current.set(bus.routeId, { at: here, snapped: prev?.snapped ?? null });
+      void fetchEnrichment(here.lat, here.lng, { route: false, address: false }).then((e) => {
+        if (!e || !aliveRef.current) return;
+        enrichRef.current.set(bus.routeId, { at: here, snapped: e.snapped });
+        const st = markersRef.current.get(bus.routeId);
+        if (st && e.snapped) glideTo(st, e.snapped);
+      });
+    }
+
+    for (const [id, st] of markersRef.current) {
+      if (!seen.has(id)) {
+        st.marker.remove();
+        st.circle?.remove();
+        markersRef.current.delete(id);
+        enrichRef.current.delete(id);
+      }
+    }
+
+    recluster();
+
+    // Auto-fit: when the SET of buses worth framing changes (first data, a bus starts
+    // or stops), and only while the user has not taken over and nothing is picked.
+    const active = list.filter((b) => livenessOf(b.lastFixAt, nowRef.current) !== 'off').map((b) => b.routeId).sort();
+    const fitSig = active.length > 0 ? `a:${active.join(',')}` : `n:${list.map((b) => b.routeId).sort().join(',')}`;
+    if (autoFitRef.current && !selectedIdRef.current && fitSigRef.current !== fitSig) {
+      fitSigRef.current = fitSig;
+      fitToBuses();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buses, clockBucket, selectedRouteId]);
+
+  const fitAll = () => {
+    autoFitRef.current = true;
+    followRef.current = false;
+    setFollowing(false);
+    fitToBuses();
+  };
+
+  const focusSelected = () => {
+    const map = mapInstanceRef.current;
+    const st = selectedRouteId ? markersRef.current.get(selectedRouteId) : null;
+    if (!map || !st) return;
+    followRef.current = true;
+    setFollowing(true);
+    map.setView([st.anim.lat, st.anim.lng], Math.min(Math.max(map.getZoom(), 15), 17), { animate: true });
+  };
 
   // The pinned fallback has no browser Esc handling, so add it.
   useEffect(() => {
@@ -423,200 +709,64 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   };
   const isFull = fullscreen || pseudoFull;
 
-  // The map's box changes size when the phone's route list opens or closes, and
-  // when it goes full screen. Leaflet measures its container once, so tell it,
-  // or it leaves grey bands.
-  useEffect(() => {
-    const el = mapRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => mapInstanceRef.current?.invalidateSize());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const copyCoords = (text: string) => {
+    void navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
+  };
 
-  // Stop pins for the picked route. Keyed on a primitive signature — this page polls,
-  // so the array is new every few seconds and a redraw would close any open popup.
-  const routeStopsKey = stopsSignature(routeStops);
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    if (!stopsLayerRef.current) stopsLayerRef.current = L.layerGroup().addTo(map);
-    const list = routeStopsLatestRef.current;
-    drawStopPins(stopsLayerRef.current, list, routeStopCount);
-
-    // Frame the route ONCE per pick, not on every pin-state change — otherwise the
-    // map would re-zoom each time the bus passes a stop.
-    const key = list.length > 0 ? routeStopsRouteId ?? null : null;
-    if (key && stopsFramedForRef.current !== key) {
-      const pts: [number, number][] = list.map((s) => [s.lat, s.lng]);
-      const bus = markersRef.current.get(key);
-      if (bus) pts.push([bus.anim.lat, bus.anim.lng]);
-      pts.push([CAMPUS.lat, CAMPUS.lng]);
-      map.fitBounds(L.latLngBounds(pts).pad(0.12));
-    }
-    stopsFramedForRef.current = key;
-  }, [routeStopsKey, routeStopsRouteId, routeStopCount]);
-
-  // Diff markers against the latest data: update existing (glide + icon + popup),
-  // add new, remove gone. No clear-all, no fitBounds-every-poll (the old flicker).
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    const list = buses ?? [];
-    const seen = new Set<string>();
-
-    for (const bus of list) {
-      seen.add(bus.routeId);
-      const target: LatLng = { lat: bus.lat, lng: bus.lng };
-      const icon = createBusIcon(bus);
-      const popup = buildPopup(bus);
-      const existing = markersRef.current.get(bus.routeId);
-
-      if (existing) {
-        existing.marker.setIcon(icon);
-        existing.bus = bus;
-        const p = existing.marker.getPopup();
-        if (p) p.setContent(popup);
-        else existing.marker.bindPopup(popup);
-
-        if (bus.accuracyM != null && bus.accuracyM > 0) {
-          if (!existing.circle) {
-            existing.circle = L.circle(target, { radius: bus.accuracyM, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map);
-          } else {
-            existing.circle.setLatLng(target);
-            existing.circle.setRadius(bus.accuracyM);
-          }
-        } else if (existing.circle) {
-          existing.circle.remove();
-          existing.circle = null;
-        }
-
-        // Only restart the glide when the bus actually reported a NEW position.
-        // This effect re-runs on any change of `buses` identity — which for an
-        // unmemoized parent is every render, including every selection click. A
-        // bare retarget would reset `start` each time, so the marker would re-glide
-        // whatever distance remained over a fresh GLIDE_MS and crawl without ever
-        // arriving. shouldSnap cannot rescue it: it only fires above 2 km.
-        if (target.lat !== existing.rawTarget.lat || target.lng !== existing.rawTarget.lng) {
-          existing.rawTarget = target;
-          if (shouldSnap(existing.anim, target)) {
-            existing.anim = target;
-            existing.from = target;
-            existing.to = target;
-            existing.marker.setLatLng([target.lat, target.lng]);
-          } else {
-            existing.from = { ...existing.anim };
-            existing.to = target;
-            existing.start = performance.now();
-          }
-        }
-      } else {
-        // Buses always draw above stop pins (whose offsets top out at 300).
-        const marker = L.marker([target.lat, target.lng], { icon, zIndexOffset: 1000 }).addTo(map);
-        marker.bindPopup(popup);
-        const circle = bus.accuracyM != null && bus.accuracyM > 0
-          ? L.circle([target.lat, target.lng], { radius: bus.accuracyM, color: '#3B82F6', weight: 1, fillColor: '#3B82F6', fillOpacity: 0.1 }).addTo(map)
-          : null;
-        const st: MarkerState = {
-          marker, circle, anim: target, from: target, to: target, rawTarget: target,
-          start: performance.now(), bus,
-        };
-        markersRef.current.set(bus.routeId, st);
-        // Bind ONCE and never unbind: marker.off('click') would also strip the handler
-        // bindPopup installs, and popups would silently stop opening. `st.bus` is
-        // mutated each poll so this handler always reads the current route.
-        marker.on('click', () => onSelectRouteRef.current(st.bus.routeId));
-      }
-    }
-
-    // Snap pass — runs AFTER the main loop above (which retargets every marker to
-    // the RAW fix each poll). For each fresh bus we (1) re-apply its cached snapped
-    // point so the raw retarget doesn't undo it, and (2) (re)fetch a snap when the
-    // bus is new or has moved > REENRICH_M. The selected bus's snap is owned by the
-    // selection effect, which writes the same enrichRef cache.
-    for (const bus of list) {
-      const fresh = bus.state === 'live' || bus.state === 'recent';
-      if (!fresh) continue;
-      const here: LatLng = { lat: bus.lat, lng: bus.lng };
-      const prev = enrichRef.current.get(bus.routeId);
-      const movedFar = !prev || haversineMeters(prev.at, here) >= REENRICH_M;
-
-      // (1) Keep the marker on its cached snapped point — but NOT if it just teleported
-      //     far (a stale snap would misplace it until the refetch resolves).
-      if (prev?.snapped && !movedFar) {
-        const st = markersRef.current.get(bus.routeId);
-        if (st) st.to = prev.snapped;
-      }
-
-      // (2) Non-selected buses: refetch a snap only when new or moved far.
-      if (selectedIdRef.current === bus.routeId) continue;
-      if (!movedFar) continue;
-      enrichRef.current.set(bus.routeId, { at: here, snapped: prev?.snapped ?? null });
-      void fetchEnrichment(here.lat, here.lng, { route: false, address: false }).then((e) => {
-        if (!e) return;
-        enrichRef.current.set(bus.routeId, { at: here, snapped: e.snapped });
-        const st = markersRef.current.get(bus.routeId);
-        if (st && e.snapped) {
-          st.from = { ...st.anim };
-          st.to = e.snapped;
-          st.start = performance.now();
-        }
-      });
-    }
-
-    for (const [id, st] of markersRef.current) {
-      if (!seen.has(id)) {
-        st.marker.remove();
-        st.circle?.remove();
-        markersRef.current.delete(id);
-        enrichRef.current.delete(id);   // drop stale snap cache for gone buses
-      }
-    }
-
-    // Frame the buses once on first data; afterwards leave the user's zoom/pan alone.
-    if (!hasFitRef.current && markersRef.current.size > 0) {
-      fitToMarkers();
-      hasFitRef.current = true;
-    }
-  }, [buses]);
+  const selLiveness = selectedBus ? livenessOf(selectedBus.lastFixAt, nowMs) : 'off';
+  const selCompass = selectedBus && selLiveness === 'live' ? compassOf(selectedBus.heading) : null;
+  const selCoords = selectedBus ? `${selectedBus.lat.toFixed(5)}, ${selectedBus.lng.toFixed(5)}` : '';
+  const hasOld = buses.some((b) => livenessOf(b.lastFixAt, nowMs) === 'off');
 
   return (
-    // No tall min-height here: the caller sizes the box. A 420px minimum inside a
-    // shorter overflow-hidden box clipped the selected-bus card on phones.
+    // No tall min-height here: the caller sizes the box.
     <div
       ref={wrapRef}
       className={
         pseudoFull
           ? 'fixed inset-0 z-[9999] isolate h-dvh w-screen bg-white dark:bg-gray-900'
-          : 'relative isolate h-full min-h-[260px] w-full bg-white dark:bg-gray-900'
+          : 'relative isolate h-full min-h-[120px] w-full bg-white dark:bg-gray-900'
       }
     >
       <div ref={mapRef} className="absolute inset-0" />
-      {/* Bottom-right: the top-right corner belongs to Leaflet's layers control,
-          which the old "Recenter" button sat on top of. */}
-      <div className="absolute bottom-3 right-3 z-[1000] flex flex-col items-end gap-1.5">
+
+      {/* Top-right, under Leaflet's layers button. The bottom of the map belongs to the
+          selected-bus card, which is as wide as the map on a phone. */}
+      <div className="absolute right-2.5 top-[4.25rem] z-[1000] flex flex-col items-end gap-1.5">
+        {buses.length > 0 && (
+          <button type="button" onClick={fitAll} className={CONTROL_BTN}>
+            <Scan className="h-4 w-4" /> Fit all buses
+          </button>
+        )}
+        {selectedBus && !following && (
+          <button type="button" onClick={focusSelected} className={CONTROL_BTN}>
+            <Crosshair className="h-4 w-4" /> Focus bus
+          </button>
+        )}
         <button
           type="button"
           onClick={toggleFullscreen}
           aria-label={isFull ? 'Exit full screen' : 'Full screen map'}
           title={isFull ? 'Exit full screen (Esc)' : 'Full screen map'}
-          className={MAP_BTN}
+          className={CONTROL_BTN}
         >
           {isFull ? <Minimize2 className="h-4 w-4" aria-hidden /> : <Maximize2 className="h-4 w-4" aria-hidden />}
           {isFull ? 'Exit' : 'Full screen'}
         </button>
-        {buses.length > 0 && (
-          <button type="button" onClick={fitToMarkers} className={MAP_BTN}>
-            Fit all buses
-          </button>
-        )}
       </div>
-      {buses.some((b) => !FRESH_STATES.has(b.state)) && (
+
+      {hasOld && (
         <p className="pointer-events-none absolute left-14 top-2.5 z-[1000] rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-gray-600 shadow-sm dark:bg-gray-900/90 dark:text-gray-300">
-          Faded bus = last known place
+          Grey bus = last known place
         </p>
       )}
+
       {buses.length === 0 && emptyMessage && (
         <div className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="rounded-xl border border-gray-200 bg-white/95 px-4 py-3 text-center shadow-lg dark:border-gray-700 dark:bg-gray-900/95">
@@ -625,11 +775,15 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
           </div>
         </div>
       )}
+
       {selectedBus && (
-        <div className="absolute bottom-3 left-3 z-[1000] max-w-[min(320px,calc(100%-9.5rem))] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+        <div className="absolute bottom-3 left-3 right-3 z-[1000] max-w-[330px] rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+              <p className="truncate text-base font-bold tracking-wide text-gray-900 dark:text-white">
+                {selectedBus.registrationNumber ?? 'No bus number'}
+              </p>
+              <p className="truncate text-xs text-gray-600 dark:text-gray-300">
                 Route {selectedBus.routeNumber ?? '?'}
                 {selectedBus.routeName ? ` · ${selectedBus.routeName}` : ''}
               </p>
@@ -638,27 +792,49 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
               type="button"
               onClick={() => onSelectRoute(null)}
               aria-label="Clear selection"
-              className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              className="-mr-1 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
             >
               ×
             </button>
           </div>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            📍 {enrichment?.address ?? 'Locating…'}
+
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold ${LIVENESS_CHIP[selLiveness]}`}>
+              <span className="h-2 w-2 rounded-full" style={{ background: BUS_COLORS[selLiveness] }} aria-hidden />
+              {selLiveness === 'live' ? 'LIVE' : selLiveness === 'delayed' ? 'Delayed' : 'Not sharing now'}
+            </span>
+            <span className="text-gray-600 dark:text-gray-300">
+              {selectedBus.lastFixAt
+                ? `${selLiveness === 'off' ? 'last seen' : 'updated'} ${agoText(selectedBus.lastFixAt, nowMs)}`
+                : 'no position yet'}
+            </span>
           </p>
-          <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
-            {selectedBus.registrationNumber ?? 'No bus number'} · {selectedBus.reason}
-            {selectedBus.speedKmh != null && FRESH_STATES.has(selectedBus.state) ? ` · ${Math.round(selectedBus.speedKmh)} km/h` : ''}
-          </p>
-          {toCampus && enrichment?.distanceKm != null && (
-            <p className="mt-1 text-xs text-green-700 dark:text-green-400">
-              🚌 {enrichment.distanceKm.toFixed(1)} km to campus
-              {enrichment.durationMin != null ? ` · ~${enrichment.durationMin} min` : ''}
+          {selLiveness === 'off' && (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{selectedBus.reason}</p>
+          )}
+
+          {selLiveness !== 'off' && (
+            <p className="mt-1.5 text-xs font-medium text-gray-800 dark:text-gray-200">
+              {[
+                selectedBus.speedKmh != null ? `${Math.round(selectedBus.speedKmh)} km/h` : null,
+                selCompass ? `heading ${selCompass}` : null,
+                selectedBus.accuracyM != null ? `±${Math.round(selectedBus.accuracyM)} m` : null,
+              ].filter(Boolean).join(' · ') || 'Speed not reported'}
             </p>
           )}
-          {stopSummary ? (
+
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {enrichment?.address ?? 'Finding the place…'}
+          </p>
+          {toCampus && selLiveness !== 'off' && enrichment?.distanceKm != null && (
+            <p className="mt-1 text-xs text-green-700 dark:text-green-400">
+              {enrichment.distanceKm.toFixed(1)} km to campus
+              {enrichment.durationMin != null ? ` · about ${enrichment.durationMin} min` : ''}
+            </p>
+          )}
+          {stopSummary && selLiveness !== 'off' ? (
             <p className="mt-1 text-xs font-medium text-violet-700 dark:text-violet-300">
-              📌 {stopSummary.headline}
+              {stopSummary.headline}
               {stopSummary.detail ? <span className="font-normal"> · {stopSummary.detail}</span> : null}
             </p>
           ) : stopsSetupHref ? (
@@ -669,19 +845,54 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
               </a>
             </p>
           ) : null}
-          {selectedBus.driverName && (
-            <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
-              <span className="truncate text-xs text-gray-600 dark:text-gray-300">{selectedBus.driverName}</span>
+
+          {showMore && (
+            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-gray-100 pt-2 text-xs dark:border-gray-800">
+              <dt className="text-gray-400 dark:text-gray-500">Position</dt>
+              <dd className="flex min-w-0 items-center gap-2 text-gray-700 dark:text-gray-300">
+                <span className="truncate font-mono">{selCoords}</span>
+                <button type="button" onClick={() => copyCoords(selCoords)} className="shrink-0 font-medium text-blue-700 underline dark:text-blue-400">
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </dd>
+              <dt className="text-gray-400 dark:text-gray-500">Reported</dt>
+              <dd className="truncate text-gray-700 dark:text-gray-300">
+                {selectedBus.lastFixAt ? new Date(selectedBus.lastFixAt).toLocaleString('en-IN') : 'Never'}
+              </dd>
+              <dt className="text-gray-400 dark:text-gray-500">Heading</dt>
+              <dd className="text-gray-700 dark:text-gray-300">
+                {selectedBus.heading != null ? `${Math.round(selectedBus.heading)}°${compassOf(selectedBus.heading) ? ` (${compassOf(selectedBus.heading)})` : ''}` : 'Not reported'}
+              </dd>
+              <dt className="text-gray-400 dark:text-gray-500">Accuracy</dt>
+              <dd className="text-gray-700 dark:text-gray-300">
+                {selectedBus.accuracyM != null ? `within ${Math.round(selectedBus.accuracyM)} m` : 'Not reported'}
+              </dd>
+            </dl>
+          )}
+
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+            <span className="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300">
+              {selectedBus.driverName ?? 'No driver assigned'}
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowMore((v) => !v)}
+                aria-expanded={showMore}
+                className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                {showMore ? 'Less' : 'More'}
+              </button>
               {selectedBus.driverPhone && (
                 <a
                   href={`tel:${selectedBus.driverPhone.replace(/\s/g, '')}`}
-                  className="shrink-0 rounded-lg bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                  className="rounded-lg bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
                 >
                   Call driver
                 </a>
               )}
-            </div>
-          )}
+            </span>
+          </div>
         </div>
       )}
     </div>

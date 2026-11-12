@@ -9,8 +9,9 @@ import { cn } from '@/lib/utils';
 import { humanizeAge } from '@/lib/gps/route-status';
 import { haversineKm } from '@/lib/gps/distance';
 import { CAMPUS } from '@/lib/gps/campus';
-import { useLiveBus, POLL_SUBSCRIBED_MS } from '@/hooks/use-live-bus';
-import { FLEET_TOPIC } from '@/lib/tracking/broadcast';
+import { useLiveFleet, POLL_SUBSCRIBED_MS } from '@/hooks/use-live-bus';
+import { newerFix } from '@/lib/tracking/fleet-fixes';
+import { clockOffsetMs, isRecentForMap, livenessOf } from '@/lib/gps/liveness';
 import { FleetList } from './fleet-list';
 import { STATUS_GROUPS, groupOf, type GroupKey } from './status-groups';
 import { PageHeader } from '@/components/ui/page-header';
@@ -42,6 +43,8 @@ interface RouteStops {
   /** Every active stop on the route, located or not. */
   total: number;
   direction: TripDirection;
+  /** The road this route's bus drove on its latest full trip, or null. */
+  path: [number, number][] | null;
 }
 
 /** The picked route's confirmed stop pins. A failure just means no pins are drawn. */
@@ -50,6 +53,7 @@ async function fetchRouteStops(routeId: string): Promise<RouteStops> {
   if (!res.ok) throw new Error('Failed to load stops');
   const json = (await res.json()) as {
     direction: TripDirection;
+    path?: [number, number][] | null;
     stops: Array<{
       id: string; name: string; order: number; time: string | null; eveningTime: string | null;
       isMajor: boolean; lat: number | null; lng: number | null; confirmed: boolean;
@@ -61,7 +65,7 @@ async function fetchRouteStops(routeId: string): Promise<RouteStops> {
       pins.push({ id: s.id, name: s.name, order: s.order, lat: s.lat, lng: s.lng, time: s.time, eveningTime: s.eveningTime, isMajor: s.isMajor });
     }
   }
-  return { pins, total: json.stops.length, direction: json.direction };
+  return { pins, total: json.stops.length, direction: json.direction, path: json.path ?? null };
 }
 
 function toMapBus(r: FleetRoute): MapBus | null {
@@ -80,6 +84,7 @@ function toMapBus(r: FleetRoute): MapBus | null {
     reason: r.reason,
     driverPhone: r.driver?.phone ?? null,
     speedKmh: r.speedKmh,
+    lastFixAt: r.lastFixAt,
   };
 }
 
@@ -107,7 +112,7 @@ export default function TrackAllPage() {
 
   // Live fixes for the whole fleet. Gated by RLS on realtime.messages to holders of
   // tms.tracking.fleet.view — a student subscribing to this topic receives nothing.
-  const { fix: liveFix, channelStatus } = useLiveBus(FLEET_TOPIC);
+  const { fixes: liveFixes, version: liveVersion, channelStatus } = useLiveFleet();
   const socketUp = channelStatus === 'subscribed';
 
   const { data, isLoading, error, isError, refetch, isFetching, dataUpdatedAt } = useQuery({
@@ -137,8 +142,9 @@ export default function TrackAllPage() {
   // whatever render happened to run when the poll last failed or the tab was hidden.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    // 1s so "Updated 8s ago" counts up live.
-    const id = setInterval(() => setNow(Date.now()), 1_000);
+    // Every 5 s: enough for "updated 10s ago" and for LIVE to expire on time, without
+    // redrawing the whole page each second.
+    const id = setInterval(() => setNow(Date.now()), 5_000);
     return () => clearInterval(id);
   }, []);
 
@@ -151,42 +157,56 @@ export default function TrackAllPage() {
   // Only meaningful while auto-refresh is on; paused means the admin chose a snapshot.
   const showStale = autoRefresh && dataUpdatedAt > 0 && (isError || dataAgeMs > pollMs * 2);
 
-  // Broadcast payload flattened to PRIMITIVES before it goes anywhere near a
-  // dependency array. This page polls, so any object/array from fetched data has a
-  // fresh identity every tick — the defect class that caused four separate bugs here
-  // (markers crawling, rows stuck on "Locating…", selection stranded).
-  const liveRouteId = liveFix?.routeId ?? null;
-  const liveAt = liveFix?.at ?? null;
-  const liveLat = liveFix?.latitude ?? null;
-  const liveLng = liveFix?.longitude ?? null;
-  const liveHeading = liveFix?.heading ?? null;
-  const liveSpeedMs = liveFix?.speed ?? null;
-  const liveAccuracyM = liveFix?.accuracyM ?? null;
-
+  // Broadcast positions, one per bus. `liveFixes` is a Map mutated in place, so the
+  // memo depends on `liveVersion` (a number that rises with every accepted fix) —
+  // never on the Map or on any fetched object, which get a fresh identity every poll.
   const routes = useMemo(() => {
     const base = data?.routes ?? [];
-    if (!liveRouteId || !liveAt || liveLat === null || liveLng === null) return base;
+    if (liveFixes.size === 0) return base;
     return base.map((r) => {
-      if (r.routeId !== liveRouteId) return r;
-      // Only overlay a fix that is genuinely newer than the polled snapshot.
-      if (!(Date.parse(liveAt) > Date.parse(r.lastFixAt ?? ''))) return r;
-      const position = { lat: liveLat, lng: liveLng };
+      // Only a fix genuinely newer than the polled snapshot replaces it.
+      const fix = newerFix(liveFixes, r.routeId, r.lastFixAt);
+      if (!fix) return r;
+      const position = { lat: fix.latitude, lng: fix.longitude };
       return {
         ...r,
         position,
-        heading: liveHeading,
+        heading: fix.heading,
         // speed arrives in METRES PER SECOND; FleetRoute.speedKmh is km/h.
-        speedKmh: liveSpeedMs != null ? liveSpeedMs * 3.6 : null,
-        accuracyM: liveAccuracyM,
+        speedKmh: fix.speed != null ? fix.speed * 3.6 : null,
+        accuracyM: fix.accuracyM,
         distanceToCampusKm: haversineKm(position, CAMPUS),
-        lastFixAt: liveAt,
+        lastFixAt: fix.at,
+        // A position that just arrived IS the bus reporting, whatever the last poll
+        // (up to 30 s old while the feed is up) said about it.
+        sharing: true,
+        state: 'live' as const,
+        label: 'Live',
+        tone: 'green' as const,
+        reason: 'Position just received',
       };
     });
-  }, [data, liveRouteId, liveAt, liveLat, liveLng, liveHeading, liveSpeedMs, liveAccuracyM]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, liveVersion]);
+
+  // The viewer's clock corrected to the server's: every position is aged against this.
+  const clock = now + clockOffsetMs(data?.serverNow, dataUpdatedAt);
+
+  // What the map draws. A position older than 12 hours is not a bus's whereabouts any
+  // more — two of the six stored positions were months old and stretched the opening
+  // view 45 km — so it is left off unless that route is the one picked. The list still
+  // shows every route. `mapClock` steps once a minute; the cut-off needs no finer.
+  const mapClock = Math.floor(clock / 60_000);
   const buses = useMemo(
-    () => routes.map(toMapBus).filter((b): b is MapBus => b !== null),
-    [routes],
+    () =>
+      routes
+        .map(toMapBus)
+        .filter((b): b is MapBus => b !== null)
+        .filter((b) => b.routeId === selectedRouteId || isRecentForMap(b.lastFixAt, mapClock * 60_000)),
+    [routes, mapClock, selectedRouteId],
   );
+  // Counted here from each position's age, so the number cannot lag the map.
+  const reportingNow = routes.filter((r) => r.position && livenessOf(r.lastFixAt, clock) !== 'off').length;
 
   // Drop-out decision (requirement 3, revised after review): keep the user's
   // selection in PAGE state exactly as they made it — including selecting a route
@@ -226,6 +246,13 @@ export default function TrackAllPage() {
     ? buses.some((b) => b.routeId === selectedRouteId)
     : true;
   const mapSelectedRouteId = selectedRouteStillPresent ? selectedRouteId : null;
+
+  // Picking a route in the list: on a phone the list closes so the map, now centred on
+  // that bus with its card, is what the admin sees. Desktop shows both side by side.
+  const selectFromList = useCallback((id: string | null) => {
+    setSelectedRouteId(id);
+    if (id && !window.matchMedia('(min-width: 900px)').matches) setListOpen(false);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     const res = await refetch();
@@ -307,7 +334,7 @@ export default function TrackAllPage() {
       routes={routes}
       filter={filter}
       selectedRouteId={selectedRouteId}
-      onSelectRoute={setSelectedRouteId}
+      onSelectRoute={selectFromList}
       onNudge={(id) => void handleNudge(id)}
       nudges={nudges}
     />
@@ -326,6 +353,8 @@ export default function TrackAllPage() {
         routeStopCount={stopData?.total}
         stopSummary={stopSummary}
         direction={stopData?.direction ?? inferDirection(null, now)}
+        routePath={selectedRouteId ? stopData?.path ?? null : null}
+        nowMs={clock}
         stopsSetupHref={
           selectedRouteId && stopData && stopData.pins.length === 0
             ? `/routes/${selectedRouteId}/stop-locations`
@@ -347,11 +376,11 @@ export default function TrackAllPage() {
       ? `${STATUS_GROUPS.find((g) => g.key === filter)?.label} · ${groupCounts[filter]}`
       : `All routes · ${routes.length}`;
     return (
-      <div className="-mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_8rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6">
+      <div className="-mx-4 -mb-24 -mt-6 flex h-[calc(100dvh_-_7.0625rem_-_env(safe-area-inset-bottom)_-_var(--pwa-banner-h,0px))] flex-col overflow-hidden sm:-mx-6">
         <div className="shrink-0 space-y-2 border-b border-gray-200 bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900">
           <div className="flex items-center justify-between gap-2">
             <p className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-              <span className="font-semibold text-gray-900 dark:text-white">{s.reporting} of {s.trackable}</span> buses reporting
+              <span className="font-semibold text-gray-900 dark:text-white">{reportingNow} of {s.trackable}</span> buses reporting
               {showStale ? (
                 <span className="text-amber-700 dark:text-amber-400"> · data {humanizeAge(dataAgeMs)} old</span>
               ) : (
@@ -410,7 +439,7 @@ export default function TrackAllPage() {
               <ChevronUp className={cn('h-5 w-5 transition-transform', listOpen && 'rotate-180')} />
             </span>
           </button>
-          {listOpen && <div className="h-[52dvh] min-h-0 px-2 pb-2">{list}</div>}
+          {listOpen && <div className="h-[38dvh] min-h-0 px-2 pb-2">{list}</div>}
         </div>
       </div>
     );
@@ -429,7 +458,7 @@ export default function TrackAllPage() {
       <PageHeader
         description={
           <>
-            <span className="font-semibold text-gray-900 dark:text-white">{s.reporting} of {s.trackable}</span> buses
+            <span className="font-semibold text-gray-900 dark:text-white">{reportingNow} of {s.trackable}</span> buses
             reporting right now. Pick a status, a route or a bus.
           </>
         }
@@ -439,11 +468,11 @@ export default function TrackAllPage() {
               <span
                 className={cn(
                   'h-2 w-2 rounded-full',
-                  autoRefresh ? (s.reporting > 0 ? 'animate-pulse bg-green-500' : 'bg-green-500') : 'bg-gray-400'
+                  !autoRefresh ? 'bg-gray-400' : socketUp ? (reportingNow > 0 ? 'animate-pulse bg-green-500' : 'bg-green-500') : 'bg-amber-500'
                 )}
                 aria-hidden
               />
-              {autoRefresh ? 'Live' : 'Paused'}
+              {!autoRefresh ? 'Paused' : socketUp ? 'Live feed connected' : 'Checking every few seconds'}
               {updatedSec != null && ` · Updated ${updatedSec < 60 ? `${updatedSec}s` : humanizeAge(updatedSec * 1000)} ago`}
             </span>
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
@@ -482,7 +511,7 @@ export default function TrackAllPage() {
         ))}
       </SummaryCards>
 
-      <div className="grid h-[calc(100dvh-17.5rem)] min-h-[360px] grid-cols-[minmax(300px,35%)_minmax(0,1fr)] gap-4">
+      <div className="grid h-[calc(100dvh-17.5rem)] min-h-[360px] grid-cols-[minmax(300px,35%)_minmax(0,1fr)] gap-4 max-lg:-mb-[4.5rem]">
         <div className="min-h-0">{list}</div>
         <div className="min-h-0">{map}</div>
       </div>

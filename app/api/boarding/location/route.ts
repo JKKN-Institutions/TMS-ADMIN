@@ -6,6 +6,8 @@ import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { gpsFreshness } from '@/lib/gps/freshness';
 import { cachedRouteToCampus } from '@/lib/geo/route-to-campus';
 import { loadStopPins, loadTimetable, loadTripDirection } from '@/lib/stops/pins';
+import { loadRoutePath } from '@/lib/stops/route-path';
+import { busTopic } from '@/lib/tracking/broadcast';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -18,7 +20,7 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
  *  scoped by getAssignedRouteIdsForUser (the same authority boundary the scanner
  *  uses). Mirrors /api/student/location's response shape so the page can reuse the
  *  student live-track UI. */
-async function getBoardingLocation(_request: NextRequest, auth: AuthContext) {
+async function getBoardingLocation(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.ATTENDANCE_SCAN))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -103,6 +105,11 @@ async function getBoardingLocation(_request: NextRequest, auth: AuthContext) {
       loadTripDirection(svc, route.id),
     ]);
 
+    // The road the bus drives (from its latest recorded trip), sent only when the page
+    // asks — once per visit, not on every poll.
+    const wantPath = request.nextUrl.searchParams.get('path') === '1';
+    const routePath = wantPath ? (await loadRoutePath(svc, route.id, direction))?.points ?? null : undefined;
+
     // The road line to campus only makes sense on the morning run. On the evening run
     // the bus is driving AWAY from campus, and a line pointing back misleads.
     const roadRoute =
@@ -115,10 +122,16 @@ async function getBoardingLocation(_request: NextRequest, auth: AuthContext) {
     return NextResponse.json({
       success: true,
       data: {
+        // Lets the page age the position against this clock, not the viewer's.
+        serverNow: new Date().toISOString(),
         route: { id: route.id, label: `${route.route_number ?? '?'} · ${route.route_name ?? ''}`.trim() },
         stops,
         direction,
         timetable,
+        ...(wantPath ? { routePath } : {}),
+        // Server-supplied live-feed topic; the permission rule admits boarding staff of
+        // this route.
+        realtimeTopic: busTopic(route.id),
         vehicle,
         roadRoute,
       },

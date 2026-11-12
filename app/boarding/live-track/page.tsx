@@ -1,6 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useLiveBus } from '@/hooks/use-live-bus';
+import { clockOffsetMs } from '@/lib/gps/liveness';
 import type { ComponentType } from 'react';
 import { AlertTriangle, Route as RouteIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -38,12 +41,25 @@ interface BusData {
   /** Every stop on the route, located or not. */
   timetable?: TimetableStop[];
   direction?: TripDirection;
+  /** Server-supplied Realtime topic; never constructed client-side. */
+  realtimeTopic?: string | null;
+  /** The server's time when it answered. */
+  serverNow?: string;
+  /** Only in the answer to ?path=1: the road the bus drives. */
+  routePath?: [number, number][] | null;
 }
 
 async function fetchBus(): Promise<BusData> {
   const res = await fetch('/api/boarding/location', { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load location');
   return (await res.json()).data as BusData;
+}
+
+/** The road the bus drives. Asked for once per visit — it does not change while you watch. */
+async function fetchRoutePath(): Promise<[number, number][] | null> {
+  const res = await fetch('/api/boarding/location?path=1', { cache: 'no-store', credentials: 'same-origin' });
+  if (!res.ok) return null;
+  return ((await res.json()).data as BusData | undefined)?.routePath ?? null;
 }
 
 function NoticeCard({
@@ -73,10 +89,25 @@ function NoticeCard({
 }
 
 export default function BoardingLiveTrackPage() {
-  const { data, isLoading, error } = useQuery({
+  // Subscribed BEFORE the query reads `pollIntervalMs`: the poll starts at the 5 s
+  // fallback and slows only once the live feed is actually connected.
+  const [topic, setTopic] = useState<string | null>(null);
+  const { fix: liveFix, pollIntervalMs } = useLiveBus(topic);
+
+  const { data, isLoading, error, dataUpdatedAt } = useQuery({
     queryKey: ['boarding-live-track'],
     queryFn: fetchBus,
-    refetchInterval: 5000,
+    refetchInterval: pollIntervalMs,
+  });
+  // The topic is a string from the server: safe in a dependency array.
+  const serverTopic = data?.realtimeTopic ?? null;
+  useEffect(() => {
+    setTopic(serverTopic);
+  }, [serverTopic]);
+  const { data: routePath } = useQuery({
+    queryKey: ['boarding-route-path'],
+    queryFn: fetchRoutePath,
+    staleTime: Infinity,
   });
   const { viewer, status: viewerStatus, message: viewerMessage, request: onLocateMe } = useViewerLocation();
 
@@ -114,8 +145,12 @@ export default function BoardingLiveTrackPage() {
     );
   }
 
-  const lat = v?.latitude ?? null;
-  const lng = v?.longitude ?? null;
+  // A broadcast position outranks the polled one when it is genuinely newer.
+  const polledAtMs = v?.lastUpdate ? Date.parse(v.lastUpdate) : 0;
+  const useLive = !!liveFix && (liveFix.at ? Date.parse(liveFix.at) : 0) > polledAtMs;
+  const lat = useLive ? liveFix.latitude : v?.latitude ?? null;
+  const lng = useLive ? liveFix.longitude : v?.longitude ?? null;
+  const speedMs = useLive ? liveFix.speed : v?.speed ?? null;
   const hasPosition = lat != null && lng != null;
 
   return (
@@ -123,17 +158,17 @@ export default function BoardingLiveTrackPage() {
       routeLabel={route.label}
       busNumber={v?.registrationNumber ?? null}
       position={hasPosition ? { lat, lng } : null}
-      fresh={hasPosition && !!v && v.hasFix && v.status !== 'offline'}
-      liveNow={v?.status === 'online'}
-      minutesAgo={v?.minutesAgo ?? null}
-      lastUpdateIso={v?.lastUpdate ?? null}
-      heading={v?.heading ?? null}
-      accuracyM={v?.accuracyM ?? null}
-      speedKmh={v?.speed != null ? v.speed * 3.6 : null}
+      fresh={hasPosition && (useLive || (!!v && v.hasFix && v.status !== 'offline'))}
+      lastUpdateIso={useLive ? liveFix.at : v?.lastUpdate ?? null}
+      heading={useLive ? liveFix.heading : v?.heading ?? null}
+      accuracyM={useLive ? liveFix.accuracyM : v?.accuracyM ?? null}
+      speedKmh={speedMs != null ? speedMs * 3.6 : null}
       pins={data?.stops ?? []}
       timetable={data?.timetable ?? []}
       direction={data?.direction ?? inferDirection(null, Date.now())}
       roadGeometry={roadRoute?.geometry}
+      routePath={routePath ?? null}
+      clockOffsetMs={clockOffsetMs(data?.serverNow, dataUpdatedAt)}
       viewer={viewer}
       viewerStatus={viewerStatus}
       viewerMessage={viewerMessage}

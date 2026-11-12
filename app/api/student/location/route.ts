@@ -7,6 +7,7 @@ import { gpsFreshness } from '@/lib/gps/freshness';
 import { cachedRouteToCampus } from '@/lib/geo/route-to-campus';
 import { busTopic } from '@/lib/tracking/broadcast';
 import { loadStopPins, loadTimetable, loadTripDirection } from '@/lib/stops/pins';
+import { loadRoutePath } from '@/lib/stops/route-path';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -16,7 +17,7 @@ async function requirePerm(auth: AuthContext, permission: string): Promise<boole
 
 /** GET /api/student/location — last-known position of the vehicle on the learner's
  *  allocated route. Read-only "where's my bus". */
-async function getStudentLocation(_request: NextRequest, auth: AuthContext) {
+async function getStudentLocation(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requirePerm(auth, TMS_PERMISSIONS.PASSENGER_SELF_VIEW))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -90,6 +91,11 @@ async function getStudentLocation(_request: NextRequest, auth: AuthContext) {
       loadTripDirection(svc, route.id),
     ]);
 
+    // The road the bus drives (from its latest recorded trip), sent only when the page
+    // asks — once per visit, not on every poll.
+    const wantPath = request.nextUrl.searchParams.get('path') === '1';
+    const routePath = wantPath ? (await loadRoutePath(svc, route.id, direction))?.points ?? null : undefined;
+
     // The road line to campus only makes sense on the morning run. On the evening run
     // the bus is driving AWAY from campus, and a line pointing back misleads.
     const roadRoute =
@@ -102,10 +108,13 @@ async function getStudentLocation(_request: NextRequest, auth: AuthContext) {
     return NextResponse.json({
       success: true,
       data: {
+        // Lets the page age the position against this clock, not the viewer's.
+        serverNow: new Date().toISOString(),
         route: { id: route.id, label: `${route.route_number ?? '?'} · ${route.route_name ?? ''}`.trim() },
         stops,
         direction,
         timetable,
+        ...(wantPath ? { routePath } : {}),
         myStopId: learner.transport_stop_id ?? null,
         // Server-supplied so the client never constructs a topic from anything it
         // controls. The RLS policy would refuse a forged one anyway, but handing it
