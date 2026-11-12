@@ -17,6 +17,7 @@ import { createClientSupabaseClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import busPhoto from '@/public/images/login/jkkn-college-buses.webp';
 import jkknLogo from '@/public/images/login/jkkn-logo.png';
+import transportBus from '@/public/images/transport.png';
 import styles from './login.module.css';
 
 // Error codes set by app/auth/callback/route.ts and the proxy redirects.
@@ -80,7 +81,7 @@ function BrandPanel() {
   return (
     <section
       aria-label="JKKN Smart Transport"
-      className={`${styles.brandGradient} relative isolate flex flex-col overflow-hidden px-5 pb-11 pt-4 text-white [@media(max-width:639px)_and_(max-height:720px)]:pb-10 sm:px-8 sm:pb-8 sm:pt-6 md:pb-10 lg:sticky lg:top-0 lg:h-dvh lg:px-10 lg:py-9 xl:px-14 xl:py-11`}
+      className={`${styles.brandGradient} relative isolate flex flex-col overflow-hidden px-5 pb-11 pt-4 [@media(max-width:639px)_and_(max-height:720px)]:pt-3 text-white [@media(max-width:639px)_and_(max-height:720px)]:pb-10 sm:px-8 sm:pb-8 sm:pt-6 md:pb-10 lg:sticky lg:top-0 lg:h-dvh lg:px-10 lg:py-9 xl:px-14 xl:py-11`}
     >
       {/* Decorative layers */}
       <div aria-hidden="true" className={`${styles.pattern} pointer-events-none absolute inset-0 -z-10`} />
@@ -130,10 +131,12 @@ function BrandPanel() {
         </span>
       </header>
 
-      {/* Headline */}
-      <div className="mt-4 sm:mt-7 md:mt-10 lg:mt-auto lg:pt-8">
+      {/* Headline. On phones the college bus stands beside it; from sm up the
+          headline has the row to itself (the desktop panel has its own fleet photo). */}
+      <div className="mt-4 flex items-end gap-1 [@media(max-width:639px)_and_(max-height:720px)]:mt-2 sm:mt-7 sm:block md:mt-10 lg:mt-auto lg:pt-8">
+        <div className="min-w-0 flex-1">
         <h2
-          className={`${styles.enter} text-[1.6rem] font-bold leading-[1.12] tracking-tight sm:text-4xl xl:text-[3.1rem]`}
+          className={`${styles.enter} text-[1.45rem] font-bold leading-[1.12] tracking-tight sm:text-4xl xl:text-[3.1rem]`}
           style={delay(80)}
         >
           Smart{' '}
@@ -143,11 +146,29 @@ function BrandPanel() {
           Service
         </h2>
         <p
-          className={`${styles.enter} mt-1.5 max-w-lg text-[13px] leading-relaxed text-white/90 sm:mt-3 sm:text-base [@media(max-width:639px)_and_(max-height:720px)]:hidden`}
+          className={`${styles.enter} mt-1.5 max-w-lg text-[13px] leading-relaxed text-white/90 hidden sm:mt-3 sm:block sm:text-base`}
           style={delay(160)}
         >
           Smarter Journeys. Safer Travel. Better Connectivity.
         </p>
+        </div>
+
+        {/* Phone only: the JKKN college bus, driving in from the right and resting
+            on a soft shadow. Eager, because on a phone it is the largest thing on
+            screen. Pulled past the panel padding so it reads as arriving. */}
+        <div className={`${styles.driveIn} relative -mr-4 w-[52%] max-w-[230px] shrink-0 sm:hidden`} style={delay(220)}>
+          <span
+            aria-hidden="true"
+            className="absolute inset-x-[8%] bottom-[2%] h-[14%] rounded-[50%] bg-green-950/45 blur-md"
+          />
+          <Image
+            src={transportBus}
+            alt="JKKN college bus"
+            sizes="(max-width: 639px) 52vw, 1px"
+            loading="eager"
+            className="relative h-auto w-full drop-shadow-[0_10px_14px_rgba(5,46,22,0.45)]"
+          />
+        </div>
       </div>
 
       {/* Feature cards — hidden on phones to keep sign-in close to the top */}
@@ -296,7 +317,7 @@ function LoginContent() {
     <div className="flex min-h-dvh flex-col overflow-x-hidden bg-white lg:grid lg:grid-cols-2 dark:bg-neutral-950">
       <BrandPanel />
 
-      <main className="relative isolate flex flex-1 items-start justify-center bg-gradient-to-b from-green-50/70 via-white to-green-50/50 px-4 pb-5 pt-8 [@media(max-width:639px)_and_(max-height:720px)]:pb-2 sm:px-8 sm:py-12 md:items-center lg:min-h-dvh lg:py-10 dark:from-neutral-950 dark:via-neutral-950 dark:to-green-950/30">
+      <main className="relative isolate flex flex-1 items-start justify-center bg-gradient-to-b from-green-50/70 via-white to-green-50/50 px-4 pb-5 pt-8 [@media(max-width:639px)_and_(max-height:720px)]:pb-2 [@media(max-width:639px)_and_(max-height:720px)]:pt-6 sm:px-8 sm:py-12 md:items-center lg:min-h-dvh lg:py-10 dark:from-neutral-950 dark:via-neutral-950 dark:to-green-950/30">
         <div aria-hidden="true" className={`${styles.dots} pointer-events-none absolute inset-0 -z-10 dark:opacity-30`} />
 
         <div
