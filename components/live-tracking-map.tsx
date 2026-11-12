@@ -555,11 +555,13 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
       const target: LatLng = { lat: bus.lat, lng: bus.lng };
       const liveness = livenessOf(bus.lastFixAt, nowRef.current);
       const selected = bus.routeId === selectedRouteId;
-      const iconOpts = { label: bus.routeNumber || '?', liveness, heading: bus.heading, selected };
+      // The marker is the bus icon alone; the route number shows when the pointer is
+      // over it (and in the panel once the bus is picked).
+      const iconOpts = { liveness, heading: bus.heading, selected };
       const sig = busMarkerSignature(iconOpts);
       const existing = markersRef.current.get(bus.routeId);
       const accuracy = liveness !== 'off' && bus.accuracyM != null && bus.accuracyM > 0 ? bus.accuracyM : null;
-      const tip = escapeHtml(bus.registrationNumber ?? `Route ${bus.routeNumber ?? '?'}`);
+      const tip = escapeHtml(`Route ${bus.routeNumber ?? '?'}`);
 
       if (existing) {
         existing.bus = bus;
