@@ -38,7 +38,14 @@ function builder(table: string) {
     if (table === 'tms_pre_trip_check') return resolve(ok(ROWS));
     if (table === 'tms_driver') return resolve(ok([{ id: 'd1', staff_id: 's1' }, { id: 'd2', staff_id: 's2' }]));
     if (table === 'staff') return resolve(ok([{ id: 's1', first_name: 'Ravi', last_name: 'K' }, { id: 's2', first_name: 'Mani', last_name: null }]));
-    if (table === 'tms_vehicle') return resolve(ok([{ id: 'v1', registration_number: 'TN28 AB 1' }, { id: 'v2', registration_number: 'TN28 AB 2' }]));
+    if (table === 'tms_vehicle') return resolve(ok([{ id: 'v1', registration_number: 'TN28 AB 1' }, { id: 'v2', registration_number: 'TN28 AB 2' }, { id: 'v9', registration_number: 'TN28 AB 9' }]));
+    // r18 is on the first check's bus; r31 is reached only through trip t1; r5 has no check.
+    if (table === 'tms_route') return resolve(ok([
+      { id: 'r18', route_number: '18', route_name: 'SOLAR', vehicle_id: 'v1', driver_id: 's1' },
+      { id: 'r31', route_number: '31', route_name: 'T GODU', vehicle_id: 'v7', driver_id: null },
+      { id: 'r5', route_number: '5', route_name: 'ERODE', vehicle_id: 'v9', driver_id: 's2' },
+    ]));
+    if (table === 'tms_trip') return resolve(ok([{ id: 't1', route_id: 'r31' }]));
     return resolve(ok([]));
   };
   return b;
@@ -74,15 +81,20 @@ describe('GET /api/admin/pre-trip-checks', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(eqCalls).toContainEqual(['tms_pre_trip_check', 'check_date', '2026-11-07']);
-    expect(body.data.rows).toHaveLength(2);
-    expect(body.data.rows[0]).toMatchObject({ driverName: 'Ravi K', busRegistration: 'TN28 AB 1', hasPhoto: true });
+    // Sorted by route number: 5 (no check), 18 (via its bus), 31 (via the trip).
+    expect(body.data.rows.map((r: { routeNumber: string; status: string }) => [r.routeNumber, r.status])).toEqual([
+      ['5', 'not_done'], ['18', 'ok'], ['31', 'skipped'],
+    ]);
+    expect(body.data.rows[0]).toMatchObject({ key: 'route:r5', busRegistration: 'TN28 AB 9', driverName: 'Mani', check: null });
+    expect(body.data.rows[1]).toMatchObject({ routeName: 'SOLAR', driverName: 'Ravi K', busRegistration: 'TN28 AB 1' });
+    expect(body.data.rows[1].check).toMatchObject({ id: 'c-ok', hasPhoto: true });
     expect(JSON.stringify(body)).not.toContain('a.jpg');
-    expect(body.data.totals).toEqual({ all: 2, flagged: 1 });
+    expect(body.data.totals).toMatchObject({ buses: 3, checked: 2, ok: 1, issue: 0, skipped: 1, notDone: 1, all: 2, flagged: 1 });
   });
 
   it('"issues and skips only" keeps only flagged rows', async () => {
     const body = await (await listGET(req('/api/admin/pre-trip-checks?issues=1'))).json();
-    expect(body.data.rows.map((r: { id: string }) => r.id)).toEqual(['c-skip']);
+    expect(body.data.rows.map((r: { key: string }) => r.key)).toEqual(['c-skip']);
   });
 
   it('a bad date falls back to today', async () => {
