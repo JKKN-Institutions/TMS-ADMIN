@@ -10,6 +10,7 @@ import type { ViewerLocationStatus } from '@/lib/hooks/use-viewer-location';
 import type { StopPin, TripDirection } from '@/lib/stops/progress';
 import { delayText, estimateArrival, type TimetableStop } from '@/lib/stops/arrival';
 import { STOP_COLORS } from '@/lib/stops/map-stops';
+import { agoText, livenessOf } from '@/lib/gps/liveness';
 import { useRouteStops } from '@/components/map/use-route-stops';
 import { BusContextStrip } from '@/components/live/bus-context-strip';
 
@@ -29,9 +30,6 @@ export interface LiveTrackScreenProps {
   position: LatLng | null;
   /** The position is current (the bus is reporting). False = it is only the last known one. */
   fresh: boolean;
-  /** Reporting within the last couple of minutes. */
-  liveNow: boolean;
-  minutesAgo: number | null;
   lastUpdateIso: string | null;
   heading: number | null;
   accuracyM: number | null;
@@ -44,6 +42,10 @@ export interface LiveTrackScreenProps {
   /** The viewer's own boarding stop, when they have one. */
   myStopId?: string | null;
   roadGeometry?: [number, number][];
+  /** The road this route's bus drives, from a recorded trip. */
+  routePath?: [number, number][] | null;
+  /** This device's clock error against the server's (ms), from clockOffsetMs. */
+  clockOffsetMs?: number;
   viewer: LatLng | null;
   viewerStatus: ViewerLocationStatus;
   viewerMessage: string | null;
@@ -71,8 +73,8 @@ function clockOf(iso: string | null): string | null {
  */
 export function LiveTrackScreen(props: LiveTrackScreenProps) {
   const {
-    routeLabel, busNumber, position, fresh, liveNow, minutesAgo, lastUpdateIso,
-    heading, accuracyM, speedKmh, pins, timetable, direction, myStopId, roadGeometry,
+    routeLabel, busNumber, position, fresh: freshProp, lastUpdateIso,
+    heading, accuracyM, speedKmh, pins, timetable, direction, myStopId, roadGeometry, routePath, clockOffsetMs: offset = 0,
     viewer, viewerStatus, viewerMessage, onLocateMe,
   } = props;
   const [expanded, setExpanded] = useState(false);
@@ -84,12 +86,20 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
     return () => document.body.classList.remove('live-track-open');
   }, []);
 
-  // Minute clock for the arrival estimate.
-  const [now, setNow] = useState(() => Date.now());
+  // A clock for the arrival estimate and for ageing the position: "Live" must expire
+  // by itself when the bus stops reporting, without waiting for the next server answer.
+  const [rawNow, setNow] = useState(() => Date.now());
+  const now = rawNow + offset;
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30_000);
+    const id = setInterval(() => setNow(Date.now()), 10_000);
     return () => clearInterval(id);
   }, []);
+
+  // The position's age against this device's clock decides what it may be called. A
+  // caller saying "fresh" cannot make a five-minute-old position live.
+  const liveness = position ? livenessOf(lastUpdateIso, now) : 'off';
+  const fresh = freshProp && liveness !== 'off';
+  const liveNow = liveness === 'live';
 
   // Passed / next is only claimed from a CURRENT position. A stale one says nothing
   // about where the bus is now.
@@ -106,7 +116,9 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
 
   const lastSeen = clockOf(lastUpdateIso);
   const status = fresh
-    ? { dot: 'bg-green-500', ping: true, text: liveNow ? 'Live now' : `Updated ${minutesAgo ?? '?'} min ago` }
+    ? liveNow
+      ? { dot: 'bg-green-500', ping: true, text: 'Live now' }
+      : { dot: 'bg-amber-500', ping: false, text: `Delayed · updated ${agoText(lastUpdateIso, now)}` }
     : position
       ? { dot: 'bg-gray-400', ping: false, text: `Not sharing now${lastSeen ? ` · last seen ${lastSeen}` : ''}` }
       : { dot: 'bg-gray-400', ping: false, text: 'The driver has not started the trip' };
@@ -158,8 +170,12 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
           viewer={viewer}
           stops={mapStops}
           routeStopCount={timetable.length || undefined}
-          routeGeometry={fresh ? roadGeometry : undefined}
+          // The recorded road is the route line; the "road to campus" guess is only a
+          // stand-in for routes that have never recorded a trip.
+          routeGeometry={fresh && !routePath ? roadGeometry : undefined}
+          routePath={routePath}
           busState={busState}
+          liveness={liveness}
         />
       </div>
 

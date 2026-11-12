@@ -11,7 +11,7 @@ import { useLiveTracking } from '@/lib/driver/use-live-tracking';
 import { cn } from '@/lib/utils';
 import { CAMPUS } from '@/lib/gps/campus';
 import { PreTripCheckForm, type SavedPreTripCheck } from '@/components/driver/pre-trip-check-form';
-import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { inferDirection, type StopPin, type TripDirection } from '@/lib/stops/progress';
 import { useRouteStops } from '@/components/map/use-route-stops';
 import { sharingHealth } from '@/lib/driver/sharing-health';
 import { StopsCaption } from '@/components/live/stops-caption';
@@ -43,6 +43,18 @@ interface RouteLocation {
   vehicle: VehicleLocation | null;
 }
 type Resp = { data?: { routes: RouteLocation[] }; notFound?: boolean };
+
+type RoutePaths = Record<string, { onward: [number, number][] | null; return: [number, number][] | null }>;
+
+/** The road each of the driver's routes follows. Asked for once per visit. */
+async function fetchRoutePaths(): Promise<RoutePaths> {
+  const res = await fetch('/api/driver/location?path=1', { cache: 'no-store', credentials: 'same-origin' });
+  if (!res.ok) return {};
+  const routes = ((await res.json()).data?.routes ?? []) as Array<{ id: string; paths?: RoutePaths[string] }>;
+  const out: RoutePaths = {};
+  for (const r of routes) if (r.paths) out[r.id] = r.paths;
+  return out;
+}
 
 async function fetchLocation(): Promise<Resp> {
   const res = await fetch('/api/driver/location', { cache: 'no-store', credentials: 'same-origin' });
@@ -151,6 +163,8 @@ export default function DriverLocationPage() {
     fix?.lat,
     fix?.lng,
   );
+
+  const { data: routePaths } = useQuery({ queryKey: ['driver-route-paths'], queryFn: fetchRoutePaths, staleTime: Infinity });
 
   const [busy, setBusy] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -779,6 +793,8 @@ export default function DriverLocationPage() {
           accuracyM={fix?.accuracy ?? null}
           destination={CAMPUS}
           stops={mapStops}
+          // The road this route follows, for the run being driven (or the one the clock says is next).
+          routePath={activeRouteId ? routePaths?.[activeRouteId]?.[tripDirection ?? inferDirection(null, now)] ?? null : null}
           busState={fix ? 'live' : 'none'}
         />
         {!fix && (

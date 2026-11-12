@@ -7,6 +7,9 @@ import { Crosshair, Maximize2, Minimize2, Route as RouteIcon } from 'lucide-reac
 import { interpolateLatLng, shouldSnap, type LatLng } from '@/lib/gps/interpolate';
 import { stopsSignature, type MapStop } from '@/lib/stops/map-stops';
 import { drawStopPins } from '@/components/map/stop-pins';
+import { busMarkerIcon, busMarkerSignature } from '@/components/map/bus-marker';
+import { addBaseLayers } from '@/components/map/base-layers';
+import type { Liveness } from '@/lib/gps/liveness';
 
 // Fix Leaflet's default marker icon paths (same CDN icons the admin map uses).
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
@@ -40,6 +43,13 @@ interface LivePositionMapProps {
    * the map frames the stops instead; latitude/longitude are then just a map centre.
    */
   busState?: 'live' | 'stale' | 'none';
+  /**
+   * How current the position is, for the marker's look (green LIVE / amber delayed /
+   * grey). Defaults from busState: live → live, stale → off.
+   */
+  liveness?: Liveness;
+  /** The road this route's bus drives, from a recorded trip: the route line. */
+  routePath?: [number, number][] | null;
   /** Road route (bus → campus) as [lat,lng] points; drawn as a solid blue polyline. */
   routeGeometry?: [number, number][];
 }
@@ -51,20 +61,6 @@ const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '
 /** Labels are free text from the DB and Leaflet renders popup HTML raw. */
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
-}
-
-// Bus marker: SVG arrow-in-circle we rotate to the heading; plain dot when unknown.
-function busIcon(heading: number | null | undefined): L.DivIcon {
-  const rot = heading == null || Number.isNaN(heading) ? null : heading;
-  const glyph = rot == null
-    ? `<circle cx="14" cy="14" r="6" fill="#fff"/>`
-    : `<path d="M14 5 L20 21 L14 17 L8 21 Z" fill="#fff" transform="rotate(${rot} 14 14)"/>`;
-  return L.divIcon({
-    className: 'bus-marker',
-    html: `<div style="width:28px;height:28px;border-radius:50%;background:#16a34a;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;"><svg width="28" height="28" viewBox="0 0 28 28">${glyph}</svg></div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  });
 }
 
 function campusIcon(): L.DivIcon {
@@ -95,8 +91,11 @@ const CONTROL_BTN =
  *  { ssr: false }. */
 const LivePositionMap: React.FC<LivePositionMapProps> = ({
   latitude, longitude, label, zoom = 15,
-  heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry, busState = 'live',
+  heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry, busState = 'live', liveness, routePath,
 }) => {
+  const look: Liveness = liveness ?? (busState === 'stale' ? 'off' : 'live');
+  const iconSigRef = useRef('');
+  const pathLayerRef = useRef<L.LayerGroup | null>(null);
   const busStateRef = useRef(busState);
   const prevBusStateRef = useRef(busState);
   busStateRef.current = busState;
@@ -134,23 +133,14 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   useEffect(() => {
     if (!elRef.current || mapRef.current) return;
     const map = L.map(elRef.current).setView([latitude, longitude], zoom);
-    // Street basemap: standard OpenStreetMap tiles (keyless). CARTO Voyager was
-    // dropped because it now watermarks keyless tiles "API KEY REQUIRED".
-    const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 20,
-      maxNativeZoom: 19,
-      attribution: '© OpenStreetMap contributors',
-    });
-    // Satellite basemap: Esri World Imagery — free with attribution, no key.
-    const satellite = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { maxZoom: 20, attribution: 'Tiles © Esri' },
-    );
-    street.addTo(map);
-    L.control.layers({ Street: street, Satellite: satellite }, {}, { position: 'topright' }).addTo(map);
+    // Street / Light / Satellite, with the viewer's last choice remembered.
+    addBaseLayers(map);
+    pathLayerRef.current = L.layerGroup().addTo(map);
     L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
     // The bus always draws above every stop pin (their offsets top out at 300).
-    const marker = L.marker([latitude, longitude], { icon: busIcon(heading), zIndexOffset: 1000 }).addTo(map);
+    const firstIcon = { liveness: look, heading };
+    iconSigRef.current = busMarkerSignature(firstIcon);
+    const marker = L.marker([latitude, longitude], { icon: busMarkerIcon(firstIcon), zIndexOffset: 1000 }).addTo(map);
     if (label) marker.bindPopup(esc(label));
     // Only a drag by the USER stops following; our own panTo calls do not fire dragstart.
     map.on('dragstart', () => {
@@ -169,6 +159,8 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       viewerRef.current = null;
       stopsRef.current = null;
       routeLineRef.current = null;
+      pathLayerRef.current = null;
+      iconSigRef.current = '';
       hasFitRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,7 +193,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
 
   // Faded for a last-known position, hidden when there is none.
   useEffect(() => {
-    markerRef.current?.setOpacity(busState === 'none' ? 0 : busState === 'stale' ? 0.5 : 1);
+    markerRef.current?.setOpacity(busState === 'none' ? 0 : 1);
     // A hidden bus must not be tappable either.
     const iconEl = markerRef.current?.getElement();
     if (iconEl) iconEl.style.pointerEvents = busState === 'none' ? 'none' : '';
@@ -227,7 +219,16 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     const marker = markerRef.current;
     if (!map || !marker) return;
     const target: LatLng = { lat: latitude, lng: longitude };
-    marker.setIcon(busIcon(heading));
+    // Rebuilding the icon restarts its animation, so only when its look really changed.
+    const iconOpts = { liveness: look, heading };
+    const sig = busMarkerSignature(iconOpts);
+    if (sig !== iconSigRef.current) {
+      marker.setIcon(busMarkerIcon(iconOpts));
+      iconSigRef.current = sig;
+      // setIcon replaces the element, so a hidden bus must be re-hidden from taps.
+      const el = marker.getElement();
+      if (el) el.style.pointerEvents = busStateRef.current === 'none' ? 'none' : '';
+    }
     if (label) marker.bindPopup(esc(label));
 
     if (accuracyM != null && accuracyM > 0) {
@@ -268,7 +269,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       rafRef.current = t < 1 ? requestAnimationFrame(step) : null;
     };
     rafRef.current = requestAnimationFrame(step);
-  }, [latitude, longitude, label, heading, accuracyM]);
+  }, [latitude, longitude, label, heading, accuracyM, look]);
 
   // Campus destination marker.
   useEffect(() => {
@@ -332,6 +333,22 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       }).addTo(map);
     }
   }, [routeGeometry]);
+
+  // The route line: the road this bus really drives, from a recorded trip. A white
+  // casing under a solid line so it reads on every map style. Keyed on a primitive
+  // signature — callers poll, so the array is new each time.
+  const pathKey = routePath && routePath.length > 1
+    ? `${routePath.length}:${routePath[0].join(',')}:${routePath[routePath.length - 1].join(',')}`
+    : '';
+  useEffect(() => {
+    const layer = pathLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!routePath || routePath.length < 2) return;
+    L.polyline(routePath, { color: '#ffffff', weight: 8, opacity: 0.9, interactive: false }).addTo(layer);
+    L.polyline(routePath, { color: '#1d4ed8', weight: 4, opacity: 0.9, interactive: false }).addTo(layer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathKey]);
 
   // Frame bus + destination (+ viewer) into view ONCE; then leave the user's pan/zoom.
   useEffect(() => {

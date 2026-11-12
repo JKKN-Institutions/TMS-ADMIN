@@ -8,6 +8,7 @@ import { searchPlaces } from '@/lib/geo/geocode';
 import { isMissingColumn, loadTripDirection, loadTripTracks } from '@/lib/stops/pins';
 import { parseLocationChanges } from '@/lib/stops/locations';
 import { suggestStopLocations, downsampleTrack } from '@/lib/stops/suggest';
+import { loadRoutePath } from '@/lib/stops/route-path';
 
 /**
  * Map locations of a route's stops.
@@ -121,6 +122,9 @@ export async function GET(request: NextRequest, { params }: Ctx) {
       setupPending: pending,
       recordedTrips: tripCount,
       stops: rows.map(toStop),
+      // The road this route's bus drove on its latest full trip this way (null when no
+      // trip is recorded) — the route line on Track All.
+      path: (await loadRoutePath(svc, routeId, direction))?.points ?? null,
     };
 
     if (wantSuggest) {

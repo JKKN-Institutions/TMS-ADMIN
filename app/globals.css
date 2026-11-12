@@ -898,6 +898,51 @@ html {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Tracking maps.
+   ───────────────────────────────────────────────────────────────────────── */
+/* Leaflet gives a marker's wrapper a white box by default; the bus marker draws its own. */
+.tms-bus-icon { background: none; border: 0; }
+
+/* A live bus breathes: a halo in the marker's own colour (--tms-bus). */
+.tms-bus-live::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  background: var(--tms-bus, #16a34a);
+  opacity: 0.35;
+  animation: tms-bus-pulse 2s ease-out infinite;
+}
+@keyframes tms-bus-pulse {
+  0% { transform: scale(0.9); opacity: 0.4; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+/* The picked bus: a ring that tightens and relaxes around it. */
+.tms-bus-selected { transform: scale(1.12); }
+.tms-bus-selected::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 999px;
+  border: 3px solid #1d4ed8;
+  animation: tms-bus-ring 1.4s ease-in-out infinite;
+}
+@keyframes tms-bus-ring {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.14); opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tms-bus-live::before, .tms-bus-selected::after { animation: none; }
+  .tms-bus-live::before { opacity: 0.25; transform: scale(1.25); }
+}
+/* Zoom buttons a thumb can hit (Leaflet's are 30px). */
+.leaflet-touch .leaflet-bar a {
+  width: 38px;
+  height: 38px;
+  line-height: 38px;
+}
+
 /* Driver trip screen: the bottom row holds the one START / END TRIP button, so the
    floating button is lifted clear of it onto the map's right edge (the map's own
    buttons are on the left). */
