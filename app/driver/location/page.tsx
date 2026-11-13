@@ -400,7 +400,12 @@ export default function DriverLocationPage() {
     );
   };
 
-  // Desktop keeps the page exactly as it was. The full-page map below is the phone layout.
+  // What the map is centred on before the device's location is on: the route's first
+  // placed stop, or the college.
+  const firstPin = mapStops[0];
+  const centre = fix ? { lat: fix.lat, lng: fix.lng } : firstPin ? { lat: firstPin.lat, lng: firstPin.lng } : CAMPUS;
+
+  // Desktop keeps its card layout. The full-page map below is the phone layout.
   if (wide) {
     return (
       <div className="space-y-6">
@@ -602,20 +607,30 @@ export default function DriverLocationPage() {
                 </div>
 
                 {fix && <StopsCaption summary={stopSummary} pinCount={mapStops.length} />}
-                {fix && (
-                  <div className="h-[50dvh] max-h-[560px] min-h-[320px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-                    <LivePositionMap
-                      latitude={fix.lat}
-                      longitude={fix.lng}
-                      label="You are here"
-                      accuracyM={fix.accuracy}
-                      destination={CAMPUS}
-                      stops={mapStops}
-                    />
-                  </div>
-                )}
               </div>
             )}
+
+            {/* The map is always on screen, as on the phone. A desktop often has no trip
+                running and no GPS, so before a fix it shows the college and the route's
+                stops, with no bus drawn. It used to appear only once a fix arrived, which
+                on a desktop was usually never. */}
+            <div className="relative h-[50dvh] max-h-[560px] min-h-[320px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+              <LivePositionMap
+                latitude={centre.lat}
+                longitude={centre.lng}
+                label="You are here"
+                accuracyM={fix?.accuracy ?? null}
+                destination={CAMPUS}
+                stops={mapStops}
+                routePath={activeRouteId ? routePaths?.[activeRouteId]?.[tripDirection ?? inferDirection(null, now)] ?? null : null}
+                busState={fix ? 'live' : 'none'}
+              />
+              {!fix && (
+                <p className="pointer-events-none absolute inset-x-0 top-3 z-[1000] mx-auto w-fit max-w-[85%] rounded-full bg-white/95 px-3 py-1.5 text-center text-xs font-medium text-gray-700 shadow-[0_1px_6px_rgba(0,0,0,0.25)] dark:bg-gray-900/95 dark:text-gray-200">
+                  {trip ? 'Finding your location…' : 'Tap START TRIP to turn on location and show the bus here'}
+                </p>
+              )}
+            </div>
 
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Keep this page open with the screen on while driving. Sharing pauses if you switch apps or the screen
@@ -685,11 +700,6 @@ export default function DriverLocationPage() {
 
   const activeRoute = routes.find((r) => r.id === activeRouteId) ?? routes[0];
   const routeLabel = trip ? tripRoute?.label ?? activeRoute.label : activeRoute.label;
-
-  // What the map is centred on before the phone's location is on: the route's first
-  // placed stop, or the college.
-  const firstPin = mapStops[0];
-  const centre = fix ? { lat: fix.lat, lng: fix.lng } : firstPin ? { lat: firstPin.lat, lng: firstPin.lng } : CAMPUS;
 
   const tone = !health
     ? ''
