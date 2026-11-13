@@ -127,17 +127,28 @@ async function runSync(onProgress: (scanned: number, total: number, found: numbe
   return { scanned, found, errors };
 }
 
-/** Refresh every indexed report's status from the platform; returns how many changed. */
-async function refreshStatuses(): Promise<number> {
+/**
+ * Refresh every indexed report's status from the platform.
+ * `blocked` is true when the platform answered none of the lookups — it has
+ * paused its read API before, for weeks, and the statuses here then go stale
+ * with nothing on screen to say so.
+ */
+async function refreshStatuses(): Promise<{ changed: number; blocked: boolean }> {
   const res = await fetch('/api/admin/bug-reports/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
     body: JSON.stringify({ scope: 'indexed' }),
   });
-  const json = (await res.json().catch(() => ({}))) as { statusChanges?: number; error?: string };
+  const json = (await res.json().catch(() => ({}))) as {
+    statusChanges?: number;
+    scanned?: number;
+    errors?: number;
+    error?: string;
+  };
   if (!res.ok) throw new Error(json.error || 'Status refresh failed');
-  return json.statusChanges ?? 0;
+  const scanned = json.scanned ?? 0;
+  return { changed: json.statusChanges ?? 0, blocked: scanned > 0 && (json.errors ?? 0) >= scanned };
 }
 
 export default function BugReportsPage() {
@@ -177,19 +188,24 @@ export default function BugReportsPage() {
   // The ref keeps React StrictMode's double-mount from firing it twice.
   const [refreshing, setRefreshing] = useState(false);
   const refreshStarted = useRef(false);
+  const [feedBlocked, setFeedBlocked] = useState(false);
   useEffect(() => {
     if (refreshStarted.current) return;
     refreshStarted.current = true;
     setRefreshing(true);
     refreshStatuses()
-      .then(async (changed) => {
+      .then(async ({ changed, blocked }) => {
+        setFeedBlocked(blocked);
         if (changed > 0) {
           await qc.invalidateQueries({ queryKey: ['admin-bug-reports'] });
           toast.success(`Updated ${changed} report status${changed === 1 ? '' : 'es'} from the platform`);
         }
       })
       // Best-effort: the list still renders from the index if the platform is down.
-      .catch((e) => console.error('bug-reports status refresh failed:', e))
+      .catch((e) => {
+        console.error('bug-reports status refresh failed:', e);
+        setFeedBlocked(true);
+      })
       .finally(() => setRefreshing(false));
   }, [qc]);
   const list = useMemo(() => data?.rows ?? [], [data]);
@@ -234,6 +250,19 @@ export default function BugReportsPage() {
           <RefreshCw className="h-3 w-3 animate-spin" />
           Checking the platform for status changes…
         </p>
+      )}
+      {feedBlocked && !refreshing && (
+        <div
+          role="status"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          <p className="font-semibold">Statuses here may be out of date.</p>
+          <p className="mt-1">
+            The bug report platform is not letting this page read statuses right now, so a report closed on the
+            platform can still show as open here. New reports are still received. The statuses will catch up on
+            their own once the platform allows reading again.
+          </p>
+        </div>
       )}
 
       {/* The reporter platform can only answer "reports by ONE address", so this

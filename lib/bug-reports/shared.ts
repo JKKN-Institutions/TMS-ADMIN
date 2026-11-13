@@ -42,6 +42,12 @@ export interface BugReportDetail {
   reporterName: string;
   reporterEmail: string | null;
   messages: BugMessage[];
+  /**
+   * Set when the platform refused to return the report and this detail was built
+   * from our local index alone: description, screenshot, logs and messages are
+   * then empty because we never stored them. Holds the platform's own reason.
+   */
+  unavailableReason?: string;
 }
 
 // Which of the four portals a report came from, derived from its captured

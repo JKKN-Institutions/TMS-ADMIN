@@ -180,10 +180,21 @@ async function handleGet(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ success: true, data: detail });
     } catch (e) {
       console.error('bug-reports GET detail error:', e);
-      return NextResponse.json(
-        { error: (e as Error).message || 'Failed to load the report' },
-        { status: 502 }
-      );
+      // The platform would not hand the report over (it has paused reads before,
+      // answering 503 for weeks). Our index still knows who reported what, from
+      // where and when, so show that instead of a dead "not found" page. The
+      // description, screenshot and conversation live only on the platform.
+      const row = toRow(indexed);
+      const partial: BugReportDetail = {
+        ...row,
+        description: '',
+        screenshotUrl: null,
+        consoleLogs: null,
+        updatedAt: row.createdAt,
+        messages: [],
+        unavailableReason: (e as Error).message || 'The bug report platform did not respond.',
+      };
+      return NextResponse.json({ success: true, data: partial });
     }
   }
 

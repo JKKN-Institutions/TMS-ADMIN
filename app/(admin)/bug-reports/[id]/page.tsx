@@ -47,7 +47,7 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
   const [reply, setReply] = useState('');
 
   // Same query key the list uses for detail → served from cache on navigation.
-  const { data: d, isLoading, isError } = useQuery({
+  const { data: d, isLoading, isError, error } = useQuery({
     queryKey: ['admin-bug-report', id],
     queryFn: () => fetchDetail(id),
   });
@@ -86,9 +86,9 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
   if (isError || !d) {
     return (
       <div className="space-y-6 p-4">
-        <DetailPageHeader crumbs={crumbs('Not found')} backHref="/bug-reports" title="Bug report not found" />
+        <DetailPageHeader crumbs={crumbs('Not loaded')} backHref="/bug-reports" title="Bug report could not be loaded" />
         <p className="text-gray-600 dark:text-gray-300">
-          This bug report could not be loaded.{' '}
+          {(error as Error | null)?.message || 'This bug report could not be loaded.'}{' '}
           <Link href="/bug-reports" className="text-green-600 hover:underline">
             Back to bug reports
           </Link>
@@ -115,12 +115,26 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
         }
       />
 
+      {d.unavailableReason && (
+        <div
+          role="status"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          <p className="font-semibold">The full report can&apos;t be shown right now.</p>
+          <p className="mt-1">
+            The bug report platform said: &ldquo;{d.unavailableReason}&rdquo; The details below come from our own
+            record of the report. The description, screenshot and conversation are held only on the platform, and
+            the status may be out of date.
+          </p>
+        </div>
+      )}
+
       <SectionCard title="Report">
         <div className="space-y-4">
           <div>
             <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Description</div>
             <p className="whitespace-pre-wrap break-words rounded-lg bg-muted/50 p-3 text-sm text-gray-700 dark:text-gray-300">
-              {d.description || '—'}
+              {d.description || (d.unavailableReason ? 'Not available while the platform is paused.' : '—')}
             </p>
           </div>
           {d.screenshotUrl && (
@@ -172,7 +186,11 @@ export default function BugReportDetailPage({ params }: { params: Promise<{ id: 
       <SectionCard title="Conversation">
         <div className="space-y-3">
           <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            {d.messages.length === 0 && <p className="text-xs text-muted-foreground">No messages yet.</p>}
+            {d.messages.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                {d.unavailableReason ? 'Earlier messages can’t be shown while the platform is paused.' : 'No messages yet.'}
+              </p>
+            )}
             {d.messages.map((m) => (
               <div key={m.id}>
                 <span className="text-[10px] uppercase text-muted-foreground">
