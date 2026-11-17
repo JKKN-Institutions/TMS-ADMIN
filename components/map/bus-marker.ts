@@ -36,13 +36,13 @@ export const BUS_COLORS: Record<Liveness, string> = {
 
 /**
  * The college bus photo, cut from public/icons/transport.ico to a 96px PNG (drawn
- * at 36px, so it stays sharp on high-density phone screens). The .ico itself is
+ * at 50px, so it stays sharp on high-density phone screens). The .ico itself is
  * 430 KB and holds nine sizes, which is the wrong thing to load once per marker.
  */
 const BUS_IMAGE = '/icons/bus-marker.png';
 
 /** Diameter of the round badge. It is a circle so the halo and the ring fit it. */
-const D = 46;
+const D = 60;
 
 /** Everything the drawing depends on — markers are only redrawn when this changes. */
 export function busMarkerSignature(o: BusMarkerOptions): string {
@@ -68,7 +68,7 @@ export function busMarkerIcon(o: BusMarkerOptions): L.DivIcon {
   // The route number hangs under the badge, in the status colour, so the photo
   // stays uncovered and the place-name tooltip above it is not disturbed.
   const label = o.label
-    ? `<span style="position:absolute;z-index:2;left:50%;bottom:-9px;transform:translateX(-50%);background:${color};color:#fff;font:700 12px/1 Arial,Helvetica,sans-serif;padding:2px 6px;border-radius:8px;border:1.5px solid #fff;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3);">${escapeHtml(String(o.label).slice(0, 4))}</span>`
+    ? `<span style="position:absolute;z-index:2;left:50%;bottom:-9px;transform:translateX(-50%);background:${color};color:#fff;font:700 13px/1 Arial,Helvetica,sans-serif;padding:2px 7px;border-radius:8px;border:1.5px solid #fff;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3);">${escapeHtml(String(o.label).slice(0, 4))}</span>`
     : '';
   // A bus that is not reporting loses its colour, so "off" reads at a glance
   // even though the photo itself is always yellow.
@@ -78,7 +78,7 @@ export function busMarkerIcon(o: BusMarkerOptions): L.DivIcon {
     <div class="tms-bus${live ? ' tms-bus-live' : ''}${o.selected ? ' tms-bus-selected' : ''}" style="position:relative;width:${D}px;height:${D}px;--tms-bus:${color};">
       ${arrow}
       <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;border:3px solid ${color};border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.35);">
-        <img src="${BUS_IMAGE}" alt="" width="36" height="36" draggable="false" style="display:block;width:36px;height:36px;${dim}" />
+        <img src="${BUS_IMAGE}" alt="" width="50" height="50" draggable="false" style="display:block;width:50px;height:50px;${dim}" />
       </div>
       ${label}
       ${tag}
