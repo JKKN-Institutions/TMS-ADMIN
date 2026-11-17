@@ -1,8 +1,13 @@
 /*
- * Sign-in screen motion. Everything here is decorative, so all of it is
- * switched off under prefers-reduced-motion (bottom of file). Only transform /
- * opacity / background-position are animated — no layout properties — so none
- * of it causes reflow or layout shift.
+ * Sign-in screen looks and ambient motion.
+ *
+ * Two kinds of movement live on this screen:
+ *  - The slow background loops below (gradient drift, floating glows, GPS
+ *    pulse) are plain CSS: they run without JavaScript and are switched off
+ *    under prefers-reduced-motion at the bottom of this file.
+ *  - The entrance, the button, the error message and the running bus are
+ *    driven by Motion (page.tsx, bus-scene.tsx, login-motion.ts). The bus
+ *    styles in this file are looks only — nothing in them animates.
  */
 
 /* Slow drift of the green brand gradient. */
@@ -62,42 +67,6 @@
   }
 }
 
-/* Staggered page entrance. Use with --enter-delay inline. */
-.enter {
-  opacity: 0;
-  animation: enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  animation-delay: var(--enter-delay, 0ms);
-}
-
-@keyframes enter {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 14px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-/* The bus on the phone sign-in screen drives in from the right, once. */
-.driveIn {
-  opacity: 0;
-  animation: driveIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  animation-delay: var(--enter-delay, 0ms);
-}
-
-@keyframes driveIn {
-  from {
-    opacity: 0;
-    transform: translate3d(48px, 0, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
 /* Pulsing ring on the "live" GPS dot. */
 .pulse {
   animation: pulse 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
@@ -122,9 +91,191 @@
   .pulse {
     animation: none;
   }
-  .enter,
-  .driveIn {
-    animation: none;
-    opacity: 1;
-  }
+}
+
+/* ───────────────────────── Running bus (bus-scene.tsx) ─────────────────────
+ * Looks only. Motion starts and stops every movement, so there is nothing to
+ * override for reduced motion: the streaks, dust and wheel blur default to
+ * invisible and simply never get started.
+ */
+
+.scene {
+  position: relative;
+}
+
+/* Desktop: the box flexes with the viewport height. Making it a size container
+   lets the stage be "as big as fits" in both directions while keeping the
+   photo's exact shape (a plain object-fit: contain would letterbox, and the
+   road and wheels are placed in % of the bus). */
+.sceneLarge {
+  container-type: size;
+}
+
+.stageCompact {
+  position: relative;
+}
+
+.stageLarge {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: min(100cqw, calc(100cqh * 512 / 287));
+  aspect-ratio: 512 / 287;
+  translate: -50% 0;
+}
+
+/* The bus is seen from a front corner, so its wheels touch the ground at
+   different heights. A band (a road surface) holds both; a single line would
+   leave the rear wheel floating. */
+.road {
+  position: absolute;
+  z-index: -1;
+  bottom: -4%;
+  height: 22%;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(5, 46, 22, 0.34) 32%,
+    rgba(5, 46, 22, 0.34) 74%,
+    transparent
+  );
+  mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
+}
+/* Phone / tablet: the headline and tagline share this row, to the left of the
+   bus. Keep the road short on that side or its dashes strike through the text. */
+.roadCompact {
+  right: -12%;
+  left: -14%;
+}
+.roadLarge {
+  left: 50%;
+  width: calc(100cqw + 5rem);
+  translate: -50% 0;
+}
+
+/* One dash period wider than the road and shifted left by it, so sliding it
+   right by exactly one period loops without a seam. --dash is set inline. */
+.roadDashes {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: calc(-1 * var(--dash));
+  height: max(2px, 9%);
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.6) 0 calc(var(--dash) * 0.42),
+    transparent calc(var(--dash) * 0.42) var(--dash)
+  );
+}
+
+.streaks {
+  position: absolute;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+/* Kept close to the bus: further left they float above the headline and read
+   as stray lines rather than wind. */
+.streaksCompact {
+  top: 0;
+  right: -12%;
+  bottom: 34%;
+  left: -50%;
+}
+.streaksLarge {
+  top: 0;
+  bottom: 18%;
+  left: 50%;
+  width: calc(100cqw + 6rem);
+  translate: -50% 0;
+}
+
+/* Spans its whole lane with a short lit segment at the start, so translating
+   it by its own width carries the segment right across. */
+.streak {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 2px;
+  opacity: 0;
+  background: linear-gradient(
+      90deg,
+      transparent 0,
+      rgba(255, 255, 255, 0.5) 7%,
+      transparent 14%
+    )
+    no-repeat;
+}
+
+/* Pivot near the wheels, so the body rocks on its suspension rather than
+   spinning about its middle. */
+.ride {
+  position: relative;
+  transform-origin: 70% 92%;
+}
+
+.wheel {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  translate: -50% -50%;
+}
+
+/* A circle as tall as the rim, flattened inline (scaleX) into the ellipse the
+   rim makes at this camera angle. Concentric rings are what a spinning rim
+   looks like: the wheel nuts smear into bands. */
+.wheelRim {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  /* Soft stops, not hard rings: hard edges read as a painted hubcap. */
+  background: radial-gradient(
+    circle,
+    rgba(112, 118, 126, 0.8) 0%,
+    rgba(112, 118, 126, 0.8) 8%,
+    rgba(204, 208, 214, 0.8) 20%,
+    rgba(188, 193, 199, 0.78) 30%,
+    rgba(150, 156, 163, 0.75) 38%,
+    rgba(200, 205, 211, 0.8) 48%,
+    rgba(206, 210, 216, 0.8) 60%,
+    rgba(152, 158, 166, 0.75) 69%,
+    rgba(212, 216, 221, 0.8) 79%,
+    rgba(168, 173, 180, 0.7) 88%,
+    rgba(84, 90, 98, 0) 97%
+  );
+}
+
+.wheelGlint {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 55deg,
+    rgba(255, 255, 255, 0.55) 90deg,
+    transparent 125deg 235deg,
+    rgba(255, 255, 255, 0.35) 270deg,
+    transparent 305deg
+  );
+}
+
+.dust {
+  position: absolute;
+  top: 82%;
+  left: 82%;
+  width: 5.5%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  opacity: 0;
+  background: rgba(255, 255, 255, 0.45);
+  filter: blur(6px);
+  pointer-events: none;
 }
