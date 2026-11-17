@@ -28,7 +28,7 @@ type Size = 'compact' | 'large';
 
 /** Distances in px. `compact` is the phone / tablet bus, `large` the desktop one. */
 const TUNING = {
-  compact: { enter: -160, dash: 44, ride: [-1.2, -0.6], surge: [-5, 3], dust: 14 },
+  compact: { enter: 160, dash: 44, ride: [-1.2, -0.6], surge: [-5, 3], dust: 14 },
   large: { enter: 0, dash: 88, ride: [-2, -1], surge: [-8, 5], dust: 26 },
 } as const;
 
@@ -82,8 +82,8 @@ export function BusScene({ size, className = '' }: { size: Size; className?: str
       {/* The stage is exactly the photo's shape, so every layer below can be
           placed in % of the bus. */}
       <div className={large ? styles.stageLarge : styles.stageCompact}>
-        {/* Road. Phone: the bus cruises in place heading right, so the dashes run
-            left. Desktop: the bus itself crosses the panel, so the road is still. */}
+        {/* Road. Phone: the bus cruises in place heading left, so the dashes run
+            right. Desktop: the bus itself crosses the panel, so the road is still. */}
         <div
           aria-hidden="true"
           className={`${styles.road} ${large ? styles.roadLarge : styles.roadCompact}`}
@@ -92,7 +92,7 @@ export function BusScene({ size, className = '' }: { size: Size; className?: str
           <m.div
             className={styles.roadDashes}
             animate={
-              still || large ? undefined : { transform: ['translateX(0px)', `translateX(${-t.dash}px)`] }
+              still || large ? undefined : { transform: ['translateX(0px)', `translateX(${t.dash}px)`] }
             }
             transition={forever(DASH_SECONDS)}
           />
@@ -111,7 +111,7 @@ export function BusScene({ size, className = '' }: { size: Size; className?: str
               animate={
                 still || large
                   ? undefined
-                  : { transform: ['translateX(100%)', 'translateX(-15%)'], opacity: [0, 1, 1, 0] }
+                  : { transform: ['translateX(-15%)', 'translateX(100%)'], opacity: [0, 1, 1, 0] }
               }
               // Per-value: `times` must match each value's own keyframe count.
               transition={{
@@ -122,9 +122,9 @@ export function BusScene({ size, className = '' }: { size: Size; className?: str
           ))}
         </div>
 
-        {/* 1. Phone: arrives from the left, once. Desktop: just fades in. */}
+        {/* 1. Phone: arrives from the right, once. Desktop: just fades in. */}
         <m.div variants={driveIn} custom={t.enter} className="relative">
-          {/* Desktop: drives across the whole green panel, left edge to right
+          {/* Desktop: drives across the whole green panel, right edge to left
               edge, then waits off-screen a moment and comes again. cqw is the
               scene width, so 110cqw is always fully out of the panel. */}
           <m.div
@@ -133,17 +133,18 @@ export function BusScene({ size, className = '' }: { size: Size; className?: str
                 ? undefined
                 : {
                     transform: [
+                      'translateX(110cqw)',
                       'translateX(-110cqw)',
-                      'translateX(110cqw)',
-                      'translateX(110cqw)',
+                      'translateX(-110cqw)',
                     ],
                   }
             }
             transition={forever(CROSS_SECONDS, { times: [0, 0.88, 1] })}
           >
-          {/* The photo faces left; mirrored so the bus heads right. Everything
-              inside (dust, wheel spin, drift) mirrors with it. */}
-          <div style={{ transform: 'scaleX(-1)' }}>
+          {/* The photo faces left, so the bus heads left and its lettering reads
+              correctly. To turn it round, mirror this wrapper (scaleX(-1)) and
+              reverse the directions above. */}
+          <div>
           {/* 2. Eases a little ahead and back, so the cruise never looks mechanical. */}
           <m.div
             animate={
