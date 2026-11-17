@@ -236,3 +236,38 @@ export function summariseProgress(
   const s = stops[progress.nearestIndex];
   return { headline: `Near ${s.name}`, detail: `${formatDistance(progress.nearestDistanceM)} away` };
 }
+
+/** A bus this close to a stop is described as being near it. */
+export const NEAR_STOP_RADIUS_M = 500;
+/** Beyond this from every stop the bus is off its route, and no stop name describes where it is. */
+const OFF_ROUTE_RADIUS_M = 8000;
+
+/**
+ * Where the bus is, as a place a person recognises: the name of a stop on its own
+ * route. "At SOLAR", "Near GH", "Between SOLAR and GH".
+ *
+ * Stop names are the only place names we can trust here — looking a position up in
+ * a map service put four of one route's stops 29 to 68 km from where they are.
+ * Returns null when the bus is too far from every stop for a stop name to be honest.
+ */
+export function placeText(
+  stops: ReadonlyArray<Pick<StopPin, 'name' | 'order'>>,
+  progress: StopProgress | null,
+  direction: TripDirection | null,
+): string | null {
+  if (!progress || stops.length === 0) return null;
+  const nearest = stops[progress.nearestIndex];
+  if (progress.atStop) return `At ${nearest.name}`;
+  if (progress.nearestDistanceM <= NEAR_STOP_RADIUS_M) return `Near ${nearest.name}`;
+  if (progress.nearestDistanceM > OFF_ROUTE_RADIUS_M) return null;
+  if (!direction) return `Near ${nearest.name}`;
+
+  const travel = stops
+    .map((s, i) => ({ i, order: s.order }))
+    .sort((a, b) => (direction === 'onward' ? a.order - b.order : b.order - a.order))
+    .map((x) => x.i);
+  if (progress.nextIndex == null) return `Past ${stops[travel[travel.length - 1]].name}`;
+  const pos = travel.indexOf(progress.nextIndex);
+  const next = stops[progress.nextIndex];
+  return pos > 0 ? `Between ${stops[travel[pos - 1]].name} and ${next.name}` : `Heading to ${next.name}`;
+}

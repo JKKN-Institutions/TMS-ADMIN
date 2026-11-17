@@ -7,6 +7,7 @@ import {
   clockToSeconds,
   scheduledClock,
   formatDistance,
+  placeText,
   type StopPin,
 } from './progress';
 
@@ -167,5 +168,38 @@ describe('clock helpers', () => {
     expect(formatDistance(84)).toBe('80 m');
     expect(formatDistance(995)).toBe('1.0 km');
     expect(formatDistance(1234)).toBe('1.2 km');
+  });
+});
+
+describe('placeText', () => {
+  const place = (lng: number, dir: 'onward' | 'return' | null, lat = 11.4) =>
+    placeText(STOPS, stopProgress(STOPS, at(lng, lat), dir), dir);
+
+  it('names the stop the bus is standing at', () => {
+    expect(place(77.91, 'onward')).toBe('At SECOND');
+  });
+
+  it('says "Near" within a few hundred metres of a stop', () => {
+    // 0.003 deg of longitude is about 330 m here.
+    expect(place(77.913, 'onward')).toBe('Near SECOND');
+  });
+
+  it('names both stops when the bus is mid-way, in the order it is travelling', () => {
+    expect(place(77.915, 'onward')).toBe('Between SECOND and THIRD');
+    expect(place(77.915, 'return')).toBe('Between THIRD and SECOND');
+  });
+
+  it('says where it is heading before the first stop, and when it is past the last', () => {
+    expect(place(77.89, 'onward')).toBe('Heading to FIRST');
+    expect(place(77.94, 'onward')).toBe('Past COLLEGE');
+  });
+
+  it('falls back to the nearest stop when the direction is unknown', () => {
+    expect(place(77.915, null)).toMatch(/^Near (SECOND|THIRD)$/);
+  });
+
+  it('says nothing when the bus is far from every stop', () => {
+    expect(place(77.9, 'onward', 11.6)).toBeNull();
+    expect(placeText(STOPS, null, 'onward')).toBeNull();
   });
 });

@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Bus, ChevronUp } from 'lucide-react';
+import { Bus, ChevronUp, MapPin } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CAMPUS } from '@/lib/gps/campus';
 import type { LatLng } from '@/lib/gps/distance';
 import type { ViewerLocationStatus } from '@/lib/hooks/use-viewer-location';
-import type { StopPin, TripDirection } from '@/lib/stops/progress';
+import { placeText, type StopPin, type TripDirection } from '@/lib/stops/progress';
 import { delayText, estimateArrival, type TimetableStop } from '@/lib/stops/arrival';
 import { STOP_COLORS } from '@/lib/stops/map-stops';
 import { agoText, livenessOf } from '@/lib/gps/liveness';
@@ -106,6 +106,8 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
   const { mapStops, summary, progress } = useRouteStops(
     pins, direction, fresh ? position?.lat : null, fresh ? position?.lng : null, myStopId,
   );
+  // Where the bus is, as a stop name on its own route. Only from a current position.
+  const place = fresh ? placeText(pins, progress, direction) : null;
   const arrival = estimateArrival({ timetable, pins, progress, direction, myStopId, nowMs: now });
   const myStop = myStopId ? timetable.find((s) => s.id === myStopId) ?? null : null;
 
@@ -176,6 +178,7 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
           routePath={routePath}
           busState={busState}
           liveness={liveness}
+          placeLabel={place}
         />
       </div>
 
@@ -210,6 +213,13 @@ export function LiveTrackScreen(props: LiveTrackScreenProps) {
           </span>
           <span className="mt-2 block text-lg font-bold leading-snug text-gray-900 dark:text-white">{headline}</span>
           {detail && <span className="mt-0.5 block text-sm text-gray-600 dark:text-gray-400">{detail}</span>}
+          {/* Not repeated when the headline already says the same thing ("At SOLAR"). */}
+          {place && place !== headline && (
+            <span className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-green-800 dark:text-green-300">
+              <MapPin className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">Bus is now: {place}</span>
+            </span>
+          )}
           <span className="mt-1 block truncate text-xs text-gray-500 dark:text-gray-400">
             {routeLabel}
             <span className="lg:hidden"> · {expanded ? 'tap to close' : 'tap for all stops'}</span>

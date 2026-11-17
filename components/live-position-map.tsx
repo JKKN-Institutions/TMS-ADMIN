@@ -48,6 +48,11 @@ interface LivePositionMapProps {
    * grey). Defaults from busState: live → live, stale → off.
    */
   liveness?: Liveness;
+  /**
+   * Where the bus is, in words ("Near SOLAR"), shown as a label fixed above the bus.
+   * Only drawn while the bus is live.
+   */
+  placeLabel?: string | null;
   /** The road this route's bus drives, from a recorded trip: the route line. */
   routePath?: [number, number][] | null;
   /** Road route (bus → campus) as [lat,lng] points; drawn as a solid blue polyline. */
@@ -91,7 +96,7 @@ const CONTROL_BTN =
  *  { ssr: false }. */
 const LivePositionMap: React.FC<LivePositionMapProps> = ({
   latitude, longitude, label, zoom = 15,
-  heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry, busState = 'live', liveness, routePath,
+  heading, accuracyM, destination, viewer, stops, routeStopCount, routeGeometry, busState = 'live', liveness, routePath, placeLabel,
 }) => {
   const look: Liveness = liveness ?? (busState === 'stale' ? 'off' : 'live');
   const iconSigRef = useRef('');
@@ -212,6 +217,20 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     prevBusStateRef.current = busState;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busState]);
+
+  // The place name rides above the bus, always open, so nobody has to tap to learn
+  // where the bus is. Removed with the bus, and for a last-known position: a stale
+  // position says nothing about where the bus is now.
+  useEffect(() => {
+    const marker = markerRef.current;
+    if (!marker) return;
+    const text = busState === 'live' && placeLabel ? placeLabel : null;
+    marker.unbindTooltip();
+    if (text) {
+      marker.bindTooltip(esc(text), { permanent: true, direction: 'top', className: 'tms-bus-place', interactive: false });
+    }
+    // Leaflet moves the label with the marker by itself, so only the words matter here.
+  }, [placeLabel, busState]);
 
   // Bus glide + icon + accuracy circle.
   useEffect(() => {
