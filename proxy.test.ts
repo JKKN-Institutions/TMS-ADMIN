@@ -11,6 +11,12 @@ describe('proxy cron allowlist', () => {
     expect(SRC).toContain("'/api/cron/auto-generate-bills'");
   });
 
+  it('allowlists the daily attention digest cron endpoint', () => {
+    // Sends one mail a day to the transport heads. Called by pg_cron with a
+    // Bearer secret and no session, so without this entry it is 401'd here.
+    expect(SRC).toContain("'/api/cron/attention-digest'");
+  });
+
   it('allowlists the in-charge bill review cron endpoint', () => {
     expect(SRC).toContain("'/api/cron/incharge-bill-review'");
   });

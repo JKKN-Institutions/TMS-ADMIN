@@ -88,7 +88,7 @@ interface LiveTrackingMapProps {
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
 const GLIDE_MS = 4500;
 /** Markers closer than this on screen (px, centre to centre) merge into one badge. */
-const CLUSTER_RADIUS_PX = 34;
+const CLUSTER_RADIUS_PX = 44;
 /** Fitting never zooms closer than this: one bus must not fill the screen with blank tiles. */
 const FIT_MAX_ZOOM = 15;
 

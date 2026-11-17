@@ -4,6 +4,9 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { ACTIVE_LIFECYCLE_STATUSES } from '@/lib/passengers/types';
 import { istToday, addDays } from '@/lib/booking/window';
 import { buildAlerts } from '@/lib/dashboard/alerts';
+import {
+  DOC_EXPIRY_COLUMNS, loadAttentionCounts, toAlertInputs,
+} from '@/lib/dashboard/attention';
 import { loadRouteBoard } from '@/lib/routes/board';
 import { LOW_OCCUPANCY_PCT, lowOccupancyRoutes } from '@/lib/dashboard/occupancy';
 import type {
@@ -35,17 +38,6 @@ const ACTIVITY_LIMIT = 8;
 /** Baseline window for the stat-card trend arrows. */
 const TREND_BASELINE_DAYS = 30;
 const DAY_MS = 86_400_000;
-
-/**
- * The statutory documents a bus must hold. Listed once so the "expired" and
- * "due soon" checks can never drift apart.
- */
-const DOC_EXPIRY_COLUMNS = [
-  'insurance_expiry',
-  'fitness_expiry',
-  'permit_expiry_date',
-  'pollution_expiry_date',
-] as const;
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -139,7 +131,6 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
     const tomorrow = addDays(today, 1);
     const monthStart = `${today.slice(0, 7)}-01`;
     const baseline = new Date(Date.now() - TREND_BASELINE_DAYS * DAY_MS).toISOString();
-    const staleBefore = new Date(Date.now() - 3 * DAY_MS).toISOString();
     /** Documents falling due inside this window count as "due soon". */
     const soon = addDays(today, 60);
 
@@ -162,13 +153,12 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
       bookingsToday, bookingsTomorrow,
       attendanceMarked, presentToday,
       tripsToday, tripsActive,
-      paidBills, unpaidBills, overdueBills,
+      paidBills, unpaidBills,
       collectedToday, collectedMonth, collectedTotal, outstanding,
-      staleGrievances, openGrievances, ridersWithoutStop,
-      expiredDocs,
+      attentionCounts,
       trendBookings, trendPresent,
       activity,
-      hourly, board, nobodyScanned, yesterday, busPass, docsDueSoon,
+      hourly, board, yesterday, busPass, docsDueSoon,
     ] = await Promise.all([
       // ── Headline counts, each with a 30-day-ago baseline for a REAL trend ──
       // "Learners" is counted exactly as the Passengers > Learners page counts,
@@ -223,9 +213,6 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
         .not('transport_year_id', 'is', null).eq('status', 'paid'), 'bills.paid', degraded),
       countOf(() => supabase.from('billing_student_bills').select('id', head)
         .not('transport_year_id', 'is', null).eq('status', 'unpaid'), 'bills.unpaid', degraded),
-      countOf(() => supabase.from('billing_student_bills').select('id', head)
-        .not('transport_year_id', 'is', null).eq('status', 'unpaid')
-        .lt('due_date', today), 'bills.overdue', degraded),
 
       // payment_date is timestamptz, so the day boundary must carry the IST
       // offset: a bare date would silently bill 05:30 of tomorrow into today.
@@ -249,17 +236,9 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
         'final_amount', 'finance.outstanding', degraded),
 
       // ── Alert inputs ──
-      countOf(() => supabase.from('tms_grievance').select('id', head)
-        .in('status', ['open', 'in_progress'])
-        .lt('created_at', staleBefore), 'grievances.stale', degraded),
-      countOf(() => supabase.from('tms_grievance').select('id', head)
-        .in('status', ['open', 'in_progress']), 'grievances.open', degraded),
-      countOf(() => supabase.from('learners_profiles').select('id', head)
-        .eq('bus_required', true).in('lifecycle_status', activeLifecycle)
-        .is('transport_stop_id', null), 'learners.noStop', degraded),
-      // Selected rather than head-counted: the alert row names the buses, and
-      // at 35 vehicles the registrations cost nothing over the count alone.
-      expiredDocVehicles(supabase, today, degraded),
+      // One shared loader: the daily mail to the transport heads reads these
+      // same counts, so the two can never quote different numbers.
+      loadAttentionCounts(supabase, today),
 
       // ── 7-day trend ──
       // Order keys are the tables' primary keys: tms_booking is (learner_id,
@@ -280,7 +259,6 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
       // Analytics must never quote different numbers for the same route, and
       // it carries the dangling-vehicle_id handling in one place.
       loadRouteBoard(today),
-      routesWithNoScans(supabase, today, degraded),
       previousDay(supabase, today, degraded),
       busPassRequests(supabase, degraded),
       // "Due soon" must be range-checked PER COLUMN, inside and(...) groups.
@@ -298,7 +276,9 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
     const routeRows = board.routes;
     // null (not 0) when the query failed, so an unmeasurable check stays
     // unmeasured all the way to the alert row.
-    const expiredVehicleDocs = expiredDocs?.count ?? null;
+    for (const key of attentionCounts.degraded) degraded.note(key, 'see attention loader');
+    const overdueBills = attentionCounts.overdueBills;
+    const expiredVehicleDocs = attentionCounts.expiredDocs?.count ?? null;
     for (const key of board.degraded) degraded.note(`board.${key}`, 'see routes board');
     const lowOccupancy = lowOccupancyRoutes(routeRows);
     // "No bus" means no RESOLVABLE vehicle, not merely a null vehicle_id — 4
@@ -363,20 +343,7 @@ async function getDashboard(_request: NextRequest, auth: AuthContext) {
         overdueBills: overdueBills ?? 0,
       },
       routes: routeRows,
-      alerts: buildAlerts({
-        overdueBills,
-        staleGrievances,
-        openGrievances,
-        ridersWithoutStop,
-        expiredVehicleDocs,
-        routesWithoutDriver: routesNoDriver.length,
-        routesWithoutBus: routesNoBus.length,
-        routesNobodyScanned: nobodyScanned?.count ?? null,
-        routesNobodyScannedNumbers: nobodyScanned?.numbers,
-        routesWithoutBusNumbers: routesNoBus.map((r) => r.routeNumber),
-        routesWithoutDriverNumbers: routesNoDriver.map((r) => r.routeNumber),
-        expiredVehicleDocsRegistrations: expiredDocs?.registrations,
-      }),
+      alerts: buildAlerts(toAlertInputs(attentionCounts, board)),
       trend,
       activity,
       degraded: degraded.keys,
@@ -563,102 +530,6 @@ async function hourlyScans(
   } catch (e) {
     degraded.note('today.hourly', e);
     return [];
-  }
-}
-
-/**
- * Routes that had bookings today but no boarding scans at all.
- *
- * This is the single most actionable signal on the page: it usually means an
- * in-charge is not marking attendance, so the roster for that bus is blind.
- * Returns the route numbers too — a count says something is wrong, the numbers
- * say where to look.
- */
-/**
- * Buses holding at least one expired statutory document, named.
- *
- * The filter is identical to the head-count it replaced — one `.or()` of
- * per-column `lt today` — so the number this returns is the same number the
- * "Document expiry" tile has always shown. Only the registrations are new, and
- * the fleet is 35 buses, so there is no paging concern.
- *
- * Null on failure, never 0, exactly like countOf.
- */
-async function expiredDocVehicles(
-  supabase: Supa,
-  today: string,
-  degraded: Degraded
-): Promise<{ count: number; registrations: string[] } | null> {
-  try {
-    const { data, error } = await supabase
-      .from('tms_vehicle')
-      .select('id, registration_number')
-      .or(DOC_EXPIRY_COLUMNS.map((c) => `${c}.lt.${today}`).join(','));
-
-    if (error) {
-      degraded.note('vehicles.expiredDocs', error);
-      return null;
-    }
-
-    const rows = (data ?? []) as unknown as Array<{ registration_number: string | null }>;
-    const registrations = rows
-      .map((r) => (r.registration_number ?? '').trim())
-      .filter((r) => r.length > 0)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-    // The count is the ROW count, not the registration count: a bus with a
-    // blank registration is still a bus with an expired document.
-    return { count: rows.length, registrations };
-  } catch (e) {
-    degraded.note('vehicles.expiredDocs', e);
-    return null;
-  }
-}
-
-async function routesWithNoScans(
-  supabase: Supa,
-  date: string,
-  degraded: Degraded
-): Promise<{ count: number; numbers: string[] } | null> {
-  try {
-    const [bookedRes, scannedRes, routesRes] = await Promise.all([
-      supabase.from('tms_booking').select('route_id').eq('travel_date', date)
-        .order('travel_date', { ascending: true }).order('learner_id', { ascending: true })
-        .range(0, SUM_PAGE * 4 - 1),
-      // Morning only, same reason as attendance.marked/present above — an
-      // evening-only scan must not hide a route whose morning trip was
-      // never marked.
-      supabase.from('tms_attendance').select('route_id').eq('trip_date', date)
-        .eq('status', 'present').eq('direction', 'onward')
-        .order('id', { ascending: true })
-        .range(0, SUM_PAGE * 4 - 1),
-      supabase.from('tms_route').select('id, route_number').eq('status', 'active'),
-    ]);
-
-    if (bookedRes.error || scannedRes.error || routesRes.error) {
-      degraded.note('routes.noScans', bookedRes.error ?? scannedRes.error ?? routesRes.error);
-      return null;
-    }
-
-    const booked = new Set<string>();
-    for (const r of (bookedRes.data ?? []) as unknown as Array<{ route_id: string | null }>) {
-      if (r.route_id) booked.add(r.route_id);
-    }
-    const scanned = new Set<string>();
-    for (const r of (scannedRes.data ?? []) as unknown as Array<{ route_id: string | null }>) {
-      if (r.route_id) scanned.add(r.route_id);
-    }
-
-    const numbers: string[] = [];
-    for (const r of (routesRes.data ?? []) as unknown as Array<{ id: string; route_number: string }>) {
-      if (booked.has(r.id) && !scanned.has(r.id)) numbers.push(String(r.route_number));
-    }
-    numbers.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-    return { count: numbers.length, numbers };
-  } catch (e) {
-    degraded.note('routes.noScans', e);
-    return null;
   }
 }
 
