@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { createClientSupabaseClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
-import busPhoto from '@/public/images/login/jkkn-college-buses.webp';
 import jkknLogo from '@/public/images/login/jkkn-logo.png';
 import transportBus from '@/public/images/transport.png';
 import styles from './login.module.css';
@@ -131,9 +130,9 @@ function BrandPanel() {
         </span>
       </header>
 
-      {/* Headline. On phones the college bus stands beside it; from sm up the
-          headline has the row to itself (the desktop panel has its own fleet photo). */}
-      <div className="mt-4 flex items-end gap-1 [@media(max-width:639px)_and_(max-height:720px)]:mt-2 sm:mt-7 sm:block md:mt-10 lg:mt-auto lg:pt-8">
+      {/* Headline. On phones and tablets the college bus stands beside it; on
+          desktop the headline has the row to itself (the bus is shown large below). */}
+      <div className="mt-4 flex items-end gap-1 [@media(max-width:639px)_and_(max-height:720px)]:mt-2 sm:mt-7 sm:gap-4 md:mt-10 lg:mt-auto lg:block lg:pt-8">
         <div className="min-w-0 flex-1">
         <h2
           className={`${styles.enter} text-[1.45rem] font-bold leading-[1.12] tracking-tight sm:text-4xl xl:text-[3.1rem]`}
@@ -153,10 +152,11 @@ function BrandPanel() {
         </p>
         </div>
 
-        {/* Phone only: the JKKN college bus, driving in from the right and resting
-            on a soft shadow. Eager, because on a phone it is the largest thing on
-            screen. Pulled past the panel padding so it reads as arriving. */}
-        <div className={`${styles.driveIn} relative -mr-4 w-[52%] max-w-[230px] shrink-0 sm:hidden`} style={delay(220)}>
+        {/* Phone and tablet: the JKKN college bus, driving in from the right and
+            resting on a soft shadow. Eager, because on a phone it is the largest
+            thing on screen. On phones it is pulled past the panel padding so it
+            reads as arriving. */}
+        <div className={`${styles.driveIn} relative -mr-4 w-[52%] max-w-[230px] shrink-0 sm:mr-0 sm:w-[40%] sm:max-w-[300px] lg:hidden`} style={delay(220)}>
           <span
             aria-hidden="true"
             className="absolute inset-x-[8%] bottom-[2%] h-[14%] rounded-[50%] bg-green-950/45 blur-md"
@@ -164,7 +164,7 @@ function BrandPanel() {
           <Image
             src={transportBus}
             alt="JKKN college bus"
-            sizes="(max-width: 639px) 52vw, 1px"
+            sizes="(max-width: 639px) 52vw, (max-width: 1023px) 40vw, 1px"
             loading="eager"
             className="relative h-auto w-full drop-shadow-[0_10px_14px_rgba(5,46,22,0.45)]"
           />
@@ -200,30 +200,25 @@ function BrandPanel() {
         ))}
       </ul>
 
-      {/* Hero photo — real JKKN college fleet. Desktop only (lazy, so phones and
-          tablets never download it); flexes with viewport height so short
-          laptop screens never overflow. */}
-      <figure
-        className={`${styles.enter} relative mt-7 hidden overflow-hidden rounded-3xl lg:mt-6 xl:mt-7 shadow-[0_30px_60px_-20px_rgba(0,0,0,0.55)] ring-1 ring-white/15 lg:block lg:min-h-28 lg:flex-1 lg:max-h-[380px] lg:[@media(max-height:620px)]:hidden`}
+      {/* Desktop: the same JKKN college bus, large, driving in under the feature
+          cards. The box flexes with the viewport height and the bus scales to
+          fit it, so short laptop screens never overflow. */}
+      <div
+        className={`${styles.driveIn} relative mt-7 hidden lg:mt-6 lg:block lg:min-h-28 lg:flex-1 lg:max-h-[300px] xl:mt-7 lg:[@media(max-height:620px)]:hidden`}
         style={delay(320)}
       >
-        <Image
-          src={busPhoto}
-          alt="JKKN college buses lined up on campus"
-          fill
-          placeholder="blur"
-          sizes="45vw"
-          className="object-cover object-[60%_45%]"
-        />
-        <div
+        <span
           aria-hidden="true"
-          className="absolute inset-0 bg-gradient-to-t from-green-900/75 via-green-900/10 to-transparent"
+          className="absolute inset-x-[22%] bottom-[3%] h-[9%] rounded-[50%] bg-green-950/45 blur-lg"
         />
-        <figcaption className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-green-900/60 px-3 py-1.5 text-xs font-medium backdrop-blur-md">
-          <Bus className="h-3.5 w-3.5 text-green-300" aria-hidden="true" />
-          JKKN College Fleet
-        </figcaption>
-      </figure>
+        <Image
+          src={transportBus}
+          alt="JKKN college bus"
+          fill
+          sizes="(min-width: 1024px) 45vw, 1px"
+          className="object-contain object-center drop-shadow-[0_16px_20px_rgba(5,46,22,0.45)]"
+        />
+      </div>
 
       <p
         className={`${styles.enter} mt-6 hidden text-xs font-medium tracking-wide text-white/80 md:block lg:mt-5 xl:mt-7`}
