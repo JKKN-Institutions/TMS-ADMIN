@@ -29,6 +29,7 @@ import {
   CalendarDays,
   LayoutGrid,
   ListChecks,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
@@ -87,6 +88,7 @@ export const canSeeNavItem = (item: NavItem, can: (permission: string) => boolea
 export const allNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, permission: TMS_PERMISSIONS.DASHBOARD_VIEW, group: 'overview' },
   { name: 'Analytics', href: '/analytics', icon: BarChart3, permission: TMS_PERMISSIONS.REPORTS_VIEW, group: 'overview' },
+  { name: 'Reports', href: '/reports', icon: FileSpreadsheet, permission: TMS_PERMISSIONS.REPORTS_VIEW, group: 'overview' },
   // Passenger module — split into two pages: bus-required learners and staff
   // (both sourced from the MyJKKN master tables, filtered on bus_required).
   { name: 'Learners', href: '/passengers/learners', icon: GraduationCap, permission: TMS_PERMISSIONS.ENROLLMENT_VIEW, group: 'passengers' },
