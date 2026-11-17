@@ -31,6 +31,9 @@ const PUBLIC_PATHS = new Set([
   // role. Safety net for the recompute hooks on the assignment/enrollment
   // APIs.
   '/api/cron/incharge-allocation-reconcile',
+  // Daily "Needs attention" mail to the transport heads. Sends at most one
+  // mail a day — moves no money, removes no role (lib/attention-digest).
+  '/api/cron/attention-digest',
 ]);
 
 const PUBLIC_PATH_PREFIXES = [
