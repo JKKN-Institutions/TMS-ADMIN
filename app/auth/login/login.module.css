@@ -160,7 +160,7 @@
 .roadDashes {
   position: absolute;
   top: 50%;
-  right: 0;
+  right: calc(-1 * var(--dash));
   left: calc(-1 * var(--dash));
   height: max(2px, 9%);
   background-image: repeating-linear-gradient(
