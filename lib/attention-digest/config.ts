@@ -22,19 +22,36 @@ export type MailConfig =
 const DEFAULT_FROM_NAME = 'JKKN Transport';
 
 /**
- * One address, nothing else. Deliberately strict about whitespace: an entry
+ * One bare address, nothing else. No whitespace anywhere inside: an entry
  * containing a newline could smuggle an extra header (a Bcc) into the mail.
  */
 const ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
 
-/** Splits on comma or semicolon; trims, lower-cases, de-dupes, drops invalid. */
+/** Entries of a comma/semicolon list: trimmed, lower-cased, blanks removed. */
+function entries(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(/[,;]/)
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part.length > 0);
+}
+
+/** The valid addresses in a comma/semicolon list, de-duped. */
 export function parseRecipients(raw: string | undefined): string[] {
   const out: string[] = [];
-  for (const part of (raw ?? '').split(/[,;]/)) {
-    const address = part.replace(/^[ \t]+|[ \t]+$/g, '').toLowerCase();
+  for (const address of entries(raw)) {
     if (ADDRESS.test(address) && !out.includes(address)) out.push(address);
   }
   return out;
+}
+
+/**
+ * The entries that are NOT a bare address, e.g. `Sekar <sekar@...>` or two
+ * addresses separated by a space. Any of these makes the whole setting
+ * invalid: quietly mailing "the ones that parsed" would leave one head out
+ * with nothing to show for it but a shorter recipients column.
+ */
+export function invalidRecipientEntries(raw: string | undefined): string[] {
+  return entries(raw).filter((entry) => !ADDRESS.test(entry));
 }
 
 export function readMailConfig(env: Record<string, string | undefined>): MailConfig {
@@ -46,8 +63,17 @@ export function readMailConfig(env: Record<string, string | undefined>): MailCon
   const missing: string[] = [];
   if (!user) missing.push('SMTP_USER');
   if (!pass) missing.push('SMTP_PASS');
-  if (recipients.length === 0) missing.push('ATTENTION_DIGEST_RECIPIENTS');
-  if (!appUrl) missing.push('NEXT_PUBLIC_APP_URL');
+  if (recipients.length === 0) {
+    missing.push('ATTENTION_DIGEST_RECIPIENTS');
+  } else if (invalidRecipientEntries(env.ATTENTION_DIGEST_RECIPIENTS).length > 0) {
+    missing.push('ATTENTION_DIGEST_RECIPIENTS (invalid entry)');
+  }
+  if (!appUrl) {
+    missing.push('NEXT_PUBLIC_APP_URL');
+  } else if (!/^https?:\/\//i.test(appUrl)) {
+    // Without a scheme the "Open in TMS" links are relative, and Gmail drops them.
+    missing.push('NEXT_PUBLIC_APP_URL (must start with http)');
+  }
   if (missing.length > 0) return { ok: false, missing };
 
   return {

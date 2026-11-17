@@ -53,7 +53,7 @@ select * from tms_attention_digest_log order by digest_date desc limit 14;
 | `skipped_clear` | Nothing needed attention |
 | `skipped_off_day` | Sunday or declared holiday |
 | `failed` | See `error` (missing setting, wrong password). The next run retries |
-| `sending` | The job died mid-send. Blocks that day; delete the row to retry |
+| `sending` | The job stopped mid-send, so the mail may or may not have gone. Blocks that day. Ask a recipient before deleting the row to retry, or a second copy may be sent |
 
 ## Turning it off and on
 
@@ -61,3 +61,5 @@ select * from tms_attention_digest_log order by digest_date desc limit 14;
 select cron.unschedule('tms-attention-digest');   -- off
 -- on: re-run supabase/migrations/20261117100100_schedule_attention_digest.sql
 ```
+
+A mistyped check URL (for example `dryRun=true`) is refused with an error; it never sends.

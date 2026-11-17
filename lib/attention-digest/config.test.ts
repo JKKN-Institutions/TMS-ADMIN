@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseRecipients, readMailConfig } from './config';
+import { invalidRecipientEntries, parseRecipients, readMailConfig } from './config';
 
 const full = {
   SMTP_USER: 'transport@jkkn.ac.in',
@@ -30,7 +30,34 @@ describe('parseRecipients', () => {
   });
 });
 
+describe('invalidRecipientEntries', () => {
+  it('ignores blanks and a trailing newline', () => {
+    expect(invalidRecipientEntries('a@jkkn.ac.in, ,b@jkkn.ac.in\n')).toEqual([]);
+    expect(parseRecipients('a@jkkn.ac.in,b@jkkn.ac.in\n')).toEqual(['a@jkkn.ac.in', 'b@jkkn.ac.in']);
+  });
+
+  it('names every entry that is not a bare address', () => {
+    expect(invalidRecipientEntries('Sekar <sekar.s@jkkn.ac.in>, ok@jkkn.ac.in, a@x.in b@x.in')).toEqual([
+      'sekar <sekar.s@jkkn.ac.in>',
+      'a@x.in b@x.in',
+    ]);
+  });
+});
+
 describe('readMailConfig', () => {
+  it('refuses to send to only some recipients when one entry is malformed', () => {
+    const cfg = readMailConfig({
+      ...full,
+      ATTENTION_DIGEST_RECIPIENTS: 'Sekar <sekar.s@jkkn.ac.in>, surendhar.m@jkkn.ac.in',
+    });
+    expect(cfg).toEqual({ ok: false, missing: ['ATTENTION_DIGEST_RECIPIENTS (invalid entry)'] });
+  });
+
+  it('rejects an app url with no scheme', () => {
+    const cfg = readMailConfig({ ...full, NEXT_PUBLIC_APP_URL: 'tms.jkkn.ac.in' });
+    expect(cfg).toEqual({ ok: false, missing: ['NEXT_PUBLIC_APP_URL (must start with http)'] });
+  });
+
   it('reports every missing name', () => {
     expect(readMailConfig({})).toEqual({
       ok: false,

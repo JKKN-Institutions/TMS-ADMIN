@@ -109,14 +109,12 @@ export async function runAttentionDigest(
     }
   }
 
-  // All-routes exceptions only (route_id null): a holiday declared for a
-  // single route does not make it a day off for the transport office.
-  const exceptions = await loadExceptions(svc, null, date, date);
-
   return deliverDigest({
     date,
     sunday: isSunday(date),
-    holiday: exceptions.has(date),
+    // All-routes exceptions only (route_id null): a holiday declared for a
+    // single route does not make it a day off for the transport office.
+    isHoliday: async () => (await loadExceptions(svc, null, date, date)).has(date),
     alerts,
     config,
     log: supabaseLog(svc),

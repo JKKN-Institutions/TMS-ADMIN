@@ -48,6 +48,18 @@ describe('toAlertInputs', () => {
     expect(i.routesWithoutDriver).toBe(0);
   });
 
+  it('leaves the no-bus check unmeasured when the vehicle lookup failed', () => {
+    // The board leaves every registration null when tms_vehicle cannot be read;
+    // counting that would mail "every route has no bus".
+    const i = toAlertInputs(counts, {
+      routes: [row('4', null, true), row('9', null, false)],
+      degraded: ['vehicles'],
+    });
+    expect(i.routesWithoutBus).toBeNull();
+    expect(i.routesWithoutBusNumbers).toEqual([]);
+    expect(i.routesWithoutDriver).toBe(1);
+  });
+
   it('keeps a failed count null', () => {
     const i = toAlertInputs(
       { ...counts, expiredDocs: null, nobodyScanned: null, overdueBills: null },

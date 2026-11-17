@@ -11,10 +11,12 @@
  *   ?dryRun=1          returns the mail that would be sent; sends and writes nothing
  *   ?testTo=<address>  sends today's mail to that one address only; the day's
  *                      real send is unaffected
+ * Any other parameter or value is a 400, so a mistyped preview cannot send.
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { runAttentionDigest } from '@/lib/attention-digest/run';
+import { parseDigestRequest } from '@/lib/attention-digest/request';
 
 export const dynamic = 'force-dynamic';
 // The checks are one parallel batch (about a second); the rest is the SMTP
@@ -27,9 +29,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const params = request.nextUrl.searchParams;
-  const dryRun = params.get('dryRun') === '1';
-  const testTo = params.get('testTo') ?? undefined;
+  // Refuse anything that is not exactly a known flag: a mistyped preview must
+  // be an error, never the real send.
+  const parsed = parseDigestRequest(request.nextUrl.searchParams);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const dryRun = parsed.mode === 'dryRun';
+  const testTo = parsed.mode === 'test' ? parsed.testTo : undefined;
 
   try {
     const summary = await runAttentionDigest(createServiceRoleClient(), { dryRun, testTo });

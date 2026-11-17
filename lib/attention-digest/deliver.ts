@@ -62,14 +62,20 @@ export function decideDigest(i: {
 /**
  * Applies the rules for one day and performs the send.
  *
- * Never throws for a send or config problem: those become a `failed` row with
- * the reason, so a broken mailbox is visible in the log and can be retried.
+ * Never throws. A config, calendar or SMTP problem becomes a `failed` row with
+ * the reason, so it is visible in the log and the next run can retry. If the
+ * log itself cannot be claimed nothing is sent and the summary says why. If
+ * the mail went out but the log could not be updated afterwards, the outcome
+ * is still `sent` — reporting a delivered mail as failed would invite a manual
+ * retry and a duplicate.
+ *
  * `alerts` must already be filtered by digestAlerts.
  */
 export async function deliverDigest(i: {
   date: string;
   sunday: boolean;
-  holiday: boolean;
+  /** Is this date a declared all-routes holiday? May throw. */
+  isHoliday: () => Promise<boolean>;
   alerts: DashboardAlert[];
   config: MailConfig;
   log: DigestLog;
@@ -82,19 +88,51 @@ export async function deliverDigest(i: {
     error: string | null = null
   ): DigestSummary => ({ date: i.date, outcome, rows, recipients, error });
 
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  /** Best effort: a log write must never turn a known outcome into a throw. */
+  const record = async (
+    outcome: LoggedOutcome,
+    recipients: string[],
+    error: string | null = null
+  ): Promise<string | null> => {
+    try {
+      await i.log.record(i.date, outcome, { rows, recipients, error });
+      return null;
+    } catch (e) {
+      console.error('[attention-digest] could not write the log row', e);
+      return message(e);
+    }
+  };
+
   // Claimed before anything else, skips included, so a late second run can
   // never overwrite the record of a mail that already went out.
-  if (!(await i.log.claim(i.date))) return summary('skipped_already_sent');
+  let claimed: boolean;
+  try {
+    claimed = await i.log.claim(i.date);
+  } catch (e) {
+    return summary('failed', [], `log unavailable: ${message(e)}`);
+  }
+  if (!claimed) return summary('skipped_already_sent');
 
-  const decision = decideDigest({ sunday: i.sunday, holiday: i.holiday, rows });
+  let holiday: boolean;
+  try {
+    holiday = i.sunday ? false : await i.isHoliday();
+  } catch (e) {
+    const error = `holiday calendar unavailable: ${message(e)}`;
+    await record('failed', [], error);
+    return summary('failed', [], error);
+  }
+
+  const decision = decideDigest({ sunday: i.sunday, holiday, rows });
   if (decision !== 'send') {
-    await i.log.record(i.date, decision, { rows, recipients: [] });
+    await record(decision, []);
     return summary(decision);
   }
 
   if (!i.config.ok) {
     const error = `missing: ${i.config.missing.join(', ')}`;
-    await i.log.record(i.date, 'failed', { rows, recipients: [], error });
+    await record('failed', [], error);
     return summary('failed', [], error);
   }
 
@@ -103,11 +141,15 @@ export async function deliverDigest(i: {
   try {
     await i.send(i.config, { to: recipients, ...mail });
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    await i.log.record(i.date, 'failed', { rows, recipients, error });
+    const error = message(e);
+    await record('failed', recipients, error);
     return summary('failed', recipients, error);
   }
 
-  await i.log.record(i.date, 'sent', { rows, recipients });
-  return summary('sent', recipients);
+  const logError = await record('sent', recipients);
+  return summary(
+    'sent',
+    recipients,
+    logError ? `mail sent, but the log row could not be updated: ${logError}` : null
+  );
 }

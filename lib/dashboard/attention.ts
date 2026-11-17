@@ -124,15 +124,18 @@ export async function loadAttentionCounts(
  *
  * When the board itself failed it returns an empty route list. Counting that
  * would report "0 routes without a bus", so the two route checks are left
- * unmeasured instead. A degraded side lookup (trips, drivers' names) does not
- * affect them and is ignored here.
+ * unmeasured instead. The same goes for "no bus" when only the vehicle lookup
+ * failed: the board then leaves every registration null, and counting that
+ * would report every active route as having no bus. Degraded trips or driver
+ * names do not affect either check and are ignored here.
  */
 export function toAlertInputs(
   counts: AttentionCounts,
   board: { routes: DashboardRouteRow[]; degraded: string[] }
 ): AlertInputs {
   const boardFailed = board.degraded.includes('routes') || board.degraded.includes('board');
-  const noBus = board.routes.filter((r) => !r.vehicleRegistration);
+  const busUnknown = boardFailed || board.degraded.includes('vehicles');
+  const noBus = busUnknown ? [] : board.routes.filter((r) => !r.vehicleRegistration);
   const noDriver = board.routes.filter((r) => !r.hasDriver);
 
   return {
@@ -144,7 +147,7 @@ export function toAlertInputs(
     expiredVehicleDocsRegistrations: counts.expiredDocs?.registrations,
     routesNobodyScanned: counts.nobodyScanned?.count ?? null,
     routesNobodyScannedNumbers: counts.nobodyScanned?.numbers,
-    routesWithoutBus: boardFailed ? null : noBus.length,
+    routesWithoutBus: busUnknown ? null : noBus.length,
     routesWithoutBusNumbers: noBus.map((r) => r.routeNumber),
     routesWithoutDriver: boardFailed ? null : noDriver.length,
     routesWithoutDriverNumbers: noDriver.map((r) => r.routeNumber),

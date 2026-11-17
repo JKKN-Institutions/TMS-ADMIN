@@ -6,10 +6,11 @@
 -- Read it to answer "did today's mail go, and if not, why":
 --   select * from tms_attention_digest_log order by digest_date desc limit 14;
 --
--- A row stuck on 'sending' means the function died mid-send. It blocks that
--- day on purpose (a possible duplicate mail is worse than a missed one); clear
--- it by hand to allow a retry:
---   delete from tms_attention_digest_log where digest_date = current_date and outcome = 'sending';
+-- A row stuck on 'sending' means the function stopped mid-send, so the mail
+-- may or may not have gone. It blocks that day on purpose (a duplicate mail is
+-- worse than a missed one). Confirm with a recipient before clearing it:
+--   delete from tms_attention_digest_log
+--    where digest_date = (now() at time zone 'Asia/Kolkata')::date and outcome = 'sending';
 
 create table if not exists public.tms_attention_digest_log (
   digest_date date primary key,

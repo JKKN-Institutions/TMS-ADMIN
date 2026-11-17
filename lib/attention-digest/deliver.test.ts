@@ -50,7 +50,7 @@ describe('decideDigest', () => {
 });
 
 describe('deliverDigest', () => {
-  const base = { date: '2026-11-17', sunday: false, holiday: false, config: okConfig };
+  const base = { date: '2026-11-17', sunday: false, isHoliday: async () => false, config: okConfig };
 
   it('sends once to every recipient and records sent', async () => {
     const send = vi.fn().mockResolvedValue(undefined);
@@ -117,6 +117,58 @@ describe('deliverDigest', () => {
     expect(send).not.toHaveBeenCalled();
     expect(log.outcome()).toBe('failed');
     expect(log.error()).toBe('missing: SMTP_USER, SMTP_PASS');
+  });
+
+  it('skips on a declared holiday', async () => {
+    const send = vi.fn();
+    const log = memoryLog();
+    const s = await deliverDigest({ ...base, isHoliday: async () => true, alerts: [alertRow], log, send });
+    expect(s.outcome).toBe('skipped_off_day');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('stands down while another run is mid-send', async () => {
+    const send = vi.fn();
+    const s = await deliverDigest({ ...base, alerts: [alertRow], log: memoryLog('sending'), send });
+    expect(s.outcome).toBe('skipped_already_sent');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('records a failed day when the holiday calendar cannot be read', async () => {
+    const send = vi.fn();
+    const log = memoryLog();
+    const s = await deliverDigest({
+      ...base, alerts: [alertRow], log, send,
+      isHoliday: async () => { throw new Error('calendar down'); },
+    });
+    expect(s.outcome).toBe('failed');
+    expect(s.error).toContain('calendar down');
+    expect(send).not.toHaveBeenCalled();
+    expect(log.outcome()).toBe('failed');
+  });
+
+  it('reports failed, without sending, when the log cannot be claimed', async () => {
+    const send = vi.fn();
+    const log: DigestLog = {
+      claim: async () => { throw new Error('relation does not exist'); },
+      record: async () => {},
+    };
+    const s = await deliverDigest({ ...base, alerts: [alertRow], log, send });
+    expect(s.outcome).toBe('failed');
+    expect(s.error).toContain('relation does not exist');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('still reports sent when the mail went but the log update failed', async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const log: DigestLog = {
+      claim: async () => true,
+      record: async () => { throw new Error('db gone'); },
+    };
+    const s = await deliverDigest({ ...base, alerts: [alertRow], log, send });
+    expect(s.outcome).toBe('sent');
+    expect(s.error).toContain('db gone');
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('records an SMTP failure instead of throwing', async () => {
