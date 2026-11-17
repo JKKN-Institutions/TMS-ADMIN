@@ -1,16 +1,16 @@
 /**
  * The bus marker, one drawing for every tracking map.
  *
- * A round white badge holding the college bus photo. The ring and the route
- * number under it carry the state:
+ * The college bus photo on its own, in full colour, with no badge around it. The
+ * photo is always yellow, so the state is carried by what sits on it:
  *
- *   live     green, pulsing halo, a small LIVE tag, and an arrow for the heading
- *   delayed  amber with a "!" — the position is minutes old
- *   off      grey, photo greyed out — only a last known place
- *   selected a ring that breathes around whichever of the above it is
+ *   live     green route number, a small LIVE tag, and an arrow for the heading
+ *   delayed  amber route number with a "!" — the position is minutes old
+ *   off      grey route number, photo faded — only a last known place
+ *   selected a little larger, with a blue outline that follows the bus shape
  *
- * The animations are CSS (app/globals.css, the .tms-bus-* rules) and are switched off
- * for people who ask for reduced motion.
+ * Nothing here animates; the count badge below still uses the .tms-bus-live halo
+ * (app/globals.css).
  *
  * Client-only (imports leaflet): load only from components that are themselves loaded
  * with next/dynamic { ssr: false }.
@@ -35,13 +35,13 @@ export const BUS_COLORS: Record<Liveness, string> = {
 };
 
 /**
- * The college bus photo, cut from public/icons/transport.ico to a 96px PNG (drawn
- * at 50px, so it stays sharp on high-density phone screens). The .ico itself is
+ * The college bus photo, cut from public/icons/transport.ico to a 128px PNG (drawn
+ * at 60px, so it stays sharp on high-density phone screens). The .ico itself is
  * 430 KB and holds nine sizes, which is the wrong thing to load once per marker.
  */
 const BUS_IMAGE = '/icons/bus-marker.png';
 
-/** Diameter of the round badge. It is a circle so the halo and the ring fit it. */
+/** Side of the square the photo is drawn in. The bus position is its centre. */
 const D = 60;
 
 /** Everything the drawing depends on — markers are only redrawn when this changes. */
@@ -61,25 +61,27 @@ export function busMarkerIcon(o: BusMarkerOptions): L.DivIcon {
        </div>`
     : '';
   const tag = live
-    ? `<span style="position:absolute;z-index:2;right:-8px;top:-9px;background:#15803d;color:#fff;font:700 8px/1 Arial,sans-serif;letter-spacing:.5px;padding:2px 4px;border-radius:6px;border:1.5px solid #fff;">LIVE</span>`
+    ? `<span style="position:absolute;z-index:2;right:-6px;top:-4px;background:#15803d;color:#fff;font:700 8px/1 Arial,sans-serif;letter-spacing:.5px;padding:2px 4px;border-radius:6px;border:1.5px solid #fff;">LIVE</span>`
     : o.liveness === 'delayed'
-      ? `<span style="position:absolute;z-index:2;right:-6px;top:-8px;background:#b45309;color:#fff;font:700 10px/1 Arial,sans-serif;width:15px;height:15px;border-radius:50%;border:1.5px solid #fff;display:flex;align-items:center;justify-content:center;">!</span>`
+      ? `<span style="position:absolute;z-index:2;right:-2px;top:-3px;background:#b45309;color:#fff;font:700 10px/1 Arial,sans-serif;width:15px;height:15px;border-radius:50%;border:1.5px solid #fff;display:flex;align-items:center;justify-content:center;">!</span>`
       : '';
   // The route number hangs under the badge, in the status colour, so the photo
   // stays uncovered and the place-name tooltip above it is not disturbed.
   const label = o.label
-    ? `<span style="position:absolute;z-index:2;left:50%;bottom:-9px;transform:translateX(-50%);background:${color};color:#fff;font:700 13px/1 Arial,Helvetica,sans-serif;padding:2px 7px;border-radius:8px;border:1.5px solid #fff;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3);">${escapeHtml(String(o.label).slice(0, 4))}</span>`
+    ? `<span style="position:absolute;z-index:2;left:50%;bottom:-11px;transform:translateX(-50%);background:${color};color:#fff;font:700 13px/1 Arial,Helvetica,sans-serif;padding:2px 7px;border-radius:8px;border:1.5px solid #fff;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3);">${escapeHtml(String(o.label).slice(0, 4))}</span>`
     : '';
-  // A bus that is not reporting loses its colour, so "off" reads at a glance
-  // even though the photo itself is always yellow.
-  const dim = o.liveness === 'off' ? 'filter:grayscale(1);opacity:.75;' : '';
+  // No badge behind the photo, so a shadow keeps it readable on any map tile.
+  // The picked bus gets a blue outline that hugs the bus shape (drop-shadow
+  // follows the transparent edge of the PNG), and an off bus is faded.
+  const outline = o.selected
+    ? 'drop-shadow(0 0 2px #1d4ed8) drop-shadow(0 0 2px #1d4ed8) drop-shadow(0 0 3px #1d4ed8)'
+    : 'drop-shadow(0 0 1px #fff) drop-shadow(0 2px 3px rgba(0,0,0,.45))';
+  const fade = o.liveness === 'off' ? 'opacity:.55;' : '';
 
   const html = `
-    <div class="tms-bus${live ? ' tms-bus-live' : ''}${o.selected ? ' tms-bus-selected' : ''}" style="position:relative;width:${D}px;height:${D}px;--tms-bus:${color};">
+    <div class="tms-bus" style="position:relative;width:${D}px;height:${D}px;${o.selected ? 'transform:scale(1.12);' : ''}">
       ${arrow}
-      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;border:3px solid ${color};border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.35);">
-        <img src="${BUS_IMAGE}" alt="" width="50" height="50" draggable="false" style="display:block;width:50px;height:50px;${dim}" />
-      </div>
+      <img src="${BUS_IMAGE}" alt="" width="${D}" height="${D}" draggable="false" style="position:absolute;inset:0;display:block;width:${D}px;height:${D}px;filter:${outline};${fade}" />
       ${label}
       ${tag}
     </div>`;
