@@ -11,6 +11,7 @@ import { DRIVER_CATEGORY_ID, DRIVER_INSTITUTION_ID, DRIVER_ROLE_KEY } from './on
 
 export const EXISTING_ACCOUNT_MESSAGE =
   'This email already belongs to someone in MyJKKN. Use "Existing staff member" to make them a driver, or ask HR.';
+export const PERSONAL_EMAIL_TAKEN_MESSAGE = 'This personal email already belongs to someone in MyJKKN.';
 export const TRANSPORT_NOT_SAVED_WARNING =
   'The team member record was created, but the transport details were not saved. Open Edit and save again.';
 
@@ -39,6 +40,12 @@ export function escapeIlike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+/** Where a duplicate was found, and which of the given emails (normalised) it matched. */
+export interface ExistingAccountHit {
+  where: 'staff' | 'profile';
+  email: string;
+}
+
 /**
  * Does any staff row (email / institution_email) or profile (email) already use one
  * of these emails? Case-insensitive, literal match. `exclude` skips one staff row and
@@ -48,7 +55,7 @@ export async function findExistingAccount(
   svc: SupabaseClient,
   emails: string[],
   exclude: { staffId?: string; profileId?: string } = {},
-): Promise<'staff' | 'profile' | null> {
+): Promise<ExistingAccountHit | null> {
   const list = [...new Set(emails.map((e) => normalizeEmail(e ?? '')).filter((e) => e !== ''))];
   if (list.length === 0) return null;
 
@@ -67,7 +74,7 @@ export async function findExistingAccount(
         console.error('Existing-account lookup failed:', error);
         throw new OnboardError({ status: 500, error: 'Could not check whether this email is already in use.' });
       }
-      if (data && data.length > 0) return l.hit;
+      if (data && data.length > 0) return { where: l.hit, email };
     }
   }
   return null;
@@ -111,7 +118,11 @@ export async function onboardDriver(
 
   const existing = await findExistingAccount(svc, [row.institution_email, row.email]);
   if (existing) {
-    throw new OnboardError({ status: 409, error: EXISTING_ACCOUNT_MESSAGE, field: 'institutionEmailName' });
+    // row.email falls back to the institution email when no personal email was given.
+    if (existing.email === normalizeEmail(row.institution_email)) {
+      throw new OnboardError({ status: 409, error: EXISTING_ACCOUNT_MESSAGE, field: 'institutionEmailName' });
+    }
+    throw new OnboardError({ status: 409, error: PERSONAL_EMAIL_TAKEN_MESSAGE, field: 'email' });
   }
 
   const [inst, cat] = await Promise.all([

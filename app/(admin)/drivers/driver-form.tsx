@@ -48,7 +48,7 @@ class SaveError extends Error {
   }
 }
 
-async function send(url: string, method: 'POST' | 'PATCH' | 'PUT', body: unknown) {
+async function send(url: string, method: 'POST' | 'PATCH', body: unknown) {
   const res = await fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -61,15 +61,17 @@ async function send(url: string, method: 'POST' | 'PATCH' | 'PUT', body: unknown
   return json;
 }
 
-async function uploadPhoto(id: string, file: File): Promise<boolean> {
+/** Upload the photo; returns null on success, else the reason to show. */
+async function uploadPhoto(id: string, file: File): Promise<string | null> {
   try {
     const body = new FormData();
     body.append('file', file);
     const res = await fetch(`/api/admin/drivers/${id}/photo`, { method: 'POST', body });
     const json = await res.json().catch(() => ({}));
-    return res.ok && !!json.success;
+    if (res.ok && json.success) return null;
+    return typeof json.error === 'string' && json.error ? json.error : 'Upload failed';
   } catch {
-    return false;
+    return 'Upload failed';
   }
 }
 
@@ -105,6 +107,8 @@ export default function DriverForm({
 
   const showPerson = mode === 'create-new' || (mode === 'edit' && !!driver?.canFullEdit);
   const personMode = mode === 'create-new' ? 'create' : 'edit';
+  // The Create page mounts the new and existing forms together: their transport input ids must differ.
+  const tp = mode === 'create-existing' ? 'dtx' : 'dt';
 
   const [person, setPerson] = useState<DriverPersonInput>(() =>
     mode === 'edit' && driver ? personFromDriver(driver) : emptyPerson(),
@@ -164,7 +168,7 @@ export default function DriverForm({
     if (personKeys.length === 0 && transportKeys.length === 0) return false;
     setErrors(personErrs as FieldErrors);
     setTransportErrors(transportErrs as TransportErrors);
-    const first = personKeys[0] ? `dp-${personKeys[0]}` : `dt-${transportKeys[0]}`;
+    const first = personKeys[0] ? `dp-${personKeys[0]}` : `${tp}-${transportKeys[0]}`;
     setTimeout(() => scrollToField(first), 0);
     return true;
   };
@@ -190,14 +194,14 @@ export default function DriverForm({
       return { id, staffCode: null as string | null, warning: undefined as string | undefined };
     },
     onSuccess: async ({ id, staffCode, warning }) => {
-      let photoFailed = false;
-      if (photoFile && showPerson) photoFailed = !(await uploadPhoto(id, photoFile));
+      const photoError = photoFile && showPerson ? await uploadPhoto(id, photoFile) : null;
+      const photoFailed = photoError !== null;
 
       qc.invalidateQueries({ queryKey: ['drivers'] });
       qc.invalidateQueries({ queryKey: ['driver', id] });
 
       if (mode === 'create-new') {
-        if (photoFailed) toast.error('Driver created, but the photo was not uploaded');
+        if (photoFailed) toast.error(`Driver created, but the photo was not uploaded: ${photoError}`);
         if (warning) {
           toast(warning, { duration: 8000 });
           router.push(`/drivers/${id}/edit`);
@@ -207,7 +211,7 @@ export default function DriverForm({
       } else if (mode === 'create-existing') {
         toast.success('Driver created');
       } else {
-        if (photoFailed) toast.error('Details saved, but the photo was not uploaded');
+        if (photoFailed) toast.error(`Details saved, but the photo was not uploaded: ${photoError}`);
         else toast.success('Driver details saved');
       }
       router.push(`/drivers/${id}`);
@@ -238,16 +242,16 @@ export default function DriverForm({
   };
 
   const tField = (k: keyof TransportState) => ({
-    id: `dt-${k}`,
+    id: `${tp}-${k}`,
     'aria-invalid': transportErrors[k] ? true : undefined,
-    'aria-describedby': transportErrors[k] ? `dt-${k}-error` : undefined,
+    'aria-describedby': transportErrors[k] ? `${tp}-${k}-error` : undefined,
     className: 'input',
     value: transport[k],
     onChange: (e: { target: { value: string } }) => setT(k, e.target.value),
   });
   const tError = (k: keyof TransportState) =>
     transportErrors[k] ? (
-      <p id={`dt-${k}-error`} role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+      <p id={`${tp}-${k}-error`} role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
         {transportErrors[k]}
       </p>
     ) : null;
@@ -272,22 +276,22 @@ export default function DriverForm({
       <SectionCard title="Transport details">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-licenseNumber" className="text-gray-600">Licence no.</label>
+            <label htmlFor={`${tp}-licenseNumber`} className="text-gray-600">Licence no.</label>
             <input {...tField('licenseNumber')} className="input mt-1" />
             {tError('licenseNumber')}
           </div>
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-licenseExpiry" className="text-gray-600">Licence expiry</label>
+            <label htmlFor={`${tp}-licenseExpiry`} className="text-gray-600">Licence expiry</label>
             <input type="date" {...tField('licenseExpiry')} className="input mt-1" />
             {tError('licenseExpiry')}
           </div>
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-experienceYears" className="text-gray-600">Experience (years)</label>
+            <label htmlFor={`${tp}-experienceYears`} className="text-gray-600">Experience (years)</label>
             <input type="number" min="0" {...tField('experienceYears')} className="input mt-1" />
             {tError('experienceYears')}
           </div>
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-driverStatus" className="text-gray-600">Driver status</label>
+            <label htmlFor={`${tp}-driverStatus`} className="text-gray-600">Driver status</label>
             <select {...tField('driverStatus')} className="input mt-1">
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
@@ -296,7 +300,7 @@ export default function DriverForm({
             {tError('driverStatus')}
           </div>
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-assignedRouteId" className="text-gray-600">Assigned route</label>
+            <label htmlFor={`${tp}-assignedRouteId`} className="text-gray-600">Assigned route</label>
             <select {...tField('assignedRouteId')} className="input mt-1">
               <option value="">Unassigned</option>
               {routes.map((r) => (
@@ -306,17 +310,17 @@ export default function DriverForm({
             {tError('assignedRouteId')}
           </div>
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-aadharNumber" className="text-gray-600">Aadhar no.</label>
+            <label htmlFor={`${tp}-aadharNumber`} className="text-gray-600">Aadhar no.</label>
             <input {...tField('aadharNumber')} className="input mt-1" />
             {tError('aadharNumber')}
           </div>
           <div className="min-w-0 text-sm">
-            <label htmlFor="dt-medicalCertificateExpiry" className="text-gray-600">Medical certificate expiry</label>
+            <label htmlFor={`${tp}-medicalCertificateExpiry`} className="text-gray-600">Medical certificate expiry</label>
             <input type="date" {...tField('medicalCertificateExpiry')} className="input mt-1" />
             {tError('medicalCertificateExpiry')}
           </div>
           <div className="min-w-0 text-sm md:col-span-2">
-            <label htmlFor="dt-notes" className="text-gray-600">Notes</label>
+            <label htmlFor={`${tp}-notes`} className="text-gray-600">Notes</label>
             <textarea rows={2} {...tField('notes')} className="input mt-1" />
             {tError('notes')}
           </div>

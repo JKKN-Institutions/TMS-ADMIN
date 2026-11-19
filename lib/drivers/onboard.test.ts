@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { escapeIlike, findExistingAccount, ensureDriverRole, OnboardError } from './onboard';
+import {
+  escapeIlike,
+  findExistingAccount,
+  ensureDriverRole,
+  onboardDriver,
+  OnboardError,
+  EXISTING_ACCOUNT_MESSAGE,
+  PERSONAL_EMAIL_TAKEN_MESSAGE,
+} from './onboard';
+import type { DriverPersonInput } from './staff-fields';
 
 type Call = { table: string; method: string; args: unknown[] }[];
 type Result = { data?: unknown; error?: unknown };
@@ -48,12 +57,12 @@ describe('findExistingAccount', () => {
 
   it('returns staff when a staff row matches', async () => {
     const { client } = fakeClient((t) => ({ data: t === 'staff' ? [{ id: 's1' }] : [] }));
-    expect(await findExistingAccount(client, ['a@jkkn.ac.in'])).toBe('staff');
+    expect(await findExistingAccount(client, ['a@jkkn.ac.in'])).toEqual({ where: 'staff', email: 'a@jkkn.ac.in' });
   });
 
   it('returns profile when only a profile matches', async () => {
     const { client } = fakeClient((t) => ({ data: t === 'profiles' ? [{ id: 'p1' }] : [] }));
-    expect(await findExistingAccount(client, ['a@jkkn.ac.in'])).toBe('profile');
+    expect(await findExistingAccount(client, ['a@jkkn.ac.in'])).toEqual({ where: 'profile', email: 'a@jkkn.ac.in' });
   });
 
   it('returns null when nothing matches, using escaped patterns on staff.email, institution_email and profiles.email', async () => {
@@ -74,6 +83,13 @@ describe('findExistingAccount', () => {
     expect(staffNeq.every((c) => c.args[0] === 'id' && c.args[1] === 'S1')).toBe(true);
     expect(profNeq.length).toBeGreaterThan(0);
     expect(profNeq.every((c) => c.args[0] === 'id' && c.args[1] === 'P1')).toBe(true);
+  });
+
+  it('tells which input email matched, normalised', async () => {
+    const { client } = fakeClient((t, c) => ({
+      data: t === 'staff' && c.some((x) => x.method === 'ilike' && x.args[1] === 'b@gmail.com') ? [{ id: 's1' }] : [],
+    }));
+    expect(await findExistingAccount(client, ['a@jkkn.ac.in', ' B@Gmail.com '])).toEqual({ where: 'staff', email: 'b@gmail.com' });
   });
 
   it('fails closed with a 500 OnboardError when a lookup errors', async () => {
@@ -106,5 +122,41 @@ describe('ensureDriverRole', () => {
   it('throws when the driver role is missing', async () => {
     const { client } = fakeClient(() => ({ data: null }));
     await expect(ensureDriverRole(client, 'prof1', 'actor1')).rejects.toThrow();
+  });
+});
+
+describe('onboardDriver duplicate email', () => {
+  const PERSON = {
+    firstName: 'Ravi', lastName: 'Kumar', gender: 'male', dateOfBirth: '1985-04-12', maritalStatus: 'married',
+    bloodGroup: '', phone: '9876543210', email: 'ravi@gmail.com', institutionEmailName: 'ravi.k',
+    address: '', state: 'Tamil Nadu', district: 'Salem', pincode: '', emergencyContactName: '',
+    emergencyContactRelationship: '', emergencyContactRelationshipOther: '', emergencyContactPhone: '',
+    dateOfJoining: '2020-06-01', designation: 'Bus Driver', biometricId: '', biometricInstitutionId: '', isActive: true,
+  } satisfies DriverPersonInput;
+  const takenOnly = (email: string) =>
+    fakeClient((t, c) => ({
+      data: t === 'staff' && c.some((x) => x.method === 'ilike' && x.args[1] === email) ? [{ id: 'S9' }] : [],
+    }));
+  const inserts = (log: { calls: Call }[]) => log.flatMap((l) => l.calls).filter((x) => x.method === 'insert');
+
+  it('names the institution email field when the institution email is taken', async () => {
+    const { client, log } = takenOnly('ravi.k@jkkn.ac.in');
+    await expect(onboardDriver(client, PERSON, {}, 'A')).rejects.toMatchObject({
+      status: 409,
+      field: 'institutionEmailName',
+      message: EXISTING_ACCOUNT_MESSAGE,
+    });
+    expect(inserts(log)).toHaveLength(0);
+  });
+
+  it('names the personal email field when the personal email is taken', async () => {
+    const { client, log } = takenOnly('ravi@gmail.com');
+    await expect(onboardDriver(client, PERSON, {}, 'A')).rejects.toMatchObject({
+      status: 409,
+      field: 'email',
+      message: PERSONAL_EMAIL_TAKEN_MESSAGE,
+    });
+    expect(PERSONAL_EMAIL_TAKEN_MESSAGE).toBe('This personal email already belongs to someone in MyJKKN.');
+    expect(inserts(log)).toHaveLength(0);
   });
 });

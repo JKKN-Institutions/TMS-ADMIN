@@ -9,10 +9,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { canFullEdit, diffStaffPatch, validatePerson } from './staff-fields';
 import { translateStaffDbError } from './db-errors';
 import { buildTransportPayload, STAFF_SELECT } from './map';
-import { ensureDriverRole, findExistingAccount, OnboardError } from './onboard';
+import { ensureDriverRole, findExistingAccount, OnboardError, PERSONAL_EMAIL_TAKEN_MESSAGE } from './onboard';
 import { DRIVER_CATEGORY_ID, DRIVER_ROLE_KEY, STAFF_IMAGE_BUCKET } from './onboarding-constants';
 
-export const EXISTING_EMAIL_MESSAGE = 'This email already belongs to someone in MyJKKN.';
 export const RECORD_MANAGED_ELSEWHERE_MESSAGE = "This person's record is managed in MyJKKN.";
 export const PHOTO_MANAGED_ELSEWHERE_MESSAGE = "This person's photo is managed in MyJKKN.";
 export const RELOAD_MESSAGE = 'Reload the page and try again.';
@@ -77,7 +76,8 @@ export async function updateDriver(
   }
   const transport = body.transport;
 
-  const editPerson = rowIsFullyEditable(row) && body.person !== undefined && body.person !== null;
+  const fullyEditable = rowIsFullyEditable(row);
+  const editPerson = fullyEditable && body.person !== undefined && body.person !== null;
   let patch: Record<string, unknown> = {};
 
   if (editPerson) {
@@ -99,7 +99,7 @@ export async function updateDriver(
         staffId: driverId,
         profileId: profileId ?? undefined,
       });
-      if (existing) throw new OnboardError({ status: 409, error: EXISTING_EMAIL_MESSAGE, field: 'email' });
+      if (existing) throw new OnboardError({ status: 409, error: PERSONAL_EMAIL_TAKEN_MESSAGE, field: 'email' });
     }
   }
 
@@ -132,7 +132,13 @@ export async function updateDriver(
   const { error: opsErr } = await svc
     .from('tms_driver')
     .upsert(
-      { ...buildTransportPayload(driverId, transport), ...clearOldCopies, profile_id: profileId, updated_by: actorId },
+      {
+        ...buildTransportPayload(driverId, transport),
+        ...clearOldCopies,
+        // Never overwrite a stored profile link with null.
+        ...(profileId ? { profile_id: profileId } : {}),
+        updated_by: actorId,
+      },
       { onConflict: 'staff_id' },
     );
   if (opsErr) {
@@ -140,8 +146,9 @@ export async function updateDriver(
     throw new OnboardError({ status: 500, error: 'Failed to save transport details' });
   }
 
-  // Best effort: completes a create that warned. Never fails the edit.
-  if (profileId) {
+  // Best effort: completes a create that warned. Never fails the edit. Only for a
+  // record TMS owns: someone managed in MyJKKN keeps whatever roles MyJKKN gave them.
+  if (fullyEditable && profileId) {
     try {
       await ensureDriverRole(svc, profileId, actorId);
     } catch (e) {
@@ -179,9 +186,11 @@ export async function replaceDriverPhoto(
   if (!rowIsFullyEditable(row)) {
     throw new OnboardError({ status: 403, error: PHOTO_MANAGED_ELSEWHERE_MESSAGE });
   }
+  // The stored id, not the URL's spelling of it: the folder name must match exactly.
+  const staffId = row.id as string;
 
   const bucket = svc.storage.from(STAFF_IMAGE_BUCKET);
-  const path = photoObjectPath(driverId, file.name, now, file.type);
+  const path = photoObjectPath(staffId, file.name, now, file.type);
 
   const { error: uploadErr } = await bucket.upload(path, file.bytes, {
     contentType: file.type,
@@ -202,7 +211,7 @@ export async function replaceDriverPhoto(
   const { data: updated, error: updateErr } = await svc
     .from('staff')
     .update({ profile_picture: url, updated_by: actorId })
-    .eq('id', driverId)
+    .eq('id', staffId)
     .eq('role_key', DRIVER_ROLE_KEY)
     .eq('category_id', DRIVER_CATEGORY_ID)
     .select('id');
@@ -218,9 +227,9 @@ export async function replaceDriverPhoto(
   }
 
   try {
-    const { data: existing, error: listErr } = await bucket.list(driverId);
+    const { data: existing, error: listErr } = await bucket.list(staffId);
     if (listErr) throw listErr;
-    const stale = (existing ?? []).map((o) => `${driverId}/${o.name}`).filter((p) => p !== path);
+    const stale = (existing ?? []).map((o) => `${staffId}/${o.name}`).filter((p) => p !== path);
     if (stale.length > 0) {
       const { error: removeErr } = await bucket.remove(stale);
       if (removeErr) throw removeErr;

@@ -274,6 +274,8 @@ function normalizeCurrent(column: string, value: unknown): unknown {
   if (typeof value === 'string') {
     const t = value.trim();
     if (t === '') return null;
+    // Emails are compared as written by toStaffColumns, so a stored mixed-case email is not a change.
+    if (column === 'email') return normalizeEmail(t);
     return DATE_COLUMNS.has(column) ? t.slice(0, 10) : t;
   }
   return value;

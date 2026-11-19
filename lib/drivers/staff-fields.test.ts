@@ -309,6 +309,13 @@ describe('diffStaffPatch', () => {
     expect(diffStaffPatch({ ...valid, email: '' }, current)).not.toHaveProperty('email');
   });
 
+  it('compares email ignoring case and surrounding spaces', () => {
+    expect(diffStaffPatch(same, { ...current, email: ' Ravi.K@JKKN.ac.in ' })).not.toHaveProperty('email');
+    expect(diffStaffPatch({ ...same, email: 'other@jkkn.ac.in' }, { ...current, email: 'Ravi.K@JKKN.ac.in' })).toEqual({
+      email: 'other@jkkn.ac.in',
+    });
+  });
+
   it('reports a cleared value as null', () => {
     expect(diffStaffPatch({ ...same, address: '' }, current)).toEqual({ address: null });
   });

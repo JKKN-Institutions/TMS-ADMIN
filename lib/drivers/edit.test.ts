@@ -321,6 +321,44 @@ describe('updateDriver', () => {
     });
   });
 
+  it('409s on the personal email field with the personal email message', async () => {
+    const { client } = withRow(FULL_ROW, (t, c) =>
+      t === 'staff' && c.some((x) => x.method === 'ilike') ? { data: [{ id: 'S2' }] } : undefined,
+    );
+    await expect(
+      updateDriver(client, 'S1', { person: { ...PERSON, email: 'taken@gmail.com' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A'),
+    ).rejects.toMatchObject({
+      status: 409,
+      field: 'email',
+      message: 'This personal email already belongs to someone in MyJKKN.',
+    });
+  });
+
+  it('does not treat a stored mixed-case email as a change', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, email: 'Ravi@Gmail.com' });
+    const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
+    expect(r.changed).toEqual([]);
+    expect(log.some((l) => l.calls.some((c) => c.method === 'ilike'))).toBe(false);
+  });
+
+  it('does not touch roles when the row is not fully editable', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, category_id: 'other-category' });
+    await updateDriver(client, 'S1', { transport: TRANSPORT }, 'A');
+    expect(log.some((l) => l.table === 'custom_roles' || l.table === 'user_roles')).toBe(false);
+  });
+
+  it('ensures the driver role when the row is fully editable', async () => {
+    const { client, log } = withRow(FULL_ROW);
+    await updateDriver(client, 'S1', { transport: TRANSPORT }, 'A');
+    expect(log.some((l) => l.table === 'user_roles')).toBe(true);
+  });
+
+  it('never overwrites tms_driver.profile_id with null', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, profile_id: null });
+    await updateDriver(client, 'S1', { transport: TRANSPORT }, 'A');
+    expect(callsOf(log, 'tms_driver', 'upsert')[0].args[0]).not.toHaveProperty('profile_id');
+  });
+
   it('succeeds even when ensureDriverRole fails', async () => {
     const { client } = withRow(FULL_ROW, (t) => (t === 'custom_roles' ? { error: { message: 'down' } } : undefined));
     const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
@@ -395,6 +433,22 @@ describe('replaceDriverPhoto', () => {
       message: "This person's photo is managed in MyJKKN.",
     });
     expect(ops).toEqual(['upload:S1/777.png', 'remove:S1/777.png']);
+  });
+
+  it('uses the stored row id, not the id as typed in the URL, for the storage folder and the update', async () => {
+    const ops: string[] = [];
+    const storage = {
+      upload: (p: unknown) => (ops.push(`upload:${p}`), Promise.resolve({ error: null })),
+      getPublicUrl: (p: unknown) => ({ data: { publicUrl: `https://cdn/${p}` } }),
+      list: (prefix: unknown) => (ops.push(`list:${prefix}`), Promise.resolve({ data: [{ name: '1.jpg' }], error: null })),
+      remove: (p: unknown) => (ops.push(`remove:${(p as string[]).join(',')}`), Promise.resolve({ error: null })),
+    };
+    const { client, log } = withRow({ ...FULL_ROW, id: 'abc-def' }, undefined, storage);
+    const r = await replaceDriverPhoto(client, 'ABC-DEF', FILE, 'A', 777);
+    expect(r.url).toBe('https://cdn/abc-def/777.png');
+    expect(ops).toEqual(['upload:abc-def/777.png', 'list:abc-def', 'remove:abc-def/1.jpg']);
+    const upd = log.find((l) => isStaffUpdate(l.table, l.calls))!;
+    expect(upd.calls.filter((c) => c.method === 'eq').map((c) => c.args.join('='))[0]).toBe('id=abc-def');
   });
 
   it('removes the new object and returns the translated error when the staff update fails', async () => {

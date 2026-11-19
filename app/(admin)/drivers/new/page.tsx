@@ -83,10 +83,11 @@ export default function NewDriverPage() {
         ))}
       </div>
 
-      {source === 'new' ? (
+      {/* Both panels stay mounted (the inactive one hidden) so switching keeps typed input. */}
+      <div hidden={source !== 'new'}>
         <DriverForm mode="create-new" />
-      ) : (
-        <>
+      </div>
+      <div hidden={source !== 'existing'} className="space-y-6">
         <SectionCard
           title="1. Select staff member"
           action={
@@ -188,8 +189,7 @@ export default function NewDriverPage() {
             Select a staff member above to enter their operational details.
           </div>
         )}
-        </>
-      )}
+      </div>
     </div>
   );
 }
