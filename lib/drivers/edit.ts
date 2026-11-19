@@ -10,9 +10,10 @@ import { canFullEdit, diffStaffPatch, validatePerson } from './staff-fields';
 import { translateStaffDbError } from './db-errors';
 import { buildTransportPayload } from './map';
 import { ensureDriverRole, findExistingAccount, OnboardError } from './onboard';
-import { DRIVER_ROLE_KEY, STAFF_IMAGE_BUCKET } from './onboarding-constants';
+import { DRIVER_CATEGORY_ID, DRIVER_ROLE_KEY, STAFF_IMAGE_BUCKET } from './onboarding-constants';
 
 export const EXISTING_EMAIL_MESSAGE = 'This email already belongs to someone in MyJKKN.';
+export const RECORD_MANAGED_ELSEWHERE_MESSAGE = "This person's record is managed in MyJKKN.";
 export const PHOTO_MANAGED_ELSEWHERE_MESSAGE = "This person's photo is managed in MyJKKN.";
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
@@ -87,14 +88,20 @@ export async function updateDriver(
 
   const changed = Object.keys(patch);
   if (changed.length > 0) {
-    const { error } = await svc
+    // Re-assert the gate inside the write: the row may have moved category since the read.
+    const { data: updated, error } = await svc
       .from('staff')
       .update({ ...patch, updated_by: actorId })
       .eq('id', driverId)
-      .eq('role_key', DRIVER_ROLE_KEY);
+      .eq('role_key', DRIVER_ROLE_KEY)
+      .eq('category_id', DRIVER_CATEGORY_ID)
+      .select('id');
     if (error) {
       console.error('Driver edit: staff update failed:', error);
       throw new OnboardError(translateStaffDbError(error));
+    }
+    if (!updated || updated.length === 0) {
+      throw new OnboardError({ status: 403, error: RECORD_MANAGED_ELSEWHERE_MESSAGE });
     }
   }
 
@@ -168,15 +175,22 @@ export async function replaceDriverPhoto(
     throw new OnboardError({ status: 500, error: 'Failed to upload the photo.' });
   }
 
-  const { error: updateErr } = await svc
+  const { data: updated, error: updateErr } = await svc
     .from('staff')
     .update({ profile_picture: url, updated_by: actorId })
     .eq('id', driverId)
-    .eq('role_key', DRIVER_ROLE_KEY);
+    .eq('role_key', DRIVER_ROLE_KEY)
+    .eq('category_id', DRIVER_CATEGORY_ID)
+    .select('id');
   if (updateErr) {
     console.error('Driver photo: staff update failed:', updateErr);
     await bucket.remove([path]).catch(() => undefined);
     throw new OnboardError(translateStaffDbError(updateErr));
+  }
+  if (!updated || updated.length === 0) {
+    // The row left the gate after the read: keep its existing photo, drop only the new object.
+    await bucket.remove([path]).catch(() => undefined);
+    throw new OnboardError({ status: 403, error: PHOTO_MANAGED_ELSEWHERE_MESSAGE });
   }
 
   try {

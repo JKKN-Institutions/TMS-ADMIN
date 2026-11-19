@@ -101,6 +101,7 @@ function withRow(
     const e = extra?.(t, c);
     if (e) return e;
     if (isRowLoad(t, c)) return { data: row };
+    if (isStaffUpdate(t, c)) return { data: [{ id: 'S1' }] };
     if (t === 'custom_roles') return { data: { id: 'role-driver' } };
     if (t === 'user_roles') return { data: [{ id: 'ur1' }] };
     return { data: [] };
@@ -140,7 +141,11 @@ describe('updateDriver', () => {
     expect(r).toEqual({ id: 'S1', personSaved: true, changed: ['phone'] });
     const upd = log.find((l) => isStaffUpdate(l.table, l.calls))!;
     expect(upd.calls.find((c) => c.method === 'update')!.args[0]).toEqual({ phone: '9000000000', updated_by: 'A' });
-    expect(upd.calls.filter((c) => c.method === 'eq').map((c) => c.args.join('='))).toEqual(['id=S1', 'role_key=driver']);
+    expect(upd.calls.filter((c) => c.method === 'eq').map((c) => c.args.join('='))).toEqual([
+      'id=S1',
+      'role_key=driver',
+      `category_id=${DRIVER_CATEGORY_ID}`,
+    ]);
   });
 
   it('never writes protected columns even when the body carries them', async () => {
@@ -212,6 +217,15 @@ describe('updateDriver', () => {
     });
   });
 
+  it('403s with no tms_driver write when the staff update matches no row', async () => {
+    const { client, log } = withRow(FULL_ROW, (t, c) => (isStaffUpdate(t, c) ? { data: [] } : undefined));
+    await expect(
+      updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT }, 'A'),
+    ).rejects.toMatchObject({ status: 403, message: "This person's record is managed in MyJKKN." });
+    expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(0);
+    expect(log.some((l) => l.table === 'custom_roles' || l.table === 'user_roles')).toBe(false);
+  });
+
   it('translates a staff update error', async () => {
     const { client } = withRow(FULL_ROW, (t, c) =>
       isStaffUpdate(t, c) ? { error: { code: '23505', message: 'staff_biometric_uq' } } : undefined,
@@ -273,6 +287,28 @@ describe('replaceDriverPhoto', () => {
     expect(r.url).toBe('https://cdn/S1/777.png');
     expect(ops).toEqual(['upload:S1/777.png', 'list', 'remove:S1/1.jpg']);
     expect(callsOf(log, 'staff', 'update')[0].args[0]).toEqual({ profile_picture: 'https://cdn/S1/777.png', updated_by: 'A' });
+    const upd = log.find((l) => isStaffUpdate(l.table, l.calls))!;
+    expect(upd.calls.filter((c) => c.method === 'eq').map((c) => c.args.join('='))).toEqual([
+      'id=S1',
+      'role_key=driver',
+      `category_id=${DRIVER_CATEGORY_ID}`,
+    ]);
+  });
+
+  it('removes only the new object and 403s, skipping cleanup, when the update matches no row', async () => {
+    const ops: string[] = [];
+    const storage = {
+      upload: (p: unknown) => (ops.push(`upload:${p}`), Promise.resolve({ error: null })),
+      getPublicUrl: (p: unknown) => ({ data: { publicUrl: `https://cdn/${p}` } }),
+      list: () => (ops.push('list'), Promise.resolve({ data: [{ name: '1.jpg' }], error: null })),
+      remove: (p: unknown) => (ops.push(`remove:${(p as string[]).join(',')}`), Promise.resolve({ error: null })),
+    };
+    const { client } = withRow(FULL_ROW, (t, c) => (isStaffUpdate(t, c) ? { data: [] } : undefined), storage);
+    await expect(replaceDriverPhoto(client, 'S1', FILE, 'A', 777)).rejects.toMatchObject({
+      status: 403,
+      message: "This person's photo is managed in MyJKKN.",
+    });
+    expect(ops).toEqual(['upload:S1/777.png', 'remove:S1/777.png']);
   });
 
   it('removes the new object and returns the translated error when the staff update fails', async () => {
