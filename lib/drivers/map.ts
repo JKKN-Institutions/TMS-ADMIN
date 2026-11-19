@@ -12,7 +12,7 @@ import { canFullEdit } from './onboarding-constants';
  */
 
 export const STAFF_SELECT =
-  'id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id, gender, date_of_birth, marital_status, blood_group, institution_email, address, state, district, pincode, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone, staff_id, biometric_id, biometric_institution_id, category_id, role_key';
+  'id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id, gender, date_of_birth, marital_status, blood_group, institution_email, address, state, district, pincode, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone, staff_id, biometric_id, biometric_institution_id, category_id, role_key, updated_at';
 
 export interface StaffRow {
   id: string;
@@ -45,6 +45,7 @@ export interface StaffRow {
   biometric_institution_id: string | null;
   category_id: string | null;
   role_key: string | null;
+  updated_at?: string | null;
 }
 
 export interface OpsRow {
@@ -129,6 +130,7 @@ export function mapStaffToDriver(
       biometricInstitutionId: s.biometric_institution_id,
       isActive: s.is_active ?? false,
       photoUrl: s.profile_picture,
+      updatedAt: s.updated_at ?? null,
     },
     canFullEdit: canFullEdit(s),
     ops: ops ? mapOps(ops) : null,

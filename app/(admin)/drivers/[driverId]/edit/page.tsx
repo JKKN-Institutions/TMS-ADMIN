@@ -27,12 +27,17 @@ export default function DriverEditPage({ params }: { params: Promise<{ driverId:
   const { can, isSuperAdmin } = usePermissions();
   const canManage = isSuperAdmin || can('tms.drivers.manage');
 
-  const { data: driver, isLoading, isError } = useQuery({
+  // Always refetch on open, and wait for it: the form must start from the current
+  // record, because its updated_at is what a save is checked against.
+  const { data: driver, isLoading, isFetching, isError } = useQuery({
     queryKey: ['driver', driverId],
     queryFn: () => fetchDriver(driverId),
+    refetchOnMount: 'always',
+    // A background refetch would swap the form for the skeleton and drop typed input.
+    refetchOnReconnect: false,
   });
 
-  if (isLoading) {
+  if (isLoading || isFetching) {
     return (
       <div className="space-y-6">
         <DriverPageHeader crumbs={crumbs('Loading…')} title="Edit Driver" />
@@ -93,7 +98,7 @@ export default function DriverEditPage({ params }: { params: Promise<{ driverId:
         </SectionCard>
       )}
 
-      <DriverForm mode="edit" driver={driver} />
+      <DriverForm key={driver.person.updatedAt ?? driver.id} mode="edit" driver={driver} />
     </div>
   );
 }

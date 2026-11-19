@@ -181,7 +181,12 @@ export default function DriverForm({
         return { id: d.id, staffCode: d.staffCode ?? null, warning: d.warning };
       }
       const id = (driver as DriverListItem).id;
-      await send(`/api/admin/drivers/${id}`, 'PATCH', showPerson ? { person, transport } : { transport });
+      // baseUpdatedAt lets the server refuse the save if the record changed since this form loaded.
+      await send(
+        `/api/admin/drivers/${id}`,
+        'PATCH',
+        showPerson ? { person, transport, baseUpdatedAt: driver?.person.updatedAt ?? null } : { transport },
+      );
       return { id, staffCode: null as string | null, warning: undefined as string | undefined };
     },
     onSuccess: async ({ id, staffCode, warning }) => {

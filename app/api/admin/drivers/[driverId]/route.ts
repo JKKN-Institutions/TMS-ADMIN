@@ -91,9 +91,18 @@ export async function PATCH(
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
-    const { person, transport } = body as { person?: unknown; transport?: unknown };
+    const { person, transport, baseUpdatedAt } = body as {
+      person?: unknown;
+      transport?: unknown;
+      baseUpdatedAt?: unknown;
+    };
 
-    const result = await updateDriver(createServiceRoleClient(), driverId, { person, transport }, auth.userId);
+    const result = await updateDriver(
+      createServiceRoleClient(),
+      driverId,
+      { person, transport, baseUpdatedAt },
+      auth.userId,
+    );
 
     await logActivity(auth, request, {
       module: 'drivers',

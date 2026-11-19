@@ -15,6 +15,15 @@ import { DRIVER_CATEGORY_ID, DRIVER_ROLE_KEY, STAFF_IMAGE_BUCKET } from './onboa
 export const EXISTING_EMAIL_MESSAGE = 'This email already belongs to someone in MyJKKN.';
 export const RECORD_MANAGED_ELSEWHERE_MESSAGE = "This person's record is managed in MyJKKN.";
 export const PHOTO_MANAGED_ELSEWHERE_MESSAGE = "This person's photo is managed in MyJKKN.";
+export const RELOAD_MESSAGE = 'Reload the page and try again.';
+export const CHANGED_ELSEWHERE_MESSAGE = 'This record was changed by someone else. Reload the page and try again.';
+
+/** A timestamp string as epoch ms, or null when it is not a string or not a date. */
+function timestampMs(v: unknown): number | null {
+  if (typeof v !== 'string' || v.trim() === '') return null;
+  const ms = new Date(v).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -56,7 +65,7 @@ export interface UpdateDriverResult {
 export async function updateDriver(
   svc: SupabaseClient,
   driverId: string,
-  body: { person?: unknown; transport?: unknown },
+  body: { person?: unknown; transport?: unknown; baseUpdatedAt?: unknown },
   actorId: string,
 ): Promise<UpdateDriverResult> {
   const row = await loadDriverRow(svc, driverId);
@@ -72,6 +81,14 @@ export async function updateDriver(
   let patch: Record<string, unknown> = {};
 
   if (editPerson) {
+    // The form sends the staff.updated_at it loaded. If MyJKKN (or another tab) saved
+    // the row since, refuse rather than silently write the older values back.
+    const base = timestampMs(body.baseUpdatedAt);
+    if (base === null) throw new OnboardError({ status: 400, error: RELOAD_MESSAGE });
+    if (base !== new Date(row.updated_at as string).getTime()) {
+      throw new OnboardError({ status: 409, error: CHANGED_ELSEWHERE_MESSAGE });
+    }
+
     const checked = validatePerson(body.person, 'edit');
     if (!checked.ok) {
       throw new OnboardError({ status: 400, error: 'Check the highlighted fields.', fields: checked.errors });

@@ -14,7 +14,7 @@ function driver(person: Partial<DriverListItem['person']> = {}, ops: Partial<Non
       address: null, state: null, district: null, pincode: null,
       emergencyContactName: null, emergencyContactRelationship: null, emergencyContactPhone: null,
       staffCode: 'NOTJMO1', dateOfJoining: '2024-01-02', designation: 'Bus Driver',
-      biometricId: null, biometricInstitutionId: null, isActive: true, photoUrl: null,
+      biometricId: null, biometricInstitutionId: null, isActive: true, photoUrl: null, updatedAt: null,
       ...person,
     },
   };

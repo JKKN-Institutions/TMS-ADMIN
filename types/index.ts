@@ -74,6 +74,7 @@ export interface DriverPerson {
   dateOfJoining: string | null; designation: string;
   biometricId: string | null; biometricInstitutionId: string | null;
   isActive: boolean; photoUrl: string | null;
+  updatedAt: string | null;           // staff.updated_at; sent back on save to detect a change made elsewhere
 }
 
 export interface DriverListItem {

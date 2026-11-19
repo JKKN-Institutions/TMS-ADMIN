@@ -64,7 +64,10 @@ const FULL_ROW = {
   biometric_id: null,
   biometric_institution_id: null,
   is_active: true,
+  updated_at: '2026-11-19T10:00:00.123+00:00',
 };
+/** The same instant as FULL_ROW.updated_at, written the way JSON sends it. */
+const BASE = '2026-11-19T10:00:00.123Z';
 
 const PERSON = {
   firstName: 'Ravi',
@@ -111,14 +114,14 @@ function withRow(
 describe('updateDriver', () => {
   it('404s with no writes when the staff row is missing or not a driver', async () => {
     const { client, log } = withRow(null);
-    await expect(updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A')).rejects.toMatchObject({ status: 404 });
+    await expect(updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A')).rejects.toMatchObject({ status: 404 });
     expect(writes(log)).toHaveLength(0);
     expect(callsOf(log, 'staff', 'eq').map((c) => c.args.join('='))).toContain('role_key=driver');
   });
 
   it('ignores person and still upserts tms_driver when the row is not fully editable', async () => {
     const { client, log } = withRow({ ...FULL_ROW, category_id: 'other-category' });
-    const r = await updateDriver(client, 'S1', { person: { ...PERSON, phone: '1111111111' }, transport: TRANSPORT }, 'A');
+    const r = await updateDriver(client, 'S1', { person: { ...PERSON, phone: '1111111111' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
     expect(r).toEqual({ id: 'S1', personSaved: false, changed: [] });
     expect(callsOf(log, 'staff', 'update')).toHaveLength(0);
     const up = callsOf(log, 'tms_driver', 'upsert');
@@ -129,7 +132,7 @@ describe('updateDriver', () => {
 
   it('does not update staff when nothing changed', async () => {
     const { client, log } = withRow(FULL_ROW);
-    const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A');
+    const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
     expect(r).toEqual({ id: 'S1', personSaved: true, changed: [] });
     expect(callsOf(log, 'staff', 'update')).toHaveLength(0);
     expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(1);
@@ -137,7 +140,7 @@ describe('updateDriver', () => {
 
   it('updates only the changed column, filtered by id and role_key', async () => {
     const { client, log } = withRow(FULL_ROW);
-    const r = await updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT }, 'A');
+    const r = await updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
     expect(r).toEqual({ id: 'S1', personSaved: true, changed: ['phone'] });
     const upd = log.find((l) => isStaffUpdate(l.table, l.calls))!;
     expect(upd.calls.find((c) => c.method === 'update')!.args[0]).toEqual({ phone: '9000000000', updated_by: 'A' });
@@ -164,7 +167,7 @@ describe('updateDriver', () => {
       login_enabled: false,
       status: 'terminated',
     };
-    await updateDriver(client, 'S1', { person, transport: TRANSPORT }, 'A');
+    await updateDriver(client, 'S1', { person, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
     const payload = callsOf(log, 'staff', 'update')[0].args[0] as Record<string, unknown>;
     for (const k of ['institution_email', 'staff_id', 'profile_id', 'role_key', 'category_id', 'institution_id', 'department_id', 'login_enabled', 'status']) {
       expect(payload).not.toHaveProperty(k);
@@ -176,7 +179,7 @@ describe('updateDriver', () => {
       t === 'staff' && c.some((x) => x.method === 'ilike') ? { data: [{ id: 'S2' }] } : undefined,
     );
     await expect(
-      updateDriver(client, 'S1', { person: { ...PERSON, email: 'taken@gmail.com' }, transport: TRANSPORT }, 'A'),
+      updateDriver(client, 'S1', { person: { ...PERSON, email: 'taken@gmail.com' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A'),
     ).rejects.toMatchObject({ status: 409 });
     expect(writes(log)).toHaveLength(0);
     const staffNeq = callsOf(log, 'staff', 'neq');
@@ -186,7 +189,7 @@ describe('updateDriver', () => {
 
   it('excludes this profile id when checking profiles', async () => {
     const { client, log } = withRow(FULL_ROW);
-    await updateDriver(client, 'S1', { person: { ...PERSON, email: 'new@gmail.com' }, transport: TRANSPORT }, 'A');
+    await updateDriver(client, 'S1', { person: { ...PERSON, email: 'new@gmail.com' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
     const profNeq = callsOf(log, 'profiles', 'neq');
     expect(profNeq.length).toBeGreaterThan(0);
     expect(profNeq.every((c) => c.args[0] === 'id' && c.args[1] === 'P1')).toBe(true);
@@ -194,7 +197,7 @@ describe('updateDriver', () => {
 
   it('400s with field errors and writes nothing when the person is invalid', async () => {
     const { client, log } = withRow(FULL_ROW);
-    const err = await updateDriver(client, 'S1', { person: { ...PERSON, phone: '12' }, transport: TRANSPORT }, 'A').catch((e) => e);
+    const err = await updateDriver(client, 'S1', { person: { ...PERSON, phone: '12' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A').catch((e) => e);
     expect(err).toBeInstanceOf(OnboardError);
     expect(err.status).toBe(400);
     expect(err.fields?.phone).toBeTruthy();
@@ -211,7 +214,7 @@ describe('updateDriver', () => {
 
   it('500s when the tms_driver upsert fails', async () => {
     const { client } = withRow(FULL_ROW, (t) => (t === 'tms_driver' ? { error: { message: 'boom' } } : undefined));
-    await expect(updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A')).rejects.toMatchObject({
+    await expect(updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A')).rejects.toMatchObject({
       status: 500,
       message: 'Failed to save transport details',
     });
@@ -220,7 +223,7 @@ describe('updateDriver', () => {
   it('403s with no tms_driver write when the staff update matches no row', async () => {
     const { client, log } = withRow(FULL_ROW, (t, c) => (isStaffUpdate(t, c) ? { data: [] } : undefined));
     await expect(
-      updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT }, 'A'),
+      updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A'),
     ).rejects.toMatchObject({ status: 403, message: "This person's record is managed in MyJKKN." });
     expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(0);
     expect(log.some((l) => l.table === 'custom_roles' || l.table === 'user_roles')).toBe(false);
@@ -231,8 +234,55 @@ describe('updateDriver', () => {
       isStaffUpdate(t, c) ? { error: { code: '23505', message: 'staff_biometric_uq' } } : undefined,
     );
     await expect(
-      updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT }, 'A'),
+      updateDriver(client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A'),
     ).rejects.toMatchObject({ status: 409, field: 'biometricId' });
+  });
+
+  describe('refuses to overwrite a change made elsewhere', () => {
+    it('saves when baseUpdatedAt is the same instant as the stored row', async () => {
+      const { client, log } = withRow(FULL_ROW);
+      const r = await updateDriver(
+        client, 'S1', { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A',
+      );
+      expect(r.changed).toEqual(['phone']);
+      expect(callsOf(log, 'staff', 'update')).toHaveLength(1);
+    });
+
+    it('409s with no writes when the row changed since the form loaded', async () => {
+      const { client, log } = withRow(FULL_ROW);
+      await expect(
+        updateDriver(
+          client, 'S1',
+          { person: { ...PERSON, phone: '9000000000' }, transport: TRANSPORT, baseUpdatedAt: '2026-11-19T09:00:00Z' },
+          'A',
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'This record was changed by someone else. Reload the page and try again.',
+      });
+      expect(writes(log)).toHaveLength(0);
+    });
+
+    it.each([undefined, null, '', 'not-a-date', 5])('400s with no writes when baseUpdatedAt is %j', async (base) => {
+      const { client, log } = withRow(FULL_ROW);
+      await expect(
+        updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: base }, 'A'),
+      ).rejects.toMatchObject({ status: 400, message: 'Reload the page and try again.' });
+      expect(writes(log)).toHaveLength(0);
+    });
+
+    it('needs no baseUpdatedAt for a transport-only save', async () => {
+      const { client, log } = withRow(FULL_ROW);
+      const r = await updateDriver(client, 'S1', { transport: TRANSPORT }, 'A');
+      expect(r.personSaved).toBe(false);
+      expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(1);
+    });
+
+    it('needs no baseUpdatedAt when the row is not fully editable', async () => {
+      const { client, log } = withRow({ ...FULL_ROW, category_id: 'other-category' });
+      await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A');
+      expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(1);
+    });
   });
 
   describe('address and emergency contact live on staff only', () => {
@@ -240,14 +290,14 @@ describe('updateDriver', () => {
 
     it('nulls the old tms_driver copies when the person is saved', async () => {
       const { client, log } = withRow(FULL_ROW);
-      await updateDriver(client, 'S1', { person: { ...PERSON, address: '1 Main St' }, transport: TRANSPORT }, 'A');
+      await updateDriver(client, 'S1', { person: { ...PERSON, address: '1 Main St' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
       const payload = callsOf(log, 'tms_driver', 'upsert')[0].args[0] as Record<string, unknown>;
       expect(payload).toMatchObject({ address: null, emergency_contact_name: null, emergency_contact_phone: null });
     });
 
     it('leaves the copies alone when the row is not fully editable', async () => {
       const { client, log } = withRow({ ...FULL_ROW, category_id: 'other-category' });
-      await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A');
+      await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
       const payload = callsOf(log, 'tms_driver', 'upsert')[0].args[0] as Record<string, unknown>;
       for (const k of COPIES) expect(payload).not.toHaveProperty(k);
     });
@@ -264,7 +314,7 @@ describe('updateDriver', () => {
         isStaffUpdate(t, c) ? { error: { code: '23505', message: 'staff_biometric_uq' } } : undefined,
       );
       await expect(
-        updateDriver(client, 'S1', { person: { ...PERSON, address: '1 Main St' }, transport: TRANSPORT }, 'A'),
+        updateDriver(client, 'S1', { person: { ...PERSON, address: '1 Main St' }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A'),
       ).rejects.toMatchObject({ status: 409 });
       expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(0);
     });
@@ -272,7 +322,7 @@ describe('updateDriver', () => {
 
   it('succeeds even when ensureDriverRole fails', async () => {
     const { client } = withRow(FULL_ROW, (t) => (t === 'custom_roles' ? { error: { message: 'down' } } : undefined));
-    const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A');
+    const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
     expect(r.personSaved).toBe(true);
   });
 });
