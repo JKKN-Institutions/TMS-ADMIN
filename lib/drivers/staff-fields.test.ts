@@ -135,6 +135,60 @@ describe('validatePerson', () => {
     }
   });
 
+  it('requires isActive to be a real boolean in both modes', () => {
+    const { isActive: _omit, ...withoutActive } = valid;
+    for (const mode of ['create', 'edit'] as const) {
+      const r = validatePerson(withoutActive, mode, TODAY);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.isActive).toBe('Choose whether the driver is active');
+      expect(errorsFor({ isActive: 'true' as unknown as boolean }, mode)?.isActive).toBeTruthy();
+    }
+  });
+
+  it('accepts isActive false and carries it through to is_active', () => {
+    const r = validatePerson({ ...valid, isActive: false }, 'edit', TODAY);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(toStaffColumns(r.value).is_active).toBe(false);
+  });
+
+  it('gives a date of birth before 1900 its own message', () => {
+    expect(errorsFor({ dateOfBirth: '1899-12-31' })?.dateOfBirth).toBe('Date of birth looks too old — check the year');
+    expect(errorsFor({ dateOfBirth: '2999-01-01' })?.dateOfBirth).toBe('Date of birth cannot be in the future');
+  });
+
+  it('requires a non-blank biometric machine to be a UUID', () => {
+    const base = { biometricId: '123' };
+    expect(errorsFor({ ...base, biometricInstitutionId: 'not-a-uuid' })?.biometricInstitutionId).toBe(
+      'Choose a biometric machine from the list',
+    );
+    expect(
+      validatePerson(
+        { ...valid, ...base, biometricInstitutionId: 'AB12CD34-0000-4abc-8DEF-0123456789ab' },
+        'create',
+        TODAY,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('rejects an invalid blood group', () => {
+    expect(errorsFor({ bloodGroup: 'Z+' })?.bloodGroup).toBeTruthy();
+  });
+
+  it('needs a biometric code when a biometric machine is chosen', () => {
+    expect(
+      errorsFor({ biometricId: '', biometricInstitutionId: '11111111-2222-4333-8444-555555555555' })?.biometricId,
+    ).toBeTruthy();
+  });
+
+  it('rejects a relationship outside the list', () => {
+    const e = errorsFor({
+      emergencyContactName: 'Meena',
+      emergencyContactPhone: '9876543210',
+      emergencyContactRelationship: 'Neighbour',
+    });
+    expect(e?.emergencyContactRelationship).toBeTruthy();
+  });
+
   it('rejects input that is not an object', () => {
     expect(validatePerson(null, 'create', TODAY).ok).toBe(false);
   });
@@ -243,6 +297,10 @@ describe('diffStaffPatch', () => {
     expect(diffStaffPatch({ ...same, institutionEmailName: 'someone.else' }, current)).not.toHaveProperty(
       'institution_email',
     );
+  });
+
+  it('never overwrites a stored email with a blank input email', () => {
+    expect(diffStaffPatch({ ...valid, email: '' }, current)).not.toHaveProperty('email');
   });
 
   it('reports a cleared value as null', () => {

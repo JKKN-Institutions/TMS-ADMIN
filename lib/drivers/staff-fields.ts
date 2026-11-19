@@ -79,6 +79,7 @@ const NAME_PART = /^[a-z0-9._-]+$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const MIN_DATE_OF_BIRTH = '1900-01-01';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Today as YYYY-MM-DD in India, regardless of the server's timezone. */
 function todayInIndia(): string {
@@ -121,7 +122,8 @@ export function validatePerson(
   const raw = input as Record<string, unknown>;
 
   // Whitelist: read only the known keys, trimmed.
-  const v = { isActive: typeof raw.isActive === 'boolean' ? raw.isActive : true } as DriverPersonInput;
+  // isActive is never defaulted: a silent default could re-activate a deactivated driver on edit.
+  const v = { isActive: raw.isActive === true } as DriverPersonInput;
   for (const k of STRING_KEYS) {
     const x = raw[k];
     v[k] = typeof x === 'string' ? x.trim() : '';
@@ -130,6 +132,8 @@ export function validatePerson(
   else v.institutionEmailName = '';
 
   const errors: FieldErrors = {};
+
+  if (typeof raw.isActive !== 'boolean') errors.isActive = 'Choose whether the driver is active';
 
   if (v.firstName.length < 2) errors.firstName = 'First name needs at least 2 letters';
   if (v.lastName.length < 1) errors.lastName = 'Last name is required';
@@ -142,7 +146,9 @@ export function validatePerson(
   }
 
   if (!isRealDate(v.dateOfBirth)) errors.dateOfBirth = 'Enter a valid date of birth';
-  else if (v.dateOfBirth < MIN_DATE_OF_BIRTH || v.dateOfBirth > today) {
+  else if (v.dateOfBirth < MIN_DATE_OF_BIRTH) {
+    errors.dateOfBirth = 'Date of birth looks too old — check the year';
+  } else if (v.dateOfBirth > today) {
     errors.dateOfBirth = 'Date of birth cannot be in the future';
   }
   if (!isRealDate(v.dateOfJoining)) errors.dateOfJoining = 'Enter a valid joining date';
@@ -187,6 +193,9 @@ export function validatePerson(
     errors.biometricInstitutionId = 'Choose the biometric machine';
   } else if (v.biometricId === '' && v.biometricInstitutionId !== '') {
     errors.biometricId = 'Enter the biometric code';
+  }
+  if (v.biometricInstitutionId !== '' && !UUID.test(v.biometricInstitutionId)) {
+    errors.biometricInstitutionId = 'Choose a biometric machine from the list';
   }
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
