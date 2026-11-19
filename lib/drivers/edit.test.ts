@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { updateDriver, photoObjectPath, replaceDriverPhoto } from './edit';
 import { OnboardError } from './onboard';
 import { DRIVER_CATEGORY_ID } from './onboarding-constants';
+import { STAFF_SELECT } from './map';
 
 type Call = { table: string; method: string; args: unknown[] };
 type Result = { data?: unknown; error?: unknown };
@@ -35,7 +36,7 @@ const callsOf = (log: Log, table: string, method: string) =>
   log.filter((l) => l.table === table).flatMap((l) => l.calls.filter((c) => c.method === method));
 const writes = (log: Log) =>
   log.flatMap((l) => l.calls).filter((c) => ['update', 'upsert', 'insert'].includes(c.method));
-const isRowLoad = (t: string, c: Call[]) => t === 'staff' && c.some((x) => x.method === 'select' && x.args[0] === '*');
+const isRowLoad = (t: string, c: Call[]) => t === 'staff' && c.some((x) => x.method === 'select' && x.args[0] === STAFF_SELECT);
 const isStaffUpdate = (t: string, c: Call[]) => t === 'staff' && c.some((x) => x.method === 'update');
 
 const FULL_ROW = {

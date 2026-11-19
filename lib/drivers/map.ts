@@ -8,12 +8,23 @@ import { canFullEdit } from './onboarding-constants';
  * owns only the `tms_driver` operational extension. These helpers are used by
  * BOTH the list route (app/api/admin/drivers/route.ts) and the detail route
  * (app/api/admin/drivers/[driverId]/route.ts) so list and detail return the
- * exact same camelCase shape.
+ * same camelCase shape. List rows come from the narrower STAFF_LIST_SELECT, so
+ * their detail-only person fields are null / blank.
  */
 
-export const STAFF_SELECT =
-  'id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id, gender, date_of_birth, marital_status, blood_group, institution_email, address, state, district, pincode, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone, staff_id, biometric_id, biometric_institution_id, category_id, role_key, updated_at';
+/**
+ * The drivers LIST select: the original list columns plus what the list, export
+ * and pickers read (staff code, edit gate, address, emergency contact). No date
+ * of birth, gender, institution email or the other personal details: the list
+ * endpoint returns every driver, so it ships only what the table needs.
+ */
+export const STAFF_LIST_SELECT =
+  'id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id, staff_id, category_id, role_key, address, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone';
 
+/** The single-driver DETAIL select: everything the view page and edit form need. */
+export const STAFF_SELECT = `${STAFF_LIST_SELECT}, gender, date_of_birth, marital_status, blood_group, institution_email, state, district, pincode, biometric_id, biometric_institution_id, updated_at`;
+
+/** A staff row from either select; the detail-only columns are absent from list rows. */
 export interface StaffRow {
   id: string;
   first_name: string | null;
@@ -28,23 +39,24 @@ export interface StaffRow {
   profile_picture: string | null;
   institution_id: string;
   profile_id: string | null;
-  gender: string | null;
-  date_of_birth: string | null;
-  marital_status: string | null;
-  blood_group: string | null;
-  institution_email: string | null;
+  staff_id: string | null;
+  category_id: string | null;
+  role_key: string | null;
   address: string | null;
-  state: string | null;
-  district: string | null;
-  pincode: string | null;
   emergency_contact_name: string | null;
   emergency_contact_relationship: string | null;
   emergency_contact_phone: string | null;
-  staff_id: string | null;
-  biometric_id: string | null;
-  biometric_institution_id: string | null;
-  category_id: string | null;
-  role_key: string | null;
+  // Detail select only:
+  gender?: string | null;
+  date_of_birth?: string | null;
+  marital_status?: string | null;
+  blood_group?: string | null;
+  institution_email?: string | null;
+  state?: string | null;
+  district?: string | null;
+  pincode?: string | null;
+  biometric_id?: string | null;
+  biometric_institution_id?: string | null;
   updated_at?: string | null;
 }
 
@@ -110,24 +122,24 @@ export function mapStaffToDriver(
       firstName: s.first_name ?? '',
       lastName: s.last_name ?? '',
       gender: s.gender ?? '',
-      dateOfBirth: s.date_of_birth,
+      dateOfBirth: s.date_of_birth ?? null,
       maritalStatus: s.marital_status ?? '',
-      bloodGroup: s.blood_group,
+      bloodGroup: s.blood_group ?? null,
       phone: s.phone ?? '',
       email: s.email ?? '',
-      institutionEmail: s.institution_email,
+      institutionEmail: s.institution_email ?? null,
       address: s.address,
-      state: s.state,
-      district: s.district,
-      pincode: s.pincode,
+      state: s.state ?? null,
+      district: s.district ?? null,
+      pincode: s.pincode ?? null,
       emergencyContactName: s.emergency_contact_name,
       emergencyContactRelationship: s.emergency_contact_relationship,
       emergencyContactPhone: s.emergency_contact_phone,
       staffCode: s.staff_id,
       dateOfJoining: s.date_of_joining,
       designation: s.designation ?? '',
-      biometricId: s.biometric_id,
-      biometricInstitutionId: s.biometric_institution_id,
+      biometricId: s.biometric_id ?? null,
+      biometricInstitutionId: s.biometric_institution_id ?? null,
       isActive: s.is_active ?? false,
       photoUrl: s.profile_picture,
       updatedAt: s.updated_at ?? null,

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import { STAFF_SELECT, mapStaffToDriver, type StaffRow, type OpsRow } from '@/lib/drivers/map';
+import { STAFF_LIST_SELECT, mapStaffToDriver, type StaffRow, type OpsRow } from '@/lib/drivers/map';
 import { assignExistingStaffAsDriver } from '@/lib/drivers/assign-existing';
 import { OnboardError } from '@/lib/drivers/onboard';
 import { getRoutesForDrivers } from '@/lib/drivers/routes';
@@ -12,7 +12,7 @@ async function getDrivers() {
     const supabase = createServiceRoleClient();
     const { data: staffRows, error } = await supabase
       .from('staff')
-      .select(STAFF_SELECT)
+      .select(STAFF_LIST_SELECT)
       .eq('role_key', 'driver')
       .order('first_name', { ascending: true });
     if (error) {

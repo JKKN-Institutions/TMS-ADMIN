@@ -8,7 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { canFullEdit, diffStaffPatch, validatePerson } from './staff-fields';
 import { translateStaffDbError } from './db-errors';
-import { buildTransportPayload } from './map';
+import { buildTransportPayload, STAFF_SELECT } from './map';
 import { ensureDriverRole, findExistingAccount, OnboardError } from './onboard';
 import { DRIVER_CATEGORY_ID, DRIVER_ROLE_KEY, STAFF_IMAGE_BUCKET } from './onboarding-constants';
 
@@ -32,7 +32,7 @@ function isPlainObject(x: unknown): x is Record<string, unknown> {
 async function loadDriverRow(svc: SupabaseClient, driverId: string): Promise<Record<string, unknown>> {
   const { data, error } = await svc
     .from('staff')
-    .select('*')
+    .select(STAFF_SELECT)
     .eq('id', driverId)
     .eq('role_key', DRIVER_ROLE_KEY)
     .maybeSingle();

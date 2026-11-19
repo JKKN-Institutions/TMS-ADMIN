@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapStaffToDriver, buildTransportPayload, type StaffRow } from './map';
+import { mapStaffToDriver, buildTransportPayload, STAFF_LIST_SELECT, STAFF_SELECT, type StaffRow } from './map';
 import { DRIVER_CATEGORY_ID } from './onboarding-constants';
 
 const base: StaffRow = {
@@ -45,12 +45,73 @@ describe('mapStaffToDriver', () => {
     expect(d.person.photoUrl).toBe('https://x/y.png');
   });
 
+  it('maps a list-shaped row (no detail-only columns) to nulls and blanks', () => {
+    const listRow: StaffRow = {
+      id: 's1',
+      first_name: 'Ravi',
+      last_name: 'Kumar',
+      designation: 'Driver',
+      phone: '9876543210',
+      email: 'ravi@example.com',
+      employment_type: 'full_time',
+      status: 'active',
+      is_active: true,
+      date_of_joining: '2024-01-01',
+      profile_picture: null,
+      institution_id: 'inst',
+      profile_id: 'p1',
+      staff_id: 'NOTJMO001',
+      category_id: DRIVER_CATEGORY_ID,
+      role_key: 'driver',
+      address: '1 Main St',
+      emergency_contact_name: 'Mani',
+      emergency_contact_relationship: 'Brother',
+      emergency_contact_phone: '9000000000',
+    };
+    const d = mapStaffToDriver(listRow, null);
+    expect(d.canFullEdit).toBe(true);
+    expect(d.person).toMatchObject({
+      dateOfBirth: null,
+      gender: '',
+      maritalStatus: '',
+      bloodGroup: null,
+      institutionEmail: null,
+      state: null,
+      district: null,
+      pincode: null,
+      biometricId: null,
+      biometricInstitutionId: null,
+      updatedAt: null,
+      address: '1 Main St',
+      emergencyContactName: 'Mani',
+    });
+  });
+
   it('is not fully editable in another category', () => {
     expect(mapStaffToDriver({ ...base, category_id: 'other' }, null).canFullEdit).toBe(false);
   });
 
   it('is not fully editable when role_key is not driver', () => {
     expect(mapStaffToDriver({ ...base, role_key: 'faculty' }, null).canFullEdit).toBe(false);
+  });
+});
+
+describe('staff selects', () => {
+  const cols = (s: string) => s.split(',').map((c) => c.trim());
+  const DETAIL_ONLY = [
+    'gender', 'date_of_birth', 'marital_status', 'blood_group', 'institution_email',
+    'state', 'district', 'pincode', 'biometric_id', 'biometric_institution_id', 'updated_at',
+  ];
+
+  it('keeps personal details out of the list select', () => {
+    for (const c of DETAIL_ONLY) expect(cols(STAFF_LIST_SELECT)).not.toContain(c);
+    for (const c of ['id', 'profile_id', 'staff_id', 'category_id', 'role_key', 'address', 'emergency_contact_phone']) {
+      expect(cols(STAFF_LIST_SELECT)).toContain(c);
+    }
+  });
+
+  it('has everything the edit form needs in the detail select', () => {
+    for (const c of [...cols(STAFF_LIST_SELECT), ...DETAIL_ONLY]) expect(cols(STAFF_SELECT)).toContain(c);
   });
 });
 
