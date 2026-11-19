@@ -105,10 +105,17 @@ export async function updateDriver(
     }
   }
 
+  // Address and emergency contact have one home, the staff row. The form pre-filled
+  // them from the old tms_driver copy, so once the person is saved that copy goes.
+  // Runs only after the staff update succeeded: a failed update throws above.
+  const clearOldCopies = editPerson
+    ? { address: null, emergency_contact_name: null, emergency_contact_phone: null }
+    : {};
+
   const { error: opsErr } = await svc
     .from('tms_driver')
     .upsert(
-      { ...buildTransportPayload(driverId, transport), profile_id: profileId, updated_by: actorId },
+      { ...buildTransportPayload(driverId, transport), ...clearOldCopies, profile_id: profileId, updated_by: actorId },
       { onConflict: 'staff_id' },
     );
   if (opsErr) {

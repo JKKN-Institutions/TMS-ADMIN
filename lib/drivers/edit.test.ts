@@ -235,6 +235,41 @@ describe('updateDriver', () => {
     ).rejects.toMatchObject({ status: 409, field: 'biometricId' });
   });
 
+  describe('address and emergency contact live on staff only', () => {
+    const COPIES = ['address', 'emergency_contact_name', 'emergency_contact_phone'];
+
+    it('nulls the old tms_driver copies when the person is saved', async () => {
+      const { client, log } = withRow(FULL_ROW);
+      await updateDriver(client, 'S1', { person: { ...PERSON, address: '1 Main St' }, transport: TRANSPORT }, 'A');
+      const payload = callsOf(log, 'tms_driver', 'upsert')[0].args[0] as Record<string, unknown>;
+      expect(payload).toMatchObject({ address: null, emergency_contact_name: null, emergency_contact_phone: null });
+    });
+
+    it('leaves the copies alone when the row is not fully editable', async () => {
+      const { client, log } = withRow({ ...FULL_ROW, category_id: 'other-category' });
+      await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A');
+      const payload = callsOf(log, 'tms_driver', 'upsert')[0].args[0] as Record<string, unknown>;
+      for (const k of COPIES) expect(payload).not.toHaveProperty(k);
+    });
+
+    it('leaves the copies alone when no person is sent', async () => {
+      const { client, log } = withRow(FULL_ROW);
+      await updateDriver(client, 'S1', { transport: TRANSPORT }, 'A');
+      const payload = callsOf(log, 'tms_driver', 'upsert')[0].args[0] as Record<string, unknown>;
+      for (const k of COPIES) expect(payload).not.toHaveProperty(k);
+    });
+
+    it('does not upsert (so nothing is nulled) when the staff update fails', async () => {
+      const { client, log } = withRow(FULL_ROW, (t, c) =>
+        isStaffUpdate(t, c) ? { error: { code: '23505', message: 'staff_biometric_uq' } } : undefined,
+      );
+      await expect(
+        updateDriver(client, 'S1', { person: { ...PERSON, address: '1 Main St' }, transport: TRANSPORT }, 'A'),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(callsOf(log, 'tms_driver', 'upsert')).toHaveLength(0);
+    });
+  });
+
   it('succeeds even when ensureDriverRole fails', async () => {
     const { client } = withRow(FULL_ROW, (t) => (t === 'custom_roles' ? { error: { message: 'down' } } : undefined));
     const r = await updateDriver(client, 'S1', { person: PERSON, transport: TRANSPORT }, 'A');
