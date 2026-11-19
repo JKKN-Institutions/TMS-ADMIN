@@ -63,6 +63,19 @@ export interface DriverRouteRef {
   bus?: string | null; // registration number of the route's bus, null if none / missing
 }
 
+/** The MyJKKN `staff` fields the driver onboarding form edits. */
+export interface DriverPerson {
+  firstName: string; lastName: string;
+  gender: string; dateOfBirth: string | null; maritalStatus: string; bloodGroup: string | null;
+  phone: string; email: string; institutionEmail: string | null;
+  address: string | null; state: string | null; district: string | null; pincode: string | null;
+  emergencyContactName: string | null; emergencyContactRelationship: string | null; emergencyContactPhone: string | null;
+  staffCode: string | null;            // staff.staff_id (the NOTJMO### code)
+  dateOfJoining: string | null; designation: string;
+  biometricId: string | null; biometricInstitutionId: string | null;
+  isActive: boolean; photoUrl: string | null;
+}
+
 export interface DriverListItem {
   id: string;            // staff.id
   name: string;
@@ -80,6 +93,8 @@ export interface DriverListItem {
   profileId: string | null;
   ops: DriverOps | null; // null = no tms_driver row yet
   routes: DriverRouteRef[]; // assigned route(s): tms_route.driver_id=staff.id ∪ tms_driver.assigned_route_id
+  person: DriverPerson;     // the MyJKKN staff fields the form edits
+  canFullEdit: boolean;     // role_key='driver' AND category_id = DRIVER_CATEGORY_ID
 }
 
 export interface Permission {

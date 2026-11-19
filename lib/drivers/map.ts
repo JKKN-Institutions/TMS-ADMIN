@@ -1,4 +1,5 @@
 import type { DriverListItem, DriverOps, DriverRouteRef } from '@/types';
+import { canFullEdit } from './onboarding-constants';
 
 /**
  * Shared row→DTO mapping for the drivers feature.
@@ -11,7 +12,7 @@ import type { DriverListItem, DriverOps, DriverRouteRef } from '@/types';
  */
 
 export const STAFF_SELECT =
-  'id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id';
+  'id, first_name, last_name, designation, phone, email, employment_type, status, is_active, date_of_joining, profile_picture, institution_id, profile_id, gender, date_of_birth, marital_status, blood_group, institution_email, address, state, district, pincode, emergency_contact_name, emergency_contact_relationship, emergency_contact_phone, staff_id, biometric_id, biometric_institution_id, category_id, role_key';
 
 export interface StaffRow {
   id: string;
@@ -27,6 +28,23 @@ export interface StaffRow {
   profile_picture: string | null;
   institution_id: string;
   profile_id: string | null;
+  gender: string | null;
+  date_of_birth: string | null;
+  marital_status: string | null;
+  blood_group: string | null;
+  institution_email: string | null;
+  address: string | null;
+  state: string | null;
+  district: string | null;
+  pincode: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_relationship: string | null;
+  emergency_contact_phone: string | null;
+  staff_id: string | null;
+  biometric_id: string | null;
+  biometric_institution_id: string | null;
+  category_id: string | null;
+  role_key: string | null;
 }
 
 export interface OpsRow {
@@ -87,6 +105,32 @@ export function mapStaffToDriver(
     avatarUrl: s.profile_picture,
     institutionId: s.institution_id,
     profileId: s.profile_id,
+    person: {
+      firstName: s.first_name ?? '',
+      lastName: s.last_name ?? '',
+      gender: s.gender ?? '',
+      dateOfBirth: s.date_of_birth,
+      maritalStatus: s.marital_status ?? '',
+      bloodGroup: s.blood_group,
+      phone: s.phone ?? '',
+      email: s.email ?? '',
+      institutionEmail: s.institution_email,
+      address: s.address,
+      state: s.state,
+      district: s.district,
+      pincode: s.pincode,
+      emergencyContactName: s.emergency_contact_name,
+      emergencyContactRelationship: s.emergency_contact_relationship,
+      emergencyContactPhone: s.emergency_contact_phone,
+      staffCode: s.staff_id,
+      dateOfJoining: s.date_of_joining,
+      designation: s.designation ?? '',
+      biometricId: s.biometric_id,
+      biometricInstitutionId: s.biometric_institution_id,
+      isActive: s.is_active ?? false,
+      photoUrl: s.profile_picture,
+    },
+    canFullEdit: canFullEdit(s),
     ops: ops ? mapOps(ops) : null,
     routes,
   };
