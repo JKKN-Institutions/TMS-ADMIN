@@ -177,11 +177,13 @@ export function buildTransportPayload(staffId: string, f: Record<string, unknown
   const status = (DRIVER_STATUSES as readonly unknown[]).includes(f.driverStatus)
     ? (f.driverStatus as (typeof DRIVER_STATUSES)[number])
     : 'active';
+  const years = Number(f.experienceYears);
+  const experienceYears = Number.isFinite(years) && years >= 0 ? Math.trunc(years) : 0;
   return {
     staff_id: staffId,
     license_number: textOrNull(f.licenseNumber),
     license_expiry: textOrNull(f.licenseExpiry),
-    experience_years: Number(f.experienceYears) || 0,
+    experience_years: experienceYears,
     driver_status: status,
     assigned_route_id: textOrNull(f.assignedRouteId),
     aadhar_number: textOrNull(f.aadharNumber),

@@ -19,6 +19,14 @@ export interface TranslatedStaffError {
 /** Codes MyJKKN's triggers and policies use for their own human-written refusals. */
 const REFUSAL_CODES = new Set(['P0001', '42501', '55000', '23514']);
 
+/** Machine-generated Postgres wording; never shown to a person. */
+const MACHINE_TEXT = [
+  'violates check constraint',
+  'violates row-level security',
+  'violates foreign key constraint',
+  'violates not-null constraint',
+];
+
 export function translateStaffDbError(err: StaffDbError): TranslatedStaffError {
   const code = err.code ?? '';
   const message = err.message ?? '';
@@ -38,6 +46,10 @@ export function translateStaffDbError(err: StaffDbError): TranslatedStaffError {
     if (haystack.includes('staff_biometric_uq')) {
       return { status: 409, field: 'biometricId', error: 'This biometric code is already used on that machine.' };
     }
+  }
+
+  if (MACHINE_TEXT.some((t) => message.includes(t))) {
+    return { status: 500, error: 'Failed to save the team member record.' };
   }
 
   if ((REFUSAL_CODES.has(code) || message.startsWith('This person is a hire')) && message !== '') {

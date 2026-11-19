@@ -59,4 +59,22 @@ describe('translateStaffDbError', () => {
   it('does not treat an unknown 23505 as a field error', () => {
     expect(translateStaffDbError({ code: '23505', message: 'violates "something_else"' }).status).toBe(500);
   });
+
+  it('finds a constraint name that appears only in err.details', () => {
+    expect(
+      translateStaffDbError({ code: '23505', message: 'duplicate key value', details: 'Key (email)=(a@b.c) violates staff_email_key' }),
+    ).toMatchObject({ status: 409, field: 'email' });
+  });
+
+  it.each([
+    'new row for relation "staff" violates check constraint "staff_phone_check"',
+    'new row violates row-level security policy for table "staff"',
+    'insert or update on table "staff" violates foreign key constraint "staff_x_fkey"',
+    'null value in column "x" violates not-null constraint',
+  ])('never exposes machine-generated Postgres text: %s', (message) => {
+    expect(translateStaffDbError({ code: '23514', message })).toEqual({
+      status: 500,
+      error: 'Failed to save the team member record.',
+    });
+  });
 });

@@ -96,4 +96,14 @@ describe('buildTransportPayload', () => {
     expect(p.driver_status).toBe('active');
     expect(p.experience_years).toBe(0);
   });
+
+  it.each([
+    [-3, 0],
+    [Infinity, 0],
+    ['7', 7],
+    [4.9, 4],
+    [NaN, 0],
+  ])('experience_years for %s is %s', (input, expected) => {
+    expect(buildTransportPayload('s1', { experienceYears: input }).experience_years).toBe(expected);
+  });
 });
