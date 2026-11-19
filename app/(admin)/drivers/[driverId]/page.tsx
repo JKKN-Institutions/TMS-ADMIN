@@ -65,6 +65,13 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
   }
 
   const ops = driver.ops;
+  const person = driver.person;
+  const address = person.address || ops?.address || '';
+  const emergencyName = person.emergencyContactName || ops?.emergencyContactName || '';
+  const emergencyPhone = person.emergencyContactPhone || ops?.emergencyContactPhone || '';
+  const emergency = emergencyName
+    ? `${emergencyName}${person.emergencyContactRelationship ? ` (${person.emergencyContactRelationship})` : ''} · ${emergencyPhone || '—'}`
+    : '';
 
   return (
     <div className="space-y-6">
@@ -108,8 +115,19 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
 
       <SectionCard title="Staff">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Staff ID" value={person.staffCode} />
           <Field label="Email" value={driver.email} />
+          <Field label="Institution email" value={person.institutionEmail} />
           <Field label="Phone" value={driver.phone} />
+          <Field label="Gender" value={person.gender ? person.gender.charAt(0).toUpperCase() + person.gender.slice(1) : ''} />
+          <Field label="Date of birth" value={person.dateOfBirth ? person.dateOfBirth.slice(0, 10) : ''} />
+          <Field label="Marital status" value={person.maritalStatus ? person.maritalStatus.charAt(0).toUpperCase() + person.maritalStatus.slice(1) : ''} />
+          <Field label="Blood group" value={person.bloodGroup} />
+          <Field label="Address" value={address} />
+          <Field label="State" value={person.state} />
+          <Field label="District" value={person.district} />
+          <Field label="PIN code" value={person.pincode} />
+          <Field label="Emergency contact" value={emergency} />
           <Field label="Employment Type" value={driver.employmentType ? driver.employmentType.replace(/_/g, ' ') : ''} />
           <Field label="Date of Joining" value={driver.dateOfJoining} />
           <Field label="Active" value={driver.isActive ? 'Active' : 'Inactive'} />
@@ -135,10 +153,6 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
             <Field label="Driver Status" value={ops.driverStatus ? ops.driverStatus.replace(/_/g, ' ') : ''} />
             <Field label="Total Trips" value={ops.totalTrips} />
             <Field label="Rating" value={ops.rating} />
-            <Field
-              label="Emergency Contact"
-              value={ops.emergencyContactName ? `${ops.emergencyContactName} (${ops.emergencyContactPhone ?? '—'})` : ''}
-            />
             <Field label="Aadhar No." value={ops.aadharNumber} />
             <Field label="Medical Cert. Expiry" value={ops.medicalCertificateExpiry} />
             <Field label="Location Sharing" value={ops.locationSharingEnabled ? 'Enabled' : 'Disabled'} />

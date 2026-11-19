@@ -76,22 +76,24 @@ export default function DriverEditPage({ params }: { params: Promise<{ driverId:
         crumbs={editCrumbs}
         backHref={`/drivers/${driver.id}`}
         title={`Edit Driver — ${driver.name}`}
-        subtitle="Update TMS operational details"
+        subtitle="Update the team member record and transport details"
       />
 
-      <SectionCard title="Staff (read-only)">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Name" value={driver.name} />
-          <Field label="Email" value={driver.email} />
-          <Field label="Phone" value={driver.phone} />
-          <Field label="Designation" value={driver.designation} />
-        </div>
-        <p className="mt-3 text-xs text-gray-400">
-          Identity fields are owned by MyJKKN staff records and are not editable here.
-        </p>
-      </SectionCard>
+      {!driver.canFullEdit && (
+        <SectionCard title="Staff (read-only)">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Name" value={driver.name} />
+            <Field label="Email" value={driver.email} />
+            <Field label="Phone" value={driver.phone} />
+            <Field label="Designation" value={driver.designation} />
+          </div>
+          <p className="mt-3 text-xs text-gray-400">
+            Identity fields are owned by MyJKKN staff records and are not editable here.
+          </p>
+        </SectionCard>
+      )}
 
-      <DriverForm mode="edit" staffId={driver.id} initialOps={driver.ops} />
+      <DriverForm mode="edit" driver={driver} />
     </div>
   );
 }
