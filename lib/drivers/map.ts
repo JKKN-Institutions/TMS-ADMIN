@@ -160,3 +160,32 @@ export function buildOpsPayload(staffId: string, f: Record<string, unknown>) {
     notes: (f.notes as string) ?? null,
   };
 }
+
+const DRIVER_STATUSES = ['active', 'inactive', 'on_leave'] as const;
+
+function textOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
+}
+
+/**
+ * Only the `tms_driver` columns the onboarding form owns. Never includes rating,
+ * total_trips, location_sharing_enabled, address or the emergency contact (those
+ * live on `staff` now or are written by the driver app). Audit columns are added
+ * by the caller.
+ */
+export function buildTransportPayload(staffId: string, f: Record<string, unknown>) {
+  const status = (DRIVER_STATUSES as readonly unknown[]).includes(f.driverStatus)
+    ? (f.driverStatus as (typeof DRIVER_STATUSES)[number])
+    : 'active';
+  return {
+    staff_id: staffId,
+    license_number: textOrNull(f.licenseNumber),
+    license_expiry: textOrNull(f.licenseExpiry),
+    experience_years: Number(f.experienceYears) || 0,
+    driver_status: status,
+    assigned_route_id: textOrNull(f.assignedRouteId),
+    aadhar_number: textOrNull(f.aadharNumber),
+    medical_certificate_expiry: textOrNull(f.medicalCertificateExpiry),
+    notes: textOrNull(f.notes),
+  };
+}

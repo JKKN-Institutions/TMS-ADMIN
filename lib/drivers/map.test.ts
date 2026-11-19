@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapStaffToDriver, type StaffRow } from './map';
+import { mapStaffToDriver, buildTransportPayload, type StaffRow } from './map';
 import { DRIVER_CATEGORY_ID } from './onboarding-constants';
 
 const base: StaffRow = {
@@ -51,5 +51,49 @@ describe('mapStaffToDriver', () => {
 
   it('is not fully editable when role_key is not driver', () => {
     expect(mapStaffToDriver({ ...base, role_key: 'faculty' }, null).canFullEdit).toBe(false);
+  });
+});
+
+describe('buildTransportPayload', () => {
+  const form = {
+    licenseNumber: 'TN123',
+    licenseExpiry: '2030-01-01',
+    experienceYears: '7',
+    driverStatus: 'on_leave',
+    assignedRouteId: 'r1',
+    aadharNumber: '1234',
+    medicalCertificateExpiry: '2027-01-01',
+    notes: 'n',
+    rating: 5,
+    totalTrips: 99,
+    locationSharingEnabled: true,
+    address: 'x',
+    emergencyContactName: 'y',
+    emergencyContactPhone: 'z',
+  };
+
+  it('has exactly the nine transport keys', () => {
+    expect(Object.keys(buildTransportPayload('s1', form)).sort()).toEqual(
+      [
+        'staff_id', 'license_number', 'license_expiry', 'experience_years', 'driver_status',
+        'assigned_route_id', 'aadhar_number', 'medical_certificate_expiry', 'notes',
+      ].sort(),
+    );
+  });
+
+  it('maps the values', () => {
+    expect(buildTransportPayload('s1', form)).toMatchObject({
+      staff_id: 's1',
+      license_number: 'TN123',
+      experience_years: 7,
+      driver_status: 'on_leave',
+      assigned_route_id: 'r1',
+    });
+  });
+
+  it('falls back to active for an invalid status and 0 for non-numeric experience', () => {
+    const p = buildTransportPayload('s1', { driverStatus: 'banana', experienceYears: 'abc' });
+    expect(p.driver_status).toBe('active');
+    expect(p.experience_years).toBe(0);
   });
 });
