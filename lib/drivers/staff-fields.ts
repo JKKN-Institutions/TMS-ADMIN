@@ -76,7 +76,7 @@ const STRING_KEYS = [
 ] as const satisfies readonly (keyof DriverPersonInput)[];
 
 const NAME_PART = /^[a-z0-9._-]+$/;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL = /^[^\s@*%,()]+@[^\s@*%,()]+\.[^\s@*%,()]+$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const MIN_DATE_OF_BIRTH = '1900-01-01';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

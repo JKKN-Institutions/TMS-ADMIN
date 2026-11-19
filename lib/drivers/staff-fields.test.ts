@@ -94,6 +94,12 @@ describe('validatePerson', () => {
     expect(errorsFor({ email: 'not-an-email' })?.email).toBeTruthy();
   });
 
+  it('rejects emails with wildcard or filter-syntax characters', () => {
+    for (const email of ['a*b@gmail.com', 'a%b@gmail.com', 'a,b@gmail.com', 'a(b@gmail.com', 'a)b@gmail.com']) {
+      expect(errorsFor({ email })?.email, email).toBe('Enter a valid email address');
+    }
+  });
+
   it('needs a phone when only the emergency contact name is given', () => {
     expect(errorsFor({ emergencyContactName: 'Meena' })?.emergencyContactPhone).toBeTruthy();
   });
