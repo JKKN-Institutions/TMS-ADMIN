@@ -2,13 +2,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
-import {
-  STAFF_SELECT,
-  mapStaffToDriver,
-  buildOpsPayload,
-  type StaffRow,
-  type OpsRow,
-} from '@/lib/drivers/map';
+import { STAFF_SELECT, mapStaffToDriver, type StaffRow, type OpsRow } from '@/lib/drivers/map';
+import { assignExistingStaffAsDriver } from '@/lib/drivers/assign-existing';
+import { OnboardError } from '@/lib/drivers/onboard';
 import { getRoutesForDrivers } from '@/lib/drivers/routes';
 
 async function getDrivers() {
@@ -50,99 +46,43 @@ async function requireManage(auth: AuthContext): Promise<boolean> {
 }
 
 /**
- * Create a driver by assigning an EXISTING staff member. Idempotent: flips
- * staff.role_key to 'driver' only when needed, then upserts the tms_driver
- * operational row (onConflict staff_id). Re-running never duplicates.
- *
- * This is the one place TMS writes to the MyJKKN-owned `staff` table, and it is
- * deliberately minimal (a single role_key flip on an admin-chosen staff id).
+ * Create a driver by assigning an EXISTING staff member who is not a driver yet:
+ * flips staff.role_key to 'driver' when needed and writes the TMS transport
+ * details. Someone who already has a tms_driver row gets a 409 and nothing is
+ * written (their details change only through Edit).
  */
 async function createDriver(request: NextRequest, auth: AuthContext) {
   try {
     if (!(await requireManage(auth))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    const body = await request.json();
-    const staffId: string | undefined = body?.staffId;
-    const f = body?.fields ?? {};
+    let body: { staffId?: unknown; fields?: unknown } | null = null;
+    try {
+      body = await request.json();
+    } catch {
+      body = null;
+    }
+    const staffId = typeof body?.staffId === 'string' ? body.staffId : '';
     if (!staffId) return NextResponse.json({ error: 'staffId is required' }, { status: 400 });
+    const fields =
+      typeof body?.fields === 'object' && body.fields !== null && !Array.isArray(body.fields)
+        ? (body.fields as Record<string, unknown>)
+        : {};
 
-    const supabase = createServiceRoleClient();
+    const data = await assignExistingStaffAsDriver(createServiceRoleClient(), staffId, fields, auth.userId);
 
-    // Verify the staff member exists before mutating anything.
-    const { data: staff, error: staffErr } = await supabase
-      .from('staff')
-      .select('id, role_key')
-      .eq('id', staffId)
-      .maybeSingle();
-    if (staffErr) {
-      console.error('Create driver staff lookup error:', staffErr);
-      return NextResponse.json({ error: 'Failed to look up staff' }, { status: 500 });
-    }
-    if (!staff) return NextResponse.json({ error: 'Staff member not found' }, { status: 404 });
-
-    // Promote to driver only if not already (avoids needless writes to staff).
-    if ((staff as { role_key: string | null }).role_key !== 'driver') {
-      const { error: roleErr } = await supabase.from('staff').update({ role_key: 'driver' }).eq('id', staffId);
-      if (roleErr) {
-        console.error('Create driver role_key update error:', roleErr);
-        return NextResponse.json({ error: 'Failed to assign driver role' }, { status: 500 });
-      }
-    }
-
-    const payload = { ...buildOpsPayload(staffId, f), created_by: auth.userId, updated_by: auth.userId };
-    const { data, error } = await supabase
-      .from('tms_driver')
-      .upsert(payload, { onConflict: 'staff_id' })
-      .select()
-      .single();
-    if (error) {
-      console.error('Create driver tms_driver upsert error:', error);
-      return NextResponse.json({ error: 'Failed to save driver details' }, { status: 500 });
-    }
     await logActivity(auth, request, {
       module: 'drivers',
       action: 'create',
       entityType: 'tms_driver',
-      entityId: data?.staff_id ?? staffId,
+      entityId: (data?.staff_id as string | undefined) ?? staffId,
       description: `Created driver for staff ${staffId}`,
     });
     return NextResponse.json({ success: true, data });
   } catch (e) {
-    console.error('Create driver error:', e);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-async function upsertDriverOps(request: NextRequest, auth: AuthContext) {
-  try {
-    if (!(await requireManage(auth))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-
-    const body = await request.json();
-    const staffId: string | undefined = body?.staffId;
-    const f = body?.fields ?? {};
-    if (!staffId) return NextResponse.json({ error: 'staffId is required' }, { status: 400 });
-
-    const supabase = createServiceRoleClient();
-    const payload = { ...buildOpsPayload(staffId, f), updated_by: auth.userId };
-    const { data, error } = await supabase
-      .from('tms_driver')
-      .upsert(payload, { onConflict: 'staff_id' })
-      .select()
-      .single();
-    if (error) {
-      console.error('tms_driver upsert error:', error);
-      return NextResponse.json({ error: 'Failed to save driver details' }, { status: 500 });
+    if (e instanceof OnboardError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
     }
-    await logActivity(auth, request, {
-      module: 'drivers',
-      action: 'update',
-      entityType: 'tms_driver',
-      entityId: data?.staff_id ?? staffId,
-      description: `Updated driver for staff ${staffId}`,
-    });
-    return NextResponse.json({ success: true, data });
-  } catch (e) {
-    console.error('Driver upsert error:', e);
+    console.error('Create driver error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -177,5 +117,4 @@ async function deleteDriverOps(request: NextRequest, auth: AuthContext) {
 
 export const GET = withAuth(() => getDrivers());
 export const POST = withAuth((request, auth) => createDriver(request, auth));
-export const PUT = withAuth((request, auth) => upsertDriverOps(request, auth));
 export const DELETE = withAuth((request, auth) => deleteDriverOps(request, auth));

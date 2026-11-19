@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Check, Loader2, Search, UserPlus } from 'lucide-react';
 import { usePermissions } from '@/hooks/use-permissions';
 import { DriverPageHeader, SectionCard } from '../driver-page-header';
@@ -140,31 +141,40 @@ export default function NewDriverPage() {
                 {!searching && searched && results.length === 0 && (
                   <p className="text-sm text-gray-500">No staff found for &ldquo;{q.trim()}&rdquo;.</p>
                 )}
-                {results.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setSelected(s)}
-                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-4 py-2.5 text-left transition-colors hover:border-green-300 hover:bg-green-50 dark:hover:bg-green-500/10"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-semibold text-green-600 dark:bg-green-500/20 dark:text-green-300">
-                        {s.name.slice(0, 2).toUpperCase()}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate font-medium text-gray-900">{s.name}</p>
-                        <p className="truncate text-xs text-gray-500">
-                          {[s.designation, s.email].filter(Boolean).join(' · ') || '—'}
-                        </p>
+                {results.map((s) => {
+                  const body = (
+                    <>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-semibold text-green-600 dark:bg-green-500/20 dark:text-green-300">
+                          {s.name.slice(0, 2).toUpperCase()}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-gray-900">{s.name}</p>
+                          <p className="truncate text-xs text-gray-500">
+                            {[s.designation, s.email].filter(Boolean).join(' · ') || '—'}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                    {s.alreadyDriver && (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
-                        Already a driver
-                      </span>
-                    )}
-                  </button>
-                ))}
+                      {s.alreadyDriver && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                          Already a driver
+                        </span>
+                      )}
+                    </>
+                  );
+                  const rowClass =
+                    'flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-4 py-2.5 text-left transition-colors hover:border-green-300 hover:bg-green-50 dark:hover:bg-green-500/10';
+                  // An existing driver is edited from their record, never re-created here.
+                  return s.alreadyDriver ? (
+                    <Link key={s.id} href={`/drivers/${s.id}`} className={rowClass}>
+                      {body}
+                    </Link>
+                  ) : (
+                    <button key={s.id} type="button" onClick={() => setSelected(s)} className={rowClass}>
+                      {body}
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}

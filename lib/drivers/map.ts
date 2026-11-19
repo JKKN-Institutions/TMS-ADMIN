@@ -136,31 +136,6 @@ export function mapStaffToDriver(
   };
 }
 
-/**
- * Builds the snake_case `tms_driver` payload from a camelCase form `fields`
- * object. Shared by the create (POST) and update (PUT) handlers. Audit columns
- * (created_by / updated_by) are added by the caller.
- */
-export function buildOpsPayload(staffId: string, f: Record<string, unknown>) {
-  return {
-    staff_id: staffId,
-    license_number: (f.licenseNumber as string) ?? null,
-    license_expiry: (f.licenseExpiry as string) || null,
-    experience_years: Number(f.experienceYears) || 0,
-    rating: Number(f.rating) || 0,
-    total_trips: Number(f.totalTrips) || 0,
-    driver_status: (f.driverStatus as string) ?? 'active',
-    address: (f.address as string) ?? null,
-    emergency_contact_name: (f.emergencyContactName as string) ?? null,
-    emergency_contact_phone: (f.emergencyContactPhone as string) ?? null,
-    aadhar_number: (f.aadharNumber as string) ?? null,
-    medical_certificate_expiry: (f.medicalCertificateExpiry as string) || null,
-    location_sharing_enabled: !!f.locationSharingEnabled,
-    assigned_route_id: (f.assignedRouteId as string) || null,
-    notes: (f.notes as string) ?? null,
-  };
-}
-
 const DRIVER_STATUSES = ['active', 'inactive', 'on_leave'] as const;
 
 function textOrNull(v: unknown): string | null {
