@@ -2,6 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { STAFF_SELECT, mapStaffToDriver, type StaffRow, type OpsRow } from '@/lib/drivers/map';
 import { getRoutesForDrivers } from '@/lib/drivers/routes';
+import { authFromRequest, type AuthContext } from '@/lib/api/with-auth';
+import { logActivity } from '@/lib/activity/log';
+import { updateDriver } from '@/lib/drivers/edit';
+import { OnboardError } from '@/lib/drivers/onboard';
 
 /**
  * GET one driver (staff + TMS ops) by staff id. Backs the in-module view/edit
@@ -51,6 +55,64 @@ export async function GET(
     return NextResponse.json({ success: true, data: driver });
   } catch (e) {
     console.error('Driver detail API error:', e);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+async function requireManage(auth: AuthContext): Promise<boolean> {
+  if (auth.isSuperAdmin) return true;
+  const { data } = await auth.supabase.rpc('user_has_permission', { permission_name: 'tms.drivers.manage' });
+  return !!data;
+}
+
+/**
+ * PATCH a driver: person fields on the shared `staff` row (only when TMS may edit
+ * the whole record) plus the TMS-owned `tms_driver` transport row. withAuth cannot
+ * wrap a dynamic route, so auth and permission are checked here, before any read.
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ driverId: string }> }
+) {
+  try {
+    const auth = authFromRequest(request);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!(await requireManage(auth))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    const { driverId } = await params;
+    if (!driverId) return NextResponse.json({ error: 'Driver id is required' }, { status: 400 });
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+    const { person, transport } = body as { person?: unknown; transport?: unknown };
+
+    const result = await updateDriver(createServiceRoleClient(), driverId, { person, transport }, auth.userId);
+
+    await logActivity(auth, request, {
+      module: 'drivers',
+      action: 'update',
+      entityType: 'staff',
+      entityId: result.id,
+      description: result.changed.length
+        ? `Updated driver ${result.id}: ${result.changed.join(', ')}`
+        : `Updated driver ${result.id} transport details`,
+    });
+    return NextResponse.json({ success: true, data: result });
+  } catch (e) {
+    if (e instanceof OnboardError) {
+      return NextResponse.json(
+        { error: e.message, ...(e.field ? { field: e.field } : {}), ...(e.fields ? { fields: e.fields } : {}) },
+        { status: e.status }
+      );
+    }
+    console.error('Driver update API error:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
