@@ -1,9 +1,11 @@
 /**
  * Daily learner booking reminder.
  *
- * Scheduled from vercel.json at "30 11 * * *" UTC = 17:00 IST — before the default
- * 20:00 IST booking cutoff, so a reminded learner still has time to act. Vercel sends
- * `Authorization: Bearer $CRON_SECRET`.
+ * Scheduled from pg_cron at "30 11 * * *" UTC = 17:00 IST — before the default
+ * 20:00 IST booking cutoff, so a reminded learner still has time to act. pg_net sends
+ * `Authorization: Bearer $CRON_SECRET` (migration
+ * 20261125100000_schedule_booking_reminders.sql). proxy.ts allowlists this EXACT
+ * path; without that entry the request is 401'd before the check below.
  *
  * Targets ONLY transport learners with no booking for tomorrow. Idempotent per
  * (learner, date), so a retried run cannot double-notify. Respects the

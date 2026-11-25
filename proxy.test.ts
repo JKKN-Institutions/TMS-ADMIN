@@ -17,6 +17,12 @@ describe('proxy cron allowlist', () => {
     expect(SRC).toContain("'/api/cron/attention-digest'");
   });
 
+  it('allowlists the daily booking reminder cron endpoint', () => {
+    // Scheduled for months with no entry here, so every run was 401'd before
+    // the route's own CRON_SECRET check and no reminder was ever sent.
+    expect(SRC).toContain("'/api/cron/booking-reminders'");
+  });
+
   it('allowlists the in-charge bill review cron endpoint', () => {
     expect(SRC).toContain("'/api/cron/incharge-bill-review'");
   });

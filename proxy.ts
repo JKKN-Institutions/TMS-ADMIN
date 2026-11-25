@@ -34,6 +34,11 @@ const PUBLIC_PATHS = new Set([
   // Daily "Needs attention" mail to the transport heads. Sends at most one
   // mail a day — moves no money, removes no role (lib/attention-digest).
   '/api/cron/attention-digest',
+  // Daily learner booking reminder (17:00 IST). Sends inbox + push notices only
+  // — moves no money, removes no role — and is idempotent per learner and date
+  // (lib/booking/reminders.ts). Was scheduled from vercel.json without this
+  // entry, so it was 401'd here and never ran.
+  '/api/cron/booking-reminders',
 ]);
 
 const PUBLIC_PATH_PREFIXES = [
