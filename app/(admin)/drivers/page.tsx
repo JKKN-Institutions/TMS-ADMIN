@@ -4,9 +4,10 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Download, FileJson, FileSpreadsheet, FileText, Plus, Trash2, Upload, UserCheck } from 'lucide-react';
+import { ChevronDown, Download, Eye, EyeOff, FileJson, FileSpreadsheet, FileText, Plus, Trash2, Upload, UserCheck } from 'lucide-react';
 import type { DriverListItem } from '@/types';
 import { usePermissions } from '@/hooks/use-permissions';
+import { isAssignable } from '@/lib/drivers/status-rule';
 import { DataTable } from '@/components/ui/data-table';
 import { PageHeader } from '@/components/ui/page-header';
 import { SummaryCard, SummaryCards, useCardFilters } from '@/components/ui/summary-cards';
@@ -43,7 +44,15 @@ export default function DriversPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [bulkState, setBulkState] = useState<{ rows: DriverListItem[]; reset: () => void } | null>(null);
 
-  const { data: drivers = [], isLoading, isError } = useQuery({ queryKey: ['drivers'], queryFn: fetchDrivers });
+  const { data: allDrivers, isLoading, isError } = useQuery({ queryKey: ['drivers'], queryFn: fetchDrivers });
+  // Inactive drivers (people who have left) are kept out of the list unless asked for;
+  // they stay reachable so someone can be made active again.
+  const [showInactive, setShowInactive] = useState(false);
+  const inactiveCount = useMemo(() => (allDrivers ?? []).filter((d) => !isAssignable(d)).length, [allDrivers]);
+  const drivers = useMemo(
+    () => (showInactive ? (allDrivers ?? []) : (allDrivers ?? []).filter(isAssignable)),
+    [allDrivers, showInactive],
+  );
   const cf = useCardFilters();
 
   // View/Edit are now in-module pages (no popups). Delete stays a confirm dialog.
@@ -138,6 +147,17 @@ export default function DriversPage() {
           ]}
           toolbarActions={({ selectedRows, resetSelection }) => (
             <>
+              {inactiveCount > 0 && (
+                <button
+                  type="button"
+                  className={outlineBtn}
+                  aria-pressed={showInactive}
+                  onClick={() => setShowInactive((v) => !v)}
+                >
+                  {showInactive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showInactive ? 'Hide inactive' : `Show inactive (${inactiveCount})`}
+                </button>
+              )}
               {canManage && (
                 <button type="button" className={outlineBtn} onClick={() => setImportOpen(true)}>
                   <Upload className="h-4 w-4" /> Import
