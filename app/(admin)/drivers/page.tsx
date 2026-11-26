@@ -21,6 +21,7 @@ import { getDriverColumns, isOnDuty, licenseState } from './columns';
 import { DriverDeleteDialog } from './driver-delete-dialog';
 import { DriverBulkDeleteDialog } from './driver-bulk-delete-dialog';
 import { DriverImportDialog } from './driver-import-dialog';
+import { DriverStatusDialog } from './driver-status-dialog';
 import { exportDrivers, downloadDriverTemplate } from './driver-export';
 
 async function fetchDrivers(): Promise<DriverListItem[]> {
@@ -38,6 +39,7 @@ export default function DriversPage() {
   const { can, isSuperAdmin } = usePermissions();
   const canManage = isSuperAdmin || can('tms.drivers.manage');
   const [deleting, setDeleting] = useState<DriverListItem | null>(null);
+  const [statusFor, setStatusFor] = useState<DriverListItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [bulkState, setBulkState] = useState<{ rows: DriverListItem[]; reset: () => void } | null>(null);
 
@@ -51,6 +53,7 @@ export default function DriversPage() {
         (d) => router.push(`/drivers/${d.id}`),
         (d) => router.push(`/drivers/${d.id}/edit`),
         setDeleting,
+        setStatusFor,
         canManage
       ),
     [canManage, router]
@@ -125,8 +128,9 @@ export default function DriversPage() {
               { label: 'Expiring in 60 days', value: 'soon' }, { label: 'No expiry date', value: 'no_expiry' },
               { label: 'Valid', value: 'ok' },
             ] },
-            { columnId: 'activeStatus', title: 'Staff status', options: [
-              { label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' },
+            { columnId: 'activeStatus', title: 'Status', options: [
+              { label: 'Active', value: 'active' }, { label: 'On leave', value: 'on_leave' },
+              { label: 'Inactive', value: 'inactive' },
             ] },
             { columnId: 'employmentType', title: 'Employment', options: [
               { label: 'Full-time', value: 'full_time' }, { label: 'Part-time', value: 'part_time' },
@@ -178,6 +182,7 @@ export default function DriversPage() {
       )}
 
       <DriverDeleteDialog driver={deleting} open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} />
+      <DriverStatusDialog driver={statusFor} open={!!statusFor} onOpenChange={(o) => !o && setStatusFor(null)} />
       <DriverImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <DriverBulkDeleteDialog
         drivers={bulkState?.rows ?? []}

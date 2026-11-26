@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import type { DriverListItem, DriverOps } from '@/types';
 import { emptyPerson, personFromDriver, toDateInput } from '@/lib/drivers/person-form';
 import { validatePerson, type DriverPersonInput, type FieldErrors } from '@/lib/drivers/staff-fields';
+import { displayStatus, employeeActiveFor, normalizeDriverStatus } from '@/lib/drivers/status-rule';
 import { SectionCard } from './driver-page-header';
 import DriverPersonFields from './driver-person-fields';
 
@@ -25,12 +26,13 @@ interface TransportState {
 
 type TransportErrors = Partial<Record<keyof TransportState, string>>;
 
-function toTransport(ops: DriverOps | null): TransportState {
+function toTransport(ops: DriverOps | null, driver?: DriverListItem): TransportState {
   return {
     licenseNumber: ops?.licenseNumber ?? '',
     licenseExpiry: toDateInput(ops?.licenseExpiry),
     experienceYears: String(ops?.experienceYears ?? 0),
-    driverStatus: ops?.driverStatus ?? 'active',
+    // One status: an employee who is inactive in MyJKKN shows as Inactive here too.
+    driverStatus: driver ? displayStatus(driver) : (ops?.driverStatus ?? 'active'),
     assignedRouteId: ops?.assignedRouteId ?? '',
     aadharNumber: ops?.aadharNumber ?? '',
     medicalCertificateExpiry: toDateInput(ops?.medicalCertificateExpiry),
@@ -113,7 +115,9 @@ export default function DriverForm({
   const [person, setPerson] = useState<DriverPersonInput>(() =>
     mode === 'edit' && driver ? personFromDriver(driver) : emptyPerson(),
   );
-  const [transport, setTransport] = useState<TransportState>(() => toTransport(driver?.ops ?? null));
+  const [transport, setTransport] = useState<TransportState>(() =>
+    toTransport(driver?.ops ?? null, mode === 'edit' ? driver : undefined),
+  );
   const [errors, setErrors] = useState<FieldErrors>({});
   const [transportErrors, setTransportErrors] = useState<TransportErrors>({});
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -123,7 +127,8 @@ export default function DriverForm({
     setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
   };
   const setT = (k: keyof TransportState, v: string) => {
-    setTransport((p) => ({ ...p, [k]: v }));
+    // An inactive driver holds no route.
+    setTransport((p) => ({ ...p, [k]: v, ...(k === 'driverStatus' && v === 'inactive' ? { assignedRouteId: '' } : {}) }));
     setTransportErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
   };
 
@@ -173,6 +178,10 @@ export default function DriverForm({
     return true;
   };
 
+  const inactiveChosen = transport.driverStatus === 'inactive';
+  // The status decides the employee flag MyJKKN reads; the server applies the same rule.
+  const personToSend = { ...person, isActive: employeeActiveFor(normalizeDriverStatus(transport.driverStatus)) };
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (mode === 'create-existing') {
@@ -180,7 +189,7 @@ export default function DriverForm({
         return { id: staffId as string, staffCode: null as string | null, warning: undefined as string | undefined };
       }
       if (mode === 'create-new') {
-        const json = await send('/api/admin/drivers/onboard', 'POST', { person, transport });
+        const json = await send('/api/admin/drivers/onboard', 'POST', { person: personToSend, transport });
         const d = json.data as { id: string; staffCode: string | null; warning?: string };
         return { id: d.id, staffCode: d.staffCode ?? null, warning: d.warning };
       }
@@ -189,7 +198,7 @@ export default function DriverForm({
       await send(
         `/api/admin/drivers/${id}`,
         'PATCH',
-        showPerson ? { person, transport, baseUpdatedAt: driver?.person.updatedAt ?? null } : { transport },
+        showPerson ? { person: personToSend, transport, baseUpdatedAt: driver?.person.updatedAt ?? null } : { transport },
       );
       return { id, staffCode: null as string | null, warning: undefined as string | undefined };
     },
@@ -199,6 +208,9 @@ export default function DriverForm({
 
       qc.invalidateQueries({ queryKey: ['drivers'] });
       qc.invalidateQueries({ queryKey: ['driver', id] });
+      // Making a driver inactive takes them off their route and bus.
+      qc.invalidateQueries({ queryKey: ['routes'] });
+      qc.invalidateQueries({ queryKey: ['vehicles'] });
 
       if (mode === 'create-new') {
         if (photoFailed) toast.error(`Driver created, but the photo was not uploaded: ${photoError}`);
@@ -229,7 +241,7 @@ export default function DriverForm({
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (showPerson) {
-      const check = validatePerson(person, personMode);
+      const check = validatePerson(personToSend, personMode);
       if (!check.ok) {
         showFieldErrors(check.errors as Record<string, string>);
         toast.error('Please fix the highlighted fields');
@@ -294,14 +306,30 @@ export default function DriverForm({
             <label htmlFor={`${tp}-driverStatus`} className="text-gray-600">Driver status</label>
             <select {...tField('driverStatus')} className="input mt-1">
               <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
               <option value="on_leave">On leave</option>
+              {/* A brand-new driver is created active; inactive is for someone who has left. */}
+              {mode === 'edit' && <option value="inactive">Inactive</option>}
             </select>
             {tError('driverStatus')}
+            {mode === 'edit' && inactiveChosen && driver?.canFullEdit && (
+              <p className="mt-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                Inactive also makes this person inactive in MyJKKN, signs them out of every JKKN app and takes them off
+                their route.
+              </p>
+            )}
+            {mode === 'edit' && inactiveChosen && driver && !driver.canFullEdit && (
+              <p className="mt-1.5 text-xs text-gray-500">
+                This person&apos;s record is managed in MyJKKN, so this status applies to TMS only.
+              </p>
+            )}
           </div>
           <div className="min-w-0 text-sm">
             <label htmlFor={`${tp}-assignedRouteId`} className="text-gray-600">Assigned route</label>
-            <select {...tField('assignedRouteId')} className="input mt-1">
+            <select
+              {...tField('assignedRouteId')}
+              className="input mt-1"
+              disabled={mode === 'edit' && inactiveChosen && !!driver?.canFullEdit}
+            >
               <option value="">Unassigned</option>
               {routes.map((r) => (
                 <option key={r.id} value={r.id}>{r.label}</option>

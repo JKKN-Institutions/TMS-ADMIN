@@ -326,17 +326,6 @@ export default function DriverPersonFields({
           <Labeled id={id('dateOfJoining')} label="Date of joining" required error={errors.dateOfJoining}>
             <input type="date" {...text('dateOfJoining')} />
           </Labeled>
-          <Labeled id={id('isActive')} label="Status" required error={errors.isActive}>
-            <select
-              {...aria('isActive')}
-              className="input"
-              value={value.isActive ? 'active' : 'inactive'}
-              onChange={(e) => onChange('isActive', e.target.value === 'active')}
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </Labeled>
           <Labeled id={id('biometricId')} label="Biometric code" error={errors.biometricId}>
             <input {...text('biometricId')} />
           </Labeled>

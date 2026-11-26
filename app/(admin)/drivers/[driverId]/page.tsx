@@ -1,30 +1,21 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Pencil, UserCog } from 'lucide-react';
+import { Pencil, UserCheck, UserCog, UserX } from 'lucide-react';
 import type { DriverListItem } from '@/types';
 import { usePermissions } from '@/hooks/use-permissions';
+import { STATUS_LABEL, displayStatus } from '@/lib/drivers/status-rule';
 import { DriverPageHeader, SectionCard, Field } from '../driver-page-header';
+import { DriverStatusBadge } from '../driver-status-badge';
+import { DriverStatusDialog } from '../driver-status-dialog';
 
 async function fetchDriver(id: string): Promise<DriverListItem> {
   const res = await fetch(`/api/admin/drivers/${id}`);
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load driver');
   return json.data as DriverListItem;
-}
-
-function ActiveBadge({ isActive }: { isActive: boolean }) {
-  return isActive ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/15 dark:text-green-400">
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" /> Active
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" /> Inactive
-    </span>
-  );
 }
 
 const crumbs = (name: string) => [
@@ -37,6 +28,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
   const { driverId } = use(params);
   const { can, isSuperAdmin } = usePermissions();
   const canManage = isSuperAdmin || can('tms.drivers.manage');
+  const [statusOpen, setStatusOpen] = useState(false);
 
   const { data: driver, isLoading, isError } = useQuery({
     queryKey: ['driver', driverId],
@@ -66,6 +58,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
 
   const ops = driver.ops;
   const person = driver.person;
+  const status = displayStatus(driver);
   const address = person.address || ops?.address || '';
   const emergencyName = person.emergencyContactName || ops?.emergencyContactName || '';
   const emergencyPhone = person.emergencyContactPhone || ops?.emergencyContactPhone || '';
@@ -81,12 +74,24 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
         subtitle={driver.designation || 'Driver'}
         actions={
           canManage ? (
-            <Link
-              href={`/drivers/${driver.id}/edit`}
-              className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-            >
-              <Pencil className="h-4 w-4" /> Edit
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              {driver.canFullEdit && (
+                <button
+                  type="button"
+                  onClick={() => setStatusOpen(true)}
+                  className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  {status === 'inactive' ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+                  {status === 'inactive' ? 'Mark active' : 'Mark inactive'}
+                </button>
+              )}
+              <Link
+                href={`/drivers/${driver.id}/edit`}
+                className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
+              >
+                <Pencil className="h-4 w-4" /> Edit
+              </Link>
+            </div>
           ) : undefined
         }
       />
@@ -105,7 +110,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold text-gray-900">{driver.name}</h2>
-              <ActiveBadge isActive={driver.isActive} />
+              <DriverStatusBadge status={status} />
             </div>
             <p className="break-words text-sm text-gray-500">{driver.designation || '—'}</p>
             <p className="break-words text-sm text-gray-500">{driver.email || '—'}</p>
@@ -130,7 +135,7 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
           <Field label="Emergency contact" value={emergency} />
           <Field label="Employment Type" value={driver.employmentType ? driver.employmentType.replace(/_/g, ' ') : ''} />
           <Field label="Date of Joining" value={driver.dateOfJoining} />
-          <Field label="Active" value={driver.isActive ? 'Active' : 'Inactive'} />
+          <Field label="Status" value={STATUS_LABEL[status]} />
           <Field label="Lifecycle Status" value={driver.status} />
         </div>
       </SectionCard>
@@ -150,7 +155,6 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
             <Field label="License No." value={ops.licenseNumber} />
             <Field label="License Expiry" value={ops.licenseExpiry} />
             <Field label="Experience (yrs)" value={ops.experienceYears} />
-            <Field label="Driver Status" value={ops.driverStatus ? ops.driverStatus.replace(/_/g, ' ') : ''} />
             <Field label="Total Trips" value={ops.totalTrips} />
             <Field label="Rating" value={ops.rating} />
             <Field label="Aadhar No." value={ops.aadharNumber} />
@@ -169,6 +173,8 @@ export default function DriverViewPage({ params }: { params: Promise<{ driverId:
           </div>
         )}
       </SectionCard>
+
+      <DriverStatusDialog driver={statusOpen ? driver : null} open={statusOpen} onOpenChange={setStatusOpen} />
     </div>
   );
 }

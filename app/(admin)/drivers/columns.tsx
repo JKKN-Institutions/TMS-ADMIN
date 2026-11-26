@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Eye, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Eye, MoreHorizontal, Pencil, Trash2, UserCheck, UserX } from 'lucide-react';
 import type { DriverListItem } from '@/types';
 import { ExpiryBadge, PhoneLink } from '@/components/ui/display-bits';
 import { expiryState, titleCase } from '@/lib/format/display';
+import { displayStatus } from '@/lib/drivers/status-rule';
+import { DriverStatusBadge } from './driver-status-badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DataTableColumnHeader } from '@/components/ui/data-table-column-header';
 import {
@@ -16,20 +18,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-
-// Active/Inactive reflects the staff account flag (driver.isActive), distinct from
-// the operational "Driver Status" (active / on_leave / inactive).
-function ActiveBadge({ isActive }: { isActive: boolean }) {
-  const cls = isActive
-    ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400'
-    : 'bg-gray-100 text-gray-600';
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-      {isActive ? 'Active' : 'Inactive'}
-    </span>
-  );
-}
 
 /** License health used by the "License missing / expiring" cards and the License column. */
 export type LicenseState = 'missing' | 'no_expiry' | 'expired' | 'soon' | 'ok';
@@ -49,6 +37,7 @@ export function getDriverColumns(
   onView: (d: DriverListItem) => void,
   onEdit: (d: DriverListItem) => void,
   onDelete: (d: DriverListItem) => void,
+  onToggleStatus: (d: DriverListItem) => void,
   canManage: boolean
 ): ColumnDef<DriverListItem>[] {
   const cols: ColumnDef<DriverListItem>[] = [];
@@ -127,11 +116,12 @@ export function getDriverColumns(
     },
     {
       id: 'activeStatus',
-      meta: { label: 'Staff status' },
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Staff status" />,
-      accessorFn: (d) => (d.isActive ? 'active' : 'inactive'),
+      // One status: Inactive is the employee flag MyJKKN's list shows too.
+      meta: { label: 'Status' },
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+      accessorFn: (d) => displayStatus(d),
       filterFn: (row, id, value) => (row.getValue(id) as string) === value,
-      cell: ({ row }) => <ActiveBadge isActive={row.original.isActive} />,
+      cell: ({ row }) => <DriverStatusBadge status={displayStatus(row.original)} />,
     },
     {
       id: 'route',
@@ -246,6 +236,20 @@ export function getDriverColumns(
                 {canManage && (
                   <DropdownMenuItem onSelect={() => open(onEdit)}>
                     <Pencil className="text-gray-500" /> Edit
+                  </DropdownMenuItem>
+                )}
+                {/* Only for a record TMS owns: anyone else is made inactive in MyJKKN. */}
+                {canManage && d.canFullEdit && (
+                  <DropdownMenuItem onSelect={() => open(onToggleStatus)}>
+                    {displayStatus(d) === 'inactive' ? (
+                      <>
+                        <UserCheck className="text-gray-500" /> Mark active
+                      </>
+                    ) : (
+                      <>
+                        <UserX className="text-gray-500" /> Mark inactive
+                      </>
+                    )}
                   </DropdownMenuItem>
                 )}
                 {canManage && (
