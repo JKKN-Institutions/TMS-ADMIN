@@ -37,3 +37,16 @@ export function displayStatus(d: StatusSource): DriverStatus {
 export function isAssignable(d: StatusSource): boolean {
   return displayStatus(d) !== 'inactive';
 }
+
+/**
+ * The drivers to offer in a "choose a driver" list: everyone who is not inactive,
+ * plus the one already chosen (so an old choice still shows, labelled as inactive).
+ */
+export function driverChoices<T extends StatusSource & { id: string; name: string }>(
+  drivers: T[],
+  currentId?: string | null,
+): (T & { label: string })[] {
+  return drivers
+    .filter((d) => isAssignable(d) || (!!currentId && d.id === currentId))
+    .map((d) => ({ ...d, label: isAssignable(d) ? d.name : `${d.name} (inactive)` }));
+}

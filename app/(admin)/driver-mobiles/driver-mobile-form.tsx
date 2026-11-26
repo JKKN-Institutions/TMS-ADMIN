@@ -238,9 +238,14 @@ export function DriverMobileForm({ mode, driverMobileId, initial }: DriverMobile
               disabled={saving}
             >
               <option value="">Select a driver…</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}{d.phone ? ` — ${d.phone}` : ''}</option>
-              ))}
+              {/* Inactive drivers are not offered; the one already holding this phone still shows. */}
+              {drivers
+                .filter((d) => d.assignable || d.id === form.driver_staff_id)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}{d.assignable ? '' : ' (inactive)'}{d.phone ? ` — ${d.phone}` : ''}
+                  </option>
+                ))}
             </select>
             {err('driver_staff_id') && <p className="mt-1 text-xs text-red-500">{err('driver_staff_id')}</p>}
           </div>

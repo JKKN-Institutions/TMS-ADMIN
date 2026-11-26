@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { driverChoices } from '@/lib/drivers/status-rule';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
@@ -13,7 +14,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 interface GpsDevice { id: string; device_name?: string; device_id?: string; status?: string }
-interface DriverItem { id: string; name: string; ops: unknown | null }
+interface DriverItem { id: string; name: string; isActive: boolean; ops: { driverStatus: string } | null }
 interface RouteItem {
   id: string; route_number: string | null; route_name: string | null; status: string | null;
   vehicle_id: string | null; _busNumber?: string | null;
@@ -230,7 +231,8 @@ export default function VehicleForm({
   ];
   const driverOptions: SelectMenuOption[] = [
     { value: '', label: 'No driver assigned' },
-    ...drivers.map((d) => ({ value: d.id, label: d.name })),
+    // Inactive drivers are not offered; one already on this bus still shows.
+    ...driverChoices(drivers, form.assignedDriverId).map((d) => ({ value: d.id, label: d.label })),
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {

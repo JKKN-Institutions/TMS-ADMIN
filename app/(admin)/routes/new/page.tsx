@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { driverChoices } from '@/lib/drivers/status-rule';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Bus, Clock, Loader2, MapPin, Plus, Trash2 } from 'lucide-react';
@@ -11,6 +12,8 @@ import { SelectMenu } from '@/components/ui/select-menu';
 interface RouteDriverOption {
   id: string;
   name: string;
+  isActive: boolean;
+  ops: { driverStatus: string } | null;
 }
 
 interface RouteVehicleOption {
@@ -25,7 +28,7 @@ async function fetchRouteDrivers(): Promise<RouteDriverOption[]> {
     const res = await fetch('/api/admin/drivers');
     const json = await res.json();
     if (!json.success) return [];
-    return (json.data || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name }));
+    return (json.data || []).map((x: RouteDriverOption) => ({ id: x.id, name: x.name, isActive: x.isActive, ops: x.ops }));
   } catch {
     return [];
   }
@@ -254,7 +257,11 @@ export default function NewRoutePage() {
                 value={form.driver_id}
                 onValueChange={(v) => set('driver_id', v)}
                 placeholder="Unassigned"
-                options={[{ value: '', label: 'Unassigned' }, ...drivers.map((d) => ({ value: d.id, label: d.name }))]}
+                options={[
+                  { value: '', label: 'Unassigned' },
+                  // Inactive drivers are not offered; one already on this route still shows.
+                  ...driverChoices(drivers, form.driver_id).map((d) => ({ value: d.id, label: d.label })),
+                ]}
               />
             </div>
             <div className={field}>

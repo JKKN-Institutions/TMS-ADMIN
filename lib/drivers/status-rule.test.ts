@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   STATUS_LABEL,
   displayStatus,
+  driverChoices,
   employeeActiveFor,
   isAssignable,
   normalizeDriverStatus,
@@ -53,6 +54,27 @@ describe('isAssignable', () => {
     expect(isAssignable({ isActive: true, ops: ops('active') })).toBe(true);
     expect(isAssignable({ isActive: true, ops: ops('on_leave') })).toBe(true);
     expect(isAssignable({ isActive: true, ops: null })).toBe(true);
+  });
+});
+
+describe('driverChoices', () => {
+  const A = { id: 'a', name: 'Anbu', isActive: true, ops: ops('active') };
+  const L = { id: 'l', name: 'Latha', isActive: true, ops: ops('on_leave') };
+  const X = { id: 'x', name: 'Xavier', isActive: false, ops: ops('active') };
+
+  it('offers only drivers who are not inactive', () => {
+    expect(driverChoices([A, L, X]).map((d) => d.id)).toEqual(['a', 'l']);
+  });
+  it('keeps the inactive driver who is already chosen, and says so', () => {
+    const out = driverChoices([A, X], 'x');
+    expect(out.map((d) => d.label)).toEqual(['Anbu', 'Xavier (inactive)']);
+  });
+  it('does not keep an inactive driver for an empty or different choice', () => {
+    expect(driverChoices([A, X], '').map((d) => d.id)).toEqual(['a']);
+    expect(driverChoices([A, X], 'a').map((d) => d.id)).toEqual(['a']);
+  });
+  it('keeps the other fields of each driver', () => {
+    expect(driverChoices([{ ...A, phone: '9' }])[0]).toMatchObject({ id: 'a', phone: '9', label: 'Anbu' });
   });
 });
 

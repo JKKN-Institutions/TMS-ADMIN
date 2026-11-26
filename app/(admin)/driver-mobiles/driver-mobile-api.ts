@@ -1,4 +1,5 @@
 import type { DriverMobileRow } from './columns';
+import { isAssignable } from '@/lib/drivers/status-rule';
 
 export async function fetchDriverMobile(id: string): Promise<DriverMobileRow> {
   const res = await fetch(`/api/admin/driver-mobiles/${id}`, { cache: 'no-store', credentials: 'same-origin' });
@@ -11,6 +12,8 @@ export interface DriverOption {
   id: string;   // staff id — matches tms_driver.staff_id (the FK target)
   name: string;
   phone: string | null;
+  /** False for an inactive driver: shown only when they already hold this phone. */
+  assignable: boolean;
 }
 
 // Drivers come from /api/admin/drivers (mapped from `staff`). Only those WITH a
@@ -20,9 +23,9 @@ export async function fetchDriverOptions(): Promise<DriverOption[]> {
   const res = await fetch('/api/admin/drivers', { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load drivers');
-  return (json.data as { id: string; name: string; phone: string | null; ops: unknown }[])
+  return (json.data as { id: string; name: string; phone: string | null; isActive: boolean; ops: { driverStatus: string } | null }[])
     .filter((d) => d.ops != null)
-    .map((d) => ({ id: d.id, name: d.name, phone: d.phone ?? null }));
+    .map((d) => ({ id: d.id, name: d.name, phone: d.phone ?? null, assignable: isAssignable(d) }));
 }
 
 export interface RouteOption {
