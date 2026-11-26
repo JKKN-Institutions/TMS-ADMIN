@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { withAuth, type AuthContext } from '@/lib/api/with-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { logActivity } from '@/lib/activity/log';
+import { canFullEdit } from '@/lib/drivers/onboarding-constants';
 
 interface ImportRow {
   staffId?: string;
@@ -64,18 +65,48 @@ async function importDriverOps(request: NextRequest, auth: AuthContext) {
       }
     }
 
+    // Whether each person is an active employee, and whether TMS owns their record. The
+    // sheet can never make an employee inactive: that is done from the Drivers page,
+    // where it also takes them off their route.
+    const idOf = (r: ImportRow) => r.staffId || (r.email ? emailToId.get(r.email.trim().toLowerCase()) : undefined);
+    const allIds = [...new Set(rows.map(idOf).filter((x): x is string => !!x))];
+    const employee = new Map<string, { active: boolean; owned: boolean }>();
+    for (let i = 0; i < allIds.length; i += 150) {
+      const { data: staffRows, error: staffErr } = await supabase
+        .from('staff')
+        .select('id, is_active, role_key, category_id')
+        .in('id', allIds.slice(i, i + 150));
+      if (staffErr) {
+        console.error('Driver import: staff lookup failed:', staffErr);
+        return NextResponse.json({ error: 'Failed to look up the drivers' }, { status: 500 });
+      }
+      for (const s of (staffRows ?? []) as { id: string; is_active: boolean | null; role_key: string | null; category_id: string | null }[]) {
+        employee.set(s.id, { active: s.is_active !== false, owned: canFullEdit(s) });
+      }
+    }
+
     const results: RowResult[] = [];
     let updated = 0;
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      const staffId = r.staffId || (r.email ? emailToId.get(r.email.trim().toLowerCase()) : undefined);
+      const staffId = idOf(r);
       if (!staffId) {
         results.push({ row: i + 1, status: 'error', message: 'No matching driver for staffId/email' });
         continue;
       }
 
-      const status = r.driverStatus && DRIVER_STATUSES.includes(r.driverStatus) ? r.driverStatus : 'active';
+      let status = r.driverStatus && DRIVER_STATUSES.includes(r.driverStatus) ? r.driverStatus : 'active';
+      const person = employee.get(staffId);
+      if (person?.owned) {
+        if (person.active && status === 'inactive') {
+          results.push({ row: i + 1, staffId, status: 'error', message: 'Mark a driver inactive from the Drivers page' });
+          continue;
+        }
+        // An inactive employee is always stored as inactive, whatever the sheet says.
+        if (!person.active) status = 'inactive';
+      }
+      const inactive = person?.owned === true && !person.active;
       const payload = {
         staff_id: staffId,
         license_number: r.licenseNumber ?? null,
@@ -89,8 +120,8 @@ async function importDriverOps(request: NextRequest, auth: AuthContext) {
         emergency_contact_phone: r.emergencyContactPhone ?? null,
         aadhar_number: r.aadharNumber ?? null,
         medical_certificate_expiry: r.medicalCertificateExpiry || null,
-        location_sharing_enabled: toBool(r.locationSharingEnabled),
-        assigned_route_id: r.assignedRouteId || null,
+        location_sharing_enabled: inactive ? false : toBool(r.locationSharingEnabled),
+        assigned_route_id: inactive ? null : r.assignedRouteId || null,
         notes: r.notes ?? null,
         updated_by: auth.userId,
       };
