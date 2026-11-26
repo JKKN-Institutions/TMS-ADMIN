@@ -15,9 +15,13 @@ export const STATUS_LABEL: Record<DriverStatus, string> = {
   inactive: 'Inactive',
 };
 
+export function isDriverStatus(v: unknown): v is DriverStatus {
+  return (STATUSES as readonly unknown[]).includes(v);
+}
+
 /** Anything that is not one of the three statuses counts as active. */
 export function normalizeDriverStatus(v: unknown): DriverStatus {
-  return (STATUSES as readonly unknown[]).includes(v) ? (v as DriverStatus) : 'active';
+  return isDriverStatus(v) ? v : 'active';
 }
 
 /** Whether the MyJKKN employee record should be active for this driver status. */
@@ -25,12 +29,23 @@ export function employeeActiveFor(status: DriverStatus): boolean {
   return status !== 'inactive';
 }
 
-type StatusSource = { isActive: boolean; ops: { driverStatus: string } | null };
+type StatusSource = {
+  isActive: boolean;
+  /** True when TMS owns the whole record (a driver in the Driver category). */
+  canFullEdit?: boolean;
+  ops: { driverStatus: string } | null;
+};
 
-/** The status to show: an inactive employee is inactive whatever TMS stored. */
+/**
+ * The status to show. The employee flag is the authority: an inactive employee is
+ * inactive whatever TMS stored, and for a record TMS owns an ACTIVE employee is
+ * never shown as inactive because of a stale TMS value (for example after MyJKKN
+ * made them active again). Only a record managed in MyJKKN keeps a TMS-only inactive.
+ */
 export function displayStatus(d: StatusSource): DriverStatus {
   if (!d.isActive) return 'inactive';
-  return normalizeDriverStatus(d.ops?.driverStatus);
+  const stored = normalizeDriverStatus(d.ops?.driverStatus);
+  return stored === 'inactive' && d.canFullEdit ? 'active' : stored;
 }
 
 /** Whether this driver may be offered in a "choose a driver" list. */

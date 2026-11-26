@@ -23,7 +23,7 @@ export async function fetchDriverOptions(): Promise<DriverOption[]> {
   const res = await fetch('/api/admin/drivers', { cache: 'no-store', credentials: 'same-origin' });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.error || 'Failed to load drivers');
-  return (json.data as { id: string; name: string; phone: string | null; isActive: boolean; ops: { driverStatus: string } | null }[])
+  return (json.data as { id: string; name: string; phone: string | null; isActive: boolean; canFullEdit?: boolean; ops: { driverStatus: string } | null }[])
     .filter((d) => d.ops != null)
     .map((d) => ({ id: d.id, name: d.name, phone: d.phone ?? null, assignable: isAssignable(d) }));
 }

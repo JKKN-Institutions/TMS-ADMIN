@@ -40,6 +40,13 @@ function toTransport(ops: DriverOps | null, driver?: DriverListItem): TransportS
   };
 }
 
+/** What the server took an inactive driver off. */
+interface Released {
+  routes: { id: string; label: string }[];
+  mobilesHeld: number;
+  warning?: string;
+}
+
 class SaveError extends Error {
   fields?: Record<string, string>;
   field?: string;
@@ -195,14 +202,18 @@ export default function DriverForm({
       }
       const id = (driver as DriverListItem).id;
       // baseUpdatedAt lets the server refuse the save if the record changed since this form loaded.
-      await send(
+      const saved = await send(
         `/api/admin/drivers/${id}`,
         'PATCH',
         showPerson ? { person: personToSend, transport, baseUpdatedAt: driver?.person.updatedAt ?? null } : { transport },
       );
-      return { id, staffCode: null as string | null, warning: undefined as string | undefined };
+      // Set when this save made the driver inactive (or finished taking them off a route).
+      const released = (saved.data as { released?: Released } | undefined)?.released;
+      return { id, staffCode: null as string | null, warning: undefined as string | undefined, released };
     },
-    onSuccess: async ({ id, staffCode, warning }) => {
+    onSuccess: async (result) => {
+      const { id, staffCode, warning } = result;
+      const released = 'released' in result ? result.released : undefined;
       const photoError = photoFile && showPerson ? await uploadPhoto(id, photoFile) : null;
       const photoFailed = photoError !== null;
 
@@ -225,6 +236,18 @@ export default function DriverForm({
       } else {
         if (photoFailed) toast.error(`Details saved, but the photo was not uploaded: ${photoError}`);
         else toast.success('Driver details saved');
+        if (released?.routes.length) {
+          toast(`Taken off ${released.routes.map((r) => r.label).join(', ')}. Choose another driver for that route.`, { duration: 8000 });
+        }
+        if (released?.warning) toast.error(released.warning, { duration: 8000 });
+        if (released && released.mobilesHeld > 0) {
+          toast(
+            released.mobilesHeld === 1
+              ? 'They still hold 1 phone. Collect it in Driver Mobiles.'
+              : `They still hold ${released.mobilesHeld} phones. Collect them in Driver Mobiles.`,
+            { duration: 8000 },
+          );
+        }
       }
       router.push(`/drivers/${id}`);
     },

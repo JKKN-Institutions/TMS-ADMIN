@@ -392,12 +392,41 @@ describe('updateDriver: one status for TMS and MyJKKN', () => {
     expect(r.released).toBeDefined();
   });
 
-  it('does not re-activate or release again when an inactive driver is saved unchanged', async () => {
+  it('does not re-activate an inactive driver who is saved unchanged', async () => {
     const { client, log } = withRow({ ...FULL_ROW, is_active: false });
     const r = await updateDriver(client, 'S1', { person: { ...PERSON, isActive: true }, transport: INACTIVE, baseUpdatedAt: BASE }, 'A');
     expect(callsOf(log, 'staff', 'update')).toHaveLength(0);
-    expect(routeUpdates(log)).toHaveLength(0);
+    // Nothing was left to take them off, so there is nothing to report.
     expect(r.released).toBeUndefined();
+  });
+
+  it('finishes the release for a driver who is already inactive but still on a route', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, is_active: false }, (t, c) =>
+      t === 'tms_route' && c.some((x) => x.method === 'update')
+        ? { data: [{ id: 'R1', route_number: '12', route_name: 'ERODE' }] }
+        : undefined,
+    );
+    const r = await updateDriver(client, 'S1', { person: PERSON, transport: INACTIVE, baseUpdatedAt: BASE }, 'A');
+    expect(routeUpdates(log)).toHaveLength(1);
+    expect(r.released?.routes).toEqual([{ id: 'R1', label: '12 · ERODE' }]);
+  });
+
+  it('has already taken the driver off their route when saving the transport details fails', async () => {
+    const { client, log } = withRow(FULL_ROW, (t, c) =>
+      t === 'tms_driver' && c.some((x) => x.method === 'upsert') ? { error: { message: 'boom' } } : undefined,
+    );
+    await expect(
+      updateDriver(client, 'S1', { person: PERSON, transport: INACTIVE, baseUpdatedAt: BASE }, 'A'),
+    ).rejects.toMatchObject({ status: 500 });
+    expect(routeUpdates(log)).toHaveLength(1);
+  });
+
+  it.each([undefined, null, '', 'Inactive', 5])('400s with no writes when the driver status is %j', async (driverStatus) => {
+    const { client, log } = withRow({ ...FULL_ROW, is_active: false });
+    await expect(
+      updateDriver(client, 'S1', { transport: { licenseNumber: 'TN123', driverStatus } }, 'A'),
+    ).rejects.toMatchObject({ status: 400, message: 'Choose a driver status' });
+    expect(writes(log)).toHaveLength(0);
   });
 
   it('makes the employee active again when Driver status goes back to Active', async () => {

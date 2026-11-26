@@ -248,16 +248,21 @@ describe('setDriverActive', () => {
     expect(payloadOf(updatesOf(log, 'staff')[0])).toEqual({ is_active: true, updated_by: 'A' });
     const ops = updatesOf(log, 'tms_driver')[0];
     expect(payloadOf(ops)).toEqual({ driver_status: 'active', updated_by: 'A' });
-    expect(filtersOf(ops)).toEqual(['staff_id=S1']);
+    expect(filtersOf(ops)).toEqual(['staff_id=S1', 'driver_status=inactive']);
     expect(updatesOf(log, 'tms_route')).toHaveLength(0);
     expect(log.some((l) => l.table === 'tms_trip')).toBe(false);
     expect(r).toEqual({ id: 'S1', name: 'Ravi Kumar', active: true, changed: true, routes: [], mobilesHeld: 0 });
   });
 
-  it('writes nothing when asked to activate an already active driver', async () => {
+  it('still clears a stale TMS "inactive" when the employee is already active, touching nothing else', async () => {
     const { client, log } = world();
     const r = await setDriverActive(client, 'S1', true, 'A');
     expect(r.changed).toBe(false);
-    expect(writes(log)).toHaveLength(0);
+    expect(updatesOf(log, 'staff')).toHaveLength(0);
+    const ops = updatesOf(log, 'tms_driver')[0];
+    expect(payloadOf(ops)).toEqual({ driver_status: 'active', updated_by: 'A' });
+    // Only a row that says inactive: someone on leave stays on leave.
+    expect(filtersOf(ops)).toEqual(['staff_id=S1', 'driver_status=inactive']);
+    expect(writes(log).map((l) => l.table)).toEqual(['tms_driver']);
   });
 });

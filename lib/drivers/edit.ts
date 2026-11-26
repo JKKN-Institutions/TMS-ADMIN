@@ -17,7 +17,7 @@ import {
   releaseDriverDuties,
   type ReleaseResult,
 } from './status';
-import { employeeActiveFor, normalizeDriverStatus } from './status-rule';
+import { employeeActiveFor, isDriverStatus } from './status-rule';
 
 export { RECORD_MANAGED_ELSEWHERE_MESSAGE };
 export const PHOTO_MANAGED_ELSEWHERE_MESSAGE = "This person's photo is managed in MyJKKN.";
@@ -93,8 +93,13 @@ export async function updateDriver(
 
   // One status: Inactive means the employee is inactive in MyJKKN. Only for a record
   // TMS owns; for anyone else the status stays a TMS-only note.
-  const wantActive = employeeActiveFor(normalizeDriverStatus(transport.driverStatus));
-  const storedActive = row.is_active !== false;
+  // The status is never defaulted for such a record: a silent "active" would make an
+  // inactive employee active again.
+  if (fullyEditable && !isDriverStatus(transport.driverStatus)) {
+    throw new OnboardError({ status: 400, error: 'Choose a driver status' });
+  }
+  const wantActive = !isDriverStatus(transport.driverStatus) || employeeActiveFor(transport.driverStatus);
+  const storedActive = row.is_active === true;
   const goingInactive = fullyEditable && storedActive && !wantActive;
 
   if (editPerson) {
@@ -146,6 +151,14 @@ export async function updateDriver(
     }
   }
 
+  // An inactive employee holds no route or bus. Runs on every save of an inactive
+  // driver, not only the one that made them inactive, and before the transport row is
+  // saved: it is harmless to repeat, and it finishes a release that an earlier error,
+  // or a change made in MyJKKN, left undone.
+  const release = fullyEditable && !wantActive ? await releaseDriverDuties(svc, driverId, actorId) : undefined;
+  const released =
+    release && (goingInactive || release.routes.length > 0 || release.warning) ? release : undefined;
+
   // Address and emergency contact have one home, the staff row. The form pre-filled
   // them from the old tms_driver copy, so once the person is saved that copy goes.
   // Runs only after the staff update succeeded: a failed update throws above.
@@ -181,9 +194,6 @@ export async function updateDriver(
       console.error('Driver edit: ensureDriverRole failed (ignored):', e);
     }
   }
-
-  // After the employee flag and the transport row are saved: take them off their route and bus.
-  const released = goingInactive ? await releaseDriverDuties(svc, driverId, actorId) : undefined;
 
   return { id: driverId, personSaved: editPerson, changed, ...(released ? { released } : {}) };
 }

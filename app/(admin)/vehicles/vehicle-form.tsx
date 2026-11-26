@@ -14,7 +14,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 
 interface GpsDevice { id: string; device_name?: string; device_id?: string; status?: string }
-interface DriverItem { id: string; name: string; isActive: boolean; ops: { driverStatus: string } | null }
+interface DriverItem { id: string; name: string; isActive: boolean; canFullEdit?: boolean; ops: { driverStatus: string } | null }
 interface RouteItem {
   id: string; route_number: string | null; route_name: string | null; status: string | null;
   vehicle_id: string | null; _busNumber?: string | null;

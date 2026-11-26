@@ -109,9 +109,14 @@ export async function PATCH(
       action: 'update',
       entityType: 'staff',
       entityId: result.id,
-      description: result.changed.length
-        ? `Updated driver ${result.id}: ${result.changed.join(', ')}`
-        : `Updated driver ${result.id} transport details`,
+      description:
+        (result.changed.length
+          ? `Updated driver ${result.id}: ${result.changed.join(', ')}`
+          : `Updated driver ${result.id} transport details`) +
+        (result.changed.includes('is_active') && result.released ? ' (marked inactive)' : '') +
+        (result.released?.routes.length
+          ? `; removed from ${result.released.routes.map((r) => r.label).join(', ')}`
+          : ''),
     });
     return NextResponse.json({ success: true, data: result });
   } catch (e) {

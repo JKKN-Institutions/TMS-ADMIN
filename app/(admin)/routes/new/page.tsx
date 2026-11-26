@@ -13,6 +13,7 @@ interface RouteDriverOption {
   id: string;
   name: string;
   isActive: boolean;
+  canFullEdit?: boolean;
   ops: { driverStatus: string } | null;
 }
 
@@ -28,7 +29,7 @@ async function fetchRouteDrivers(): Promise<RouteDriverOption[]> {
     const res = await fetch('/api/admin/drivers');
     const json = await res.json();
     if (!json.success) return [];
-    return (json.data || []).map((x: RouteDriverOption) => ({ id: x.id, name: x.name, isActive: x.isActive, ops: x.ops }));
+    return (json.data || []).map((x: RouteDriverOption) => ({ id: x.id, name: x.name, isActive: x.isActive, canFullEdit: x.canFullEdit, ops: x.ops }));
   } catch {
     return [];
   }

@@ -5,6 +5,7 @@ import {
   driverChoices,
   employeeActiveFor,
   isAssignable,
+  isDriverStatus,
   normalizeDriverStatus,
 } from './status-rule';
 
@@ -18,6 +19,13 @@ describe('normalizeDriverStatus', () => {
   });
   it.each(['x', '', null, undefined, 5, 'INACTIVE'])('treats %j as active', (v) => {
     expect(normalizeDriverStatus(v)).toBe('active');
+  });
+});
+
+describe('isDriverStatus', () => {
+  it('accepts only the three statuses', () => {
+    expect(['active', 'on_leave', 'inactive'].every(isDriverStatus)).toBe(true);
+    expect([undefined, null, '', 'Inactive', 5].some(isDriverStatus)).toBe(false);
   });
 });
 
@@ -39,6 +47,13 @@ describe('displayStatus', () => {
     expect(displayStatus({ isActive: true, ops: ops('active') })).toBe('active');
     expect(displayStatus({ isActive: true, ops: ops('on_leave') })).toBe('on_leave');
     expect(displayStatus({ isActive: true, ops: ops('inactive') })).toBe('inactive');
+  });
+  it('ignores a stale TMS "inactive" for an active employee whose record TMS owns', () => {
+    expect(displayStatus({ isActive: true, canFullEdit: true, ops: ops('inactive') })).toBe('active');
+    expect(isAssignable({ isActive: true, canFullEdit: true, ops: ops('inactive') })).toBe(true);
+  });
+  it('keeps the TMS-only inactive for a record managed in MyJKKN', () => {
+    expect(displayStatus({ isActive: true, canFullEdit: false, ops: ops('inactive') })).toBe('inactive');
   });
   it('is active for an active employee with no transport details', () => {
     expect(displayStatus({ isActive: true, ops: null })).toBe('active');

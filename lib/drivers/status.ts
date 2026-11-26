@@ -184,12 +184,13 @@ export async function setDriverActive(
     return { id, name, active, changed, ...released };
   }
 
-  if (changed) {
-    const { error: opsErr } = await svc
-      .from('tms_driver')
-      .update({ driver_status: 'active', updated_by: actorId })
-      .eq('staff_id', id);
-    if (opsErr) console.error('Driver status: could not set transport status active (ignored):', opsErr);
-  }
+  // Also when the employee was already active (made active again in MyJKKN): clear a
+  // stale TMS "inactive". Only that value, so someone on leave stays on leave.
+  const { error: opsErr } = await svc
+    .from('tms_driver')
+    .update({ driver_status: 'active', updated_by: actorId })
+    .eq('staff_id', id)
+    .eq('driver_status', 'inactive');
+  if (opsErr) console.error('Driver status: could not set transport status active (ignored):', opsErr);
   return { id, name, active, changed, routes: [], mobilesHeld: 0 };
 }
