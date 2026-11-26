@@ -554,6 +554,7 @@ export default function BoardingAttendancePage() {
         onOpenChange={setAbsenceOpen}
         routes={absenceRoutes}
         date={date}
+        eveningActive={windows.return.active}
         onDeclared={() => {
           qc.invalidateQueries({ queryKey: ['incharge-absence'] });
           qc.invalidateQueries({ queryKey: ['boarding-roster'] });

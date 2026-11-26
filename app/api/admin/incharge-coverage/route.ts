@@ -106,7 +106,7 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
 
     const { data: absData, error: absErr } = await svc
       .from('tms_incharge_absence')
-      .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+      .select('assignment_id, absence_date, covering_assignment_id, cover_status, trip')
       .eq('absence_date', date);
     // Never let a failed load read as "nobody is excused" — that would list
     // legitimately absent in-charges as coverage gaps the office then chases.
@@ -127,7 +127,10 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
         const share = sharesByAssignment.get(a.id) ?? [];
         allocated += share.length;
         if (share.length === 0) emptyShares += 1;
-        if (isExcused(a.id, date, absences)) continue;
+        // This board scores the MORNING trip only (see the attendance query
+        // above), so only an absence that covers the morning excuses a share
+        // here. An evening-only absence leaves the morning duty standing.
+        if (isExcused(a.id, date, absences, 'onward')) continue;
         // Duty is the own share PLUS any share accepted as cover today —
         // must match lib/boarding/share-coverage.ts
         // exactly, or the board shows green while the cron strikes/bills
@@ -135,7 +138,7 @@ async function getCoverage(request: NextRequest, auth: AuthContext) {
         // shares are already loaded in `sharesByAssignment`, so this union
         // costs no extra query.
         const shareIds = new Set(share);
-        for (const covered of delegatedTo(a.id, date, absences)) {
+        for (const covered of delegatedTo(a.id, date, absences, 'onward')) {
           for (const id of sharesByAssignment.get(covered) ?? []) shareIds.add(id);
         }
         const duty = shareDuty({

@@ -204,7 +204,7 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       for (const c of chunk(routeIds)) {
         const { data, error } = await svc
           .from('tms_incharge_absence')
-          .select('route_id, assignment_id, absence_date, covering_assignment_id, cover_status')
+          .select('route_id, assignment_id, absence_date, covering_assignment_id, cover_status, trip')
           .in('route_id', c).eq('absence_date', date);
         if (error) {
           console.error('boarding attendance roster: failed to load in-charge absences:', error);
@@ -220,7 +220,9 @@ async function getRoster(request: NextRequest, auth: AuthContext) {
       const coveredByRoute = new Map<string, string[]>();
       const allCoveredIds = new Set<string>();
       for (const [routeId, myAssignmentId] of myAssignmentByRoute) {
-        const covered = delegatedTo(myAssignmentId, date, absencesByRoute.get(routeId) ?? []);
+        // For the trip on screen: cover accepted for the morning is not "mine"
+        // on the Evening tab.
+        const covered = delegatedTo(myAssignmentId, date, absencesByRoute.get(routeId) ?? [], direction);
         if (covered.length) {
           coveredByRoute.set(routeId, covered);
           for (const id of covered) allCoveredIds.add(id);

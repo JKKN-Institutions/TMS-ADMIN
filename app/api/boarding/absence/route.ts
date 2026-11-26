@@ -18,6 +18,13 @@ import { emailIlikePattern } from '@/lib/identity/email-match';
 import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
 import { logActivity } from '@/lib/activity/log';
+import { loadAttendanceWindows } from '@/lib/boarding/attendance-window';
+import { ABSENCE_TRIP_LABEL, parseAbsenceTrip, type AbsenceTrip } from '@/lib/boarding/absence-trip';
+
+/** "on 2026-11-26" for a full day, "for the morning trip on 2026-11-26" for a half day. */
+function whenText(trip: AbsenceTrip, date: string): string {
+  return trip === 'full_day' ? `on ${date}` : `for the ${ABSENCE_TRIP_LABEL[trip].toLowerCase()} trip on ${date}`;
+}
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -38,6 +45,7 @@ interface AbsenceDbRow {
   id: string; assignment_id: string; staff_email: string; route_id: string;
   absence_date: string; reason: string | null;
   covering_assignment_id: string | null; cover_status: string;
+  trip: string | null;
 }
 
 /**
@@ -79,6 +87,8 @@ async function decorate(svc: ReturnType<typeof createServiceRoleClient>, rows: A
       route_id: r.route_id,
       route_number: numById.get(r.route_id) ?? null,
       absence_date: r.absence_date,
+      // A row from before the column existed reads as the full day.
+      trip: parseAbsenceTrip(r.trip) ?? 'full_day',
       reason: r.reason,
       cover_status: r.cover_status,
       staff_email: r.staff_email,
@@ -153,7 +163,7 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     const body = (await request.json().catch(() => ({}))) as {
-      routeId?: string; date?: string; reason?: string; coveringStaffEmail?: string;
+      routeId?: string; date?: string; reason?: string; coveringStaffEmail?: string; trip?: unknown;
     };
     const routeId = String(body.routeId ?? '');
     const date = String(body.date ?? '');
@@ -165,6 +175,14 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
     // back-dating an excuse would let anyone erase a miss after the fact.
     if (date < istToday()) {
       return NextResponse.json({ error: 'Absence can only be declared for today or a future day' }, { status: 400 });
+    }
+
+    // Which trip. Nothing sent is the full day (the old dialog, still running
+    // in an installed app, sends none). An unknown value is refused, never
+    // defaulted: a silent full day would excuse a trip the in-charge is riding.
+    const trip = parseAbsenceTrip(body.trip);
+    if (!trip) {
+      return NextResponse.json({ error: 'Choose Morning, Evening or Full day' }, { status: 400 });
     }
 
     // HISTORY -- do not re-add a share-scoring gate here.
@@ -203,6 +221,17 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
     }
 
     const svc = createServiceRoleClient();
+
+    // There is no evening trip to be absent from while evening attendance is
+    // switched off in Settings. The dialog hides the choice; this is the
+    // matching refusal for a stale screen.
+    if (trip === 'return' && !(await loadAttendanceWindows(svc)).return.active) {
+      return NextResponse.json(
+        { error: 'Evening attendance is switched off, so there is no evening trip to be absent from.', reason: 'evening_off' },
+        { status: 409 },
+      );
+    }
+
     const { data: mine, error: mineError } = await svc
       .from('tms_staff_route_assignment').select('id')
       .eq('route_id', routeId).eq('staff_email', email).eq('is_active', true).maybeSingle();
@@ -241,6 +270,10 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
         staff_email: email,
         route_id: routeId,
         absence_date: date,
+        // One declaration per person per day: declaring again REPLACES the
+        // trip too (morning, then evening, leaves evening). The dialog says so
+        // and points at Full day for both.
+        trip,
         reason: body.reason?.trim() || null,
         covering_assignment_id: coveringAssignmentId,
         // Re-declaring resets the request: a new nominee has not agreed yet,
@@ -263,7 +296,7 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
           profileId,
           actorId: auth.userId,
           title: 'Cover requested for bus attendance',
-          body: `A colleague on your bus will be absent on ${date} and has asked you to mark their students that day. Open the in-charge page to accept or decline.`,
+          body: `A colleague on your bus will be absent ${whenText(trip, date)} and has asked you to mark their students then. Open the in-charge page to accept or decline.`,
           url: '/boarding/in-charge',
         });
       }
@@ -274,8 +307,8 @@ async function declareAbsence(request: NextRequest, auth: AuthContext) {
       action: 'mark',
       entityType: 'tms_incharge_absence',
       entityId: row?.id,
-      description: `Declared in-charge absence on ${date} for route ${routeId}`,
-      metadata: { routeId, date, coveringEmail },
+      description: `Declared in-charge absence ${whenText(trip, date)} for route ${routeId}`,
+      metadata: { routeId, date, trip, coveringEmail },
     });
     return NextResponse.json({ success: true, data: { id: row?.id } }, { status: 201 });
   } catch (e) {

@@ -98,7 +98,11 @@ async function loadTransportYearStart(svc: SupabaseClient): Promise<string | nul
  */
 async function markableLearnerIds(
   svc: SupabaseClient,
-  opts: { callerEmail: string | null; routeId: string; date: string; isSuperAdmin: boolean; enabled: boolean },
+  opts: {
+    callerEmail: string | null; routeId: string; date: string; isSuperAdmin: boolean; enabled: boolean;
+    /** The trip being marked or cleared: accepted cover is for one trip. */
+    direction: AttDirection;
+  },
 ): Promise<{ all: Set<string>; own: Set<string> } | null> {
   if (!opts.enabled || opts.isSuperAdmin || !opts.callerEmail) return null;
 
@@ -117,10 +121,10 @@ async function markableLearnerIds(
 
   const { data: absData } = await svc
     .from('tms_incharge_absence')
-    .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+    .select('assignment_id, absence_date, covering_assignment_id, cover_status, trip')
     .eq('route_id', opts.routeId)
     .eq('absence_date', opts.date);
-  for (const covered of delegatedTo(myAssignmentId, opts.date, (absData ?? []) as AbsenceRow[])) {
+  for (const covered of delegatedTo(myAssignmentId, opts.date, (absData ?? []) as AbsenceRow[], opts.direction)) {
     for (const id of await loadShareLearnerIds(svc, covered)) ids.add(id);
   }
 
@@ -273,7 +277,7 @@ async function mark(request: NextRequest, auth: AuthContext) {
     }
     const markable = await markableLearnerIds(svc, {
       callerEmail, routeId, date: authDate, isSuperAdmin: auth.isSuperAdmin,
-      enabled: cfg.inchargeShareScoringEnabled,
+      enabled: cfg.inchargeShareScoringEnabled, direction,
     });
 
     if (markable) {
@@ -784,7 +788,7 @@ async function clearMarks(request: NextRequest, auth: AuthContext) {
     const callerEmail = (callerProfile?.email as string | undefined)?.toLowerCase() ?? null;
     const markable = await markableLearnerIds(svc, {
       callerEmail, routeId, date: authDate, isSuperAdmin: auth.isSuperAdmin,
-      enabled: cfg.inchargeShareScoringEnabled,
+      enabled: cfg.inchargeShareScoringEnabled, direction,
     });
 
     if (markable) {

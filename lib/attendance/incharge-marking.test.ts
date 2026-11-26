@@ -19,6 +19,7 @@ const base = (over: Partial<MarkingInputs> = {}): MarkingInputs => ({
   calendarOff: [],
   excused: [],
   absences: [],
+  direction: 'onward',
   ...over,
 });
 
@@ -66,6 +67,28 @@ describe('buildMarkingReport', () => {
     expect(r.cells['2026-11-07'].s).toBe('missed'); // today, nothing yet
     expect(r.cells['2026-11-08'].s).toBe('na'); // future (and a Sunday)
     expect(r).toMatchObject({ dutyDays: 4, markedDays: 2, missedDays: 2, markedPct: 50 });
+  });
+
+  it('a half-day leave is no duty on its own trip and still a duty on the other', () => {
+    // Away for the morning only: the morning report must not count the day
+    // against them, and the evening report must still expect their scan.
+    const absences = [{
+      assignment_id: 'a1', absence_date: '2026-11-05', covering_assignment_id: null,
+      cover_status: 'uncovered' as const, trip: 'onward' as const,
+    }];
+    const morning = buildMarkingReport(base({ absences, direction: 'onward' }))[0];
+    const evening = buildMarkingReport(base({ absences, direction: 'return' }))[0];
+    expect(morning.cells['2026-11-05'].s).toBe('off');
+    expect(evening.cells['2026-11-05'].s).toBe('missed');
+  });
+
+  it('a full-day leave is no duty on either trip', () => {
+    const absences = [{
+      assignment_id: 'a1', absence_date: '2026-11-05', covering_assignment_id: null,
+      cover_status: 'uncovered' as const, trip: 'full_day' as const,
+    }];
+    expect(buildMarkingReport(base({ absences, direction: 'onward' }))[0].cells['2026-11-05'].s).toBe('off');
+    expect(buildMarkingReport(base({ absences, direction: 'return' }))[0].cells['2026-11-05'].s).toBe('off');
   });
 
   it('a day nobody in the fleet marked is not a service day', () => {

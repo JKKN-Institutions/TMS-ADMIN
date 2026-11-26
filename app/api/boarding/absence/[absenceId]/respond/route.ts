@@ -12,6 +12,7 @@ import { notifyProfile } from '@/lib/notifications/notify';
 import { emailIlikePattern } from '@/lib/identity/email-match';
 import { istToday } from '@/lib/booking/window';
 import { TMS_PERMISSIONS } from '@/lib/constants/tms-permissions';
+import { ABSENCE_TRIP_LABEL, parseAbsenceTrip } from '@/lib/boarding/absence-trip';
 
 async function requirePerm(auth: AuthContext, permission: string): Promise<boolean> {
   if (auth.isSuperAdmin) return true;
@@ -36,7 +37,7 @@ async function respond(
     const svc = createServiceRoleClient();
     const { data: absence, error: absenceError } = await svc
       .from('tms_incharge_absence')
-      .select('id, staff_email, covering_assignment_id, absence_date, cover_status')
+      .select('id, staff_email, covering_assignment_id, absence_date, cover_status, trip')
       .eq('id', absenceId)
       .maybeSingle();
     if (absenceError) {
@@ -95,6 +96,12 @@ async function respond(
       return NextResponse.json({ error: 'Failed to record your response' }, { status: 500 });
     }
 
+    // "on 2026-11-26", or "for the morning trip on 2026-11-26" for a half day.
+    const trip = parseAbsenceTrip(absence.trip) ?? 'full_day';
+    const when = trip === 'full_day'
+      ? `on ${absence.absence_date}`
+      : `for the ${ABSENCE_TRIP_LABEL[trip].toLowerCase()} trip on ${absence.absence_date}`;
+
     const { data: absenteeProfile } = await svc
       .from('profiles').select('id').ilike('email', emailIlikePattern(absence.staff_email)).maybeSingle();
     const absenteeId = (absenteeProfile as { id: string } | null)?.id;
@@ -104,8 +111,8 @@ async function respond(
         actorId: auth.userId,
         title: body.accept ? 'Your cover request was accepted' : 'Your cover request was declined',
         body: body.accept
-          ? `A colleague will mark your students on ${absence.absence_date}.`
-          : `Nobody has accepted cover for ${absence.absence_date}. You are still excused for that day, but your students will go unmarked.`,
+          ? `A colleague will mark your students ${when}.`
+          : `Nobody has accepted cover ${when}. You are still excused, but your students will go unmarked.`,
         url: '/boarding/in-charge',
       });
     }

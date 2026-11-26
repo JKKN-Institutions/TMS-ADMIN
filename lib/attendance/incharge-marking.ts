@@ -14,6 +14,7 @@
  */
 
 import { isExcused, type AbsenceRow } from '@/lib/boarding/share-coverage';
+import type { AttDirection } from '@/lib/boarding/attendance-window';
 import { normEmail } from '@/lib/fees/incharge-bill-review';
 
 /**
@@ -98,6 +99,12 @@ export interface MarkingInputs {
   /** tms_incharge_excused_day. */
   excused: string[];
   absences: AbsenceRow[];
+  /**
+   * The trip this report is for. The marks are already for one trip (the SQL
+   * takes it); leave must be read for the same one, or a morning-only absence
+   * would also wipe the evening duty.
+   */
+  direction: AttDirection;
 }
 
 // ── Dates ──────────────────────────────────────────────────────────────────
@@ -186,7 +193,7 @@ export function buildMarkingReport(inp: MarkingInputs): MarkingRow[] {
         serviceDay: serviceDay(ic.routeId, d),
         own: own?.n ?? 0,
         bus,
-        onLeave: isExcused(ic.assignmentId, d, inp.absences),
+        onLeave: isExcused(ic.assignmentId, d, inp.absences, inp.direction),
       });
       cells[d] = { s, n: own?.n ?? 0, bus, first: own?.first ?? null, last: own?.last ?? null };
       if (s === 'marked') markedDays++;

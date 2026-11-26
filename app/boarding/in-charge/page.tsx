@@ -5,12 +5,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bus, Check, Loader2, LogOut } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/providers/auth-provider';
+import { ABSENCE_TRIP_LABEL, type AbsenceTrip } from '@/lib/boarding/absence-trip';
 
 interface AbsenceRecord {
   id: string;
   route_id: string;
   route_number: string | null;
   absence_date: string;
+  /** Morning, evening or the full day. */
+  trip: AbsenceTrip;
   reason: string | null;
   cover_status: 'pending' | 'accepted' | 'declined' | 'uncovered';
   covering_staff_email: string | null;
@@ -78,7 +81,7 @@ function AbsencePanel() {
             {requests.map((r) => (
               <li key={r.id} className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
                 <p className="text-sm text-gray-900 dark:text-gray-100">
-                  {r.staff_name} · route {r.route_number ?? '—'} · {r.absence_date}
+                  {r.staff_name} · route {r.route_number ?? '—'} · {r.absence_date} · {ABSENCE_TRIP_LABEL[r.trip] ?? 'Full day'}
                 </p>
                 {r.reason && <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{r.reason}</p>}
                 {r.cover_status === 'pending' ? (
@@ -118,7 +121,7 @@ function AbsencePanel() {
             {mine.map((a) => (
               <li key={a.id} className="flex items-center justify-between gap-2 text-sm">
                 <span className="text-gray-700 dark:text-gray-200">
-                  {a.absence_date} · route {a.route_number ?? '—'}
+                  {a.absence_date} · route {a.route_number ?? '—'} · {ABSENCE_TRIP_LABEL[a.trip] ?? 'Full day'}
                 </span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${coverStatusBadge[a.cover_status]}`}>
                   {a.cover_status}

@@ -13,6 +13,8 @@
  *
  * No I/O — the callers gather the facts, these decide.
  */
+import type { AttDirection } from './attendance-window';
+import { absenceCoversTrip, type AbsenceTrip } from './absence-trip';
 
 export interface AbsenceRow {
   assignment_id: string;
@@ -20,6 +22,11 @@ export interface AbsenceRow {
   absence_date: string;
   covering_assignment_id: string | null;
   cover_status: 'pending' | 'accepted' | 'declined' | 'uncovered';
+  /**
+   * Which trip the absence is for. Missing means the full day, which is what
+   * every declaration meant before the choice existed.
+   */
+  trip?: AbsenceTrip | null;
 }
 
 export interface ShareCoverage {
@@ -58,9 +65,20 @@ export function shareCovered(input: { duty: string[]; markedLearnerIds: string[]
  * accepted the cover. Responsibility for finding cover is not placed on someone
  * who is off sick; the uncovered share shows on the admin coverage board
  * instead.
+ *
+ * `direction` is the trip being asked about and is required on purpose: a
+ * morning-only absence must not excuse the evening trip, and a caller that
+ * could leave it out would quietly excuse both.
  */
-export function isExcused(assignmentId: string, date: string, absences: AbsenceRow[]): boolean {
-  return absences.some((a) => a.assignment_id === assignmentId && a.absence_date === date);
+export function isExcused(
+  assignmentId: string,
+  date: string,
+  absences: AbsenceRow[],
+  direction: AttDirection,
+): boolean {
+  return absences.some(
+    (a) => a.assignment_id === assignmentId && a.absence_date === date && absenceCoversTrip(a.trip, direction),
+  );
 }
 
 /**
@@ -68,14 +86,24 @@ export function isExcused(assignmentId: string, date: string, absences: AbsenceR
  * date. Only an ACCEPTED cover transfers duty: a pending request has not been
  * agreed to, and making someone answerable for a share they never accepted is
  * the same unfairness the route-level rule had, pointed the other way.
+ *
+ * The hand-over is for the declared trip only. Cover accepted for a morning
+ * absence gives no right to mark that share in the evening, when its own
+ * in-charge is back on the bus.
  */
-export function delegatedTo(assignmentId: string, date: string, absences: AbsenceRow[]): string[] {
+export function delegatedTo(
+  assignmentId: string,
+  date: string,
+  absences: AbsenceRow[],
+  direction: AttDirection,
+): string[] {
   return absences
     .filter(
       (a) =>
         a.absence_date === date &&
         a.cover_status === 'accepted' &&
-        a.covering_assignment_id === assignmentId,
+        a.covering_assignment_id === assignmentId &&
+        absenceCoversTrip(a.trip, direction),
     )
     .map((a) => a.assignment_id);
 }

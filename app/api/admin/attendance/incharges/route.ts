@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
       svc.from('tms_service_calendar').select('exception_date, route_id').gte('exception_date', first).lte('exception_date', last),
       svc.from('tms_incharge_excused_day').select('day').gte('day', first).lte('day', last),
       svc.from('tms_incharge_absence')
-        .select('assignment_id, absence_date, covering_assignment_id, cover_status')
+        .select('assignment_id, absence_date, covering_assignment_id, cover_status, trip')
         .gte('absence_date', first).lte('absence_date', last),
       svc.rpc('tms_incharge_marking_report', { p_from: first, p_to: last, p_direction: direction }),
     ]);
@@ -162,6 +162,7 @@ export async function GET(request: NextRequest) {
         .map((c) => ({ date: c.exception_date, routeId: c.route_id })),
       excused: ((excRes.data ?? []) as Array<{ day: string }>).map((e) => e.day),
       absences: (absRes.data ?? []) as AbsenceRow[],
+      direction,
     });
     rows.sort((x, y) =>
       String(x.routeNumber ?? '').localeCompare(String(y.routeNumber ?? ''), undefined, { numeric: true }) ||
