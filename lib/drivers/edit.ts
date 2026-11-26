@@ -11,8 +11,15 @@ import { translateStaffDbError } from './db-errors';
 import { buildTransportPayload, STAFF_SELECT } from './map';
 import { ensureDriverRole, findExistingAccount, OnboardError, PERSONAL_EMAIL_TAKEN_MESSAGE } from './onboard';
 import { DRIVER_CATEGORY_ID, DRIVER_ROLE_KEY, STAFF_IMAGE_BUCKET } from './onboarding-constants';
+import {
+  RECORD_MANAGED_ELSEWHERE_MESSAGE,
+  assertNoRunningTrip,
+  releaseDriverDuties,
+  type ReleaseResult,
+} from './status';
+import { employeeActiveFor, normalizeDriverStatus } from './status-rule';
 
-export const RECORD_MANAGED_ELSEWHERE_MESSAGE = "This person's record is managed in MyJKKN.";
+export { RECORD_MANAGED_ELSEWHERE_MESSAGE };
 export const PHOTO_MANAGED_ELSEWHERE_MESSAGE = "This person's photo is managed in MyJKKN.";
 export const RELOAD_MESSAGE = 'Reload the page and try again.';
 export const CHANGED_ELSEWHERE_MESSAGE = 'This record was changed by someone else. Reload the page and try again.';
@@ -54,11 +61,15 @@ export interface UpdateDriverResult {
   id: string;
   personSaved: boolean;
   changed: string[];
+  /** Set when this save made the driver inactive: what they were taken off. */
+  released?: ReleaseResult;
 }
 
 /**
  * Update a driver's staff columns (only when the whole record is TMS-editable) and
- * always upsert the TMS-owned `tms_driver` row. Throws OnboardError for 404 / 400 /
+ * always upsert the TMS-owned `tms_driver` row. For a record TMS owns, the chosen
+ * Driver status also decides the employee flag MyJKKN reads (`staff.is_active`):
+ * Inactive makes the employee inactive and releases their route. Throws OnboardError for 404 / 400 /
  * 409 and translated database errors.
  */
 export async function updateDriver(
@@ -80,6 +91,12 @@ export async function updateDriver(
   const editPerson = fullyEditable && body.person !== undefined && body.person !== null;
   let patch: Record<string, unknown> = {};
 
+  // One status: Inactive means the employee is inactive in MyJKKN. Only for a record
+  // TMS owns; for anyone else the status stays a TMS-only note.
+  const wantActive = employeeActiveFor(normalizeDriverStatus(transport.driverStatus));
+  const storedActive = row.is_active !== false;
+  const goingInactive = fullyEditable && storedActive && !wantActive;
+
   if (editPerson) {
     // The form sends the staff.updated_at it loaded. If MyJKKN (or another tab) saved
     // the row since, refuse rather than silently write the older values back.
@@ -89,7 +106,9 @@ export async function updateDriver(
       throw new OnboardError({ status: 409, error: CHANGED_ELSEWHERE_MESSAGE });
     }
 
-    const checked = validatePerson(body.person, 'edit');
+    // The status decides the employee flag; whatever isActive the request carried is ignored.
+    const personInput = isPlainObject(body.person) ? { ...body.person, isActive: wantActive } : body.person;
+    const checked = validatePerson(personInput, 'edit');
     if (!checked.ok) {
       throw new OnboardError({ status: 400, error: 'Check the highlighted fields.', fields: checked.errors });
     }
@@ -102,6 +121,11 @@ export async function updateDriver(
       if (existing) throw new OnboardError({ status: 409, error: PERSONAL_EMAIL_TAKEN_MESSAGE, field: 'email' });
     }
   }
+
+  if (fullyEditable && !editPerson && storedActive !== wantActive) patch.is_active = wantActive;
+
+  // Before any write: a driver in the middle of a trip cannot be made inactive.
+  if (goingInactive) await assertNoRunningTrip(svc, driverId);
 
   const changed = Object.keys(patch);
   if (changed.length > 0) {
@@ -135,6 +159,8 @@ export async function updateDriver(
       {
         ...buildTransportPayload(driverId, transport),
         ...clearOldCopies,
+        // An inactive employee holds no route and shares no location.
+        ...(fullyEditable && !wantActive ? { assigned_route_id: null, location_sharing_enabled: false } : {}),
         // Never overwrite a stored profile link with null.
         ...(profileId ? { profile_id: profileId } : {}),
         updated_by: actorId,
@@ -156,7 +182,10 @@ export async function updateDriver(
     }
   }
 
-  return { id: driverId, personSaved: editPerson, changed };
+  // After the employee flag and the transport row are saved: take them off their route and bus.
+  const released = goingInactive ? await releaseDriverDuties(svc, driverId, actorId) : undefined;
+
+  return { id: driverId, personSaved: editPerson, changed, ...(released ? { released } : {}) };
 }
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif']);

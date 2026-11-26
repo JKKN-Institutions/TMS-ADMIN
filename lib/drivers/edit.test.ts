@@ -366,6 +366,100 @@ describe('updateDriver', () => {
   });
 });
 
+describe('updateDriver: one status for TMS and MyJKKN', () => {
+  const INACTIVE = { ...TRANSPORT, driverStatus: 'inactive', assignedRouteId: 'R1' };
+  const routeUpdates = (log: Log) => callsOf(log, 'tms_route', 'update');
+  const staffPayload = (log: Log) => callsOf(log, 'staff', 'update')[0]?.args[0] as Record<string, unknown> | undefined;
+  const upsertPayload = (log: Log) => callsOf(log, 'tms_driver', 'upsert')[0].args[0] as Record<string, unknown>;
+
+  it('makes the employee inactive when Driver status is Inactive, whatever isActive the form sent', async () => {
+    const { client, log } = withRow(FULL_ROW);
+    const r = await updateDriver(client, 'S1', { person: { ...PERSON, isActive: true }, transport: INACTIVE, baseUpdatedAt: BASE }, 'A');
+    expect(staffPayload(log)).toEqual({ is_active: false, updated_by: 'A' });
+    expect(r.changed).toEqual(['is_active']);
+  });
+
+  it('takes the driver off their route and stops location sharing when they become inactive', async () => {
+    const { client, log } = withRow(FULL_ROW);
+    const r = await updateDriver(client, 'S1', { person: PERSON, transport: INACTIVE, baseUpdatedAt: BASE }, 'A');
+    expect(routeUpdates(log)).toHaveLength(1);
+    expect(routeUpdates(log)[0].args[0]).toEqual({ driver_id: null, updated_by: 'A' });
+    expect(upsertPayload(log)).toMatchObject({
+      driver_status: 'inactive',
+      assigned_route_id: null,
+      location_sharing_enabled: false,
+    });
+    expect(r.released).toBeDefined();
+  });
+
+  it('does not re-activate or release again when an inactive driver is saved unchanged', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, is_active: false });
+    const r = await updateDriver(client, 'S1', { person: { ...PERSON, isActive: true }, transport: INACTIVE, baseUpdatedAt: BASE }, 'A');
+    expect(callsOf(log, 'staff', 'update')).toHaveLength(0);
+    expect(routeUpdates(log)).toHaveLength(0);
+    expect(r.released).toBeUndefined();
+  });
+
+  it('makes the employee active again when Driver status goes back to Active', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, is_active: false });
+    await updateDriver(client, 'S1', { person: { ...PERSON, isActive: false }, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
+    expect(staffPayload(log)).toEqual({ is_active: true, updated_by: 'A' });
+    expect(routeUpdates(log)).toHaveLength(0);
+  });
+
+  it('keeps the employee active for On leave', async () => {
+    const { client, log } = withRow(FULL_ROW);
+    await updateDriver(client, 'S1', { person: PERSON, transport: { ...TRANSPORT, driverStatus: 'on_leave' }, baseUpdatedAt: BASE }, 'A');
+    expect(callsOf(log, 'staff', 'update')).toHaveLength(0);
+    expect(upsertPayload(log)).toMatchObject({ driver_status: 'on_leave' });
+    expect(upsertPayload(log)).not.toHaveProperty('location_sharing_enabled');
+  });
+
+  it('applies the rule on a transport-only save, gated by id, role and category', async () => {
+    const { client, log } = withRow(FULL_ROW);
+    await updateDriver(client, 'S1', { transport: INACTIVE }, 'A');
+    expect(staffPayload(log)).toEqual({ is_active: false, updated_by: 'A' });
+    const upd = log.find((l) => isStaffUpdate(l.table, l.calls))!;
+    expect(upd.calls.filter((c) => c.method === 'eq').map((c) => c.args.join('='))).toEqual([
+      'id=S1',
+      'role_key=driver',
+      `category_id=${DRIVER_CATEGORY_ID}`,
+    ]);
+    expect(routeUpdates(log)).toHaveLength(1);
+  });
+
+  it('never touches MyJKKN or routes for a record TMS does not own', async () => {
+    const { client, log } = withRow({ ...FULL_ROW, category_id: 'other-category' });
+    const r = await updateDriver(client, 'S1', { person: PERSON, transport: INACTIVE, baseUpdatedAt: BASE }, 'A');
+    expect(callsOf(log, 'staff', 'update')).toHaveLength(0);
+    expect(routeUpdates(log)).toHaveLength(0);
+    expect(upsertPayload(log)).toMatchObject({ driver_status: 'inactive', assigned_route_id: 'R1' });
+    expect(r.released).toBeUndefined();
+  });
+
+  it('409s with no writes when the driver has a trip running', async () => {
+    const { client, log } = withRow(FULL_ROW, (t, c) => {
+      if (t === 'tms_driver' && c.some((x) => x.method === 'select')) return { data: { id: 'D1' } };
+      if (t === 'tms_trip') return { data: [{ id: 'T1' }] };
+      return undefined;
+    });
+    await expect(
+      updateDriver(client, 'S1', { person: PERSON, transport: INACTIVE, baseUpdatedAt: BASE }, 'A'),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'This driver has a trip running. End the trip first, then mark them inactive.',
+    });
+    expect(writes(log)).toHaveLength(0);
+  });
+
+  it('does not need isActive in the body: the status decides it', async () => {
+    const { client } = withRow(FULL_ROW);
+    const { isActive: _dropped, ...noFlag } = PERSON;
+    const r = await updateDriver(client, 'S1', { person: noFlag, transport: TRANSPORT, baseUpdatedAt: BASE }, 'A');
+    expect(r.personSaved).toBe(true);
+  });
+});
+
 describe('photoObjectPath', () => {
   it('uses staffId, timestamp and a lowercased allowed extension', () => {
     expect(photoObjectPath('S1', 'Me.PNG', 123)).toBe('S1/123.png');
