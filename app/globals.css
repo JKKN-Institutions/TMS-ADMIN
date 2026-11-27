@@ -918,6 +918,8 @@ html {
   0% { transform: scale(0.9); opacity: 0.4; }
   100% { transform: scale(1.7); opacity: 0; }
 }
+/* The bus swings round to its new direction instead of jumping to it. */
+.tms-bus-body { transform-origin: 50% 50%; transition: transform 0.6s ease; }
 /* The place name fixed above a live bus ("Near SOLAR"). */
 .leaflet-tooltip.tms-bus-place {
   background: #14532d;
@@ -949,6 +951,7 @@ html {
 }
 @media (prefers-reduced-motion: reduce) {
   .tms-bus-live::before, .tms-bus-selected::after { animation: none; }
+  .tms-bus-body { transition: none; }
   .tms-bus-live::before { opacity: 0.25; transform: scale(1.25); }
 }
 /* Zoom buttons a thumb can hit (Leaflet's are 30px). */

@@ -46,3 +46,44 @@ export const SNAP_THRESHOLD_M = 2_000;
 export function shouldSnap(from: LatLng, to: LatLng, thresholdMeters = SNAP_THRESHOLD_M): boolean {
   return haversineMeters(from, to) > thresholdMeters;
 }
+
+/** Compass bearing of the straight line from→to: degrees clockwise from north, 0–360. */
+export function bearingDeg(from: LatLng, to: LatLng): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const dLng = toRad(to.lng - from.lng);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/** A move shorter than this between two fixes is GPS jitter, not travel. */
+export const MIN_COURSE_M = 8;
+
+/**
+ * Which way the bus is facing, for a marker that turns with it.
+ *
+ * The phone's own heading when it sent one; otherwise the direction it moved since
+ * the last fix (about a third of fixes carry no heading); otherwise whatever it was
+ * facing before, so a bus waiting at a stop does not swing back to north.
+ */
+export function courseOf(
+  heading: number | null | undefined,
+  from: LatLng,
+  to: LatLng,
+  previous: number | null,
+): number | null {
+  if (heading != null && !Number.isNaN(heading)) return ((heading % 360) + 360) % 360;
+  if (haversineMeters(from, to) >= MIN_COURSE_M) return bearingDeg(from, to);
+  return previous;
+}
+
+/**
+ * The angle to turn to, measured so the turn from `current` is the short way round.
+ * 350° → 10° comes back as 370°, not a 340° spin backwards.
+ */
+export function shortestTurn(current: number, target: number): number {
+  const delta = ((((target - current) % 360) + 540) % 360) - 180;
+  return current + delta;
+}

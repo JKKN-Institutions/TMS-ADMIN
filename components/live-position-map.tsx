@@ -4,10 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Crosshair, Maximize2, Minimize2, Route as RouteIcon } from 'lucide-react';
-import { interpolateLatLng, shouldSnap, type LatLng } from '@/lib/gps/interpolate';
+import { interpolateLatLng, shouldSnap, courseOf, type LatLng } from '@/lib/gps/interpolate';
 import { stopsSignature, type MapStop } from '@/lib/stops/map-stops';
 import { drawStopPins } from '@/components/map/stop-pins';
-import { busMarkerIcon, busMarkerSignature } from '@/components/map/bus-marker';
+import { busMarkerIcon, busMarkerSignature, turnBusMarker } from '@/components/map/bus-marker';
 import { addBaseLayers } from '@/components/map/base-layers';
 import type { Liveness } from '@/lib/gps/liveness';
 
@@ -91,7 +91,7 @@ const CONTROL_BTN =
 
 /** Single-bus live map. Reused by the driver self-view, the student/boarding
  *  where's-my-bus pages and the admin Vehicles "Live track" popup. The bus GLIDES to
- *  each new fix; a campus pin, heading arrow, accuracy circle, "you" marker and the
+ *  each new fix; a campus pin, accuracy circle, "you" marker and the
  *  route's numbered stop pins layer on top. Always load via next/dynamic with
  *  { ssr: false }. */
 const LivePositionMap: React.FC<LivePositionMapProps> = ({
@@ -118,6 +118,8 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
   const animPosRef = useRef<LatLng>({ lat: latitude, lng: longitude });
   const fromRef = useRef<LatLng>({ lat: latitude, lng: longitude });
   const toRef = useRef<LatLng>({ lat: latitude, lng: longitude });
+  /** The way the bus is facing (deg from north), kept while it stands still. */
+  const courseRef = useRef<number | null>(heading ?? null);
   const startRef = useRef<number>(0);
   const rafRef = useRef<number | null>(null);
 
@@ -239,7 +241,11 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
     if (!map || !marker) return;
     const target: LatLng = { lat: latitude, lng: longitude };
     // Rebuilding the icon restarts its animation, so only when its look really changed.
-    const iconOpts = { liveness: look, heading };
+    // The bus drawing turns to face its direction of travel: the reported heading,
+    // or the way it moved since the last fix when the phone sent none.
+    const course = courseOf(heading, toRef.current, target, courseRef.current);
+    courseRef.current = course;
+    const iconOpts = { liveness: look, heading: course };
     const sig = busMarkerSignature(iconOpts);
     if (sig !== iconSigRef.current) {
       marker.setIcon(busMarkerIcon(iconOpts));
@@ -248,6 +254,7 @@ const LivePositionMap: React.FC<LivePositionMapProps> = ({
       const el = marker.getElement();
       if (el) el.style.pointerEvents = busStateRef.current === 'none' ? 'none' : '';
     }
+    turnBusMarker(marker, course);
     if (label) marker.bindPopup(esc(label));
 
     if (accuracyM != null && accuracyM > 0) {

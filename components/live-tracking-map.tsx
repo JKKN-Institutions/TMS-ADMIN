@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Crosshair, Maximize2, Minimize2, Scan } from 'lucide-react';
-import { interpolateLatLng, shouldSnap, haversineMeters, type LatLng } from '@/lib/gps/interpolate';
+import { interpolateLatLng, shouldSnap, haversineMeters, courseOf, type LatLng } from '@/lib/gps/interpolate';
 import { shouldUseSnap } from '@/lib/geo/osrm';
 import { CAMPUS } from '@/lib/gps/campus';
 import type { TrackingState } from '@/lib/gps/route-status';
@@ -12,7 +12,7 @@ import { agoText, compassOf, livenessOf, type Liveness } from '@/lib/gps/livenes
 import { clusterPoints } from '@/lib/tracking/cluster';
 import { stopsSignature, type MapStop } from '@/lib/stops/map-stops';
 import { drawStopPins, escapeHtml } from '@/components/map/stop-pins';
-import { busMarkerIcon, busMarkerSignature, clusterMarkerIcon, BUS_COLORS } from '@/components/map/bus-marker';
+import { busMarkerIcon, busMarkerSignature, clusterMarkerIcon, turnBusMarker, BUS_COLORS } from '@/components/map/bus-marker';
 import { addBaseLayers } from '@/components/map/base-layers';
 
 // Fix for default markers in Leaflet
@@ -88,7 +88,7 @@ interface LiveTrackingMapProps {
 // Glide slightly under the 5s reader poll so each marker settles just before the next fix.
 const GLIDE_MS = 4500;
 /** Markers closer than this on screen (px, centre to centre) merge into one badge. */
-const CLUSTER_RADIUS_PX = 56;
+const CLUSTER_RADIUS_PX = 36;
 /** Fitting never zooms closer than this: one bus must not fill the screen with blank tiles. */
 const FIT_MAX_ZOOM = 15;
 
@@ -104,6 +104,8 @@ interface MarkerState {
    * because the snap pass overwrites `to` with the road-snapped point.
    */
   rawTarget: LatLng;
+  /** The way the bus is facing (deg from north), kept while it stands still. */
+  course: number | null;
   start: number;
   /** A glide is in progress. The animation loop only touches markers with this set. */
   moving: boolean;
@@ -540,7 +542,7 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
   }, [routeStopsKey, routeStopsRouteId, routeStopCount]);
 
   // Diff markers against the latest data: update existing (glide + icon), add new,
-  // remove gone. Also re-runs on the coarse clock, so a marker's LIVE tag expires.
+  // remove gone. Also re-runs on the coarse clock, so a live bus loses its halo when it goes quiet.
   // The clock is bucketed to 10 s so a parent that ticks faster does not re-run this.
   const clockBucket = Math.floor(nowMs / 10_000);
   useEffect(() => {
@@ -557,9 +559,12 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
       const selected = bus.routeId === selectedRouteId;
       // The marker is the bus icon alone; the route number shows when the pointer is
       // over it (and in the panel once the bus is picked).
-      const iconOpts = { liveness, heading: bus.heading, selected };
-      const sig = busMarkerSignature(iconOpts);
       const existing = markersRef.current.get(bus.routeId);
+      // The bus drawing turns to face its direction of travel: the reported heading,
+      // or the way it moved since the last fix when the phone sent none.
+      const course = courseOf(bus.heading, existing?.rawTarget ?? target, target, existing?.course ?? null);
+      const iconOpts = { liveness, heading: course, selected };
+      const sig = busMarkerSignature(iconOpts);
       const accuracy = liveness !== 'off' && bus.accuracyM != null && bus.accuracyM > 0 ? bus.accuracyM : null;
       const tip = escapeHtml(`Route ${bus.routeNumber ?? '?'}`);
 
@@ -570,6 +575,8 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
           existing.marker.setIcon(busMarkerIcon(iconOpts));
           existing.iconSig = sig;
         }
+        existing.course = course;
+        turnBusMarker(existing.marker, course);
         existing.marker.setZIndexOffset(selected ? 2000 : liveness === 'live' ? 1200 : 1000);
         existing.marker.getTooltip()?.setContent(tip);
 
@@ -610,12 +617,15 @@ const LiveTrackingMap: React.FC<LiveTrackingMapProps> = ({
           ? L.circle([target.lat, target.lng], { radius: accuracy, color: '#16a34a', weight: 1, fillColor: '#16a34a', fillOpacity: 0.1, interactive: false }).addTo(map)
           : null;
         const st: MarkerState = {
-          marker, circle, anim: target, from: target, to: target, rawTarget: target,
+          marker, circle, anim: target, from: target, to: target, rawTarget: target, course,
           start: 0, moving: false, bus, iconSig: sig, shown: true,
         };
         markersRef.current.set(bus.routeId, st);
         // Bound ONCE. `st.bus` is replaced each update, so this always reads the current route.
         marker.on('click', () => onSelectRouteRef.current(st.bus.routeId));
+        // Coming back out of a group badge redraws the bus from its icon, which still
+        // holds the direction it was first drawn with.
+        marker.on('add', () => turnBusMarker(marker, st.course));
       }
     }
 

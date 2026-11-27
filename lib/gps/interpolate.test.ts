@@ -5,6 +5,9 @@ import {
   haversineMeters,
   shouldSnap,
   SNAP_THRESHOLD_M,
+  bearingDeg,
+  courseOf,
+  shortestTurn,
 } from './interpolate';
 
 describe('lerp', () => {
@@ -58,5 +61,51 @@ describe('shouldSnap', () => {
     const far = { lat: 11.5045, lng: 77.8 }; // ~500 m
     expect(shouldSnap(near, far, 100)).toBe(true);
     expect(shouldSnap(near, far, SNAP_THRESHOLD_M)).toBe(false);
+  });
+});
+
+describe('bearingDeg', () => {
+  const o = { lat: 11.44, lng: 77.73 };
+  it('reads the four compass points', () => {
+    expect(bearingDeg(o, { lat: 11.45, lng: 77.73 })).toBeCloseTo(0, 0);
+    expect(bearingDeg(o, { lat: 11.44, lng: 77.74 })).toBeCloseTo(90, 0);
+    expect(bearingDeg(o, { lat: 11.43, lng: 77.73 })).toBeCloseTo(180, 0);
+    expect(bearingDeg(o, { lat: 11.44, lng: 77.72 })).toBeCloseTo(270, 0);
+  });
+});
+
+describe('courseOf', () => {
+  const a = { lat: 11.44, lng: 77.73 };
+  const east = { lat: 11.44, lng: 77.731 }; // ~109 m east
+  const jitter = { lat: 11.44001, lng: 77.73 }; // ~1 m
+
+  it('uses the reported heading when there is one', () => {
+    expect(courseOf(200, a, east, 10)).toBe(200);
+    expect(courseOf(-90, a, east, 10)).toBe(270);
+  });
+
+  it('falls back to the direction of travel when no heading was sent', () => {
+    expect(courseOf(null, a, east, 10)).toBeCloseTo(90, 0);
+  });
+
+  it('keeps the previous direction when the bus has not really moved', () => {
+    expect(courseOf(null, a, jitter, 135)).toBe(135);
+    expect(courseOf(undefined, a, a, null)).toBeNull();
+  });
+});
+
+describe('shortestTurn', () => {
+  it('turns the short way across north', () => {
+    expect(shortestTurn(350, 10)).toBe(370);
+    expect(shortestTurn(10, 350)).toBe(-10);
+  });
+
+  it('stays continuous after several turns', () => {
+    expect(shortestTurn(370, 90)).toBe(450);
+    expect(shortestTurn(-10, 180)).toBe(-180);
+  });
+
+  it('leaves a plain turn alone', () => {
+    expect(shortestTurn(90, 120)).toBe(120);
   });
 });
